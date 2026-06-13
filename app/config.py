@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_storage_dir: str = str(MPT_DIR / "storage" / "tasks")
 
+    # HyperFrames engine (local HTML->MP4 CLI run via npx; no service to host)
+    hyperframes_version: str = "0.6.97"           # pinned; CLI contract validated against it
+    hyperframes_render_quality: str = "standard"  # draft | standard | high
+    hyperframes_storage_dir: str = str(MANAGER_DIR / "storage" / "hyperframes")
+    # Background-music pool shared with MPT; falls back to channel/music/ if absent.
+    bgm_dir: str = str(MPT_DIR / "resource" / "songs")
+
     # Paths (managed by us)
     db_path: str = str(MANAGER_DIR / "manager.db")
     credentials_dir: str = str(MANAGER_DIR / "credentials")
@@ -47,7 +54,8 @@ settings = Settings()
 
 def ensure_dirs() -> None:
     for p in (settings.credentials_dir, settings.storage_dir,
-              str(Path(settings.storage_dir) / "videos")):
+              str(Path(settings.storage_dir) / "videos"),
+              settings.hyperframes_storage_dir):
         Path(p).mkdir(parents=True, exist_ok=True)
 
 

@@ -66,6 +66,7 @@ class RenderProfile(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     channel_id: Optional[int] = Field(default=None, foreign_key="channel.id")  # null = shared
+    engine: str = "mpt"                           # which render engine these params target
     params_json: str = "{}"
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -111,7 +112,8 @@ class Video(SQLModel, table=True):
     privacy: Optional[str] = None                 # null -> inherit channel default
 
     # render results
-    mpt_task_id: Optional[str] = None
+    engine: Optional[str] = None                  # frozen at submit: which engine rendered this
+    mpt_task_id: Optional[str] = None             # opaque engine handle (MPT task id / HF job id)
     render_progress: int = 0
     video_path: Optional[str] = None
     thumb_path: Optional[str] = None

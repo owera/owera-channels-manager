@@ -29,6 +29,7 @@ def list_profiles(channel_id: int | None = None, session: Session = Depends(get_
 @router.post("/profiles", status_code=201)
 def create_profile(body: ProfileCreate, session: Session = Depends(get_session)):
     p = RenderProfile(name=body.name, channel_id=body.channel_id,
+                      engine=body.engine or "mpt",
                       params_json=json.dumps(body.params or {}))
     session.add(p)
     session.commit()
@@ -51,6 +52,8 @@ def update_profile(profile_id: int, body: ProfileUpdate, session: Session = Depe
         raise HTTPException(404, "profile not found")
     if body.name is not None:
         p.name = body.name
+    if body.engine is not None:
+        p.engine = body.engine
     if body.params is not None:
         p.params_json = json.dumps(body.params)
     p.updated_at = utcnow()
