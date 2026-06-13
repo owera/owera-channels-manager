@@ -1,6 +1,12 @@
 # Signal Desk — YouTube Channel Manager
 
-A self-hosted, single-user manager that orchestrates the MoneyPrinterTurbo (MPT)
+[![License: MIT](https://img.shields.io/badge/license-MIT-c9f24e.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.11%E2%80%933.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-SPA-61DAFB?logo=react&logoColor=black)
+![SQLite](https://img.shields.io/badge/SQLite-source%20of%20truth-003B57?logo=sqlite&logoColor=white)
+
+A self-hosted manager that orchestrates the MoneyPrinterTurbo (MPT)
 engine to run **multiple YouTube channels**: queue topics, render in batches behind
 an optional **approval gate**, and publish into each topic's **playlist** — with full
 control over how each video is generated via reusable **render profiles**.
