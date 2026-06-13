@@ -1,0 +1,15 @@
+[Unit]
+Description=MoneyPrinterTurbo engine (video generation API)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/ai-engineering-youtube-channel/MoneyPrinterTurbo
+# ANTHROPIC_API_KEY for litellm script generation (channel/.env holds it).
+EnvironmentFile=%h/src/ai-engineering-youtube-channel/channel/.env
+ExecStart=%h/.local/bin/uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

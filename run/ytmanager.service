@@ -1,0 +1,15 @@
+[Unit]
+Description=YouTube Channel Manager (Signal Desk)
+After=network-online.target mpt.service
+Wants=mpt.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/ai-engineering-youtube-channel/manager
+EnvironmentFile=%h/src/ai-engineering-youtube-channel/channel/.env
+ExecStart=%h/.local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 7000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

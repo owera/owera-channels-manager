@@ -1,0 +1,20 @@
+[project]
+name = "yt-channel-manager"
+version = "0.1.0"
+description = "Self-hosted multi-channel YouTube manager orchestrating MoneyPrinterTurbo"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlmodel==0.0.22",
+    "httpx==0.28.1",
+    "apscheduler==3.11.0",
+    "google-api-python-client==2.156.0",
+    "google-auth-oauthlib==1.2.1",
+    "litellm==1.86.2",
+    "python-multipart==0.0.20",
+    "pydantic-settings==2.7.1",
+]
+
+[tool.uv]
+package = false

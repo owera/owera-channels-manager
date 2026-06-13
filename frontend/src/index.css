@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #08090b;
+  color: #cdd3da;
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* Atmosphere: faint dot grid + radial signal wash + grain */
+  background-image:
+    radial-gradient(circle at 85% -10%, rgba(201, 242, 78, 0.07), transparent 45%),
+    radial-gradient(circle at 0% 100%, rgba(86, 200, 230, 0.05), transparent 40%),
+    radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, 22px 22px;
+  background-attachment: fixed;
+}
+
+/* fine film grain overlay */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgba(201, 242, 78, 0.3);
+  color: #fff;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #272d35 transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #272d35;
+  border-radius: 99px;
+}
+
+@layer components {
+  .panel {
+    @apply bg-ink-700/80 border border-ink-line rounded-md shadow-panel backdrop-blur-sm;
+  }
+  .label {
+    @apply font-mono text-[10px] uppercase tracking-[0.18em] text-fog-300;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 px-3.5 py-2 rounded font-mono text-xs uppercase
+           tracking-wider transition-all duration-150 select-none cursor-pointer
+           border border-ink-line text-fog-100 hover:border-fog-300 hover:text-white
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-signal {
+    @apply bg-signal text-ink-900 border-signal font-semibold hover:bg-white hover:border-white
+           hover:shadow-glow;
+  }
+  .btn-ghost {
+    @apply border-transparent hover:border-ink-line;
+  }
+  .input {
+    @apply w-full bg-ink-900/60 border border-ink-line rounded px-3 py-2 text-sm text-fog-50
+           placeholder:text-fog-400 focus:outline-none focus:border-signal/60
+           focus:ring-1 focus:ring-signal/30 transition;
+  }
+  .card-hover {
+    @apply transition-all duration-150 hover:border-fog-300/40 hover:-translate-y-0.5;
+  }
+}
