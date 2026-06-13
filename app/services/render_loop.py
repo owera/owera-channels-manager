@@ -16,7 +16,8 @@ from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, RenderProfile, Topic, Video, VideoStatus, utcnow
 from app.services import metadata, quota
-from app.services.mpt_client import STATE_COMPLETE, STATE_FAILED, build_video_params, mpt
+from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
+from app.services.mpt_client import build_video_params
 from app.services.topic_playlist import ensure_topic_playlist
 
 
@@ -48,8 +49,8 @@ def _make_thumbnail(video_path: Path, out_path: Path) -> bool:
         return False
 
 
-def _finalize(session: Session, video: Video, channel: Channel, task: dict) -> None:
-    src = mpt.local_final_path(video.mpt_task_id)
+def _finalize(session: Session, video: Video, channel: Channel, engine, task: dict) -> None:
+    src = engine.final_path(video.mpt_task_id)
     if not src.exists():
         video.status = VideoStatus.FAILED
         video.error = f"render reported complete but {src} is missing"
@@ -99,16 +100,17 @@ def _advance_in_flight(session: Session) -> None:
                 continue
         if not video.mpt_task_id:
             continue
+        engine = get_engine(video.engine)
         try:
-            task = mpt.poll(video.mpt_task_id)
+            task = engine.poll(video.mpt_task_id)
         except Exception:
-            continue  # MPT unreachable — retry next tick
+            continue  # engine unreachable — retry next tick
         video.render_progress = int(task.get("progress") or video.render_progress)
         if task.get("state") == STATE_COMPLETE:
-            _finalize(session, video, channel, task)
+            _finalize(session, video, channel, engine, task)
         elif task.get("state") == STATE_FAILED:
             video.status = VideoStatus.FAILED
-            video.error = "MPT reported render failure"
+            video.error = task.get("error") or f"{video.engine or 'mpt'} reported render failure"
             quota.log(session, kind="render", status="error", video_id=video.id,
                       channel_id=video.channel_id, detail=video.error)
 
@@ -140,12 +142,15 @@ def _submit_new(session: Session) -> None:
             _profile_params(session, video.render_profile_id),
             json.loads(video.overrides_json) if video.overrides_json else None,
         )
+        engine_name = resolve_engine(session, video, topic, channel)
+        engine = get_engine(engine_name)
         try:
-            task_id = mpt.submit(params)
+            task_id = engine.submit(video, params)
         except Exception as e:
             quota.log(session, kind="render", status="error", video_id=video.id,
                       channel_id=channel.id, detail=f"submit failed: {e}")
             continue
+        video.engine = engine_name
         video.mpt_task_id = task_id
         video.status = VideoStatus.RENDERING
         video.render_progress = 0

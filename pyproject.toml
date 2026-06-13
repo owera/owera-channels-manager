@@ -15,6 +15,7 @@ dependencies = [
     "litellm==1.86.2",
     "python-multipart==0.0.20",
     "pydantic-settings==2.7.1",
+    "edge-tts==7.2.8",
 ]
 
 [tool.uv]

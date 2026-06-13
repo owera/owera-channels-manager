@@ -44,8 +44,26 @@ def ensure_default_profile(session: Session) -> models.RenderProfile:
     return p
 
 
+def _add_missing_columns() -> None:
+    """SQLModel.create_all never ALTERs existing tables, so add columns introduced
+    after a table was first created. Idempotent; safe to run on every startup."""
+    from sqlalchemy import text
+
+    wanted = {
+        "renderprofile": [("engine", "VARCHAR DEFAULT 'mpt'")],
+        "video": [("engine", "VARCHAR")],
+    }
+    with engine.begin() as conn:
+        for table, cols in wanted.items():
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for name, decl in cols:
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns()
     with Session(engine) as s:
         if s.get(models.Settings, 1) is None:
             s.add(models.Settings(id=1))

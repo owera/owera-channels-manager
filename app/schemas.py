@@ -33,11 +33,13 @@ class PlaylistCreate(BaseModel):
 class ProfileCreate(BaseModel):
     name: str
     channel_id: Optional[int] = None
+    engine: str = "mpt"
     params: dict[str, Any] = {}
 
 
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
+    engine: Optional[str] = None
     params: Optional[dict[str, Any]] = None
 
 

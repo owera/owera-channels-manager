@@ -54,6 +54,7 @@ export interface RenderProfile {
   id: number;
   name: string;
   channel_id: number | null;
+  engine: string;
   params_json: string;
 }
 
