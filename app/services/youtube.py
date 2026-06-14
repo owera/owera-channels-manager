@@ -8,6 +8,7 @@ Generalizes channel/upload.py to:
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -34,6 +35,8 @@ CATEGORY_SCIENCE_TECH = "28"
 QUOTA_UPLOAD = 1600
 QUOTA_PLAYLIST_INSERT = 50
 QUOTA_PLAYLISTITEM_INSERT = 50
+QUOTA_CHANNEL_UPDATE = 50
+QUOTA_SUBSCRIPTION_WRITE = 50
 QUOTA_LIST = 1
 
 
@@ -225,6 +228,170 @@ def add_to_playlist(service, playlist_id: str, video_id: str) -> str:
     except HttpError as e:
         raise _classify(e)
     return resp["id"]
+
+
+# ---- Channel administration: metrics, branding, subscriptions ------------
+
+def fetch_channel(service) -> dict:
+    """The authenticated channel's snippet + public statistics + branding (one call,
+    1 quota unit). Returns {} if the account has no channel."""
+    try:
+        resp = service.channels().list(
+            part="snippet,statistics,brandingSettings", mine=True
+        ).execute()
+    except HttpError as e:
+        raise _classify(e)
+    items = resp.get("items", [])
+    if not items:
+        return {}
+    it = items[0]
+    snip = it.get("snippet", {})
+    stats = it.get("statistics", {})
+    chan = it.get("brandingSettings", {}).get("channel", {})
+
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    return {
+        "id": it["id"],
+        "title": snip.get("title"),
+        "thumbnail": snip.get("thumbnails", {}).get("default", {}).get("url"),
+        "statistics": {
+            "subscriber_count": _int(stats.get("subscriberCount")),
+            "view_count": _int(stats.get("viewCount")),
+            "video_count": _int(stats.get("videoCount")),
+            "hidden_subscriber_count": bool(stats.get("hiddenSubscriberCount")),
+        },
+        "branding": {
+            "title": chan.get("title"),
+            "description": chan.get("description"),
+            "keywords": chan.get("keywords"),          # space-separated; multiword quoted
+            "country": chan.get("country"),
+            "default_language": chan.get("defaultLanguage"),
+        },
+    }
+
+
+def update_branding(service, channel_id: str, *, title=None, description=None,
+                    keywords=None, country=None, default_language=None) -> dict:
+    """Update the channel's public branding. channels.update REPLACES the
+    brandingSettings.channel object, so we merge the requested fields over the
+    current ones to avoid clobbering anything left unset (1 read + 50 units)."""
+    current = fetch_channel(service).get("branding", {}) or {}
+    merged = {
+        "title": title if title is not None else current.get("title"),
+        "description": description if description is not None else current.get("description"),
+        "keywords": keywords if keywords is not None else current.get("keywords"),
+        "country": country if country is not None else current.get("country"),
+        "defaultLanguage": default_language if default_language is not None
+        else current.get("default_language"),
+    }
+    channel = {k: v for k, v in merged.items() if v not in (None, "")}
+    try:
+        resp = service.channels().update(
+            part="brandingSettings", body={"id": channel_id,
+                                           "brandingSettings": {"channel": channel}},
+        ).execute()
+    except HttpError as e:
+        raise _classify(e)
+    chan = resp.get("brandingSettings", {}).get("channel", {})
+    return {
+        "title": chan.get("title"), "description": chan.get("description"),
+        "keywords": chan.get("keywords"), "country": chan.get("country"),
+        "default_language": chan.get("defaultLanguage"),
+    }
+
+
+def list_subscriptions(service, max_items: int = 200) -> list[dict]:
+    """Channels this account is subscribed to (the ones it follows)."""
+    out: list[dict] = []
+    page = None
+    while True:
+        try:
+            resp = service.subscriptions().list(
+                part="snippet", mine=True, maxResults=50,
+                order="alphabetical", pageToken=page,
+            ).execute()
+        except HttpError as e:
+            raise _classify(e)
+        for it in resp.get("items", []):
+            sn = it.get("snippet", {})
+            out.append({
+                "sub_id": it["id"],
+                "channel_id": sn.get("resourceId", {}).get("channelId"),
+                "title": sn.get("title"),
+                "description": sn.get("description"),
+                "thumbnail": sn.get("thumbnails", {}).get("default", {}).get("url"),
+            })
+        page = resp.get("nextPageToken")
+        if not page or len(out) >= max_items:
+            return out
+
+
+def list_subscribers(service, max_items: int = 100) -> list[dict]:
+    """Recent subscribers to this channel (read-only — the API can't add/remove them)."""
+    out: list[dict] = []
+    page = None
+    while True:
+        try:
+            resp = service.subscriptions().list(
+                part="subscriberSnippet", mySubscribers=True,
+                maxResults=50, pageToken=page,
+            ).execute()
+        except HttpError as e:
+            raise _classify(e)
+        for it in resp.get("items", []):
+            sn = it.get("subscriberSnippet", {})
+            out.append({
+                "channel_id": sn.get("channelId"),
+                "title": sn.get("title"),
+                "thumbnail": sn.get("thumbnails", {}).get("default", {}).get("url"),
+            })
+        page = resp.get("nextPageToken")
+        if not page or len(out) >= max_items:
+            return out
+
+
+def resolve_channel_id(service, ref: str) -> str:
+    """Turn a channel id, /channel/UC… URL, or @handle into a UC… channel id."""
+    ref = (ref or "").strip()
+    m = re.search(r"(UC[0-9A-Za-z_-]{22})", ref)
+    if m:
+        return m.group(1)
+    hm = re.search(r"@([A-Za-z0-9._-]+)", ref)
+    handle = (hm.group(1) if hm else ref).lstrip("@")
+    if not handle:
+        raise ValueError(f"could not parse a channel from '{ref}'")
+    try:
+        resp = service.channels().list(part="id", forHandle=handle).execute()
+    except HttpError as e:
+        raise _classify(e)
+    items = resp.get("items", [])
+    if not items:
+        raise ValueError(f"no channel found for '{ref}'")
+    return items[0]["id"]
+
+
+def subscribe(service, channel_id: str) -> dict:
+    try:
+        resp = service.subscriptions().insert(
+            part="snippet",
+            body={"snippet": {"resourceId": {"kind": "youtube#channel",
+                                             "channelId": channel_id}}},
+        ).execute()
+    except HttpError as e:
+        raise _classify(e)
+    return {"sub_id": resp["id"], "channel_id": channel_id}
+
+
+def unsubscribe(service, sub_id: str) -> None:
+    try:
+        service.subscriptions().delete(id=sub_id).execute()
+    except HttpError as e:
+        raise _classify(e)
 
 
 # Daily-cap reasons: both the API project quota and the per-channel upload cap.

@@ -231,6 +231,80 @@ export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: () => api<AppSettings>("/settings") });
 
 // ---- Mutations ----
+// ---- YouTube channel administration ----
+export interface ChannelStats {
+  subscriber_count: number;
+  view_count: number;
+  video_count: number;
+  hidden_subscriber_count?: boolean;
+}
+export interface ChannelBranding {
+  title: string | null;
+  description: string | null;
+  keywords: string | null;
+  country: string | null;
+  default_language: string | null;
+}
+export interface ChannelYoutube {
+  id: string;
+  title: string | null;
+  thumbnail: string | null;
+  statistics: ChannelStats;
+  branding: ChannelBranding;
+}
+export interface MetricPoint {
+  id: number;
+  channel_id: number;
+  subscriber_count: number;
+  view_count: number;
+  video_count: number;
+  captured_at: string;
+}
+export interface Subscription {
+  sub_id: string;
+  channel_id: string;
+  title: string;
+  description?: string | null;
+  thumbnail?: string | null;
+}
+export interface Subscriber {
+  channel_id: string;
+  title: string;
+  thumbnail?: string | null;
+}
+
+export const useChannelYoutube = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: ["yt", id],
+    queryFn: () => api<ChannelYoutube>(`/channels/${id}/youtube`),
+    enabled: !!id && enabled,
+    retry: false,
+  });
+
+export const useMetrics = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: ["metrics", id],
+    queryFn: () =>
+      api<{ latest: MetricPoint | null; history: MetricPoint[] }>(`/channels/${id}/metrics`),
+    enabled: !!id && enabled,
+  });
+
+export const useSubscriptions = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: ["subs", id],
+    queryFn: () => api<Subscription[]>(`/channels/${id}/subscriptions`),
+    enabled: !!id && enabled,
+    retry: false,
+  });
+
+export const useSubscribers = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: ["subscribers", id],
+    queryFn: () => api<Subscriber[]>(`/channels/${id}/subscribers`),
+    enabled: !!id && enabled,
+    retry: false,
+  });
+
 function invalidate(qc: ReturnType<typeof useQueryClient>, keys: string[]) {
   keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 }
@@ -353,6 +427,23 @@ export const useMut = () => {
     updateSettings: useMutation({
       mutationFn: (b: any) => api("/settings", { method: "PATCH", body: j(b) }),
       onSuccess: () => invalidate(qc, ["settings"]),
+    }),
+    // YouTube channel administration
+    updateBranding: useMutation({
+      mutationFn: ({ id, body }: any) => api(`/channels/${id}/branding`, { method: "PUT", body: j(body) }),
+      onSuccess: () => invalidate(qc, ["yt"]),
+    }),
+    refreshMetrics: useMutation({
+      mutationFn: (id: number) => api(`/channels/${id}/metrics/refresh`, { method: "POST" }),
+      onSuccess: () => invalidate(qc, ["metrics", "yt"]),
+    }),
+    subscribe: useMutation({
+      mutationFn: ({ id, channel }: any) => api(`/channels/${id}/subscriptions`, { method: "POST", body: j({ channel }) }),
+      onSuccess: () => invalidate(qc, ["subs"]),
+    }),
+    unsubscribe: useMutation({
+      mutationFn: ({ id, subId }: any) => api(`/channels/${id}/subscriptions/${subId}`, { method: "DELETE" }),
+      onSuccess: () => invalidate(qc, ["subs"]),
     }),
   };
 };

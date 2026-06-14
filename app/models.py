@@ -156,6 +156,17 @@ class JobRun(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class ChannelMetric(SQLModel, table=True):
+    """A point-in-time snapshot of a channel's public YouTube statistics, recorded
+    daily by the scheduler so the UI can show subscriber/view/video trends."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
+    subscriber_count: int = 0
+    view_count: int = 0
+    video_count: int = 0
+    captured_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class Settings(SQLModel, table=True):
     id: Optional[int] = Field(default=1, primary_key=True)
     render_concurrency: int = 1

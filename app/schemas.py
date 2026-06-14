@@ -96,3 +96,16 @@ class SettingsUpdate(BaseModel):
     render_concurrency: Optional[int] = None
     publish_drip_minutes: Optional[int] = None
     scheduler_paused: Optional[bool] = None
+
+
+# ---- YouTube channel administration ----
+class BrandingUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[str] = None            # space-separated; multiword keywords quoted
+    country: Optional[str] = None             # ISO 3166-1 alpha-2, e.g. "US"
+    default_language: Optional[str] = None    # BCP-47, e.g. "en"
+
+
+class SubscribeBody(BaseModel):
+    channel: str                              # channel id, @handle, or channel URL

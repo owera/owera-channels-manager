@@ -4,6 +4,7 @@ import {
   useChannels, useMut, useProfiles, useTopics, type Channel, type Topic,
 } from "../api";
 import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
+import ChannelYoutube from "./ChannelYoutube";
 
 const OAUTH_HEX: Record<string, string> = {
   connected: "#c9f24e", expired: "#f5a524", error: "#f7768e", disconnected: "#6c7681",
@@ -187,6 +188,8 @@ function ChannelDetail({ channel }: { channel: Channel }) {
       </div>
 
       <ContentTopics channel={channel} />
+
+      <ChannelYoutube channel={channel} />
     </div>
   );
 }

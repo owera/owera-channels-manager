@@ -10,7 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import ensure_dirs, load_dotenv_into_env, settings
 from app.db import init_db
 from app.routers import (channels, media, playlists, profiles, queue,
-                         settings as settings_router, topics, videos)
+                         settings as settings_router, topics, videos,
+                         youtube_admin)
 from app.services import scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -37,7 +38,8 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-for r in (channels, playlists, profiles, topics, videos, queue, media, settings_router):
+for r in (channels, playlists, profiles, topics, videos, queue, media, settings_router,
+          youtube_admin):
     app.include_router(r.router)
 
 

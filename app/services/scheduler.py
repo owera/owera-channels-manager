@@ -6,11 +6,12 @@ Jobs are non-overlapping (max_instances=1, coalesce=True).
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import settings
-from app.services import publish_loop, render_loop
+from app.services import metrics_loop, publish_loop, render_loop
 
 logger = logging.getLogger("manager.scheduler")
 
@@ -41,9 +42,19 @@ def start() -> None:
         "interval", seconds=settings.publish_tick_seconds,
         id="publish", max_instances=1, coalesce=True,
     )
+    # Channel metrics: a light daily snapshot per channel. Runs every few hours
+    # (the tick itself records at most once/UTC-day/channel) with an initial run
+    # shortly after startup so trend data starts accumulating right away.
+    _scheduler.add_job(
+        _safe(metrics_loop.tick, "metrics"),
+        "interval", hours=settings.metrics_tick_hours,
+        id="metrics", max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
     _scheduler.start()
-    logger.info("scheduler started (render %ss / publish %ss)",
-                settings.render_tick_seconds, settings.publish_tick_seconds)
+    logger.info("scheduler started (render %ss / publish %ss / metrics %sh)",
+                settings.render_tick_seconds, settings.publish_tick_seconds,
+                settings.metrics_tick_hours)
     return None
 
 

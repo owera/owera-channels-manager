@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     render_poll_seconds: int = 10
     render_timeout_seconds: int = 2400        # 40 min hard cap per render
     youtube_daily_quota_cap: int = 9000       # safety cap below the ~10k API quota
+    metrics_tick_hours: int = 6               # channel-stats snapshot cadence (≤1/day each)
 
 
 settings = Settings()
