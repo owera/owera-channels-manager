@@ -874,6 +874,39 @@ wheels = [
 ]
 
 [[package]]
+name = "owera-channels-manager"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "apscheduler" },
+    { name = "edge-tts" },
+    { name = "fastapi" },
+    { name = "google-api-python-client" },
+    { name = "google-auth-oauthlib" },
+    { name = "httpx" },
+    { name = "litellm" },
+    { name = "pydantic-settings" },
+    { name = "python-multipart" },
+    { name = "sqlmodel" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "apscheduler", specifier = "==3.11.0" },
+    { name = "edge-tts", specifier = "==7.2.8" },
+    { name = "fastapi", specifier = "==0.115.6" },
+    { name = "google-api-python-client", specifier = "==2.156.0" },
+    { name = "google-auth-oauthlib", specifier = "==1.2.1" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "litellm", specifier = "==1.86.2" },
+    { name = "pydantic-settings", specifier = "==2.7.1" },
+    { name = "python-multipart", specifier = "==0.0.20" },
+    { name = "sqlmodel", specifier = "==0.0.22" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.34.0" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1659,39 +1692,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/25/722e3b93bd687009afb2d59a35e13d30ddd8f80571445bb0c4e4ce26ec66/yarl-1.24.2-cp312-cp312-win_amd64.whl", hash = "sha256:7dafe10c12ddd4d120d528c4b5599c953bd7b12845347d507b95451195bb6cad", size = 92901, upload-time = "2026-05-19T21:29:20.014Z" },
     { url = "https://files.pythonhosted.org/packages/39/47/4486ccfb674c04854a1ef8aa77868b6a6f765feaf69633409d7ca4f02cb8/yarl-1.24.2-cp312-cp312-win_arm64.whl", hash = "sha256:044a09d8401fcf8681977faef6d286b8ade1e2d2e9dceda175d1cfa5ca496f30", size = 87229, upload-time = "2026-05-19T21:29:22.1Z" },
     { url = "https://files.pythonhosted.org/packages/fd/4d/4b880086bd0d3e034d25647be1d830afc3e3f610e98c4ab3490af6b1b6d5/yarl-1.24.2-py3-none-any.whl", hash = "sha256:2783d9226db8797636cd6896e4de81feed252d1db72265686c9558d97a4d94b9", size = 53576, upload-time = "2026-05-19T21:31:03.909Z" },
-]
-
-[[package]]
-name = "yt-channel-manager"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "apscheduler" },
-    { name = "edge-tts" },
-    { name = "fastapi" },
-    { name = "google-api-python-client" },
-    { name = "google-auth-oauthlib" },
-    { name = "httpx" },
-    { name = "litellm" },
-    { name = "pydantic-settings" },
-    { name = "python-multipart" },
-    { name = "sqlmodel" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "apscheduler", specifier = "==3.11.0" },
-    { name = "edge-tts", specifier = "==7.2.8" },
-    { name = "fastapi", specifier = "==0.115.6" },
-    { name = "google-api-python-client", specifier = "==2.156.0" },
-    { name = "google-auth-oauthlib", specifier = "==1.2.1" },
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "litellm", specifier = "==1.86.2" },
-    { name = "pydantic-settings", specifier = "==2.7.1" },
-    { name = "python-multipart", specifier = "==0.0.20" },
-    { name = "sqlmodel", specifier = "==0.0.22" },
-    { name = "uvicorn", extras = ["standard"], specifier = "==0.34.0" },
 ]
 
 [[package]]

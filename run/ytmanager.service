@@ -1,5 +1,5 @@
 [Unit]
-Description=YouTube Channel Manager (Signal Desk)
+Description=Owera Channels Manager
 After=network-online.target mpt.service
 Wants=mpt.service
 

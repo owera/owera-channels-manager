@@ -1,9 +1,8 @@
-import { useHealth, useMut, useSettings } from "../api";
-import { Dot, Field, SectionLabel, Toggle } from "../ui";
+import { useMut, useSettings } from "../api";
+import { Field, SectionLabel, Toggle } from "../ui";
 
 export default function Settings() {
   const { data: s } = useSettings();
-  const { data: health } = useHealth();
   const m = useMut();
   if (!s) return <div className="p-8 font-mono text-fog-400">loading…</div>;
 
@@ -15,19 +14,6 @@ export default function Settings() {
         <div className="label mb-2">// settings</div>
         <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Settings</h1>
       </header>
-
-      <div className="panel p-6 mb-6">
-        <SectionLabel>// engine</SectionLabel>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 font-mono text-sm">
-            <Dot hex={health?.mpt_reachable ? "#c9f24e" : "#f7768e"} pulse={health?.mpt_reachable} />
-            <span className={health?.mpt_reachable ? "text-fog-100" : "text-[#f7768e]"}>
-              MoneyPrinterTurbo {health?.mpt_reachable ? "online" : "offline"}
-            </span>
-          </div>
-          <span className="font-mono text-xs text-fog-400">{s.mpt_base_url}</span>
-        </div>
-      </div>
 
       <div className="panel p-6 mb-6">
         <SectionLabel>// scheduler</SectionLabel>

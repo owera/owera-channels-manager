@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title="YouTube Channel Manager", lifespan=lifespan)
+app = FastAPI(title="Owera Channels Manager", lifespan=lifespan)
 
 # Dev convenience: the Vite dev server proxies /api, but allow direct CORS too.
 app.add_middleware(

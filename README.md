@@ -1,4 +1,4 @@
-# Signal Desk — YouTube Channel Manager
+# Owera Channels Manager
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-c9f24e.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%E2%80%933.12-3776AB?logo=python&logoColor=white)

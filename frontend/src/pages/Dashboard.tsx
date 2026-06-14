@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useDashboard, useHealth, useRuns, useSettings, type DashboardRow, type Status } from "../api";
+import { useDashboard, useRuns, useSettings, type DashboardRow, type Status } from "../api";
 import { STATUS_META } from "../status";
 import { Dot } from "../ui";
 
@@ -119,7 +119,6 @@ function ChannelCard({ row, i }: { row: DashboardRow; i: number }) {
 export default function Dashboard() {
   const { data: rows } = useDashboard();
   const { data: runs } = useRuns();
-  const { data: health } = useHealth();
   const { data: settings } = useSettings();
 
   const sum = (k: Status) => rows?.reduce((a, r) => a + (r.counts[k] || 0), 0) ?? 0;
@@ -137,11 +136,11 @@ export default function Dashboard() {
           <div className="label mb-2">// overview</div>
           <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Control Room</h1>
         </div>
-        <div className="flex items-center gap-3 font-mono text-xs">
-          <Dot hex={health?.mpt_reachable ? "#c9f24e" : "#f7768e"} pulse={health?.mpt_reachable} />
-          <span className={health?.mpt_reachable ? "text-fog-200" : "text-[#f7768e]"}>engine {health?.mpt_reachable ? "online" : "offline"}</span>
-          {settings?.scheduler_paused && <span className="text-amber ml-2">· scheduler paused</span>}
-        </div>
+        {settings?.scheduler_paused && (
+          <div className="flex items-center gap-3 font-mono text-xs">
+            <span className="text-amber">scheduler paused</span>
+          </div>
+        )}
       </header>
 
       {/* KPI strip */}
