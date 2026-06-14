@@ -42,7 +42,14 @@ class NeedsConnect(Exception):
 
 
 class QuotaExceeded(Exception):
-    """YouTube daily quota hit — caller should stop publishing for this channel today."""
+    """A YouTube daily cap was hit — caller should stop publishing for this channel
+    until it resets. `reason` is the YouTube error reason (e.g. 'uploadlimitexceeded'
+    or 'quotaexceeded'); the publish loop uses it to size the cooldown, since the two
+    caps reset differently (rolling 24h vs midnight Pacific)."""
+
+    def __init__(self, *args, reason: str = ""):
+        super().__init__(*args)
+        self.reason = reason
 
 
 def channel_dir(slug: str) -> Path:
@@ -220,15 +227,32 @@ def add_to_playlist(service, playlist_id: str, video_id: str) -> str:
     return resp["id"]
 
 
+# Daily-cap reasons: both the API project quota and the per-channel upload cap.
+# Surfaced as QuotaExceeded so the publish loop leaves the video APPROVED to retry
+# after a cooldown, instead of marking it permanently FAILED (which nothing re-picks).
+# Deliberately EXCLUDES short-term throttles (rateLimitExceeded / userRateLimitExceeded
+# / uploadRateLimitExceeded) — those want a brief backoff, not a day-long cooldown.
+_DAILY_CAP_REASONS = {"uploadlimitexceeded", "quotaexceeded", "dailylimitexceeded"}
+
+
+def _error_reason(e: HttpError) -> str:
+    """The YouTube error 'reason' (e.g. 'uploadLimitExceeded'), lowercased.
+
+    Match on this, NOT the HTTP status: uploadLimitExceeded is returned as 400 *or*
+    403 depending on the path, and its message ("The user has exceeded the number of
+    videos they may upload.") contains no "quota" substring — so status/keyword
+    matching silently misclassifies it as a hard failure. Falls back to scanning the
+    raw body so a response-shape change can't hide a known reason."""
+    import json
+    try:
+        return json.loads(e.content.decode("utf-8"))["error"]["errors"][0]["reason"].lower()
+    except Exception:
+        body = (e.content or b"").decode("utf-8", "ignore").lower()
+        return next((r for r in _DAILY_CAP_REASONS if r in body), "")
+
+
 def _classify(e: HttpError) -> Exception:
-    status = getattr(e.resp, "status", None)
-    content = (e.content or b"").lower()
-    # Quota (403) and the per-channel daily upload cap (400 uploadLimitExceeded)
-    # are both transient daily limits — surface them as QuotaExceeded so the
-    # publish loop leaves the video APPROVED to retry next day, rather than
-    # marking it permanently FAILED (which nothing re-picks automatically).
-    if status == 403 and b"quota" in content:
-        return QuotaExceeded(str(e))
-    if status == 400 and b"uploadlimitexceeded" in content:
-        return QuotaExceeded(str(e))
+    reason = _error_reason(e)
+    if reason in _DAILY_CAP_REASONS:
+        return QuotaExceeded(str(e), reason=reason)
     return e
