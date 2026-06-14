@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import settings
-from app.services import metrics_loop, publish_loop, render_loop
+from app.services import autofill_loop, metrics_loop, publish_loop, render_loop
 
 logger = logging.getLogger("manager.scheduler")
 
@@ -51,10 +51,18 @@ def start() -> None:
         id="metrics", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
+    # Auto-refill low topic idea queues. The tick no-ops unless the setting is on,
+    # so it's safe to always register; runs soon after start, then on its interval.
+    _scheduler.add_job(
+        _safe(autofill_loop.tick, "autofill"),
+        "interval", minutes=settings.autofill_tick_minutes,
+        id="autofill", max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+    )
     _scheduler.start()
-    logger.info("scheduler started (render %ss / publish %ss / metrics %sh)",
+    logger.info("scheduler started (render %ss / publish %ss / metrics %sh / autofill %smin)",
                 settings.render_tick_seconds, settings.publish_tick_seconds,
-                settings.metrics_tick_hours)
+                settings.metrics_tick_hours, settings.autofill_tick_minutes)
     return None
 
 

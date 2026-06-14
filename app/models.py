@@ -173,3 +173,7 @@ class Settings(SQLModel, table=True):
     render_concurrency: int = 1
     publish_drip_minutes: int = 30
     scheduler_paused: bool = False
+    # Auto-refill: when a topic's pending (draft+queued) videos drop below the
+    # threshold, generate more video ideas for it.
+    topic_autogen_enabled: bool = False
+    topic_autogen_min_pending: int = 3

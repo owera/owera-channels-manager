@@ -98,6 +98,8 @@ class SettingsUpdate(BaseModel):
     render_concurrency: Optional[int] = None
     publish_drip_minutes: Optional[int] = None
     scheduler_paused: Optional[bool] = None
+    topic_autogen_enabled: Optional[bool] = None
+    topic_autogen_min_pending: Optional[int] = None
 
 
 # ---- YouTube channel administration ----

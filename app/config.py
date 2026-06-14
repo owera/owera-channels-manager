@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     render_timeout_seconds: int = 2400        # 40 min hard cap per render
     youtube_daily_quota_cap: int = 9000       # safety cap below the ~10k API quota
     metrics_tick_hours: int = 6               # channel-stats snapshot cadence (≤1/day each)
+    autofill_tick_minutes: int = 20           # how often to top up low topic idea queues
+    autofill_batch: int = 8                   # ideas generated per topic refill
 
 
 settings = Settings()

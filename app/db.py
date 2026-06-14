@@ -54,6 +54,8 @@ def _add_missing_columns() -> None:
         "video": [("engine", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME")],
         "topic": [("content_format", "VARCHAR DEFAULT 'short'")],
+        "settings": [("topic_autogen_enabled", "BOOLEAN DEFAULT 0"),
+                     ("topic_autogen_min_pending", "INTEGER DEFAULT 3")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
