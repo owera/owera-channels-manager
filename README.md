@@ -14,6 +14,8 @@ one into the right playlist on a schedule that respects YouTube's limits.
 It's self-hosted and lightweight — one Python process, a single SQLite file, and a web
 UI. You bring the Google accounts and an Anthropic API key; it handles the pipeline.
 
+![The Control Room — every channel, its pipeline, and today's numbers at a glance](docs/screenshots/dashboard.png)
+
 ## Features
 
 - **Many channels, one place** — manage every channel, its playlists, and its publishing
@@ -50,6 +52,8 @@ videos and their status). A background **scheduler** does the work on a loop:
 
 The approval gate is just a status: a video in **review** won't publish until you approve
 it. Turn on a channel's *skip gate* and rendered videos jump straight to **approved**.
+
+![The Queue Board — ideas flow left to right toward published, and each card shows what it's waiting on](docs/screenshots/board.png)
 
 ## Requirements
 
@@ -106,6 +110,11 @@ running, just use HyperFrames — nothing else is affected.)
    **Approve** (or rely on the channel's *skip gate*).
 6. The publish loop uploads each approved video within the daily budget and adds it to its
    playlist. Follow it all on the **Dashboard**.
+
+<p align="center">
+  <img src="docs/screenshots/channels.png" width="49%" alt="Channels — connect a Google account, set budgets and defaults, and manage topics" />
+  <img src="docs/screenshots/profiles.png" width="49%" alt="Render Profiles — define the look, voice, and language once and reuse everywhere" />
+</p>
 
 ## Run it as a background service
 
