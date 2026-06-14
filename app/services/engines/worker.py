@@ -139,10 +139,16 @@ HARD RULES — a violation makes the render fail:
    <script> window.__timelines = window.__timelines || {}; const tl = gsap.timeline({paused:true}); /* tweens */ window.__timelines["master"] = tl; </script>
 6. Deterministic only: NO Math.random, NO Date.now, NO fetch/network, NO external images/fonts/video.
 7. All timing must fit within 0..{DUR} seconds. Keep text inside safe margins (>=80px from edges).
+8. ONE TEXT BLOCK AT A TIME — never render text on top of other visible text. The title must
+   fade to opacity 0 BEFORE the first phrase appears, and each phrase must fade to opacity 0
+   before the next phrase appears. So every text element you fade in MUST have a matching
+   fade-to-0 tween that completes at or before the next text element's data-start (only the
+   final element may stay). Do not leave earlier text on screen — give each its own time slot.
 
-STYLE: modern, bold, high-contrast motion graphics. A large title, then 3-5 short on-screen \
-phrases that reveal in sequence and reinforce the narration. System sans-serif, big readable \
-type, subtle GSAP entrances (fade/slide/scale). Pick a tasteful dark or vivid background."""
+STYLE: modern, bold, high-contrast motion graphics. Reveal ONE item at a time in a single \
+centered focal area: show the title, fade it out, then bring in each short phrase and fade it \
+out before the next — a clean replacement, never a cluttered or overlapping frame. System \
+sans-serif, big readable type, subtle GSAP entrances (fade/slide/scale). Tasteful dark or vivid background."""
 
 
 def _generate_composition(subject: str, script: str, resolution: str,
@@ -174,32 +180,38 @@ def _looks_valid(html: str) -> bool:
 
 def _fallback_composition(subject: str, script: str, resolution: str,
                           width: int, height: int, duration: float) -> str:
-    """A guaranteed-valid composition built from the script — used if the LLM output
-    is malformed or its render fails."""
-    lines = _key_lines(script, k=4)
-    pad = max(60, int(width * 0.07))
-    title_top = int(height * 0.14)
-    # Distribute bullet reveals across the timeline after the title.
-    start0 = 0.9
-    span = max(0.1, duration - start0 - 0.4)
-    step = span / max(1, len(lines))
+    """A guaranteed-valid, NON-OVERLAPPING composition: one centered focal area that
+    shows the title, then one key line at a time. Each block fades fully out before the
+    next fades in, so two text blocks are never on screen together. Used when the LLM
+    output is malformed or its render fails."""
+    k = max(4, min(8, int(duration // 18)))            # more reveals for longer videos
+    lines = _key_lines(script, k=k)
+    pad = max(60, int(width * 0.08))
+    segments = [("seg-title", _esc(subject))] + [("seg-line", _esc(l)) for l in lines]
+    n = len(segments)
+    fade = 0.5
+    seg_len = max(1.8, round((duration - 0.3) / n, 3))
 
-    bullets_html, tweens = [], [
-        'tl.fromTo("#title",{opacity:0,y:50},{opacity:1,y:0,duration:0.7,ease:"power2.out"},0);'
-    ]
-    for i, line in enumerate(lines):
-        t = round(start0 + i * step, 2)
-        top = int(height * (0.40 + i * 0.13))
-        eid = f"b{i}"
-        bullets_html.append(
-            f'<div id="{eid}" class="clip bullet" style="top:{top}px" data-start="{t}" '
-            f'data-duration="{round(duration - t, 2)}" data-track-index="{i + 1}">'
-            f"{_esc(line)}</div>"
+    els, tweens = [], []
+    for i, (cls, text) in enumerate(segments):
+        start = round(i * seg_len, 2)
+        last = i == n - 1
+        # window covers entrance + hold; last block holds to the end
+        dur = round(duration - start, 2) if last else round(seg_len, 2)
+        eid = f"seg{i}"
+        els.append(
+            f'<div id="{eid}" class="clip {cls}" data-start="{start}" '
+            f'data-duration="{dur}" data-track-index="{i}">{text}</div>'
         )
         tweens.append(
-            f'tl.fromTo("#{eid}",{{opacity:0,x:-40}},{{opacity:1,x:0,duration:0.5,'
-            f'ease:"power2.out"}},{t});'
+            f'tl.fromTo("#{eid}",{{opacity:0,y:34}},{{opacity:1,y:0,duration:{fade},'
+            f'ease:"power2.out"}},{start});'
         )
+        if not last:  # fade fully out exactly as the next block starts -> no overlap
+            tweens.append(
+                f'tl.to("#{eid}",{{opacity:0,duration:{fade},ease:"power2.in"}},'
+                f'{round(start + seg_len - fade, 2)});'
+            )
 
     return f"""<!doctype html>
 <html lang="en" data-resolution="{resolution}">
@@ -209,18 +221,16 @@ def _fallback_composition(subject: str, script: str, resolution: str,
   html,body{{margin:0;padding:0;width:{width}px;height:{height}px;background:#0b0b16;
     overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}}
   #root{{width:{width}px;height:{height}px;position:relative}}
-  .clip{{position:absolute;left:{pad}px;right:{pad}px;color:#fff;opacity:0}}
-  #title{{top:{title_top}px;font-size:{int(width*0.085)}px;font-weight:800;line-height:1.05;
-    letter-spacing:-1px}}
-  .bullet{{font-size:{int(width*0.052)}px;font-weight:600;color:#c9d2ff}}
-  .bullet::before{{content:"";display:inline-block;width:{int(width*0.03)}px;height:6px;
-    background:#6c7bff;border-radius:3px;margin-right:18px;vertical-align:middle}}
+  /* every segment fills the same centered focal box; only one is ever visible (opacity) */
+  .clip{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    padding:0 {pad}px;box-sizing:border-box;text-align:center;color:#fff;opacity:0}}
+  .seg-title{{font-size:{int(width*0.07)}px;font-weight:800;line-height:1.08;letter-spacing:-1px}}
+  .seg-line{{font-size:{int(width*0.05)}px;font-weight:600;color:#c9d2ff;line-height:1.2}}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="{width}" data-height="{height}"
        data-start="0" data-duration="{duration}">
-    <h1 id="title" class="clip" data-start="0" data-duration="{duration}" data-track-index="0">{_esc(subject)}</h1>
-    {''.join(bullets_html)}
+    {''.join(els)}
   </div>
   <script>
     window.__timelines = window.__timelines || {{}};
