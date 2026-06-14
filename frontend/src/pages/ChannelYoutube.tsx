@@ -102,15 +102,18 @@ function Branding({ channel }: { channel: Channel }) {
         </Field>
         <div className="col-span-2">
           <Field label="description">
-            <textarea className="input h-28" value={form.description ?? ""} onChange={(e) => set("description", e.target.value)} />
+            <textarea className="input h-28" value={form.description ?? ""}
+              placeholder="No description set on YouTube — add one and save to publish it."
+              onChange={(e) => set("description", e.target.value)} />
           </Field>
         </div>
         <Field label="country" hint="ISO code, e.g. US">
-          <input className="input" value={form.country ?? ""} maxLength={2}
+          <input className="input" value={form.country ?? ""} maxLength={2} placeholder="—"
             onChange={(e) => set("country", e.target.value.toUpperCase())} />
         </Field>
         <Field label="default language" hint="e.g. en">
-          <input className="input" value={form.default_language ?? ""} onChange={(e) => set("default_language", e.target.value)} />
+          <input className="input" value={form.default_language ?? ""} placeholder="—"
+            onChange={(e) => set("default_language", e.target.value)} />
         </Field>
       </div>
       <div className="flex items-center gap-3 mt-4">

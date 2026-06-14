@@ -245,7 +245,7 @@ export default function Channels() {
               </button>
             ))}
           </div>
-          {selected && <ChannelDetail channel={selected} />}
+          {selected && <ChannelDetail key={selected.id} channel={selected} />}
         </div>
       )}
 
