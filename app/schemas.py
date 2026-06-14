@@ -48,6 +48,7 @@ class TopicCreate(BaseModel):
     channel_id: int
     name: str
     theme_prompt: Optional[str] = None
+    content_format: str = "short"           # "short" (vertical Shorts) | "long" (16:9 long-form)
     render_profile_id: Optional[int] = None
     create_playlist: bool = True            # auto-create a YouTube playlist named after the topic
     playlist_id: Optional[int] = None       # or link an existing one instead
@@ -56,6 +57,7 @@ class TopicCreate(BaseModel):
 class TopicUpdate(BaseModel):
     name: Optional[str] = None
     theme_prompt: Optional[str] = None
+    content_format: Optional[str] = None
     render_profile_id: Optional[int] = None
     playlist_id: Optional[int] = None
     active: Optional[bool] = None

@@ -271,7 +271,9 @@ def regenerate_metadata(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
-    meta = metadata.generate(v.subject, v.script or "")
+    topic = session.get(Topic, v.topic_id)
+    fmt = "long" if topic and topic.content_format == "long" else "short"
+    meta = metadata.generate(v.subject, v.script or "", fmt)
     v.title, v.description = meta["title"], meta["description"]
     v.tags_json = json.dumps(meta["tags"])
     v.metadata_generated = True

@@ -48,9 +48,14 @@ _dist = Path(settings.frontend_dist)
 if _dist.exists():
     app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
 
+    # index.html must never be cached: its hashed asset references change on every
+    # build, and a stale cached index.html points at a deleted bundle (blank screen).
+    # The hashed /assets are immutable and stay cacheable.
+    _NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
     @app.get("/{full_path:path}")
     def spa(full_path: str):
         candidate = _dist / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(_dist / "index.html")
+        return FileResponse(_dist / "index.html", headers=_NO_CACHE)

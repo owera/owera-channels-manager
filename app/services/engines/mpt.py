@@ -13,6 +13,9 @@ class MPTEngine:
     name = "mpt"
 
     def submit(self, video, params: dict) -> str:
+        # content_format is a manager-internal hint (consumed via the aspect/script
+        # overrides already merged into params); don't pass it to MPT's VideoParams.
+        params = {k: v for k, v in params.items() if k != "content_format"}
         return mpt.submit(params)
 
     def poll(self, handle: str) -> dict:

@@ -21,18 +21,28 @@ def _from_meta(subject: str, meta: dict) -> dict:
     return {"title": title, "description": description, "tags": tags}
 
 
-def _litellm_fallback(subject: str, script: str) -> dict:
+def _litellm_fallback(subject: str, script: str, content_format: str = "short") -> dict:
     """Direct LLM call if the MPT endpoint is unavailable."""
     try:
         import litellm
 
-        prompt = (
-            "You are a YouTube Shorts copywriter. For the video below return a single "
-            "minified JSON object with keys title (<=100 chars, hooky), caption (<=400 chars, "
-            "ends with a call to action, no hashtags inside), hashtags (array of 3 strings "
-            "each starting with #). No commentary.\n\n"
-            f"Subject: {subject}\n\nScript: {script[:2000]}"
-        )
+        if content_format == "long":
+            prompt = (
+                "You are a YouTube copywriter for in-depth long-form videos. For the video "
+                "below return a single minified JSON object with keys title (<=100 chars, "
+                "clear and search-friendly), caption (<=800 chars, a substantive 2-3 sentence "
+                "summary then a call to action, no hashtags inside), hashtags (array of 5 "
+                "strings each starting with #). No commentary.\n\n"
+                f"Subject: {subject}\n\nScript: {script[:4000]}"
+            )
+        else:
+            prompt = (
+                "You are a YouTube Shorts copywriter. For the video below return a single "
+                "minified JSON object with keys title (<=100 chars, hooky), caption (<=400 chars, "
+                "ends with a call to action, no hashtags inside), hashtags (array of 3 strings "
+                "each starting with #). No commentary.\n\n"
+                f"Subject: {subject}\n\nScript: {script[:2000]}"
+            )
         resp = litellm.completion(
             model=settings.litellm_model,
             messages=[{"role": "user", "content": prompt}],
@@ -51,8 +61,9 @@ def _litellm_fallback(subject: str, script: str) -> dict:
         }
 
 
-def generate(subject: str, script: str) -> dict:
-    meta = mpt.social_metadata(subject, script or "", platform="youtube_shorts", language="en-US")
+def generate(subject: str, script: str, content_format: str = "short") -> dict:
+    platform = "youtube" if content_format == "long" else "youtube_shorts"
+    meta = mpt.social_metadata(subject, script or "", platform=platform, language="en-US")
     if meta:
         return _from_meta(subject, meta)
-    return _litellm_fallback(subject, script or "")
+    return _litellm_fallback(subject, script or "", content_format)

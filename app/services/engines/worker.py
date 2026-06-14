@@ -102,13 +102,25 @@ def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
 
 def _generate_script(subject: str, params: dict) -> str:
     n = int(params.get("paragraph_number") or 2)
-    prompt = (
-        f"Write a punchy voiceover script for a vertical short-form video titled "
-        f"\"{subject}\". About {max(60, n * 35)}-{max(90, n * 50)} words, {n} short "
-        "paragraphs. Conversational, concrete, no filler, no headings, no stage "
-        "directions, no emojis. Return ONLY the spoken words."
-    )
-    text = _llm(prompt, max_tokens=600).strip()
+    if (params.get("content_format") or "short") == "long":
+        prompt = (
+            f"Write an engaging, well-structured voiceover script for an in-depth "
+            f"YouTube video titled \"{subject}\". About 450-700 words across "
+            f"{max(6, n)} paragraphs: a hook, several substantive sections that explain "
+            "with concrete detail and examples, then a short wrap-up. Conversational and "
+            "authoritative, no filler, no headings, no stage directions, no emojis. "
+            "Return ONLY the spoken words."
+        )
+        max_tokens = 1500
+    else:
+        prompt = (
+            f"Write a punchy voiceover script for a vertical short-form video titled "
+            f"\"{subject}\". About {max(60, n * 35)}-{max(90, n * 50)} words, {n} short "
+            "paragraphs. Conversational, concrete, no filler, no headings, no stage "
+            "directions, no emojis. Return ONLY the spoken words."
+        )
+        max_tokens = 600
+    text = _llm(prompt, max_tokens=max_tokens).strip()
     # Strip accidental markdown/quote wrapping.
     return re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
 

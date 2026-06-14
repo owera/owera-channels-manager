@@ -37,6 +37,14 @@ def _effective_skip_gate(video: Video, channel: Channel) -> bool:
     return channel.default_skip_gate if video.skip_gate is None else video.skip_gate
 
 
+def _format_overrides(content_format: str) -> dict:
+    """Highest-priority render params for long-form: force a landscape aspect and a
+    longer script. Shorts keep the existing profile-driven behavior (no overrides)."""
+    if content_format == "long":
+        return {"video_aspect": "16:9", "paragraph_number": 8}
+    return {}
+
+
 def _make_thumbnail(video_path: Path, out_path: Path) -> bool:
     try:
         subprocess.run(
@@ -70,7 +78,9 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.thumb_path = str(thumb)
 
     if not video.metadata_generated:
-        meta = metadata.generate(video.subject, video.script or "")
+        topic = session.get(Topic, video.topic_id)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
+        meta = metadata.generate(video.subject, video.script or "", fmt)
         video.title = video.title or meta["title"]
         video.description = video.description or meta["description"]
         video.tags_json = video.tags_json or json.dumps(meta["tags"])
@@ -135,13 +145,16 @@ def _submit_new(session: Session) -> None:
         topic = session.get(Topic, video.topic_id)
         # A video is starting production → make sure its topic playlist exists.
         ensure_topic_playlist(session, topic, channel)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
         params = build_video_params(
             video.subject,
             _profile_params(session, channel.default_render_profile_id),
             _profile_params(session, topic.render_profile_id if topic else None),
             _profile_params(session, video.render_profile_id),
             json.loads(video.overrides_json) if video.overrides_json else None,
+            _format_overrides(fmt),
         )
+        params["content_format"] = fmt
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:

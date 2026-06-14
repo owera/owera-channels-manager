@@ -53,6 +53,7 @@ def _add_missing_columns() -> None:
         "renderprofile": [("engine", "VARCHAR DEFAULT 'mpt'")],
         "video": [("engine", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME")],
+        "topic": [("content_format", "VARCHAR DEFAULT 'short'")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

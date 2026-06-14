@@ -21,7 +21,15 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
     <div className="panel p-4">
       <div className="flex items-start justify-between">
         <div>
-          <div className="font-display font-bold text-fog-50 text-base">{topic.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="font-display font-bold text-fog-50 text-base">{topic.name}</span>
+            <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border"
+              style={topic.content_format === "long"
+                ? { color: "#a78bfa", borderColor: "#a78bfa55" }
+                : { color: "#6c7681", borderColor: "#6c768155" }}>
+              {topic.content_format === "long" ? "long-form" : "shorts"}
+            </span>
+          </div>
           {topic.theme_prompt && <div className="text-[12px] text-fog-300 mt-0.5 line-clamp-2">{topic.theme_prompt}</div>}
         </div>
         <button className="label hover:text-[#f7768e]" onClick={() => m.deleteTopic.mutate(topic.id)}>del</button>
@@ -57,6 +65,7 @@ function ContentTopics({ channel }: { channel: Channel }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [format, setFormat] = useState<"short" | "long">("short");
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
@@ -84,11 +93,22 @@ function ContentTopics({ channel }: { channel: Channel }) {
           <textarea className="input h-20" value={prompt} onChange={(e) => setPrompt(e.target.value)}
             placeholder="Retrieval-augmented generation: chunking, embeddings, rerankers, eval, pitfalls." />
         </Field>
+        <Field label="format" hint="shorts are vertical 9:16; long-form is 16:9 with a longer, structured script">
+          <div className="flex gap-2">
+            {(["short", "long"] as const).map((f) => (
+              <button key={f} type="button"
+                className={`btn flex-1 justify-center ${format === f ? "btn-signal" : "btn-ghost"}`}
+                onClick={() => setFormat(f)}>
+                {f === "short" ? "Shorts" : "Long-form"}
+              </button>
+            ))}
+          </div>
+        </Field>
         <div className="text-[12px] text-fog-400 mb-3 font-mono">a playlist is created automatically when the topic's first video is produced</div>
         <button className="btn btn-signal w-full" disabled={!name || m.createTopic.isPending}
           onClick={() => m.createTopic.mutate(
-            { channel_id: channel.id, name, theme_prompt: prompt || null },
-            { onSuccess: () => { setOpen(false); setName(""); setPrompt(""); } })}>
+            { channel_id: channel.id, name, theme_prompt: prompt || null, content_format: format },
+            { onSuccess: () => { setOpen(false); setName(""); setPrompt(""); setFormat("short"); } })}>
           {m.createTopic.isPending ? "creating…" : "create topic"}
         </button>
       </Modal>

@@ -45,6 +45,7 @@ def create_topic(body: TopicCreate, session: Session = Depends(get_session)):
     mx = session.exec(select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
     topic = Topic(
         channel_id=ch.id, name=body.name.strip(), theme_prompt=body.theme_prompt,
+        content_format="long" if body.content_format == "long" else "short",
         render_profile_id=body.render_profile_id, position=(mx or 0) + 1,
     )
     # Optionally link an existing playlist; otherwise the topic's playlist is
@@ -100,7 +101,8 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
         raise HTTPException(404, "topic not found")
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
     try:
-        ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing), body.count)
+        ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing),
+                                         body.count, t.content_format)
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0

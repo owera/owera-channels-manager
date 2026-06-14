@@ -31,6 +31,7 @@ export interface Topic {
   channel_id: number;
   name: string;
   theme_prompt: string | null;
+  content_format: "short" | "long";
   playlist_id: number | null;
   render_profile_id: number | null;
   active: boolean;

@@ -92,6 +92,7 @@ class Topic(SQLModel, table=True):
     channel_id: int = Field(foreign_key="channel.id", index=True)
     name: str                                     # e.g. "RAG", "AI Agents"
     theme_prompt: Optional[str] = None            # guidance for generating video ideas
+    content_format: str = "short"                 # "short" (vertical Shorts) | "long" (16:9 long-form)
     playlist_id: Optional[int] = Field(default=None, foreign_key="playlist.id")
     render_profile_id: Optional[int] = Field(default=None, foreign_key="renderprofile.id")
     active: bool = True
