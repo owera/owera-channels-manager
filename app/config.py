@@ -74,3 +74,9 @@ def load_dotenv_into_env() -> None:
                 continue
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+
+    # Bridge the manager setting (MANAGER_ANTHROPIC_API_KEY) to the bare name
+    # litellm reads. Without this, a key set via the manager's own MANAGER_*
+    # convention is loaded into settings but never reaches the LLM call.
+    if settings.anthropic_api_key:
+        os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)

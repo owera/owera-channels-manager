@@ -114,6 +114,8 @@ def tick() -> None:
         for channel in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
             if channel.oauth_status != OAuthStatus.CONNECTED:
                 continue
+            if quota.daily_limit_hit(session, channel.id):
+                continue  # quota / upload-limit already hit today — wait for reset
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:
                 continue
             if quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD > settings.youtube_daily_quota_cap:

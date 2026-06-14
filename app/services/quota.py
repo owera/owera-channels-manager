@@ -47,6 +47,21 @@ def last_publish_at(session: Session, channel_id: int):
     ).one()
 
 
+def daily_limit_hit(session: Session, channel_id: int) -> bool:
+    """True if this channel already hit a YouTube daily cap today (quota or the
+    per-channel upload limit). Both are logged with a 'quota exceeded:' detail
+    prefix. Used to stop publishing for the channel until the limit resets next
+    day — otherwise the publish loop would retry every tick and hammer the API."""
+    n = session.exec(
+        select(func.count(JobRun.id)).where(
+            JobRun.channel_id == channel_id, JobRun.kind == "publish",
+            JobRun.status == "error", JobRun.created_at >= _day_start(),
+            JobRun.detail.like("quota exceeded:%"),
+        )
+    ).one()
+    return n > 0
+
+
 def in_flight_renders(session: Session) -> int:
     return session.exec(
         select(func.count(Video.id)).where(Video.status == VideoStatus.RENDERING)

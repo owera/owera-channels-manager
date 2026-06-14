@@ -223,6 +223,12 @@ def add_to_playlist(service, playlist_id: str, video_id: str) -> str:
 def _classify(e: HttpError) -> Exception:
     status = getattr(e.resp, "status", None)
     content = (e.content or b"").lower()
+    # Quota (403) and the per-channel daily upload cap (400 uploadLimitExceeded)
+    # are both transient daily limits — surface them as QuotaExceeded so the
+    # publish loop leaves the video APPROVED to retry next day, rather than
+    # marking it permanently FAILED (which nothing re-picks automatically).
     if status == 403 and b"quota" in content:
+        return QuotaExceeded(str(e))
+    if status == 400 and b"uploadlimitexceeded" in content:
         return QuotaExceeded(str(e))
     return e
