@@ -77,7 +77,7 @@ function VideoCard({ v, onOpen, eta, qinfo, paused }: { v: Video; onOpen: (v: Vi
   );
 }
 
-function Column({ status, videos, onOpen, onProduceAll, plan, queuePlan, paused }: any) {
+function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queuePlan, paused }: any) {
   const meta = STATUS_META[status as keyof typeof STATUS_META];
   const items = videos.filter((v: Video) => v.status === status);
   return (
@@ -90,6 +90,9 @@ function Column({ status, videos, onOpen, onProduceAll, plan, queuePlan, paused 
         <div className="flex items-center gap-2">
           {status === "draft" && items.length > 0 && (
             <button className="label text-signal hover:text-white" onClick={onProduceAll}>produce all</button>
+          )}
+          {items.length > 0 && (
+            <button className="label text-fog-400 hover:text-[#f7768e]" onClick={onDeleteAll}>delete all</button>
           )}
           <span className="font-mono text-xs tabular-nums text-fog-400">{items.length}</span>
         </div>
@@ -185,6 +188,14 @@ export default function Board() {
     if (ids.length) m.produceBulk.mutate({ channel_id: active, ordered_ids: ids });
   };
 
+  const deleteAll = (status: string) => {
+    const ids = shown.filter((v) => v.status === status).map((v) => v.id);
+    if (!ids.length) return;
+    const label = STATUS_META[status as keyof typeof STATUS_META]?.label || status;
+    if (!confirm(`Delete ${ids.length} video${ids.length > 1 ? "s" : ""} from ${label}? This can't be undone.`)) return;
+    ids.forEach((id) => m.deleteVideo.mutate(id));
+  };
+
   return (
     <div className="p-8 h-full flex flex-col">
       <header className="flex items-end justify-between mb-5">
@@ -223,9 +234,9 @@ export default function Board() {
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">
-            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} queuePlan={queuePlan} paused={channel?.paused} />)}
+            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} paused={channel?.paused} />)}
             {TERMINAL_COLUMNS.map((s) => shown.some((v) => v.status === s) ?
-              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} queuePlan={queuePlan} paused={channel?.paused} /> : null)}
+              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} paused={channel?.paused} /> : null)}
           </div>
         </div>
       )}
