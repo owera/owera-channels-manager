@@ -57,7 +57,23 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
 
-    cursor = now if not last else max(now, last + drip)
+    # The publish loop won't touch this channel while it's in a YouTube daily-cap
+    # cooldown, so the schedule can't start before the cap resets. Mirror the gates
+    # in publish_loop.tick() so the ETA shows the real next-publish time rather than
+    # "any moment".
+    gate = now
+    cooldown = ch.cooldown_until
+    if cooldown is not None:
+        if cooldown.tzinfo is None:                  # SQLite returns naive datetimes
+            cooldown = cooldown.replace(tzinfo=timezone.utc)
+        gate = max(gate, cooldown)
+    if quota.daily_limit_hit(session, channel_id):
+        # Same-day cap with no (or an earlier) cooldown timestamp; daily_limit_hit()
+        # clears at the next UTC day boundary. Independent of cooldown — the loop
+        # skips on either gate, so the ETA must respect the later of the two.
+        gate = max(gate, _next_midnight_utc(now))
+
+    cursor = gate if not last else max(gate, last + drip)
     cur_day = cursor.date()
     day_count = quota.published_today(session, channel_id) if cur_day == now.date() else 0
 
