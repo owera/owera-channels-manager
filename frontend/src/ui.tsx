@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { STATUS_META } from "./status";
 import type { Status } from "./api";
@@ -54,7 +55,10 @@ export function Modal({
     if (open) window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [open, onClose]);
-  return (
+  // Render into <body> so the fixed overlay isn't trapped by an ancestor's
+  // containing block — `.panel` uses backdrop-filter, which (like transform)
+  // re-roots position:fixed onto that panel instead of the viewport.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -78,7 +82,8 @@ export function Modal({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 
@@ -103,11 +108,15 @@ export function Empty({ children }: { children: ReactNode }) {
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
+      type="button"
       onClick={() => onChange(!on)}
       className={`relative w-10 h-5 rounded-full transition-colors ${on ? "bg-signal" : "bg-ink-500"}`}
     >
+      {/* left-0 anchors the knob to the track's left edge; without it the empty
+          inline span centers (text-align:center on <button>) and the transform
+          pushes the ON knob off the right edge. */}
       <span
-        className="absolute top-0.5 w-4 h-4 rounded-full bg-ink-900 transition-transform"
+        className="absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
         style={{ transform: on ? "translateX(22px)" : "translateX(2px)" }}
       />
     </button>
