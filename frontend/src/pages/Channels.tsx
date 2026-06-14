@@ -14,6 +14,16 @@ const OAUTH_HEX: Record<string, string> = {
 function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
   const m = useMut();
   const [count, setCount] = useState(8);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(topic.name);
+  const [prompt, setPrompt] = useState(topic.theme_prompt ?? "");
+  const [format, setFormat] = useState<"short" | "long">(topic.content_format);
+  const openEdit = () => {
+    setName(topic.name);
+    setPrompt(topic.theme_prompt ?? "");
+    setFormat(topic.content_format);
+    setEditing(true);
+  };
   const c: Record<string, number> = topic.video_counts || {};
   const drafts = c.draft || 0;
   const live = c.published || 0;
@@ -32,7 +42,10 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
           </div>
           {topic.theme_prompt && <div className="text-[12px] text-fog-300 mt-0.5 line-clamp-2">{topic.theme_prompt}</div>}
         </div>
-        <button className="label hover:text-[#f7768e]" onClick={() => m.deleteTopic.mutate(topic.id)}>del</button>
+        <div className="flex items-center gap-2.5">
+          <button className="label hover:text-signal" onClick={openEdit}>edit</button>
+          <button className="label hover:text-[#f7768e]" onClick={() => m.deleteTopic.mutate(topic.id)}>del</button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 mt-3 font-mono text-[10px] uppercase tracking-wider">
@@ -55,6 +68,32 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
         </button>
         <Link to={`/board/${channel.id}?topic=${topic.id}`} className="btn !py-1.5">view queue →</Link>
       </div>
+
+      <Modal open={editing} onClose={() => setEditing(false)} title="Edit topic">
+        <Field label="topic name">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="theme guidance (optional)" hint="steers the kinds of video ideas generated">
+          <textarea className="input h-20" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+        </Field>
+        <Field label="format" hint="applies to new ideas and not-yet-rendered videos; already-rendered videos keep their aspect">
+          <div className="flex gap-2">
+            {(["short", "long"] as const).map((f) => (
+              <button key={f} type="button"
+                className={`btn flex-1 justify-center ${format === f ? "btn-signal" : "btn-ghost"}`}
+                onClick={() => setFormat(f)}>
+                {f === "short" ? "Shorts" : "Long-form"}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <button className="btn btn-signal w-full" disabled={!name || m.updateTopic.isPending}
+          onClick={() => m.updateTopic.mutate(
+            { id: topic.id, body: { name, theme_prompt: prompt || null, content_format: format } },
+            { onSuccess: () => setEditing(false) })}>
+          {m.updateTopic.isPending ? "saving…" : "save changes"}
+        </button>
+      </Modal>
     </div>
   );
 }
