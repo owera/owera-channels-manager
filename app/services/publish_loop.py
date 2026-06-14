@@ -70,8 +70,13 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         )
     except QuotaExceeded as e:
         video.status = VideoStatus.APPROVED
+        channel.cooldown_until = quota.cooldown_until_for(e.reason)
+        session.add(channel)
+        # Keep the "quota exceeded:" prefix — quota.daily_limit_hit() matches on it.
         quota.log(session, kind="publish", status="error", video_id=video.id,
-                  channel_id=channel.id, detail=f"quota exceeded: {e}")
+                  channel_id=channel.id,
+                  detail=f"quota exceeded: [{e.reason}] cooldown until "
+                         f"{channel.cooldown_until.isoformat()}; {e}")
         raise
     except Exception as e:
         video.status = VideoStatus.FAILED
@@ -114,6 +119,14 @@ def tick() -> None:
         for channel in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
             if channel.oauth_status != OAuthStatus.CONNECTED:
                 continue
+            if channel.cooldown_until:
+                cu = channel.cooldown_until
+                if cu.tzinfo is None:                 # SQLite returns naive datetimes
+                    cu = cu.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) < cu:
+                    continue  # in cooldown after a YouTube daily cap — wait for reset
+            if quota.daily_limit_hit(session, channel.id):
+                continue  # fallback: same-day cap logged but cooldown not set
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:
                 continue
             if quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD > settings.youtube_daily_quota_cap:
