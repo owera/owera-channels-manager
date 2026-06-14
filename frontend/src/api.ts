@@ -211,6 +211,15 @@ export const usePublishPlan = (channelId: number) =>
     refetchInterval: 10000,
   });
 
+export type QueueReason = { reason: string; eta: string | null };
+export const useQueuePlan = (channelId: number) =>
+  useQuery({
+    queryKey: ["queue-plan", channelId],
+    queryFn: () => api<Record<string, QueueReason>>(`/videos/queue-plan?channel_id=${channelId}`),
+    enabled: !!channelId,
+    refetchInterval: 5000,
+  });
+
 export const useRuns = (channelId?: number) =>
   useQuery({
     queryKey: ["runs", channelId ?? "all"],

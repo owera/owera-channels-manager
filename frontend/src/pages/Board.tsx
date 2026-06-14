@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  useChannels, useMut, useProfiles, usePublishPlan, useTopics, useVideos, type Video,
+  useChannels, useMut, useProfiles, usePublishPlan, useQueuePlan, useTopics, useVideos,
+  type QueueReason, type Video,
 } from "../api";
 import { BOARD_COLUMNS, STATUS_META, TERMINAL_COLUMNS } from "../status";
 import { Empty, Field, Modal, StatusChip } from "../ui";
@@ -18,7 +19,7 @@ function relTime(iso: string): string {
   return `~${d}d ${h % 24}h`;
 }
 
-function VideoCard({ v, onOpen, eta, paused }: { v: Video; onOpen: (v: Video) => void; eta?: string; paused?: boolean }) {
+function VideoCard({ v, onOpen, eta, qinfo, paused }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; paused?: boolean }) {
   const m = useMut();
   const progressing = v.status === "rendering" || v.status === "publishing";
   return (
@@ -46,6 +47,14 @@ function VideoCard({ v, onOpen, eta, paused }: { v: Video; onOpen: (v: Video) =>
         </div>
       )}
 
+      {v.status === "queued" && qinfo && (
+        <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
+          style={{ color: qinfo.reason.includes("paused") ? "#f5a524" : STATUS_META.queued.hex }}>
+          <span>◷</span>
+          {qinfo.reason}{qinfo.eta ? ` · in ${relTime(qinfo.eta)}` : ""}
+        </div>
+      )}
+
       {v.error && <div className="mt-2 text-[11px] font-mono text-[#f7768e] line-clamp-2">{v.error}</div>}
 
       <div className="flex items-center gap-2 mt-3">
@@ -68,7 +77,7 @@ function VideoCard({ v, onOpen, eta, paused }: { v: Video; onOpen: (v: Video) =>
   );
 }
 
-function Column({ status, videos, onOpen, onProduceAll, plan, paused }: any) {
+function Column({ status, videos, onOpen, onProduceAll, plan, queuePlan, paused }: any) {
   const meta = STATUS_META[status as keyof typeof STATUS_META];
   const items = videos.filter((v: Video) => v.status === status);
   return (
@@ -86,7 +95,7 @@ function Column({ status, videos, onOpen, onProduceAll, plan, paused }: any) {
         </div>
       </div>
       <div className="flex-1 space-y-2.5 min-h-[60px] rounded-md p-1 overflow-y-auto">
-        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} paused={paused} />)}
+        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} paused={paused} />)}
       </div>
     </div>
   );
@@ -155,6 +164,7 @@ export default function Board() {
   const { data: topics } = useTopics(active);
   const { data: videos } = useVideos(active);
   const { data: plan } = usePublishPlan(active);
+  const { data: queuePlan } = useQueuePlan(active);
   const m = useMut();
   const [editing, setEditing] = useState<Video | null>(null);
 
@@ -213,9 +223,9 @@ export default function Board() {
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">
-            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} paused={channel?.paused} />)}
+            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} queuePlan={queuePlan} paused={channel?.paused} />)}
             {TERMINAL_COLUMNS.map((s) => shown.some((v) => v.status === s) ?
-              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} paused={channel?.paused} /> : null)}
+              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} plan={plan} queuePlan={queuePlan} paused={channel?.paused} /> : null)}
           </div>
         </div>
       )}

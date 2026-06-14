@@ -90,6 +90,51 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
     return plan
 
 
+@router.get("/queue-plan")
+def queue_plan(channel_id: int, session: Session = Depends(get_session)):
+    """Why each queued video isn't rendering yet — mirrors the gates in
+    render_loop._submit_new so the board can label queued cards. Returns
+    {video_id: {"reason": str, "eta": iso8601|null}}."""
+    ch = session.get(Channel, channel_id)
+    if not ch:
+        raise HTTPException(404, "channel not found")
+    queued = session.exec(
+        select(Video).where(Video.channel_id == channel_id, Video.status == VideoStatus.QUEUED)
+        .order_by(Video.position, Video.id)
+    ).all()
+    if not queued:
+        return {}
+
+    cfg_row = app_settings(session)
+
+    def entry(reason: str, eta: str | None = None) -> dict:
+        return {"reason": reason, "eta": eta}
+
+    # Global / channel-wide stops apply to every queued video.
+    if cfg_row.scheduler_paused:
+        return {str(v.id): entry("scheduler paused") for v in queued}
+    if ch.paused:
+        return {str(v.id): entry("channel paused") for v in queued}
+
+    budget = ch.daily_render_budget
+    rendered = quota.rendered_today(session, channel_id)
+    slots_today = max(0, budget - rendered)
+    in_flight = quota.in_flight_renders(session)
+    reset = _next_midnight_utc(datetime.now(timezone.utc)).isoformat()
+
+    plan: dict[str, dict] = {}
+    for i, v in enumerate(queued):
+        if i >= slots_today:                              # today's render budget spent
+            plan[str(v.id)] = entry(f"render budget full ({rendered}/{budget})", reset)
+        elif i == 0 and in_flight >= cfg_row.render_concurrency:
+            plan[str(v.id)] = entry("waiting for render slot")
+        elif i == 0:
+            plan[str(v.id)] = entry("next to render")
+        else:
+            plan[str(v.id)] = entry("queued · renders today")
+    return plan
+
+
 @router.post("", status_code=201)
 def create_video(body: VideoCreate, session: Session = Depends(get_session)):
     topic = session.get(Topic, body.topic_id)
