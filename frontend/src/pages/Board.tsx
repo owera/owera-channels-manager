@@ -19,7 +19,7 @@ function relTime(iso: string): string {
   return `~${d}d ${h % 24}h`;
 }
 
-function VideoCard({ v, onOpen, eta, qinfo, paused }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; paused?: boolean }) {
+function VideoCard({ v, onOpen, eta, qinfo, format, paused }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; format?: "short" | "long"; paused?: boolean }) {
   const m = useMut();
   const progressing = v.status === "rendering" || v.status === "publishing";
   return (
@@ -58,6 +58,12 @@ function VideoCard({ v, onOpen, eta, qinfo, paused }: { v: Video; onOpen: (v: Vi
       {v.error && <div className="mt-2 text-[11px] font-mono text-[#f7768e] line-clamp-2">{v.error}</div>}
 
       <div className="flex items-center gap-2 mt-3">
+        {format && (
+          <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border"
+            style={format === "long" ? { color: "#a78bfa", borderColor: "#a78bfa55" } : { color: "#6c7681", borderColor: "#6c768155" }}>
+            {format === "long" ? "long-form" : "shorts"}
+          </span>
+        )}
         {v.status === "review" && <span className="label" style={{ color: STATUS_META.review.hex }}>tap to review</span>}
         {v.added_to_playlist && <span className="label text-fog-400">in playlist</span>}
         {v.yt_video_id && (
@@ -77,7 +83,7 @@ function VideoCard({ v, onOpen, eta, qinfo, paused }: { v: Video; onOpen: (v: Vi
   );
 }
 
-function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queuePlan, paused }: any) {
+function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queuePlan, formats, paused }: any) {
   const meta = STATUS_META[status as keyof typeof STATUS_META];
   const items = videos.filter((v: Video) => v.status === status);
   return (
@@ -98,7 +104,7 @@ function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queue
         </div>
       </div>
       <div className="flex-1 space-y-2.5 min-h-[60px] rounded-md p-1 overflow-y-auto">
-        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} paused={paused} />)}
+        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} format={formats?.[v.topic_id]} paused={paused} />)}
       </div>
     </div>
   );
@@ -196,6 +202,10 @@ export default function Board() {
     ids.forEach((id) => m.deleteVideo.mutate(id));
   };
 
+  // Format lives on the topic; videos inherit it. Map topic_id -> format for the cards.
+  const formats: Record<number, "short" | "long"> = {};
+  (topics ?? []).forEach((t) => { formats[t.id] = t.content_format; });
+
   return (
     <div className="p-8 h-full flex flex-col">
       <header className="flex items-end justify-between mb-5">
@@ -234,9 +244,9 @@ export default function Board() {
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">
-            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} paused={channel?.paused} />)}
+            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} />)}
             {TERMINAL_COLUMNS.map((s) => shown.some((v) => v.status === s) ?
-              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} paused={channel?.paused} /> : null)}
+              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} /> : null)}
           </div>
         </div>
       )}
