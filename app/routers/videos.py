@@ -30,8 +30,24 @@ def list_videos(channel_id: int | None = None, topic_id: int | None = None,
 
 
 def _next_midnight_utc(dt: datetime) -> datetime:
+    """Next UTC midnight after dt — the render-budget day boundary (render uses no quota)."""
     nxt = (dt + timedelta(days=1)).date()
     return datetime.combine(nxt, time.min, tzinfo=timezone.utc)
+
+
+def _next_quota_reset(dt: datetime) -> datetime:
+    """Next YouTube quota-day boundary (Pacific midnight) strictly after dt — the
+    publish-budget/quota day boundary."""
+    return quota._next_pt_midnight_utc(dt)
+
+
+def _pt_date(dt: datetime):
+    """The Pacific (YouTube quota) calendar date of a UTC datetime."""
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    except Exception:
+        return (dt - timedelta(hours=8)).date()
 
 
 @router.get("/publish-plan")
@@ -69,21 +85,23 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
         gate = max(gate, cooldown)
     if quota.daily_limit_hit(session, channel_id):
         # Same-day cap with no (or an earlier) cooldown timestamp; daily_limit_hit()
-        # clears at the next UTC day boundary. Independent of cooldown — the loop
-        # skips on either gate, so the ETA must respect the later of the two.
-        gate = max(gate, _next_midnight_utc(now))
+        # clears when YouTube's quota resets (Pacific midnight). Independent of
+        # cooldown — the loop skips on either gate, so respect the later of the two.
+        gate = max(gate, _next_quota_reset(now))
 
+    # Publishing follows YouTube's quota day (Pacific midnight), so the budget rolls
+    # over and the counts reset on that boundary — matching when YouTube replenishes.
     cursor = gate if not last else max(gate, last + drip)
-    cur_day = cursor.date()
-    day_count = quota.published_today(session, channel_id) if cur_day == now.date() else 0
+    cur_day = _pt_date(cursor)
+    day_count = quota.published_today(session, channel_id) if cur_day == _pt_date(now) else 0
 
     plan: dict[str, str] = {}
     for v in approved:
-        if cursor.date() != cur_day:                 # natural rollover from dripping
-            cur_day, day_count = cursor.date(), 0
-        if day_count >= daily_limit:                 # day's budget spent → next day
-            cursor = _next_midnight_utc(cursor)
-            cur_day, day_count = cursor.date(), 0
+        if _pt_date(cursor) != cur_day:              # natural rollover from dripping
+            cur_day, day_count = _pt_date(cursor), 0
+        if day_count >= daily_limit:                 # day's budget spent → next quota day
+            cursor = _next_quota_reset(cursor)
+            cur_day, day_count = _pt_date(cursor), 0
         plan[str(v.id)] = cursor.isoformat()
         day_count += 1
         cursor = cursor + drip

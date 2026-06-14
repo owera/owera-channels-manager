@@ -136,11 +136,16 @@ export default function Dashboard() {
           <div className="label mb-2">// overview</div>
           <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Control Room</h1>
         </div>
-        {settings?.scheduler_paused && (
-          <div className="flex items-center gap-3 font-mono text-xs">
-            <span className="text-amber">scheduler paused</span>
-          </div>
-        )}
+        <div className="flex items-center gap-4 font-mono text-xs">
+          {settings?.youtube_quota_reset_at && (
+            <span className="flex items-center gap-1.5 text-fog-400">
+              <span>◷</span>
+              <span className="text-fog-300">youtube quota resets in</span>
+              <span className="text-fog-100 tabular-nums">{relTime(settings.youtube_quota_reset_at)}</span>
+            </span>
+          )}
+          {settings?.scheduler_paused && <span className="text-amber">scheduler paused</span>}
+        </div>
       </header>
 
       {/* KPI strip */}

@@ -138,6 +138,7 @@ export interface AppSettings {
   topic_autogen_min_pending: number;
   scheduler_paused: boolean;
   mpt_base_url: string;
+  youtube_quota_reset_at: string;
 }
 
 // ---- fetch wrapper ----

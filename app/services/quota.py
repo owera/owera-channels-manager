@@ -25,6 +25,11 @@ def _next_pt_midnight_utc(now: datetime) -> datetime:
         return candidate if candidate > now else candidate + timedelta(days=1)
 
 
+def next_quota_reset() -> datetime:
+    """When the YouTube Data API project quota next resets (Pacific midnight, UTC)."""
+    return _next_pt_midnight_utc(datetime.now(timezone.utc))
+
+
 def cooldown_until_for(reason: str) -> datetime:
     """When a channel that just hit a YouTube daily cap may be retried (tz-aware UTC).
 
@@ -39,31 +44,47 @@ def cooldown_until_for(reason: str) -> datetime:
 
 
 def _day_start() -> datetime:
+    """Start of the local accounting day (UTC midnight). Used for the render budget,
+    a local throttle that consumes no YouTube quota."""
     now = datetime.now(timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _count(session: Session, channel_id: int, kind: str) -> int:
+def _quota_day_start() -> datetime:
+    """Start of YouTube's current quota day = most recent Pacific midnight (UTC).
+    Publishing and quota accounting use this so the app's 'today' lines up with when
+    YouTube actually replenishes quota (it resets at Pacific midnight, not UTC)."""
+    now = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        now_pt = now.astimezone(ZoneInfo("America/Los_Angeles"))
+        return now_pt.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    except Exception:
+        c = now.replace(hour=8, minute=0, second=0, microsecond=0)  # >= Pacific midnight year-round
+        return c if c <= now else c - timedelta(days=1)
+
+
+def _count(session: Session, channel_id: int, kind: str, since: datetime) -> int:
     return session.exec(
         select(func.count(JobRun.id)).where(
             JobRun.channel_id == channel_id, JobRun.kind == kind,
-            JobRun.status == "success", JobRun.created_at >= _day_start(),
+            JobRun.status == "success", JobRun.created_at >= since,
         )
     ).one()
 
 
 def published_today(session: Session, channel_id: int) -> int:
-    return _count(session, channel_id, "publish")
+    return _count(session, channel_id, "publish", _quota_day_start())
 
 
 def rendered_today(session: Session, channel_id: int) -> int:
-    return _count(session, channel_id, "render")
+    return _count(session, channel_id, "render", _day_start())
 
 
 def quota_spent_today(session: Session, channel_id: int) -> int:
     total = session.exec(
         select(func.coalesce(func.sum(JobRun.quota_cost), 0)).where(
-            JobRun.channel_id == channel_id, JobRun.created_at >= _day_start(),
+            JobRun.channel_id == channel_id, JobRun.created_at >= _quota_day_start(),
         )
     ).one()
     return int(total or 0)
@@ -79,14 +100,15 @@ def last_publish_at(session: Session, channel_id: int):
 
 
 def daily_limit_hit(session: Session, channel_id: int) -> bool:
-    """True if this channel already hit a YouTube daily cap today (quota or the
-    per-channel upload limit). Both are logged with a 'quota exceeded:' detail
-    prefix. Used to stop publishing for the channel until the limit resets next
-    day — otherwise the publish loop would retry every tick and hammer the API."""
+    """True if this channel already hit a YouTube daily cap during the current quota
+    day (quota or the per-channel upload limit). Both are logged with a 'quota
+    exceeded:' detail prefix. Used to stop publishing for the channel until YouTube's
+    quota resets (Pacific midnight) — otherwise the publish loop would retry every
+    tick and hammer the API."""
     n = session.exec(
         select(func.count(JobRun.id)).where(
             JobRun.channel_id == channel_id, JobRun.kind == "publish",
-            JobRun.status == "error", JobRun.created_at >= _day_start(),
+            JobRun.status == "error", JobRun.created_at >= _quota_day_start(),
             JobRun.detail.like("quota exceeded:%"),
         )
     ).one()

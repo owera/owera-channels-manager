@@ -4,6 +4,7 @@ from sqlmodel import Session
 from app.config import settings as app_config
 from app.db import app_settings, get_session
 from app.schemas import SettingsUpdate
+from app.services import quota
 from app.services.mpt_client import mpt
 
 router = APIRouter(prefix="/api", tags=["settings"])
@@ -15,6 +16,8 @@ def get_settings(session: Session = Depends(get_session)):
     return {
         **cfg.model_dump(),
         "mpt_base_url": app_config.mpt_base_url,
+        # When the YouTube Data API project quota next resets (Pacific midnight).
+        "youtube_quota_reset_at": quota.next_quota_reset().isoformat(),
     }
 
 
