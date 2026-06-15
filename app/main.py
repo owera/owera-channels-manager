@@ -12,7 +12,7 @@ from app.db import init_db
 from app.routers import (channels, media, playlists, profiles, queue,
                          settings as settings_router, topics, videos,
                          youtube_admin)
-from app.services import scheduler
+from app.services import render_loop, scheduler
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     load_dotenv_into_env()
     ensure_dirs()
     init_db()
+    render_loop.recover_orphaned_renders()        # re-queue renders orphaned by a restart
     scheduler.start()
     try:
         yield

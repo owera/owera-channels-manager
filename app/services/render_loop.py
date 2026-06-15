@@ -5,6 +5,7 @@ channel.default_render_profile.
 """
 
 import json
+import logging
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -19,6 +20,32 @@ from app.services import metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.mpt_client import build_video_params
 from app.services.topic_playlist import ensure_topic_playlist
+
+logger = logging.getLogger("manager.render")
+
+
+def recover_orphaned_renders() -> None:
+    """Re-queue renders left in 'rendering' by a previous process. HyperFrames runs
+    on in-process daemon threads that die with the process, so any such render still
+    marked 'rendering' at startup is orphaned — nothing will ever advance it. MPT runs
+    in its own service and its task survives a manager restart, so leave those to be
+    re-polled by the render loop. Call once at startup."""
+    with session_scope() as session:
+        stuck = session.exec(select(Video).where(Video.status == VideoStatus.RENDERING)).all()
+        n = 0
+        for v in stuck:
+            if v.engine == "mpt":
+                continue  # external task survives the restart; the render loop re-polls it
+            v.status = VideoStatus.QUEUED
+            v.mpt_task_id = None
+            v.render_progress = 0
+            v.error = None
+            session.add(v)
+            quota.log(session, kind="render", status="error", video_id=v.id,
+                      channel_id=v.channel_id, detail="recovered orphaned render — re-queued")
+            n += 1
+        if n:
+            logger.info("recovered %d orphaned in-process render(s) at startup", n)
 
 
 def _profile_params(session: Session, profile_id) -> dict:

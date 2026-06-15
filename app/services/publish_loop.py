@@ -34,6 +34,32 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
     ).first()
 
 
+def _recover_stuck_publishing(session: Session) -> None:
+    """Reset videos stranded in 'publishing' (upload interrupted by a crash, restart,
+    or network drop) back to 'approved' so they re-publish. The publish loop only
+    advances 'approved' videos, so without this a stuck upload would sit forever.
+
+    Skips uploads still inside the timeout window, so a genuinely in-flight upload is
+    never reset out from under itself."""
+    now = datetime.now(timezone.utc)
+    timeout = settings.publish_timeout_seconds
+    for v in session.exec(select(Video).where(Video.status == VideoStatus.PUBLISHING)).all():
+        started = v.last_attempt_at or v.updated_at
+        if started and started.tzinfo is None:        # SQLite returns naive datetimes
+            started = started.replace(tzinfo=timezone.utc)
+        if started and (now - started).total_seconds() < timeout:
+            continue
+        v.status = VideoStatus.APPROVED
+        v.render_progress = 0
+        v.error = None
+        v.retry_count += 1
+        session.add(v)
+        quota.log(session, kind="publish", status="error", video_id=v.id,
+                  channel_id=v.channel_id,
+                  detail=f"recovered stuck publish (>{timeout}s) — re-queued")
+    session.commit()
+
+
 def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     video.status = VideoStatus.PUBLISHING
     video.render_progress = 0          # reuse as upload progress while publishing
@@ -116,6 +142,7 @@ def tick() -> None:
         cfg = app_settings(session)
         if cfg.scheduler_paused:
             return
+        _recover_stuck_publishing(session)            # re-queue any orphaned uploads
         for channel in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
             if channel.oauth_status != OAuthStatus.CONNECTED:
                 continue
