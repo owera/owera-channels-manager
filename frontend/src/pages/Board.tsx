@@ -126,8 +126,16 @@ function VideoModal({ video, channelId, onClose }: { video: Video; channelId: nu
   }, { onSuccess: onClose });
 
   return (
-    <Modal open onClose={onClose} title="Manage video">
+    <Modal open wide={!!video.video_path} onClose={onClose} title="Manage video">
       <div className="mb-4"><StatusChip status={video.status} /></div>
+      {video.video_path && (
+        <div className="mb-4">
+          <video controls playsInline preload="metadata"
+            poster={`/api/videos/${video.id}/thumb`}
+            src={`/api/videos/${video.id}/video`}
+            className="block mx-auto max-h-[55vh] max-w-full rounded bg-black" />
+        </div>
+      )}
       <Field label="subject">
         <textarea className="input h-20" value={subject} onChange={(e) => setSubject(e.target.value)} disabled={!editable} />
       </Field>
