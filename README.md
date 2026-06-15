@@ -118,9 +118,11 @@ running, just use HyperFrames — nothing else is affected.)
 
 ## Run it as a background service
 
-Sample `systemd --user` units live in [`run/`](run/). Edit the `WorkingDirectory` (and the
-`EnvironmentFile`/`mpt.service` lines if you're not using MoneyPrinterTurbo) to match your
-checkout, then:
+Sample unit/agent files live in [`run/`](run/) so the manager starts at boot and restarts
+on crash.
+
+**Linux (systemd --user).** Edit `WorkingDirectory` (and the `EnvironmentFile`/`mpt.service`
+lines if you're not using MoneyPrinterTurbo) to match your checkout, then:
 
 ```sh
 mkdir -p ~/.config/systemd/user
@@ -129,6 +131,28 @@ systemctl --user daemon-reload
 systemctl --user enable --now ytmanager.service
 loginctl enable-linger "$USER"     # keep it running after you log out
 ```
+
+**macOS (launchd).** `run/com.owera.channels-manager.plist` is a template — substitute your
+paths (it assumes uv at `~/.local/bin` and Homebrew at `/opt/homebrew/bin`; on Intel Macs
+that's `/usr/local/bin`), then load it:
+
+```sh
+sed "s|/Users/you|$HOME|g" run/com.owera.channels-manager.plist \
+  > ~/Library/LaunchAgents/com.owera.channels-manager.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.channels-manager.plist
+```
+
+Manage it:
+
+```sh
+launchctl print    gui/$(id -u)/com.owera.channels-manager   # status
+launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager   # restart (after a code change)
+launchctl bootout  gui/$(id -u)/com.owera.channels-manager   # stop / disable
+tail -f ~/Library/Logs/owera-channels-manager.log            # logs
+```
+
+Once it's a launchd service, restart with `kickstart -k` rather than killing uvicorn —
+launchd owns port 7000 and will immediately respawn a killed process.
 
 ## Tips & troubleshooting
 

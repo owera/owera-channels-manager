@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd agent for the Owera Channels Manager.
+
+  This is a TEMPLATE — replace the placeholder paths before installing:
+    /Users/you            -> your home dir   (echo $HOME)
+    /Users/you/.local/bin -> where uv lives  (dirname "$(which uv)")
+    /opt/homebrew/bin     -> Homebrew bin     (Apple Silicon: /opt/homebrew/bin,
+                                               Intel: /usr/local/bin) — needs node/npx + ffmpeg
+    .../src/owera-channels-manager -> your checkout
+
+  Install:
+    sed "s|/Users/you|$HOME|g" run/com.owera.channels-manager.plist \
+      > ~/Library/LaunchAgents/com.owera.channels-manager.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.channels-manager.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.owera.channels-manager</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/you/.local/bin/uv</string>
+        <string>run</string>
+        <string>uvicorn</string>
+        <string>app.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>7000</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/you/src/owera-channels-manager</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd does not inherit the login shell PATH; uv + node/npx + ffmpeg live here -->
+        <key>PATH</key>
+        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/you</string>
+    </dict>
+
+    <!-- Start at login/load and keep it running; restart on crash or any exit -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/owera-channels-manager.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/owera-channels-manager.log</string>
+</dict>
+</plist>
