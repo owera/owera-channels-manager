@@ -135,20 +135,29 @@ HARD RULES — a violation makes the render fail:
 3. The root element MUST be:
    <div id="root" data-composition-id="master" data-width="{W}" data-height="{H}" data-start="0" data-duration="{DUR}"> ... </div>
 4. Every animated/timed element MUST have class="clip" and data-start, data-duration, data-track-index (unique integer per element).
-5. Register a PAUSED timeline at the end of <body>:
-   <script> window.__timelines = window.__timelines || {}; const tl = gsap.timeline({paused:true}); /* tweens */ window.__timelines["master"] = tl; </script>
+5. End <body> with EXACTLY this timeline script — do NOT hand-write per-element tweens. This
+   single loop animates every .clip from its data-start/data-duration, which keeps the output
+   short so it is never truncated (every .clip MUST therefore have valid numeric data-start
+   and data-duration):
+   <script>
+   window.__timelines = window.__timelines || {};
+   const tl = gsap.timeline({paused:true});
+   document.querySelectorAll('.clip').forEach(el => {
+     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.6;
+     tl.fromTo(el, {opacity:0, y:28}, {opacity:1, y:0, duration:f, ease:"power2.out"}, s);
+     if (s + d < {DUR} - 0.1) tl.to(el, {opacity:0, duration:f, ease:"power2.in"}, s + d - f);
+   });
+   window.__timelines["master"] = tl;
+   </script>
 6. Deterministic only: NO Math.random, NO Date.now, NO fetch/network, NO external images/fonts/video.
 7. All timing must fit within 0..{DUR} seconds. Keep text inside safe margins (>=80px from edges).
-8. ONE TEXT BLOCK AT A TIME — never render text on top of other visible text. The title must
-   fade to opacity 0 BEFORE the first phrase appears, and each phrase must fade to opacity 0
-   before the next phrase appears. So every text element you fade in MUST have a matching
-   fade-to-0 tween that completes at or before the next text element's data-start (only the
-   final element may stay). Do not leave earlier text on screen — give each its own time slot.
+8. ONE TEXT BLOCK AT A TIME: the [data-start, data-start+data-duration] windows of your .clip
+   elements MUST NOT overlap — give each phrase its own slot, so only one shows at a time
+   (the timeline above fades each clip in at its data-start and out at the end of its window).
 
-STYLE: modern, bold, high-contrast motion graphics. Reveal ONE item at a time in a single \
-centered focal area: show the title, fade it out, then bring in each short phrase and fade it \
-out before the next — a clean replacement, never a cluttered or overlapping frame. System \
-sans-serif, big readable type, subtle GSAP entrances (fade/slide/scale). Tasteful dark or vivid background."""
+STYLE: modern, bold, high-contrast motion graphics. A title clip, then 8-16 short phrase clips \
+revealed ONE at a time in a single centered focal area — each cleanly replaces the previous, \
+never cluttered or overlapping. Big, readable system-sans type. Tasteful dark or vivid background."""
 
 
 def _generate_composition(subject: str, script: str, resolution: str,
@@ -161,7 +170,7 @@ def _generate_composition(subject: str, script: str, resolution: str,
         f"dump it verbatim):\n{script}\n\nThe video is {duration} seconds at {width}x{height} "
         f"({resolution}). Author the index.html now."
     )
-    html = _llm(prompt, system=system, max_tokens=4000).strip()
+    html = _llm(prompt, system=system, max_tokens=8000).strip()
     return _strip_fences(html)
 
 
@@ -174,8 +183,14 @@ def _strip_fences(text: str) -> str:
 
 def _looks_valid(html: str) -> bool:
     h = html.lower()
-    return ("<html" in h and 'data-composition-id="master"' in h
-            and "window.__timelines" in h and "gsap.timeline" in h)
+    if not ("<html" in h and 'data-composition-id="master"' in h and "gsap.timeline" in h):
+        return False
+    # Reject truncated output (LLM hit the token limit): the timeline must be registered
+    # AND actually animate clips. Without tweens, every .clip stays at its CSS opacity:0
+    # and the video renders blank — so fall back to the deterministic composition instead.
+    closed = re.search(r'__timelines\s*\[\s*["\']master["\']\s*\]\s*=', h) is not None
+    has_tween = re.search(r'\.(fromto|to|from|set)\s*\(', h) is not None
+    return closed and has_tween
 
 
 def _fallback_composition(subject: str, script: str, resolution: str,
