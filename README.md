@@ -154,6 +154,59 @@ tail -f ~/Library/Logs/owera-channels-manager.log            # logs
 Once it's a launchd service, restart with `kickstart -k` rather than killing uvicorn —
 launchd owns port 7000 and will immediately respawn a killed process.
 
+## Autonomous growth agent (optional)
+
+Beyond the always-on pipeline, the manager can close the loop and **grow the portfolio
+itself** — measure → learn → act → improve, once a day, unattended. Three pieces make
+this work:
+
+- **Per-video analytics.** The app records a daily YouTube Analytics snapshot per
+  published video (views, impressions, CTR, average view %, watch time, likes,
+  comments, subscribers gained) and exposes a leaderboard:
+  `GET /api/channels/{id}/video-analytics` and `…/video-analytics/by-topic` (the core
+  "which themes/formats actually perform" signal).
+- **Custom thumbnails.** On publish, a bold high-contrast "hook card" is generated and
+  uploaded to YouTube (the biggest unused CTR lever) — best-effort, never blocks a
+  publish.
+- **The daily agent.** A launchd timer runs headless Claude Code against this repo with
+  a versioned playbook (`run/daily-agent-playbook.md`): it reads the analytics, ranks
+  winners/losers, steers topics (weights, new ideas, web-researched viral angles), and
+  ships **one or two small, reversible** app/prompt improvements — each a normal git
+  commit — then writes a dated report to `run/agent-reports/`.
+
+**One-time setup** (the agent is data-driven, so wire up its inputs first):
+
+1. In Google Cloud Console, add the **YouTube Analytics** read-only scope
+   (`yt-analytics.readonly`) to each channel's OAuth consent screen.
+2. In the app, **Reconnect** each channel once to grant that scope (publishing keeps
+   working before then — only analytics is gated). Analytics populate within 24–72h.
+3. **Phone-verify** each channel (youtube.com/verify) so custom thumbnails upload
+   (unverified channels just skip the thumbnail; publishing is unaffected).
+
+**Enable the agent** (macOS launchd — only when you want the autonomous loop):
+
+```sh
+sed "s|/Users/you|$HOME|g" run/com.owera.growth-agent.plist \
+  > ~/Library/LaunchAgents/com.owera.growth-agent.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.growth-agent.plist
+launchctl kickstart -k gui/$(id -u)/com.owera.growth-agent   # run once now to test
+tail -f ~/Library/Logs/owera-growth-agent.log
+```
+
+**Guardrails & kill switch.** The agent is bounded by the playbook: reversible git
+commits only (no force-push/history rewrite), ≤2 changes/day, never deletes channels/
+credentials/videos, never disables safety gates or the quota cap, respects every
+budget. It only touches this repo, the local app, and read-only web research. To stop
+it:
+
+```sh
+touch run/growth-agent.disabled                              # skip the next run
+launchctl bootout gui/$(id -u)/com.owera.growth-agent        # remove the timer
+```
+
+Every effect is visible: a committed daily report, each code change as a git commit,
+and the `/api/runs` audit log.
+
 ## Tips & troubleshooting
 
 - **Channel shows `expired`?** OAuth apps in "Testing" expire their refresh token about

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd timer for the Owera daily growth agent.
+
+  Runs run/growth-agent.sh once a day, which invokes headless Claude Code against
+  this repo with run/daily-agent-playbook.md. The agent is FULLY AUTONOMOUS within
+  the guardrails written into the playbook (reversible git commits, <=2 changes/day,
+  no destructive ops, respects budgets). Install this only when you want that.
+
+  This is a TEMPLATE — replace the placeholder paths before installing:
+    /Users/you                       -> your home dir ($HOME)
+    .../src/owera-channels-manager   -> your checkout
+
+  Install (note: only do this when you intend to enable the autonomous agent):
+    sed "s|/Users/you|$HOME|g" run/com.owera.growth-agent.plist \
+      > ~/Library/LaunchAgents/com.owera.growth-agent.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.growth-agent.plist
+
+  Kill switch (stop the next run without unloading):
+    touch run/growth-agent.disabled
+  Remove the timer entirely:
+    launchctl bootout gui/$(id -u)/com.owera.growth-agent
+  Run once now to test:
+    launchctl kickstart -k gui/$(id -u)/com.owera.growth-agent
+  Logs:
+    tail -f ~/Library/Logs/owera-growth-agent.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.owera.growth-agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/you/src/owera-channels-manager/run/growth-agent.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/you/src/owera-channels-manager</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd does not inherit the login shell PATH; the script also sets this. -->
+        <key>PATH</key>
+        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/you</string>
+    </dict>
+
+    <!-- Once a day at 09:00 local time. A periodic timer, not a daemon: do NOT
+         RunAtLoad (no surprise run on every login/reboot) and do NOT KeepAlive. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/owera-growth-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/owera-growth-agent.log</string>
+</dict>
+</plist>
