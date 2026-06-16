@@ -68,9 +68,11 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
     except youtube.QuotaExceeded:
         raise
     except Exception as e:
+        # A failed call (e.g. the Analytics API not enabled in the Cloud project, or
+        # the channel not yet reconsented) bills no quota — only successes do.
         logger.info("analytics snapshot skipped for video %s: %s", video.id, e)
         quota.log(session, kind="analytics", status="error", channel_id=channel.id,
-                  video_id=video.id, detail=str(e), quota_cost=_QUOTA_PER_VIDEO)
+                  video_id=video.id, detail=str(e), quota_cost=0)
         return None
     m = VideoMetric(
         video_id=video.id,
@@ -121,12 +123,20 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
             logger.info("analytics: quota cap reached for %s, stopping", channel.slug)
             break
         try:
-            if record_video_snapshot(session, analytics, channel, video, now):
-                recorded += 1
+            ok = record_video_snapshot(session, analytics, channel, video, now)
         except youtube.QuotaExceeded as e:
             logger.info("analytics: quota exceeded for %s: %s", channel.slug, e)
             break
         session.commit()           # persist each snapshot so quota accounting is live
+        if ok:
+            recorded += 1
+        elif recorded == 0:
+            # The first attempt hard-failed and nothing has succeeded — the channel
+            # isn't analytics-ready (API disabled in the Cloud project, or not yet
+            # reconsented for the scope). Stop hammering the rest; retry next tick.
+            logger.info("analytics: first call failed for %s — channel not ready, "
+                        "skipping the rest this tick", channel.slug)
+            break
     return recorded
 
 

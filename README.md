@@ -176,8 +176,9 @@ this work:
 
 **One-time setup** (the agent is data-driven, so wire up its inputs first):
 
-1. In Google Cloud Console, add the **YouTube Analytics** read-only scope
-   (`yt-analytics.readonly`) to each channel's OAuth consent screen.
+1. In Google Cloud Console, for each channel's project: **enable the YouTube Analytics
+   API** (it's separate from the Data API) and add the **`yt-analytics.readonly`** scope
+   to the OAuth consent screen.
 2. In the app, **Reconnect** each channel once to grant that scope (publishing keeps
    working before then — only analytics is gated). Analytics populate within 24–72h.
 3. **Phone-verify** each channel (youtube.com/verify) so custom thumbnails upload
