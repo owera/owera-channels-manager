@@ -96,6 +96,10 @@ class Topic(SQLModel, table=True):
     playlist_id: Optional[int] = Field(default=None, foreign_key="playlist.id")
     render_profile_id: Optional[int] = Field(default=None, foreign_key="renderprofile.id")
     active: bool = True
+    # Growth-agent steering knob: scales how aggressively autofill tops up this topic's
+    # idea queue. 1 = normal; >1 = a proven winner gets refilled more; 0 = soft-pause
+    # (no new ideas) without deactivating the topic.
+    weight: int = 1
     position: int = 0
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

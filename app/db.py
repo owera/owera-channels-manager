@@ -53,7 +53,8 @@ def _add_missing_columns() -> None:
         "renderprofile": [("engine", "VARCHAR DEFAULT 'mpt'")],
         "video": [("engine", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME")],
-        "topic": [("content_format", "VARCHAR DEFAULT 'short'")],
+        "topic": [("content_format", "VARCHAR DEFAULT 'short'"),
+                  ("weight", "INTEGER DEFAULT 1")],
         "settings": [("topic_autogen_enabled", "BOOLEAN DEFAULT 0"),
                      ("topic_autogen_min_pending", "INTEGER DEFAULT 3")],
     }

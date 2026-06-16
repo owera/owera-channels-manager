@@ -5,7 +5,7 @@ from sqlmodel import Session, func, select
 
 from app.config import settings
 from app.db import app_settings, get_session
-from app.models import Channel, JobRun, OAuthStatus, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.services import quota
 from app.services.mpt_client import mpt
 from app.services.youtube import QUOTA_UPLOAD
@@ -74,3 +74,50 @@ def runs(channel_id: int | None = None, video_id: int | None = None, limit: int 
     if video_id is not None:
         q = q.where(JobRun.video_id == video_id)
     return session.exec(q.order_by(JobRun.created_at.desc()).limit(limit)).all()
+
+
+@router.get("/agent/state")
+def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
+    """Everything the autonomous growth agent needs in one read: app settings, the
+    full dashboard, the per-topic/format analytics leaderboard per channel, the topic
+    control surface (active/weight/pending), and the recent run audit. The agent acts
+    through the existing PATCH/POST endpoints; this is its single observation call."""
+    # Lazy import avoids any import-order coupling with the youtube-admin router.
+    from app.routers.youtube_admin import video_analytics_by_topic
+
+    cfg = app_settings(session)
+    channels = session.exec(select(Channel).order_by(Channel.id)).all()
+
+    analytics_by_topic = {}
+    for ch in channels:
+        if ch.oauth_status == OAuthStatus.CONNECTED:
+            analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session)
+
+    topics = []
+    for t in session.exec(select(Topic).order_by(Topic.channel_id, Topic.position)).all():
+        pending = session.exec(
+            select(func.count(Video.id)).where(
+                Video.topic_id == t.id,
+                Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED]))
+        ).one()
+        published = session.exec(
+            select(func.count(Video.id)).where(
+                Video.topic_id == t.id, Video.status == VideoStatus.PUBLISHED)
+        ).one()
+        topics.append({
+            "id": t.id, "channel_id": t.channel_id, "name": t.name,
+            "content_format": t.content_format, "active": t.active,
+            "weight": t.weight, "pending": pending, "published": published,
+        })
+
+    recent_runs = session.exec(
+        select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit)).all()
+
+    return {
+        "now": datetime.now(timezone.utc).isoformat(),
+        "settings": cfg,
+        "dashboard": dashboard(session),
+        "analytics_by_topic": analytics_by_topic,
+        "topics": topics,
+        "recent_runs": recent_runs,
+    }

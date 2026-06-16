@@ -58,8 +58,15 @@ def tick() -> None:
         threshold = max(1, cfg.topic_autogen_min_pending)
         topics = session.exec(select(Topic).where(Topic.active == True)).all()  # noqa: E712
         for topic in topics:
+            weight = topic.weight if topic.weight is not None else 1
+            if weight <= 0:
+                continue  # soft-paused by the growth agent (weight 0): no new ideas
             if _pending_count(session, topic.id) >= threshold:
                 continue
-            n = _refill_topic(session, topic, settings.autofill_batch)
+            # Winners (weight > 1) refill bigger batches; cap the multiplier so a
+            # stray large weight can't blow up LLM cost on one tick.
+            batch = settings.autofill_batch * min(weight, 4)
+            n = _refill_topic(session, topic, batch)
             if n:
-                logger.info("auto-refilled %d ideas for topic '%s'", n, topic.name)
+                logger.info("auto-refilled %d ideas for topic '%s' (weight %d)",
+                            n, topic.name, weight)

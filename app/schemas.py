@@ -61,6 +61,7 @@ class TopicUpdate(BaseModel):
     render_profile_id: Optional[int] = None
     playlist_id: Optional[int] = None
     active: Optional[bool] = None
+    weight: Optional[int] = None             # growth-agent steering (see Topic.weight)
 
 
 class GenerateBody(BaseModel):
