@@ -9,12 +9,14 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
+from pathlib import Path
+
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
-from app.services import quota, youtube
+from app.services import quota, thumbnail, youtube
 from app.services.youtube import (NeedsConnect, QuotaExceeded, QUOTA_PLAYLISTITEM_INSERT,
-                                  QUOTA_UPLOAD)
+                                  QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
 
 
 def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
@@ -58,6 +60,30 @@ def _recover_stuck_publishing(session: Session) -> None:
                   channel_id=v.channel_id,
                   detail=f"recovered stuck publish (>{timeout}s) — re-queued")
     session.commit()
+
+
+def _set_custom_thumbnail(session: Session, service, channel: Channel,
+                          video: Video, video_id: str) -> None:
+    """Generate + upload a custom thumbnail. Best-effort: never raises, never fails a
+    publish. Custom thumbnails require a phone-verified channel — an unverified channel
+    returns 403, which is logged like any other thumbnail error and otherwise ignored."""
+    if not video.video_path:
+        return
+    out_png = Path(video.video_path).parent / "thumb_custom.png"
+    try:
+        png = thumbnail.make_thumbnail_png(
+            video.subject, video.title, out_png)
+        if not png:
+            quota.log(session, kind="thumbnail", status="error", video_id=video.id,
+                      channel_id=channel.id, detail="thumbnail generation failed")
+            return
+        youtube.set_thumbnail(service, video_id, str(png))
+        video.thumb_path = str(png)
+        quota.log(session, kind="thumbnail", status="success", video_id=video.id,
+                  channel_id=channel.id, quota_cost=QUOTA_THUMBNAIL_SET)
+    except Exception as e:
+        quota.log(session, kind="thumbnail", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=str(e)[:300])
 
 
 def _publish_one(session: Session, channel: Channel, video: Video) -> None:
@@ -119,6 +145,9 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
               channel_id=channel.id, quota_cost=QUOTA_UPLOAD,
               detail=f"https://youtube.com/watch?v={video_id}")
 
+    # Custom thumbnail (biggest CTR lever) — best-effort, never fails the publish.
+    _set_custom_thumbnail(session, service, channel, video, video_id)
+
     # Add to the topic's playlist (auto-create if it's somehow still missing).
     from app.services.topic_playlist import ensure_topic_playlist
     topic = session.get(Topic, video.topic_id)
@@ -156,7 +185,8 @@ def tick() -> None:
                 continue  # fallback: same-day cap logged but cooldown not set
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:
                 continue
-            if quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD > settings.youtube_daily_quota_cap:
+            if (quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD
+                    + QUOTA_THUMBNAIL_SET > settings.youtube_daily_quota_cap):
                 continue
             if not _drip_ok(session, channel, cfg.publish_drip_minutes):
                 continue
