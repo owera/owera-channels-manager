@@ -11,7 +11,13 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import settings
-from app.services import autofill_loop, metrics_loop, publish_loop, render_loop
+from app.services import (
+    analytics_loop,
+    autofill_loop,
+    metrics_loop,
+    publish_loop,
+    render_loop,
+)
 
 logger = logging.getLogger("manager.scheduler")
 
@@ -51,6 +57,16 @@ def start() -> None:
         id="metrics", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
+    # Per-video analytics: a daily snapshot per published video so the growth loop
+    # can learn what performs. The tick records at most once/UTC-day/video and is a
+    # no-op for channels not yet reconsented for the analytics scope; first run is
+    # delayed a minute so startup recovery/metrics settle first.
+    _scheduler.add_job(
+        _safe(analytics_loop.tick, "analytics"),
+        "interval", hours=settings.analytics_tick_hours,
+        id="analytics", max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
     # Auto-refill low topic idea queues. The tick no-ops unless the setting is on,
     # so it's safe to always register; runs soon after start, then on its interval.
     _scheduler.add_job(
@@ -60,9 +76,11 @@ def start() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
     _scheduler.start()
-    logger.info("scheduler started (render %ss / publish %ss / metrics %sh / autofill %smin)",
+    logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "
+                "analytics %sh / autofill %smin)",
                 settings.render_tick_seconds, settings.publish_tick_seconds,
-                settings.metrics_tick_hours, settings.autofill_tick_minutes)
+                settings.metrics_tick_hours, settings.analytics_tick_hours,
+                settings.autofill_tick_minutes)
     return None
 
 

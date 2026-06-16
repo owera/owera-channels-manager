@@ -168,6 +168,23 @@ class ChannelMetric(SQLModel, table=True):
     captured_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class VideoMetric(SQLModel, table=True):
+    """A point-in-time per-video YouTube Analytics snapshot, recorded ~daily by the
+    analytics loop. The time series powers the leaderboard the growth agent learns from."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    video_id: int = Field(foreign_key="video.id", index=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
+    views: int = 0
+    impressions: int = 0
+    ctr: float = 0.0                      # impressionClickThroughRate (0..1)
+    avg_view_pct: float = 0.0             # averageViewPercentage (0..100)
+    watch_time_minutes: int = 0          # estimatedMinutesWatched
+    likes: int = 0
+    comments: int = 0
+    subscribers_gained: int = 0
+    captured_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class Settings(SQLModel, table=True):
     id: Optional[int] = Field(default=1, primary_key=True)
     render_concurrency: int = 1

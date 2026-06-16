@@ -27,8 +27,12 @@ from googleapiclient.http import MediaFileUpload
 
 from app.config import settings
 
-# Full youtube scope so we can manage playlists, not just upload.
+# Full youtube scope so we can manage playlists, not just upload. Analytics read is
+# requested only at CONSENT time; the Data-API path (get_service) keeps loading creds
+# with the narrow SCOPES, so existing youtube-only tokens keep publishing even before
+# a channel has been re-consented for analytics.
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
+CONSENT_SCOPES = SCOPES + ["https://www.googleapis.com/auth/yt-analytics.readonly"]
 CATEGORY_SCIENCE_TECH = "28"
 
 # Estimated quota costs (units) — YouTube Data API v3.
@@ -37,7 +41,9 @@ QUOTA_PLAYLIST_INSERT = 50
 QUOTA_PLAYLISTITEM_INSERT = 50
 QUOTA_CHANNEL_UPDATE = 50
 QUOTA_SUBSCRIPTION_WRITE = 50
+QUOTA_THUMBNAIL_SET = 50
 QUOTA_LIST = 1
+QUOTA_ANALYTICS_QUERY = 1
 
 
 class NeedsConnect(Exception):
@@ -75,11 +81,11 @@ def has_token(slug: str) -> bool:
     return token_path(slug).exists()
 
 
-def _load_creds(slug: str) -> Optional[Credentials]:
+def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credentials]:
     tp = token_path(slug)
     if not tp.exists():
         return None
-    creds = Credentials.from_authorized_user_file(str(tp), SCOPES)
+    creds = Credentials.from_authorized_user_file(str(tp), scopes or SCOPES)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
@@ -105,7 +111,7 @@ def build_flow(slug: str, redirect_uri: str) -> Flow:
     cs = client_secret_path(slug)
     if not cs.exists():
         raise NeedsConnect(f"upload client_secret.json for channel '{slug}' first")
-    return Flow.from_client_secrets_file(str(cs), scopes=SCOPES, redirect_uri=redirect_uri)
+    return Flow.from_client_secrets_file(str(cs), scopes=CONSENT_SCOPES, redirect_uri=redirect_uri)
 
 
 def authorization_url(flow: Flow) -> str:
@@ -173,6 +179,16 @@ def upload_video(service, video_path: str, title: str, description: str,
         if status and progress_cb:
             progress_cb(int(status.progress() * 100))
     return response["id"]
+
+
+def set_thumbnail(service, video_id: str, png_path: str) -> None:
+    """Upload a custom thumbnail for a video (requires a phone-verified channel —
+    otherwise YouTube returns 403, which callers treat as best-effort)."""
+    media = MediaFileUpload(png_path, mimetype="image/png")
+    try:
+        service.thumbnails().set(videoId=video_id, media_body=media).execute()
+    except HttpError as e:
+        raise _classify(e)
 
 
 def list_playlists(service) -> list[dict]:
@@ -392,6 +408,71 @@ def unsubscribe(service, sub_id: str) -> None:
         service.subscriptions().delete(id=sub_id).execute()
     except HttpError as e:
         raise _classify(e)
+
+
+# ---- Analytics (YouTube Analytics API v2, owner reports) ------------------
+
+def get_analytics_service(slug: str):
+    """YouTube Analytics API v2 client. Requests the analytics scope, so it only
+    works once the channel has been re-consented for it; otherwise raises NeedsConnect
+    or the API returns an insufficient-scope error — callers treat that as 'skip'."""
+    if not has_client_secret(slug):
+        raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
+    creds = _load_creds(slug, CONSENT_SCOPES)
+    if creds is None:
+        raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
+    return build("youtubeAnalytics", "v2", credentials=creds)
+
+
+def _analytics_row(analytics, channel_yt_id, video_id, start_date, end_date, metrics) -> dict:
+    resp = analytics.reports().query(
+        ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
+        dimensions="video", filters=f"video=={video_id}", metrics=metrics, maxResults=1,
+    ).execute()
+    rows = resp.get("rows") or []
+    if not rows:
+        return {}
+    headers = [h["name"] for h in resp.get("columnHeaders", [])]
+    return dict(zip(headers, rows[0]))
+
+
+def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
+                          start_date: str, end_date: str) -> dict:
+    """Per-video analytics over [start_date, end_date] (YYYY-MM-DD). Two queries: core
+    metrics + the impressions/CTR pair (owner-only, often empty for new/low videos).
+    Returns a normalized dict ready for a VideoMetric row."""
+    raw: dict = {}
+    try:
+        raw.update(_analytics_row(
+            analytics, channel_yt_id, video_id, start_date, end_date,
+            "views,estimatedMinutesWatched,averageViewPercentage,averageViewDuration,"
+            "likes,comments,subscribersGained"))
+    except HttpError as e:
+        raise _classify(e)
+    try:
+        raw.update(_analytics_row(
+            analytics, channel_yt_id, video_id, start_date, end_date,
+            "impressions,impressionClickThroughRate"))
+    except Exception:
+        pass  # impressions/CTR can be unavailable; tolerate
+
+    def _n(key, cast=int):
+        v = raw.get(key)
+        try:
+            return cast(v) if v is not None else cast(0)
+        except (TypeError, ValueError):
+            return cast(0)
+
+    return {
+        "views": _n("views"),
+        "impressions": _n("impressions"),
+        "ctr": _n("impressionClickThroughRate", float),
+        "avg_view_pct": _n("averageViewPercentage", float),
+        "watch_time_minutes": _n("estimatedMinutesWatched"),
+        "likes": _n("likes"),
+        "comments": _n("comments"),
+        "subscribers_gained": _n("subscribersGained"),
+    }
 
 
 # Daily-cap reasons: both the API project quota and the per-channel upload cap.
