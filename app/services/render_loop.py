@@ -150,9 +150,13 @@ def _advance_in_flight(session: Session) -> None:
             _TRANSIENT = ("overloaded_error", "rate_limit_error", "RateLimitError",
                           "overloaded", "529", "503")
             if any(sig in err for sig in _TRANSIENT) and video.retry_count < 2:
-                video.status = VideoStatus.APPROVED
+                # Re-render: go back to QUEUED so _submit_new picks it up again.
+                # (APPROVED would skip rendering and hand a file-less video to the
+                # publish loop.) Clear the engine handle + progress for a clean retry.
+                video.status = VideoStatus.QUEUED
                 video.retry_count += 1
                 video.mpt_task_id = None
+                video.render_progress = 0
                 video.error = None
                 quota.log(session, kind="render", status="error", video_id=video.id,
                           channel_id=video.channel_id,
