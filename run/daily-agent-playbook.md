@@ -16,10 +16,18 @@ learn what works. Treat it as your standing instructions.
    force-push, never rewrite history, never `git reset --hard` published commits.
 2. **Change cap:** at most **2 code/prompt changes** to the app per run, each small,
    focused, and explained in its commit message. Quality over volume.
-3. **Verify before you commit.** After any code change, confirm the app still imports
-   and boots (`uv run python -c "import app.main"`), and restart it
-   (`launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager`) and re-check
-   `GET /api/dashboard` returns 200. If anything breaks, `git revert` your change.
+3. **Verify before you commit — behavior, not just boot.** Imports + a 200 from
+   `/api/dashboard` prove nothing about *logic*. For every change you must ALSO prove the
+   change does what you claim:
+   - Confirm it imports (`uv run python -c "import app.main"`), restart
+     (`launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager`), and re-check
+     `GET /api/dashboard` returns 200.
+   - **Then exercise the actual behavior.** Trigger the code path (e.g. via the REST API
+     or a focused `uv run python -c …` that calls the function), and read the result back
+     from the DB / API to confirm the intended effect actually happened. A change is not
+     "done" until you have observed its effect, not assumed it.
+   - If you cannot exercise it, say so explicitly in the report and treat it as unverified.
+   - If anything is wrong or unproven, `git revert` (or don't commit) — never ship on faith.
 4. **Never destructive.** Do not delete channels, credentials, published videos, or
    playlists. Do not disable safety gates, the quota cap, drip spacing, or budgets.
    Do not touch `.env`, `credentials/`, `manager.db`, or anything outside this repo,
@@ -99,14 +107,44 @@ Choose improvements the data points to. Examples (let analytics pick, don't do a
 - Better **idea generation** for a winning theme.
 - Small **pipeline** robustness or quality fixes the runs/logs reveal.
 - Tighten this **playbook** with what you learned.
-Make the change, **verify** (guardrail 3), then commit with a clear message ending in
-the standard `Co-Authored-By` line. If unsure or risky, skip it — doing nothing is
-always safe.
+
+**Prefer the safest class of change.** Prompt/copy tweaks are low-risk; logic that moves
+videos between states is high-risk. When in doubt, do the prompt change and skip the
+logic change.
+
+**If you touch the video/channel state machine, trace the whole lifecycle FIRST.**
+A status is only meaningful by *which loop consumes it*. Before changing any
+`Video.status` (or channel state) transition, write down — in the report — the full path:
+which loop selects that status, what it does next, and what each downstream loop will do
+with the value you're setting. Setting the wrong target status silently routes a video to
+the wrong loop. The map:
+
+```
+draft ─produce→ queued ─render_loop._submit_new→ rendering ─render_loop._advance→
+   rendered → (review | approved)        [approved = skip-gate or operator-approved]
+approved ─publish_loop→ publishing → published            (+ failed, rejected)
+
+Consumers:  render_loop._submit_new   picks up  QUEUED        → renders it
+            render_loop._advance_*    advances  RENDERING
+            publish_loop              picks up  APPROVED      → UPLOADS it
+```
+So: to **re-render**, send a video to `QUEUED` (NOT `APPROVED` — approved means "rendered
+and ready to upload"; an approved video with no `video_path` is a bug). To **re-publish**,
+`APPROVED`. Confirm the row actually has the artifacts the target loop expects.
+
+Make the change, **verify it behaves** (guardrail 3 — exercise the path and observe the
+effect, don't assume), then commit with a clear message ending in the standard
+`Co-Authored-By` line. If unsure or risky, skip it — doing nothing is always safe.
 
 ### 5. Report & commit
 - Write `run/agent-reports/YYYY-MM-DD.md` with: what you observed (key numbers),
   what you learned (winners/losers + hypotheses), what you did (every API action and
   code change, with links/ids), and what to watch next time.
+- **Report only what you verified.** Every claim of effect must be backed by an
+  observation you actually made this run — quote the proof (the DB row / API response /
+  command output you checked). If you changed code to "recover video N", show video N's
+  status *after*; don't write "recovers X" because the code looks like it should. State
+  unverified items as unverified. A wrong claim in the report is worse than a humble one.
 - Commit the report (and any code changes). Push to `main`.
 - If you made no changes (thin data, paused, or nothing worth doing), still write a
   short report saying so, commit it, and stop. A quiet day is a valid day.
