@@ -150,28 +150,31 @@ operator to review. If unsure or risky, skip it — doing nothing is always safe
   unverified items as unverified. A wrong claim in the report is worse than a humble one.
 
 **Shipping (the gate):** the operator reviews and merges your code — you never do.
-- Start from an up-to-date `main` on a fresh dated branch:
+- Start from an up-to-date `main` on a fresh, **uniquely-named** branch (the timestamp
+  suffix avoids colliding with an earlier run on the same day):
   ```sh
-  git fetch origin && git switch -c growth-agent/$(date +%F) origin/main   # add -N if the branch exists
+  BR="growth-agent/$(date +%F-%H%M%S)"
+  git fetch origin && git switch -c "$BR" origin/main
   ```
 - Stage the report **and** any verified code changes, commit (clear message ending in the
   standard `Co-Authored-By` line), and push the branch:
   ```sh
   git add -A && git commit -m "Growth agent $(date +%F): <summary>"
-  git push -u origin HEAD
+  git push -u origin "$BR"
   ```
 - Open the PR (its body = your report so review is one click):
   ```sh
-  gh pr create --base main --title "Growth agent $(date +%F)" \
+  gh pr create --base main --head "$BR" --title "Growth agent $(date +%F)" \
     --body-file run/agent-reports/$(date +%F).md
   ```
   Put the PR URL in the report and the run log. **Do not `gh pr merge`** — leave it open.
-- If `gh` can't auth (launchd keychain), the branch is still pushed: note in the report
-  that the PR must be opened manually, and stop. Never fall back to pushing `main`.
+- **Always end back on `main`** so the next run starts clean: `git switch main`.
+- If `gh` can't auth, the branch is still pushed: note in the report that the PR must be
+  opened manually, switch back to `main`, and stop. Never fall back to pushing `main`.
 - **Quiet day / no code change:** there's nothing to gate, so just commit the report on a
-  branch and open the PR anyway (a report-only PR), OR skip the PR and leave the report as
-  the only artifact — your channel actions are already live and logged in `/api/runs`.
-  Either way, never touch `main`. A quiet day is a valid day.
+  branch and open the PR anyway (a report-only PR), OR skip the branch and leave the report
+  uncommitted — your channel actions are already live and logged in `/api/runs`. Either
+  way, never touch `main`, and end on `main`. A quiet day is a valid day.
 
 ---
 
