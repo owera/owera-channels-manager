@@ -106,9 +106,13 @@ def _generate_script(subject: str, params: dict) -> str:
         prompt = (
             f"Write an engaging, well-structured voiceover script for an in-depth "
             f"YouTube video titled \"{subject}\". About 450-700 words across "
-            f"{max(6, n)} paragraphs: a hook, several substantive sections that explain "
-            "with concrete detail and examples, then a short wrap-up. Conversational and "
-            "authoritative, no filler, no headings, no stage directions, no emojis. "
+            f"{max(6, n)} paragraphs. Structure: open with a direct, punchy hook (2-3 "
+            "sentences) that immediately addresses the tension or question in the title — "
+            "do NOT start with 'In this video', 'Today we will', or 'Welcome back'; instead "
+            "open with the core question, surprising claim, or the pain point the viewer "
+            "already feels. Follow with substantive sections explaining with concrete detail "
+            "and examples, then a short wrap-up. Conversational and authoritative, no filler, "
+            "no headings, no stage directions, no emojis. "
             "Return ONLY the spoken words."
         )
         max_tokens = 1500
