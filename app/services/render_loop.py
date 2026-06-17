@@ -146,10 +146,22 @@ def _advance_in_flight(session: Session) -> None:
         if task.get("state") == STATE_COMPLETE:
             _finalize(session, video, channel, engine, task)
         elif task.get("state") == STATE_FAILED:
-            video.status = VideoStatus.FAILED
-            video.error = task.get("error") or f"{video.engine or 'mpt'} reported render failure"
-            quota.log(session, kind="render", status="error", video_id=video.id,
-                      channel_id=video.channel_id, detail=video.error)
+            err = task.get("error") or f"{video.engine or 'mpt'} reported render failure"
+            _TRANSIENT = ("overloaded_error", "rate_limit_error", "RateLimitError",
+                          "overloaded", "529", "503")
+            if any(sig in err for sig in _TRANSIENT) and video.retry_count < 2:
+                video.status = VideoStatus.APPROVED
+                video.retry_count += 1
+                video.mpt_task_id = None
+                video.error = None
+                quota.log(session, kind="render", status="error", video_id=video.id,
+                          channel_id=video.channel_id,
+                          detail=f"transient error (retry {video.retry_count}/2): {err[:200]}")
+            else:
+                video.status = VideoStatus.FAILED
+                video.error = err
+                quota.log(session, kind="render", status="error", video_id=video.id,
+                          channel_id=video.channel_id, detail=video.error)
 
 
 def _submit_new(session: Session) -> None:
