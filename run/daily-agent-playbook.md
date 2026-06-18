@@ -94,10 +94,24 @@ Pick the highest-leverage few; you don't have to do all of them every run:
   weight knob, not deletion.
 - **Feed winners:** `POST /api/topics/{id}/generate {"count": 8}` to add fresh ideas to
   a proven theme; optionally `POST /api/videos/{id}/produce` to queue the best drafts.
-- **Research viral angles:** use WebSearch to find what's trending / working right now
-  in the AI/tech niche (new model releases, viral formats, hooks). Translate findings
-  into **new topics**: `POST /api/topics {"channel_id":N,"name":"…","theme_prompt":"…",
-  "content_format":"short|long","create_playlist":true}`. Be specific and timely.
+- **Trend research & smart adoption** (the deliberate trend pipeline — do this every run):
+  1. **Research** with WebSearch across the niche + language — new model/framework/tool
+     releases and what's spiking (Hacker News, PyPI/npm trending, Reddit, release notes).
+     Owera Software (ch1) = English AI-engineering; Rodrigo Recio (ch2) = Portuguese AI/ML/MLOps.
+  2. **Check priors**: `GET /api/agent/state` → `trends` (or `GET /api/trends`). Skip terms
+     already logged/adopted; see which adopted trends performed (their `adopted_topic_id`
+     in the by-topic leaderboard) and bias toward trend-types that worked.
+  3. **Score** each candidate 0–100 on: momentum/timeliness, novelty (not already a topic
+     or logged trend), channel + language fit, evergreen-vs-spike, and performance feedback.
+     Decide **adopt / watch / reject** with a one-line reason.
+  4. **Persist every candidate** (adopted or not, so the log stays deduped + learnable):
+     `POST /api/trends {"term","description","source","channel_id","language",
+     "content_format","momentum","score","status","decision_reason"}` (upserts by term).
+  5. **Adopt the top 1–2 only**: `POST /api/trends/{id}/adopt {"produce_count":3,"idea_count":8}`
+     — creates a topic, seeds ideas, and auto-produces a few so it renders today. Don't
+     flood; quality over volume.
+- **One-off new topic** (non-trend): `POST /api/topics {"channel_id":N,"name":"…",
+  "theme_prompt":"…","content_format":"short|long","create_playlist":true}`.
 - **Sharpen a theme:** improve a topic's `theme_prompt` via `PATCH /api/topics/{id}` so
   future ideas are better targeted.
 - Keep every action logged automatically (the API writes `JobRun`s); don't bypass it.
@@ -172,6 +186,8 @@ risky, skip it — doing nothing is always safe.
 | Per-video leaderboard | `GET /api/channels/{id}/video-analytics?sort=views\|ctr\|avg_view_pct` |
 | By topic/format | `GET /api/channels/{id}/video-analytics/by-topic` |
 | Force-refresh analytics | `POST /api/channels/{id}/video-analytics/refresh` |
+| List/record a trend | `GET /api/trends?status=&channel_id=` · `POST /api/trends` `{term,description,source,channel_id,language,content_format,momentum,score,status,decision_reason}` |
+| Adopt a trend (topic+auto-produce) | `POST /api/trends/{id}/adopt` `{channel_id?,content_format?,idea_count,produce_count}` |
 | Weight / pause / retarget a topic | `PATCH /api/topics/{id}` `{weight,active,theme_prompt,content_format}` |
 | New topic | `POST /api/topics` `{channel_id,name,theme_prompt,content_format,create_playlist}` |
 | Generate ideas | `POST /api/topics/{id}/generate` `{count}` |

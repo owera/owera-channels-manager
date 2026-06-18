@@ -99,6 +99,26 @@ export interface JobRun {
   created_at: string;
 }
 
+export type TrendStatus = "researched" | "watching" | "adopted" | "rejected";
+export interface TrendSignal {
+  id: number;
+  term: string;
+  term_norm: string;
+  description: string | null;
+  source: string | null;
+  channel_id: number | null;
+  language: string | null;
+  content_format: "short" | "long";
+  momentum: string | null;
+  score: number;
+  status: TrendStatus;
+  decision_reason: string | null;
+  adopted_topic_id: number | null;
+  first_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DashboardActive {
   id: number;
   subject: string;
@@ -231,6 +251,13 @@ export const useRuns = (channelId?: number) =>
 
 export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: () => api<AppSettings>("/settings") });
+
+export const useTrends = (status?: string) =>
+  useQuery({
+    queryKey: ["trends", status ?? "all"],
+    queryFn: () => api<TrendSignal[]>(`/trends${status ? `?status=${status}` : ""}`),
+    refetchInterval: 8000,
+  });
 
 // ---- Mutations ----
 // ---- YouTube channel administration ----
@@ -429,6 +456,15 @@ export const useMut = () => {
     updateSettings: useMutation({
       mutationFn: (b: any) => api("/settings", { method: "PATCH", body: j(b) }),
       onSuccess: () => invalidate(qc, ["settings"]),
+    }),
+    // Trend signals (research → smart adoption)
+    adoptTrend: useMutation({
+      mutationFn: ({ id, body }: any) => api(`/trends/${id}/adopt`, { method: "POST", body: j(body || {}) }),
+      onSuccess: () => invalidate(qc, ["trends", "topics", "videos", "dashboard"]),
+    }),
+    updateTrend: useMutation({
+      mutationFn: ({ id, body }: any) => api(`/trends/${id}`, { method: "PATCH", body: j(body) }),
+      onSuccess: () => invalidate(qc, ["trends"]),
     }),
     // YouTube channel administration
     updateBranding: useMutation({

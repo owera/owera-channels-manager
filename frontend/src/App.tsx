@@ -5,13 +5,15 @@ import Board from "./pages/Board";
 import Review from "./pages/Review";
 import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
+import Trends from "./pages/Trends";
 
 const NAV = [
   { to: "/", label: "Overview", end: true, code: "00" },
   { to: "/board", label: "Queue Board", code: "01" },
   { to: "/channels", label: "Channels", code: "02" },
-  { to: "/profiles", label: "Render Profiles", code: "03" },
-  { to: "/settings", label: "Settings", code: "04" },
+  { to: "/trends", label: "Trends", code: "03" },
+  { to: "/profiles", label: "Render Profiles", code: "04" },
+  { to: "/settings", label: "Settings", code: "05" },
 ];
 
 function Sidebar() {
@@ -60,6 +62,7 @@ export default function App() {
           <Route path="/board" element={<Board />} />
           <Route path="/board/:channelId" element={<Board />} />
           <Route path="/channels" element={<Channels />} />
+          <Route path="/trends" element={<Trends />} />
           <Route path="/review/:videoId" element={<Review />} />
           <Route path="/profiles" element={<Profiles />} />
           <Route path="/settings" element={<Settings />} />

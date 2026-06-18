@@ -5,7 +5,8 @@ from sqlmodel import Session, func, select
 
 from app.config import settings
 from app.db import app_settings, get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendStatus,
+                        Video, VideoStatus)
 from app.services import quota
 from app.services.mpt_client import mpt
 from app.services.youtube import QUOTA_UPLOAD
@@ -113,11 +114,18 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     recent_runs = session.exec(
         select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit)).all()
 
+    # Active trends (so the agent dedupes + learns from prior research each run).
+    trends = session.exec(
+        select(TrendSignal).where(TrendSignal.status.in_(
+            [TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED]))
+        .order_by(TrendSignal.updated_at.desc()).limit(30)).all()
+
     return {
         "now": datetime.now(timezone.utc).isoformat(),
         "settings": cfg,
         "dashboard": dashboard(session),
         "analytics_by_topic": analytics_by_topic,
         "topics": topics,
+        "trends": trends,
         "recent_runs": recent_runs,
     }

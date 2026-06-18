@@ -189,6 +189,35 @@ class VideoMetric(SQLModel, table=True):
     captured_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class TrendStatus:
+    RESEARCHED = "researched"     # found + scored this run
+    WATCHING = "watching"         # promising but not adopted yet
+    ADOPTED = "adopted"           # turned into a topic (adopted_topic_id set)
+    REJECTED = "rejected"         # decided not worth it
+
+
+class TrendSignal(SQLModel, table=True):
+    """A trending topic the growth agent researched (via WebSearch) and scored for
+    'smart adoption'. Persisted so adoption is deduped across days and learnable: an
+    adopted trend links to a Topic, whose videos' analytics show whether it paid off."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    term: str                                     # human-facing trend, e.g. "LangGraph"
+    term_norm: str = Field(index=True)            # lowercased/trimmed, for dedup
+    description: Optional[str] = None              # what it is + why it matters
+    source: Optional[str] = None                  # e.g. "WebSearch: HN/PyPI"
+    channel_id: Optional[int] = Field(default=None, foreign_key="channel.id", index=True)
+    language: Optional[str] = None                # "en" | "pt"
+    content_format: str = "short"                 # suggested format for adoption
+    momentum: Optional[str] = None               # rising | hot | fading | evergreen
+    score: float = 0.0                            # smart-adoption score, 0..100
+    status: str = Field(default=TrendStatus.RESEARCHED, index=True)
+    decision_reason: Optional[str] = None         # why adopt / watch / reject
+    adopted_topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    first_seen_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Settings(SQLModel, table=True):
     id: Optional[int] = Field(default=1, primary_key=True)
     render_concurrency: int = 1

@@ -95,6 +95,40 @@ class ReorderBody(BaseModel):
     ordered_ids: list[int]
 
 
+# ---- Trend signals (research → smart adoption) ----
+class TrendCreate(BaseModel):
+    term: str
+    description: Optional[str] = None
+    source: Optional[str] = None
+    channel_id: Optional[int] = None
+    language: Optional[str] = None
+    content_format: str = "short"
+    momentum: Optional[str] = None            # rising | hot | fading | evergreen
+    score: float = 0.0                        # 0..100
+    status: Optional[str] = None              # researched | watching | adopted | rejected
+    decision_reason: Optional[str] = None
+
+
+class TrendUpdate(BaseModel):
+    description: Optional[str] = None
+    source: Optional[str] = None
+    channel_id: Optional[int] = None
+    language: Optional[str] = None
+    content_format: Optional[str] = None
+    momentum: Optional[str] = None
+    score: Optional[float] = None
+    status: Optional[str] = None
+    decision_reason: Optional[str] = None
+
+
+class TrendAdoptBody(BaseModel):
+    channel_id: Optional[int] = None          # target channel (falls back to the trend's)
+    content_format: Optional[str] = None      # override the trend's suggested format
+    idea_count: int = 8                       # ideas to seed on the new topic
+    produce_count: int = 3                    # how many to auto-produce (queue to render)
+    theme_prompt: Optional[str] = None        # override the auto-derived theme prompt
+
+
 class SettingsUpdate(BaseModel):
     render_concurrency: Optional[int] = None
     publish_drip_minutes: Optional[int] = None
