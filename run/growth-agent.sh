@@ -21,16 +21,6 @@ LOCK="$REPO/run/.growth-agent.lock"
 ts() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "$(ts) growth-agent: $*" >> "$LOG"; }
 
-# --- Secrets (gitignored) -------------------------------------------------
-# Loads GH_TOKEN so `gh pr create` works in the launchd context without depending
-# on the macOS keychain being unlocked. Create it once with:
-#   ( umask 077; printf 'export GH_TOKEN=%s\n' "$(gh auth token)" > run/growth-agent.env )
-if [ -f "$REPO/run/growth-agent.env" ]; then
-  . "$REPO/run/growth-agent.env"
-else
-  log "note: run/growth-agent.env missing — gh will fall back to the keychain for PRs"
-fi
-
 # --- Kill switch ----------------------------------------------------------
 if [ -f "$REPO/run/growth-agent.disabled" ]; then
   log "disabled (run/growth-agent.disabled present) — skipping"
