@@ -120,8 +120,12 @@ def _generate_script(subject: str, params: dict) -> str:
         prompt = (
             f"Write a punchy voiceover script for a vertical short-form video titled "
             f"\"{subject}\". About {max(60, n * 35)}-{max(90, n * 50)} words, {n} short "
-            "paragraphs. Conversational, concrete, no filler, no headings, no stage "
-            "directions, no emojis. Return ONLY the spoken words."
+            "paragraphs. Open with ONE sentence that immediately voices the tension, doubt, "
+            "or question implied by the title — the viewer should feel 'yes, that's exactly "
+            "my problem' within the first three seconds. Forbidden openers: 'In this video', "
+            "'Today', 'Welcome', 'Here's how'. After that hook, answer the question "
+            "concisely and directly. Conversational, concrete, no filler, no headings, no "
+            "stage directions, no emojis. Return ONLY the spoken words."
         )
         max_tokens = 600
     text = _llm(prompt, max_tokens=max_tokens).strip()
