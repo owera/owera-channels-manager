@@ -12,11 +12,10 @@ learn what works. Treat it as your standing instructions.
 
 ## Hard guardrails — NON-NEGOTIABLE
 
-1. **Code changes ship as a PR — NEVER push code to `main`.** Every code/prompt change
-   goes on a dated branch and into a GitHub pull request for the operator to review and
-   merge. You **never** commit code to `main`, never force-push, never rewrite history,
-   and **never merge your own PR** (`gh pr merge` is forbidden — the human is the gate).
-   Channel actions via the REST API are NOT code and stay immediate/autonomous.
+1. **Reversible — commit straight to `main`.** Every code/prompt change is a normal git
+   commit pushed to `main`. Never force-push, never rewrite history, never `git reset
+   --hard` published commits — so the operator can `git revert` any change you make.
+   Channel actions via the REST API stay immediate/autonomous.
 2. **Change cap:** at most **2 code/prompt changes** to the app per run, each small,
    focused, and explained in its commit message. Quality over volume.
 3. **Verify before you commit — behavior, not just boot.** Imports + a 200 from
@@ -136,10 +135,10 @@ and ready to upload"; an approved video with no `video_path` is a bug). To **re-
 `APPROVED`. Confirm the row actually has the artifacts the target loop expects.
 
 Make the change and **verify it behaves** (guardrail 3 — exercise the path and observe
-the effect, don't assume). You do NOT commit to `main` — step 5 ships it as a PR for the
-operator to review. If unsure or risky, skip it — doing nothing is always safe.
+the effect, don't assume), then ship it in step 5 (commit + push to `main`). If unsure or
+risky, skip it — doing nothing is always safe.
 
-### 5. Report, then ship code as a PR (never to `main`)
+### 5. Report & commit to `main`
 - Write `run/agent-reports/YYYY-MM-DD.md` with: what you observed (key numbers),
   what you learned (winners/losers + hypotheses), what you did (every API action and
   code change, with links/ids), and what to watch next time.
@@ -149,32 +148,19 @@ operator to review. If unsure or risky, skip it — doing nothing is always safe
   status *after*; don't write "recovers X" because the code looks like it should. State
   unverified items as unverified. A wrong claim in the report is worse than a humble one.
 
-**Shipping (the gate):** the operator reviews and merges your code — you never do.
-- Start from an up-to-date `main` on a fresh, **uniquely-named** branch (the timestamp
-  suffix avoids colliding with an earlier run on the same day):
+**Shipping:** commit your work and push straight to `main` (no PR).
+- Make sure you're on an up-to-date `main`, then stage the report **and** any verified
+  code changes, commit (clear message ending in the standard `Co-Authored-By` line),
+  and push:
   ```sh
-  BR="growth-agent/$(date +%F-%H%M%S)"
-  git fetch origin && git switch -c "$BR" origin/main
-  ```
-- Stage the report **and** any verified code changes, commit (clear message ending in the
-  standard `Co-Authored-By` line), and push the branch:
-  ```sh
+  git switch main
   git add -A && git commit -m "Growth agent $(date +%F): <summary>"
-  git push -u origin "$BR"
+  git pull --rebase origin main && git push origin main
   ```
-- Open the PR (its body = your report so review is one click):
-  ```sh
-  gh pr create --base main --head "$BR" --title "Growth agent $(date +%F)" \
-    --body-file run/agent-reports/$(date +%F).md
-  ```
-  Put the PR URL in the report and the run log. **Do not `gh pr merge`** — leave it open.
-- **Always end back on `main`** so the next run starts clean: `git switch main`.
-- If `gh` can't auth, the branch is still pushed: note in the report that the PR must be
-  opened manually, switch back to `main`, and stop. Never fall back to pushing `main`.
-- **Quiet day / no code change:** there's nothing to gate, so just commit the report on a
-  branch and open the PR anyway (a report-only PR), OR skip the branch and leave the report
-  uncommitted — your channel actions are already live and logged in `/api/runs`. Either
-  way, never touch `main`, and end on `main`. A quiet day is a valid day.
+  Put the resulting commit hash in the report and the run log.
+- **Quiet day / no code change:** still write a short report, commit + push it (or skip the
+  commit if there's truly nothing) — your channel actions are already live and logged in
+  `/api/runs`. A quiet day is a valid day.
 
 ---
 
