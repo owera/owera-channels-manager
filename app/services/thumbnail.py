@@ -35,7 +35,8 @@ def _hook_text(subject: str, title: str | None) -> str:
         system = (
             "You write YouTube thumbnail hooks. Return ONLY a single punchy hook of "
             "3 to 6 words that creates curiosity — no quotes, no emojis, no hashtags, "
-            "no trailing punctuation. Prefer concrete, high-contrast words."
+            "no trailing punctuation. Prefer concrete, high-contrast words. "
+            "Always respond in the same language as the video title."
         )
         out = _llm(f"Video title: {base}\n\nWrite the thumbnail hook.",
                    system=system, max_tokens=40).strip()
