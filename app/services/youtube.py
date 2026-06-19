@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Callable, Optional
 
-# The redirect-based flow uses an http loopback redirect (http://localhost:7000/...)
+# The redirect-based flow uses an http loopback redirect (http://localhost:7070/...)
 # and the authorization response arrives over http — relax oauthlib's https-only
 # guard, and don't fail when Google returns a broadened granted-scope set.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")

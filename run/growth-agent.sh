@@ -39,8 +39,8 @@ if ! command -v claude >/dev/null 2>&1; then
   log "ERROR: 'claude' CLI not found on PATH — install Claude Code or fix PATH"
   exit 1
 fi
-if ! curl -sf -o /dev/null http://127.0.0.1:7000/api/dashboard; then
-  log "app not reachable on :7000 — skipping (is the manager running?)"
+if ! curl -sf -o /dev/null http://127.0.0.1:7070/api/dashboard; then
+  log "app not reachable on :7070 — skipping (is the manager running?)"
   exit 0
 fi
 

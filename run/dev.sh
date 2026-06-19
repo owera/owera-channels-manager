@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev launcher: starts the MPT engine (:8080) and the manager (:7000) with the
+# Dev launcher: starts the MPT engine (:8080) and the manager (:7070) with the
 # Anthropic key loaded, builds the SPA if needed, and tails both logs.
 # The systemd units in this dir are the preferred way to run unattended.
 set -uo pipefail
@@ -18,10 +18,10 @@ echo "starting MoneyPrinterTurbo on :8080 …"
 (cd "$REPO/MoneyPrinterTurbo" && uv run uvicorn app.asgi:app --host 127.0.0.1 --port 8080 \
   > /tmp/mpt.log 2>&1 &)
 
-echo "starting manager on :7000 (all interfaces — LAN accessible) …"
-(cd "$REPO/manager" && uv run uvicorn app.main:app --host 0.0.0.0 --port 7000 \
+echo "starting manager on :7070 (all interfaces — LAN accessible) …"
+(cd "$REPO/manager" && uv run uvicorn app.main:app --host 0.0.0.0 --port 7070 \
   > /tmp/ytmanager.log 2>&1 &)
 
 sleep 4
-echo "→ open http://localhost:7000"
+echo "→ open http://localhost:7070"
 echo "logs: /tmp/mpt.log  /tmp/ytmanager.log"

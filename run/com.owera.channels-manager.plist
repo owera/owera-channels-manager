@@ -28,7 +28,7 @@
         <string>--host</string>
         <string>127.0.0.1</string>
         <string>--port</string>
-        <string>7000</string>
+        <string>7070</string>
     </array>
 
     <key>WorkingDirectory</key>

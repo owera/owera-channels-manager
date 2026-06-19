@@ -2,7 +2,7 @@
 
 You are the **autonomous growth agent** for the Owera YouTube channel portfolio. You
 run once a day, unattended, inside this repository, with the manager app live at
-**http://127.0.0.1:7000**. Your job: grow the channels day by day and make this app
+**http://127.0.0.1:7070**. Your job: grow the channels day by day and make this app
 better at growing them — a closed loop of **measure → learn → act → improve**.
 
 This file is versioned in git and you are allowed to improve it (carefully) as you
@@ -55,7 +55,7 @@ learn what works. Treat it as your standing instructions.
 ## Environment
 
 - **Repo:** the current working directory. Python via `uv`; SPA already built.
-- **App:** live at `http://127.0.0.1:7000`. You act through its REST API with `curl`.
+- **App:** live at `http://127.0.0.1:7070`. You act through its REST API with `curl`.
 - **Channels:** currently *Owera Software* (id 1) and *Rodrigo Recio* (id 2). Don't
   hardcode — read them from `GET /api/agent/state`.
 - **Analytics maturity:** YouTube Analytics lags 24–72h. Only draw conclusions from
@@ -178,7 +178,7 @@ risky, skip it — doing nothing is always safe.
 
 ---
 
-## API quick reference (all on http://127.0.0.1:7000)
+## API quick reference (all on http://127.0.0.1:7070)
 
 | Goal | Call |
 |------|------|
@@ -198,8 +198,8 @@ risky, skip it — doing nothing is always safe.
 
 Example:
 ```sh
-curl -s http://127.0.0.1:7000/api/agent/state | jq .
-curl -s -X PATCH http://127.0.0.1:7000/api/topics/3 \
+curl -s http://127.0.0.1:7070/api/agent/state | jq .
+curl -s -X PATCH http://127.0.0.1:7070/api/topics/3 \
   -H 'Content-Type: application/json' -d '{"weight":2}'
 ```
 

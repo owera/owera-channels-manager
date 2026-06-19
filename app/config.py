@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # Network. Manager binds all interfaces for LAN access; MPT stays internal.
     host: str = "0.0.0.0"
-    port: int = 7000
+    port: int = 7070
 
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"

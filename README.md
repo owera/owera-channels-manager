@@ -35,7 +35,7 @@ UI. You bring the Google accounts and an Anthropic API key; it handles the pipel
 ## How it works
 
 ```
-Browser ──▶ Manager API + Web UI  (http://localhost:7000)
+Browser ──▶ Manager API + Web UI  (http://localhost:7070)
                │   SQLite (manager.db) — the single source of truth
                │   scheduler: render loop  +  publish loop
                ▼
@@ -75,13 +75,13 @@ echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 cd frontend && npm install && npm run build && cd ..
 
 # 3. Start the manager (uv sets up the Python environment automatically)
-uv run uvicorn app.main:app --port 7000
+uv run uvicorn app.main:app --port 7070
 ```
 
-Open **http://localhost:7000** and you're in.
+Open **http://localhost:7070** and you're in.
 
 > **Developing the UI?** Run `cd frontend && npm run dev` for hot-reload (Vite on
-> :5173, proxying `/api` to the manager on :7000).
+> :5173, proxying `/api` to the manager on :7070).
 
 ### Optional: the MoneyPrinterTurbo engine
 
@@ -152,7 +152,29 @@ tail -f ~/Library/Logs/owera-channels-manager.log            # logs
 ```
 
 Once it's a launchd service, restart with `kickstart -k` rather than killing uvicorn —
-launchd owns port 7000 and will immediately respawn a killed process.
+launchd owns port 7070 and will immediately respawn a killed process.
+
+### Access it from the network (LAN)
+
+By default the service binds **`127.0.0.1`** (localhost only). To reach it from other
+devices on your network, bind all interfaces — change the plist's host `127.0.0.1` →
+`0.0.0.0` and reload:
+
+```sh
+sed -i '' 's|<string>127.0.0.1</string>|<string>0.0.0.0</string>|' \
+  ~/Library/LaunchAgents/com.owera.channels-manager.plist
+launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager
+```
+
+Then browse to `http://<your-LAN-IP>:7070`. Notes:
+- **No authentication.** Anyone on the network can fully control your channels. Only do
+  this on a trusted LAN, and **never** port-forward it to the public internet. For secure
+  remote access, prefer an SSH tunnel (`ssh -L 7070:localhost:7070 you@host`) or a VPN
+  like Tailscale.
+- **Connect/reconnect channels from `localhost:7070` on the host machine** — Google only
+  allows OAuth loopback redirects, so the consent flow won't complete from a LAN IP.
+- **macOS:** port 7070 avoids the AirPlay Receiver, which squats on `*:7000`. Allow the
+  incoming-connection firewall prompt if it appears.
 
 ## Autonomous growth agent (optional)
 
