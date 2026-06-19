@@ -83,7 +83,7 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused }: { v: Video; onOpen
   );
 }
 
-function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queuePlan, formats, paused }: any) {
+function Column({ status, videos, onOpen, onProduceAll, onApproveAll, onDeleteAll, plan, queuePlan, formats, paused }: any) {
   const meta = STATUS_META[status as keyof typeof STATUS_META];
   const items = videos.filter((v: Video) => v.status === status);
   return (
@@ -96,6 +96,9 @@ function Column({ status, videos, onOpen, onProduceAll, onDeleteAll, plan, queue
         <div className="flex items-center gap-2">
           {status === "draft" && items.length > 0 && (
             <button className="label text-signal hover:text-white" onClick={onProduceAll}>produce all</button>
+          )}
+          {status === "review" && items.length > 0 && (
+            <button className="label text-signal hover:text-white" onClick={onApproveAll}>approve all</button>
           )}
           {items.length > 0 && (
             <button className="label text-fog-400 hover:text-[#f7768e]" onClick={onDeleteAll}>delete all</button>
@@ -202,6 +205,13 @@ export default function Board() {
     if (ids.length) m.produceBulk.mutate({ channel_id: active, ordered_ids: ids });
   };
 
+  const approveAll = () => {
+    const ids = shown.filter((v) => v.status === "review").map((v) => v.id);
+    if (!ids.length) return;
+    if (!confirm(`Approve ${ids.length} video${ids.length > 1 ? "s" : ""} for publishing?`)) return;
+    ids.forEach((id) => m.approveVideo.mutate({ id }));
+  };
+
   const deleteAll = (status: string) => {
     const ids = shown.filter((v) => v.status === status).map((v) => v.id);
     if (!ids.length) return;
@@ -252,9 +262,9 @@ export default function Board() {
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">
-            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} />)}
+            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} />)}
             {TERMINAL_COLUMNS.map((s) => shown.some((v) => v.status === s) ?
-              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} /> : null)}
+              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} /> : null)}
           </div>
         </div>
       )}
