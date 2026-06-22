@@ -135,6 +135,7 @@ class SettingsUpdate(BaseModel):
     scheduler_paused: Optional[bool] = None
     topic_autogen_enabled: Optional[bool] = None
     topic_autogen_min_pending: Optional[int] = None
+    topic_autogen_target: Optional[int] = None
 
 
 # ---- YouTube channel administration ----

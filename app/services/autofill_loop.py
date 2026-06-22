@@ -56,17 +56,24 @@ def tick() -> None:
         if not cfg.topic_autogen_enabled:
             return
         threshold = max(1, cfg.topic_autogen_min_pending)
+        target = max(threshold, cfg.topic_autogen_target)  # ceiling never below the trigger
         topics = session.exec(select(Topic).where(Topic.active == True)).all()  # noqa: E712
         for topic in topics:
             weight = topic.weight if topic.weight is not None else 1
             if weight <= 0:
                 continue  # soft-paused by the growth agent (weight 0): no new ideas
-            if _pending_count(session, topic.id) >= threshold:
+            # Winners (weight > 1) keep a proportionally deeper bench; cap the
+            # multiplier so a stray large weight can't blow up the idea count / LLM cost.
+            mult = min(weight, 4)
+            pending = _pending_count(session, topic.id)
+            if pending >= threshold * mult:
+                continue  # bench still deep enough — refill in bursts, not every tick
+            # Top up to the ceiling instead of blasting a fixed batch: this is what
+            # stops the IDEAS column overshooting and piling up day over day.
+            need = min(target * mult - pending, settings.autofill_batch * mult)
+            if need <= 0:
                 continue
-            # Winners (weight > 1) refill bigger batches; cap the multiplier so a
-            # stray large weight can't blow up LLM cost on one tick.
-            batch = settings.autofill_batch * min(weight, 4)
-            n = _refill_topic(session, topic, batch)
+            n = _refill_topic(session, topic, need)
             if n:
-                logger.info("auto-refilled %d ideas for topic '%s' (weight %d)",
-                            n, topic.name, weight)
+                logger.info("auto-refilled %d ideas for topic '%s' (weight %d, ceiling %d)",
+                            n, topic.name, weight, target * mult)

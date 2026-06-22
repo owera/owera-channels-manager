@@ -227,3 +227,6 @@ class Settings(SQLModel, table=True):
     # threshold, generate more video ideas for it.
     topic_autogen_enabled: bool = False
     topic_autogen_min_pending: int = 3
+    # Ceiling: stop refilling a topic's idea bench once it has this many pending
+    # (draft+queued) videos. Bounds the board's IDEAS column so it can't grow daily.
+    topic_autogen_target: int = 6

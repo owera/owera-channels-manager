@@ -7,7 +7,7 @@ from app.config import settings
 from app.db import app_settings, get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendStatus,
                         Video, VideoStatus)
-from app.services import quota
+from app.services import issues, quota
 from app.services.mpt_client import mpt
 from app.services.youtube import QUOTA_UPLOAD
 
@@ -77,6 +77,15 @@ def runs(channel_id: int | None = None, video_id: int | None = None, limit: int 
     return session.exec(q.order_by(JobRun.created_at.desc()).limit(limit)).all()
 
 
+@router.get("/agent/issues")
+def agent_issues(session: Session = Depends(get_session)):
+    """The operational triage digest: terminal/persistent issues the background loops
+    don't auto-heal (failed/rejected videos, OAuth walls, quota cooldowns, recurring
+    error signatures, gate backlog, idea-board overflow). The agent remediates by
+    composing the existing video/topic/channel endpoints; OAuth/quota walls escalate."""
+    return issues.detect(session)
+
+
 @router.get("/agent/state")
 def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     """Everything the autonomous growth agent needs in one read: app settings, the
@@ -128,4 +137,5 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
         "topics": topics,
         "trends": trends,
         "recent_runs": recent_runs,
+        "issues": issues.detect(session),
     }

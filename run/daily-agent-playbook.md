@@ -30,16 +30,20 @@ learn what works. Treat it as your standing instructions.
      "done" until you have observed its effect, not assumed it.
    - If you cannot exercise it, say so explicitly in the report and treat it as unverified.
    - If anything is wrong or unproven, `git revert` (or don't commit) — never ship on faith.
-4. **Never destructive.** Do not delete channels, credentials, published videos, or
-   playlists. Do not disable safety gates, the quota cap, drip spacing, or budgets.
-   Do not touch `.env`, `credentials/`, `manager.db`, or anything outside this repo,
-   the local app, and read-only web research.
+4. **Destructive actions — tightly bounded.** Never delete channels, credentials,
+   **published** videos, or playlists. Never disable safety gates, the quota cap, drip
+   spacing, or budgets. Never touch `.env`, `credentials/`, `manager.db`, or anything
+   outside this repo, the local app, and read-only web research.
+   **Permitted exception (triage only):** you MAY delete videos that are in `failed` or
+   `rejected` **and** older than 7 days (`DELETE /api/videos/{id}`), and you MAY move
+   videos between states via the documented endpoints (requeue / retry / reject /
+   approve). In-flight (`rendering`/`publishing`) and `published` videos are never touched.
 5. **Respect the limits.** Work within the existing per-channel render/publish budgets,
    the global quota cap, drip spacing, and cooldowns. If you raise a budget, raise it
    by at most a small step and only with analytics justification.
-6. **Stay in scope.** You may: read analytics, steer topics/budgets via the REST API,
-   generate ideas, research trends on the web (read-only), and ship small app
-   improvements. Nothing else.
+6. **Stay in scope.** You may: read analytics, **triage and fix operational issues**
+   (step 1.5), steer topics/budgets via the REST API, generate ideas, research trends on
+   the web (read-only), and ship small app improvements. Nothing else.
 7. **Honesty.** If the data is thin or inconclusive, say so and do less. Never invent
    metrics. Virality is not guaranteed — you compound the odds, you don't fake them.
 
@@ -78,6 +82,35 @@ learn what works. Treat it as your standing instructions.
   `?sort=ctr` and `?sort=avg_view_pct` for the per-video leaderboard. If `measured` is
   0, analytics aren't flowing yet (channel not reconsented for the analytics scope) —
   note it in the report and skip analytics-driven actions this run.
+
+### 1.5 Triage & fix issues — FIX THE PIPELINE BEFORE GROWING IT
+The background loops already self-heal *transient* states (orphaned renders, stuck
+publishing, transient render retries, blank-render fallback). Your job here is the
+**terminal / persistent / judgment-needed** class they don't touch. Read the digest:
+
+- `GET /api/agent/issues` (also folded into `state.issues`). Every entry carries a
+  `suggested_action` and an `auto` flag (`true` = you fix it; `false` = escalate).
+
+Then act per category — **each fix capped, and verified per guardrail 3** (read the row
+back after and quote the after-state in the report; never claim a fix you didn't observe):
+
+| Issue (`auto`) | Do | Cap / run |
+|---|---|---|
+| `failed`, `suggested_action:"requeue"` (transient, no file) | `POST /api/videos/{id}/requeue` → re-render | ≤ 5 |
+| `failed`, `suggested_action:"retry"` (has a `video_path`, failed at publish) | `POST /api/videos/{id}/retry` → approved | ≤ 5 |
+| `failed`/`rejected`, `suggested_action:"delete"` (dead, age > 7d) | `DELETE /api/videos/{id}` | ≤ 10 |
+| `stuck_rendering`/`stuck_publishing` (past timeout, loop didn't catch it) | `requeue` / `retry` | ≤ 5 |
+| `stuck_review` (gate backlog > 48h) | approve the good ones / reject the bad ones | judgment |
+| one topic producing repeated failures | `PATCH /api/topics/{id} {"weight":0}` + note it | — |
+| `cooldown` / `quota` (escalate) | usually self-resets — monitor; only nudge `daily_publish_budget`↓ or `publish_drip_minutes`↑ a small step **with** a written reason | small step |
+| `oauth` ≠ connected (escalate) | **you cannot fix this** — lead the report with a `⚠ Needs operator` line: reconnect channel N | report-only |
+| `error_runs_24h` recurring signature | this is a real bug — fix the **root cause** in step 4 (counts toward the ≤2 code-change cap) | ≤2 code |
+
+Rules: only touch `failed`/`rejected`/`review`/stuck rows — never `published` or in-flight
+videos. Re-render → `QUEUED`, re-publish → `APPROVED` (see the lifecycle map in step 4;
+an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
+**triage observation + reporting only** — take no remediation actions. A clean digest
+(`summary.clean:true`) is a good day — note it and move on.
 
 ### 2. Learn
 - Rank **topics and formats** by `avg_views`, `avg_ctr`, `avg_view_pct` (from
@@ -153,9 +186,13 @@ the effect, don't assume), then ship it in step 5 (commit + push to `main`). If 
 risky, skip it — doing nothing is always safe.
 
 ### 5. Report & commit to `main`
-- Write `run/agent-reports/YYYY-MM-DD.md` with: what you observed (key numbers),
-  what you learned (winners/losers + hypotheses), what you did (every API action and
-  code change, with links/ids), and what to watch next time.
+- Write `run/agent-reports/YYYY-MM-DD.md` with: what you observed (key numbers), a
+  **`## Triage`** section (issues found, what you auto-fixed with the after-state proof,
+  what you escalated), what you learned (winners/losers + hypotheses), what you did (every
+  API action and code change, with links/ids), and what to watch next time.
+- **If triage surfaced anything that needs the operator** (OAuth reconnect, a recurring
+  quota wall), lead the report with a `⚠ Needs operator` block so it can't be missed.
+  A clean triage day = one line: "No operational issues found."
 - **Report only what you verified.** Every claim of effect must be backed by an
   observation you actually made this run — quote the proof (the DB row / API response /
   command output you checked). If you changed code to "recover video N", show video N's
@@ -183,6 +220,11 @@ risky, skip it — doing nothing is always safe.
 | Goal | Call |
 |------|------|
 | Observe everything | `GET /api/agent/state` |
+| Triage digest (issues to fix) | `GET /api/agent/issues` |
+| Re-render a video | `POST /api/videos/{id}/requeue` |
+| Re-publish / promote a rendered video | `POST /api/videos/{id}/retry` |
+| Reject a bad video | `POST /api/videos/{id}/reject` `{reason}` |
+| Delete a dead failed/rejected video (>7d) | `DELETE /api/videos/{id}` |
 | Per-video leaderboard | `GET /api/channels/{id}/video-analytics?sort=views\|ctr\|avg_view_pct` |
 | By topic/format | `GET /api/channels/{id}/video-analytics/by-topic` |
 | Force-refresh analytics | `POST /api/channels/{id}/video-analytics/refresh` |

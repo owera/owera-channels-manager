@@ -43,6 +43,10 @@ export default function Settings() {
           <input type="number" className="input" defaultValue={s.topic_autogen_min_pending}
             onBlur={(e) => patch({ topic_autogen_min_pending: Number(e.target.value) })} />
         </Field>
+        <Field label="max ideas to keep (ceiling)" hint="stop refilling a topic once it has this many pending ideas">
+          <input type="number" className="input" defaultValue={s.topic_autogen_target}
+            onBlur={(e) => patch({ topic_autogen_target: Number(e.target.value) })} />
+        </Field>
       </div>
     </div>
   );

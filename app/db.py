@@ -56,7 +56,8 @@ def _add_missing_columns() -> None:
         "topic": [("content_format", "VARCHAR DEFAULT 'short'"),
                   ("weight", "INTEGER DEFAULT 1")],
         "settings": [("topic_autogen_enabled", "BOOLEAN DEFAULT 0"),
-                     ("topic_autogen_min_pending", "INTEGER DEFAULT 3")],
+                     ("topic_autogen_min_pending", "INTEGER DEFAULT 3"),
+                     ("topic_autogen_target", "INTEGER DEFAULT 6")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

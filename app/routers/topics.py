@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
-from app.db import get_session
+from app.db import app_settings, get_session
 from app.models import (Channel, Playlist, Topic, Video, VideoStatus, utcnow)
 from app.schemas import GenerateBody, TopicCreate, TopicUpdate
 from app.services import quota, video_gen, youtube
@@ -99,10 +99,20 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     t = session.get(Topic, topic_id)
     if not t:
         raise HTTPException(404, "topic not found")
+    # Bound the IDEAS column: don't let a single click push this topic's draft count
+    # past the same ceiling autofill respects (target × weight multiplier).
+    cfg = app_settings(session)
+    ceiling = max(cfg.topic_autogen_min_pending, cfg.topic_autogen_target) * min(t.weight or 1, 4)
+    current_drafts = session.exec(
+        select(func.count(Video.id)).where(
+            Video.topic_id == topic_id, Video.status == VideoStatus.DRAFT)).one()
+    count = max(0, min(body.count, ceiling - current_drafts))
+    if count == 0:
+        return {"generated": 0, "reason": "idea ceiling reached"}
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
     try:
         ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing),
-                                         body.count, t.content_format)
+                                         count, t.content_format)
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0

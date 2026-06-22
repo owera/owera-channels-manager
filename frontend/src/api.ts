@@ -156,6 +156,7 @@ export interface AppSettings {
   publish_drip_minutes: number;
   topic_autogen_enabled: boolean;
   topic_autogen_min_pending: number;
+  topic_autogen_target: number;
   scheduler_paused: boolean;
   mpt_base_url: string;
   youtube_quota_reset_at: string;
