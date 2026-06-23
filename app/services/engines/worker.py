@@ -123,9 +123,11 @@ def _generate_script(subject: str, params: dict) -> str:
             "paragraphs. Open with ONE sentence that immediately voices the tension, doubt, "
             "or question implied by the title — the viewer should feel 'yes, that's exactly "
             "my problem' within the first three seconds. Forbidden openers: 'In this video', "
-            "'Today', 'Welcome', 'Here's how'. After that hook, answer the question "
-            "concisely and directly. Conversational, concrete, no filler, no headings, no "
-            "stage directions, no emojis. Return ONLY the spoken words."
+            "'Today', 'Welcome', 'Here's how'. After that hook, give the honest verdict or "
+            "concrete insight — take a clear position, don't hedge. Close with one tight, "
+            "memorable line that crystallises the lesson in a sentence the viewer will quote. "
+            "Conversational, concrete, no filler, no headings, no stage directions, no emojis. "
+            "Return ONLY the spoken words."
         )
         max_tokens = 600
     text = _llm(prompt, max_tokens=max_tokens).strip()
