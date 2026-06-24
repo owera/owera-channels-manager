@@ -335,6 +335,35 @@ export const useSubscribers = (id: number, enabled = true) =>
     retry: false,
   });
 
+export interface MonetizationMetric {
+  current: number;
+  needed: number;
+  achieved: boolean;
+  pct: number;
+}
+export interface MonetizationTier {
+  subscribers: MonetizationMetric;
+  watch_hours: MonetizationMetric;
+  shorts_views: MonetizationMetric;
+  tier_achieved: boolean;
+}
+export interface Monetization {
+  channel_id: number;
+  subscriber_count: number;
+  total_watch_hours: number;
+  shorts_views: number;
+  lower_tier: MonetizationTier;
+  full_tier: MonetizationTier;
+}
+
+export const useMonetization = (id: number) =>
+  useQuery({
+    queryKey: ["monetization", id],
+    queryFn: () => api<Monetization>(`/channels/${id}/monetization`),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+
 function invalidate(qc: ReturnType<typeof useQueryClient>, keys: string[]) {
   keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 }

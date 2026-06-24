@@ -181,6 +181,60 @@ def _age_hours(published_at, now) -> float | None:
     return round((now - pub).total_seconds() / 3600, 1)
 
 
+def _compute_monetization(session: Session, channel_id: int) -> dict:
+    """YouTube Partner Program milestone progress from stored snapshots."""
+    latest_cm = session.exec(
+        select(ChannelMetric).where(ChannelMetric.channel_id == channel_id)
+        .order_by(ChannelMetric.captured_at.desc())
+    ).first()
+    subscriber_count = latest_cm.subscriber_count if latest_cm else 0
+
+    latest_metrics = _latest_metrics(session, channel_id)
+    total_watch_hours = sum(m.watch_time_minutes for m in latest_metrics.values()) / 60
+
+    topics = _topics_map(session, channel_id)
+    short_topic_ids = {tid for tid, t in topics.items() if t.content_format == "short"}
+    video_topic_map = {v.id: v.topic_id for v in _published_videos(session, channel_id)}
+    shorts_views = sum(
+        m.views for vid_id, m in latest_metrics.items()
+        if video_topic_map.get(vid_id) in short_topic_ids
+    )
+
+    def _tier(current, threshold):
+        needed = max(0, threshold - current)
+        pct = min(100.0, round(current / threshold * 100, 1)) if threshold else 100.0
+        return {"current": current, "needed": needed, "achieved": needed == 0, "pct": pct}
+
+    wh = round(total_watch_hours, 1)
+    return {
+        "channel_id": channel_id,
+        "subscriber_count": subscriber_count,
+        "total_watch_hours": wh,
+        "shorts_views": shorts_views,
+        "lower_tier": {
+            "subscribers":  _tier(subscriber_count, 500),
+            "watch_hours":  _tier(wh, 3000),
+            "shorts_views": _tier(shorts_views, 3_000_000),
+            "tier_achieved": subscriber_count >= 500 and wh >= 3000 and shorts_views >= 3_000_000,
+        },
+        "full_tier": {
+            "subscribers":  _tier(subscriber_count, 1000),
+            "watch_hours":  _tier(wh, 4000),
+            "shorts_views": _tier(shorts_views, 10_000_000),
+            "tier_achieved": subscriber_count >= 1000 and wh >= 4000 and shorts_views >= 10_000_000,
+        },
+    }
+
+
+@router.get("/monetization")
+def get_monetization(channel_id: int, session: Session = Depends(get_session)):
+    """YouTube Partner Program milestone progress for both tiers (fan funding and ad revenue).
+    Computed from stored snapshots — no live API call needed."""
+    if not session.get(Channel, channel_id):
+        raise HTTPException(404, "channel not found")
+    return _compute_monetization(session, channel_id)
+
+
 @router.get("/video-analytics")
 def video_analytics(channel_id: int, sort: str = "views",
                     session: Session = Depends(get_session)):

@@ -1,11 +1,88 @@
 import { useEffect, useState } from "react";
 import {
   useChannelYoutube, useMetrics, useMut, useSubscribers, useSubscriptions,
-  type Channel, type ChannelBranding,
+  useMonetization, type Channel, type ChannelBranding, type MonetizationMetric,
+  type MonetizationTier,
 } from "../api";
 import { Empty, Field, SectionLabel } from "../ui";
 
 const fmt = (n: number) => n.toLocaleString();
+
+const SIGNAL = "#c9f24e";
+const ICE    = "#56c8e6";
+
+function MonoBar({ pct, achieved }: { pct: number; achieved: boolean }) {
+  return (
+    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{ width: `${Math.min(pct, 100)}%`, background: achieved ? SIGNAL : ICE }}
+      />
+    </div>
+  );
+}
+
+function TierRow({ label, metric, fmtVal }: {
+  label: string;
+  metric: MonetizationMetric;
+  fmtVal: (n: number) => string;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="label">{label}</span>
+        {metric.achieved ? (
+          <span className="font-mono text-[11px]" style={{ color: SIGNAL }}>✓ met</span>
+        ) : (
+          <span className="font-mono text-[11px] text-fog-400">{fmtVal(metric.needed)} left</span>
+        )}
+      </div>
+      <MonoBar pct={metric.pct} achieved={metric.achieved} />
+      <div className="label mt-0.5 text-fog-500">
+        {fmtVal(metric.current)} / {fmtVal(metric.current + metric.needed)}
+      </div>
+    </div>
+  );
+}
+
+function TierCard({ title, tier }: { title: string; tier: MonetizationTier }) {
+  const fmtH = (n: number) => `${n.toLocaleString()}h`;
+  return (
+    <div className="panel p-4 flex-1">
+      <div className="flex items-center justify-between mb-3">
+        <div className="label">{title}</div>
+        {tier.tier_achieved && (
+          <span className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+            style={{ color: SIGNAL, background: `${SIGNAL}20`, border: `1px solid ${SIGNAL}40` }}>
+            UNLOCKED
+          </span>
+        )}
+      </div>
+      <TierRow label="subscribers" metric={tier.subscribers} fmtVal={fmt} />
+      <TierRow label="watch hours" metric={tier.watch_hours} fmtVal={fmtH} />
+      <TierRow label="shorts views" metric={tier.shorts_views} fmtVal={fmt} />
+    </div>
+  );
+}
+
+function MonetizationWidget({ channel }: { channel: Channel }) {
+  const { data } = useMonetization(channel.id);
+  return (
+    <div className="mt-6">
+      <SectionLabel>// monetization milestones</SectionLabel>
+      {!data ? (
+        <div className="label text-fog-400 mt-2">
+          No snapshot data yet — metrics load after the first analytics run.
+        </div>
+      ) : (
+        <div className="flex gap-3 mt-3">
+          <TierCard title="lower tier — fan funding" tier={data.lower_tier} />
+          <TierCard title="full tier — ad revenue"   tier={data.full_tier} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Tiny inline trend line from a numeric series.
 function Sparkline({ points }: { points: number[] }) {
@@ -205,6 +282,7 @@ export default function ChannelYoutube({ channel }: { channel: Channel }) {
   }
   return (
     <>
+      <MonetizationWidget channel={channel} />
       <Metrics channel={channel} />
       <Branding channel={channel} />
       <Subscriptions channel={channel} />

@@ -83,6 +83,25 @@ learn what works. Treat it as your standing instructions.
   0, analytics aren't flowing yet (channel not reconsented for the analytics scope) —
   note it in the report and skip analytics-driven actions this run.
 
+### 1.1 Monetization milestone check
+`state.monetization_by_channel[channel_id]` gives subscriber count, watch hours, and
+Shorts views — plus pre-computed `lower_tier` and `full_tier` progress for each channel.
+
+**Each run:**
+- Identify the **binding constraint** per channel: the metric with the highest `needed`
+  relative to its threshold. That is where content strategy investment pays off most.
+- Map constraint to action:
+  - **subscribers binding:** boost topics with high `subscribers_gained`; weight them up.
+  - **watch hours binding:** prioritize long-form (`"long"`) topics with high `avg_view_pct`.
+  - **Shorts views binding:** maximize volume and virality of `"short"` topics; adopt fast-
+    trending terms.
+- **Target Lower Tier first.** Only shift focus to Full Tier constraints once
+  `lower_tier.tier_achieved` is `true` for a channel.
+- Include a `## Monetization` table in every report (current / needed / pct per metric per
+  channel). Call out when any metric hits 100% for the first time.
+- Don't override a working analytics-driven approach purely for milestone math — if the data
+  disagrees, say so and prefer the analytics.
+
 ### 1.5 Triage & fix issues — FIX THE PIPELINE BEFORE GROWING IT
 The background loops already self-heal *transient* states (orphaned renders, stuck
 publishing, transient render retries, blank-render fallback). Your job here is the
@@ -228,6 +247,7 @@ risky, skip it — doing nothing is always safe.
 | Per-video leaderboard | `GET /api/channels/{id}/video-analytics?sort=views\|ctr\|avg_view_pct` |
 | By topic/format | `GET /api/channels/{id}/video-analytics/by-topic` |
 | Force-refresh analytics | `POST /api/channels/{id}/video-analytics/refresh` |
+| Monetization milestone status | `GET /api/channels/{id}/monetization` |
 | List/record a trend | `GET /api/trends?status=&channel_id=` · `POST /api/trends` `{term,description,source,channel_id,language,content_format,momentum,score,status,decision_reason}` |
 | Adopt a trend (topic+auto-produce) | `POST /api/trends/{id}/adopt` `{channel_id?,content_format?,idea_count,produce_count}` |
 | Weight / pause / retarget a topic | `PATCH /api/topics/{id}` `{weight,active,theme_prompt,content_format}` |

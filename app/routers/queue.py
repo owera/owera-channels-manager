@@ -93,7 +93,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     control surface (active/weight/pending), and the recent run audit. The agent acts
     through the existing PATCH/POST endpoints; this is its single observation call."""
     # Lazy import avoids any import-order coupling with the youtube-admin router.
-    from app.routers.youtube_admin import video_analytics_by_topic
+    from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
 
     cfg = app_settings(session)
     channels = session.exec(select(Channel).order_by(Channel.id)).all()
@@ -129,11 +129,14 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
             [TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED]))
         .order_by(TrendSignal.updated_at.desc()).limit(30)).all()
 
+    monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
+
     return {
         "now": datetime.now(timezone.utc).isoformat(),
         "settings": cfg,
         "dashboard": dashboard(session),
         "analytics_by_topic": analytics_by_topic,
+        "monetization_by_channel": monetization_by_channel,
         "topics": topics,
         "trends": trends,
         "recent_runs": recent_runs,
