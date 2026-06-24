@@ -7,6 +7,7 @@ and drip spacing apply.
 import json
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from pathlib import Path
@@ -189,6 +190,18 @@ def tick() -> None:
                     + QUOTA_THUMBNAIL_SET > settings.youtube_daily_quota_cap):
                 continue
             if not _drip_ok(session, channel, cfg.publish_drip_minutes):
+                continue
+            # Skip if an upload is already in-flight for this channel.
+            # APScheduler runs ticks in parallel threads; without this guard,
+            # hung uploads (no HTTP timeout on resumable chunks) pile up across
+            # ticks and every slot times out repeatedly instead of advancing.
+            in_flight = session.exec(
+                select(func.count(Video.id)).where(
+                    Video.channel_id == channel.id,
+                    Video.status == VideoStatus.PUBLISHING,
+                )
+            ).one()
+            if in_flight:
                 continue
             video = _next_approved(session, channel.id)
             if not video:
