@@ -194,12 +194,12 @@ def detect(session: Session) -> dict:
         from app.services import music_gen as _mg
         bgm_dir = Path(settings.bgm_dir)
         pool_count = _mg.pool_count(bgm_dir)
-        if pool_count < cfg.bgm_pool_min:
-            need = cfg.bgm_pool_target - pool_count
+        if pool_count < settings.bgm_pool_min:
+            need = settings.bgm_pool_target - pool_count
             bgm_pool_issues.append({
                 "count": pool_count,
-                "min": cfg.bgm_pool_min,
-                "target": cfg.bgm_pool_target,
+                "min": settings.bgm_pool_min,
+                "target": settings.bgm_pool_target,
                 "need": need,
                 "suggested_action": f"POST /api/music/generate {{\"count\": {need}}}",
                 "auto": True,
