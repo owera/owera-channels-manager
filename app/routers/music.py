@@ -1,5 +1,6 @@
 """Background music pool management."""
 
+import random
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/api/music", tags=["music"])
 
 class GenerateBody(BaseModel):
     count: int = 1
-    prompt: str | None = None
+    style: str | None = None  # optional style description to filter presets
 
 
 @router.get("")
@@ -26,28 +27,26 @@ def list_music():
 
 @router.post("/generate")
 def generate_music(body: GenerateBody):
-    """Generate N new techno tracks via HuggingFace MusicGen.
+    """Generate N new techno tracks via local procedural synthesis.
 
-    Each track is ~30s of procedurally-prompted techno music saved as a WAV
-    file in bgm_dir, where the render pipeline picks them up automatically.
+    Each track is ~30s of synthesised techno music saved as a WAV file in
+    bgm_dir, where the render pipeline picks them up automatically.
     """
-    if not music_gen._token():
-        raise HTTPException(503, "HF token not configured — set MANAGER_HF_TOKEN or HF_TOKEN")
     count = min(max(1, body.count), 20)
     bgm_dir = Path(settings.bgm_dir)
 
-    import random
     files = []
     errors = []
     for _ in range(count):
-        prompt = body.prompt or random.choice(music_gen.TECHNO_PROMPTS)
+        style = random.choice(music_gen.TECHNO_STYLES)
         try:
-            out = music_gen.generate_and_save(prompt, bgm_dir)
+            out = music_gen.generate_and_save(style["desc"], bgm_dir)
             stat = out.stat()
             files.append({
                 "name": out.name,
                 "size_kb": round(stat.st_size / 1024, 1),
-                "prompt": prompt,
+                "style": style["desc"],
+                "bpm": style["bpm"],
             })
         except Exception as e:
             errors.append(str(e))

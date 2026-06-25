@@ -1,20 +1,20 @@
-"""Generate techno background music via HuggingFace MusicGen.
+"""Generate techno background music via local procedural synthesis.
 
-Calls facebook/musicgen-small on the HF Inference API with randomised techno
-prompts and saves the resulting WAV files into bgm_dir, where the existing
-_pick_bgm() logic in worker.py can find and use them.
+Uses numpy to synthesise kick drums, hi-hats, bass lines, and synth pads
+that sound like minimal/dark techno. Generates 30-second WAV files instantly
+(< 1s per track) with no API key or GPU required.
 
-Token: set MANAGER_HF_TOKEN (or HF_TOKEN) in the environment / .env file.
-If no token is configured, generation is skipped and a warning is logged.
+Variety comes from randomised BPM, bass patterns, synth arpeggios, and
+hi-hat density across 20 defined style presets.
 """
 
 import logging
-import os
 import random
 import time
+import wave
 from pathlib import Path
 
-import requests
+import numpy as np
 
 from app.config import settings
 from app.db import session_scope
@@ -22,39 +22,211 @@ from app.services import quota
 
 logger = logging.getLogger("manager.music_gen")
 
-# Varied prompts covering different techno sub-genres and BPMs so the generated
-# pool has sonic diversity. Keep this list long enough that repeated random picks
-# rarely land on the same prompt.
-TECHNO_PROMPTS = [
-    "driving techno music 128 bpm, dark underground, four-on-the-floor kick drum",
-    "minimal techno 130 bpm, hypnotic, Berlin warehouse style, stripped-back percussion",
-    "acid techno 135 bpm, squelchy 303 bassline, industrial, relentless hi-hats",
-    "deep techno 126 bpm, atmospheric pads, Detroit influence, slow-building tension",
-    "hard techno 140 bpm, distorted kick, aggressive, festival main-stage energy",
-    "dark techno 132 bpm, heavy bass rumble, industrial noise, dystopian atmosphere",
-    "melodic techno 128 bpm, euphoric synth arpeggios, emotional build, festival anthem",
-    "industrial techno 136 bpm, metallic percussion, harsh noise textures, relentless groove",
-    "dub techno 124 bpm, spacious reverb, cavernous delays, hypnotic sub bass",
-    "peak-time techno 138 bpm, pumping kick, stabs, relentless drive, peak floor energy",
-    "minimal techno 125 bpm, late night, sparse kick, evolving filter sweeps",
-    "techno 130 bpm, pulsing bass, analogue warmth, classic 909 drums",
-    "EBM influenced techno 140 bpm, sequenced bass, harsh industrial drums",
-    "progressive techno 128 bpm, slow filter opening, building tension, euphoric climax",
-    "atmospheric techno 126 bpm, cinematic pads, distant vocals, emotional depth",
-    "rave techno 138 bpm, early 90s style, raw energy, acidic synth lines",
-    "rolling techno 132 bpm, looped groove, hypnotic percussion, subtle variations",
-    "techno 133 bpm, reverbed claps, dark melody, underground club feel",
-    "trance-influenced techno 138 bpm, soaring pads, driving kick, euphoric breakdown",
-    "drone techno 120 bpm, deep low-end, minimal, meditative, slow evolving textures",
-]
-
-_HF_API_URL = "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
+SR = 44100  # sample rate
 _AUDIO_EXTS = {".mp3", ".m4a", ".wav"}
 
+# 20 style presets — each defines the feel of one generated track.
+# Fields: bpm, bass_pattern (note indices in minor pentatonic), hihat_density,
+# synth (True/False), description (for logging).
+TECHNO_STYLES = [
+    {"bpm": 128, "bass": [0, 0, 0, 5], "hh": "8th",  "synth": False, "desc": "driving underground 128"},
+    {"bpm": 130, "bass": [0, 0, 3, 0], "hh": "16th", "synth": False, "desc": "minimal Berlin 130"},
+    {"bpm": 135, "bass": [0, 3, 5, 3], "hh": "16th", "synth": True,  "desc": "acid techno 135"},
+    {"bpm": 126, "bass": [0, 0, 0, 7], "hh": "8th",  "synth": True,  "desc": "deep Detroit 126"},
+    {"bpm": 140, "bass": [0, 0, 5, 0], "hh": "16th", "synth": False, "desc": "hard techno 140"},
+    {"bpm": 132, "bass": [0, 3, 0, 5], "hh": "8th",  "synth": False, "desc": "dark industrial 132"},
+    {"bpm": 128, "bass": [0, 0, 7, 5], "hh": "16th", "synth": True,  "desc": "melodic techno 128"},
+    {"bpm": 136, "bass": [0, 5, 3, 7], "hh": "16th", "synth": False, "desc": "EBM 136"},
+    {"bpm": 124, "bass": [0, 0, 0, 3], "hh": "8th",  "synth": True,  "desc": "dub techno 124"},
+    {"bpm": 138, "bass": [0, 3, 3, 5], "hh": "16th", "synth": False, "desc": "peak-time 138"},
+    {"bpm": 125, "bass": [0, 0, 5, 7], "hh": "8th",  "synth": False, "desc": "minimal late-night 125"},
+    {"bpm": 130, "bass": [0, 7, 0, 5], "hh": "8th",  "synth": True,  "desc": "analogue 130"},
+    {"bpm": 140, "bass": [0, 0, 3, 5], "hh": "16th", "synth": False, "desc": "raw rave 140"},
+    {"bpm": 128, "bass": [0, 5, 0, 3], "hh": "16th", "synth": True,  "desc": "progressive 128"},
+    {"bpm": 126, "bass": [0, 0, 7, 0], "hh": "8th",  "synth": True,  "desc": "atmospheric 126"},
+    {"bpm": 133, "bass": [0, 3, 5, 0], "hh": "16th", "synth": False, "desc": "rolling groove 133"},
+    {"bpm": 138, "bass": [0, 5, 5, 3], "hh": "16th", "synth": True,  "desc": "trance-influenced 138"},
+    {"bpm": 120, "bass": [0, 0, 0, 0], "hh": "8th",  "synth": True,  "desc": "drone meditative 120"},
+    {"bpm": 132, "bass": [0, 7, 3, 5], "hh": "16th", "synth": False, "desc": "industrial 132"},
+    {"bpm": 130, "bass": [0, 0, 5, 3], "hh": "8th",  "synth": True,  "desc": "hypnotic Berlin 130"},
+]
 
-def _token() -> str:
-    """Return HF token from settings (MANAGER_HF_TOKEN) or HF_TOKEN env fallback."""
-    return settings.hf_token or os.getenv("HF_TOKEN", "")
+# Minor pentatonic intervals in semitones from root C1 (32.70 Hz)
+_ROOT_HZ = 32.70
+_PENTATONIC = [0, 3, 5, 7, 10, 12]  # minor pentatonic + octave
+
+
+def _hz(semitones: int) -> float:
+    return _ROOT_HZ * (2 ** (semitones / 12))
+
+
+def _kick(duration: float = 0.5) -> np.ndarray:
+    """Kick drum: frequency-swept sine with exponential amplitude decay."""
+    n = int(duration * SR)
+    t = np.arange(n) / SR
+    freq = 50 + 120 * np.exp(-t / 0.018)       # pitch: 170Hz → 50Hz
+    phase = 2 * np.pi * np.cumsum(freq) / SR
+    amp = np.exp(-t / 0.12)                      # punchy decay
+    click = np.exp(-t / 0.003) * 0.3            # transient click
+    return (amp * np.sin(phase) + click).astype(np.float32)
+
+
+def _hihat(duration: float = 0.035, open_: bool = False) -> np.ndarray:
+    """Hi-hat: shaped white noise burst."""
+    dur = duration * (5 if open_ else 1)
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    tau = dur * (0.6 if open_ else 0.4)
+    amp = np.exp(-t / tau)
+    noise = np.random.uniform(-1.0, 1.0, n).astype(np.float32)
+    # Simple high-pass: subtract low-frequency component
+    hp = noise - np.concatenate([[0], noise[:-1]]) * 0.95
+    return (amp * hp * 0.35).astype(np.float32)
+
+
+def _clap(duration: float = 0.08) -> np.ndarray:
+    """Snare/clap: three short noise bursts + resonance."""
+    n = int(duration * SR)
+    t = np.arange(n) / SR
+    bursts = sum(
+        np.exp(-((t - o) ** 2) / (2 * 0.003 ** 2)) * np.random.uniform(-1, 1, n)
+        for o in [0.0, 0.006, 0.012]
+    )
+    tone = np.exp(-t / 0.04) * np.sin(2 * np.pi * 220 * t) * 0.3
+    amp = np.exp(-t / (duration * 0.6))
+    return (amp * (bursts + tone) * 0.5).astype(np.float32)
+
+
+def _bass_note(freq: float, duration: float, distort: float = 1.8) -> np.ndarray:
+    """Bass note: sine + soft clip for warmth."""
+    n = int(duration * SR)
+    t = np.arange(n) / SR
+    amp = 0.7 * np.exp(-t / (duration * 0.75)) + 0.15
+    s = amp * np.sin(2 * np.pi * freq * t)
+    return (np.tanh(s * distort) / distort).astype(np.float32)
+
+
+def _synth_note(freq: float, duration: float) -> np.ndarray:
+    """Synth pad: detuned oscillators with slow attack."""
+    n = int(duration * SR)
+    t = np.arange(n) / SR
+    attack = 0.05
+    release = min(0.1, duration * 0.3)
+    env = np.ones(n, dtype=np.float32)
+    a_n = int(attack * SR)
+    r_n = int(release * SR)
+    if a_n > 0:
+        env[:a_n] = np.linspace(0, 1, a_n)
+    if r_n > 0:
+        env[-r_n:] = np.linspace(1, 0, r_n)
+    # Two slightly detuned oscillators
+    s = (np.sin(2 * np.pi * freq * t) +
+         np.sin(2 * np.pi * freq * 1.003 * t) * 0.7)
+    return (env * s * 0.25).astype(np.float32)
+
+
+def _add_at(mix: np.ndarray, signal: np.ndarray, offset: int) -> None:
+    end = min(len(mix), offset + len(signal))
+    mix[offset:end] += signal[:end - offset]
+
+
+def generate_techno(duration_s: int = 30, style: dict | None = None,
+                    seed: int | None = None) -> np.ndarray:
+    """Synthesise a techno track. Returns float32 mono samples at SR."""
+    if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
+    if style is None:
+        style = random.choice(TECHNO_STYLES)
+
+    bpm = style["bpm"]
+    beat = 60.0 / bpm
+    total = int(duration_s * SR)
+    mix = np.zeros(total, dtype=np.float32)
+
+    bass_pattern = style["bass"]
+    hh_density = style["hh"]
+    use_synth = style["synth"]
+
+    # --- Kick: four-on-the-floor ---
+    t = 0.0
+    while t < duration_s:
+        _add_at(mix, _kick(), int(t * SR))
+        t += beat
+
+    # --- Clap/snare: beats 2 and 4 ---
+    t = beat
+    while t < duration_s:
+        _add_at(mix, _clap(), int(t * SR))
+        t += beat * 2
+
+    # --- Closed hi-hat ---
+    step = beat / 2 if hh_density == "8th" else beat / 4
+    t = step
+    while t < duration_s:
+        _add_at(mix, _hihat(), int(t * SR))
+        t += step
+
+    # --- Open hi-hat: every bar (4 beats), on the "and" of beat 4 ---
+    t = beat * 3.5
+    while t < duration_s:
+        _add_at(mix, _hihat(open_=True), int(t * SR))
+        t += beat * 4
+
+    # --- Bass line: one note per beat ---
+    beat_n = 0
+    t = 0.0
+    while t < duration_s:
+        semi = _PENTATONIC[bass_pattern[beat_n % len(bass_pattern)]]
+        freq = _hz(semi)
+        _add_at(mix, _bass_note(freq, beat * 0.88), int(t * SR))
+        t += beat
+        beat_n += 1
+
+    # --- Synth arpeggio (optional): eighth notes, higher octave ---
+    if use_synth:
+        arp_notes = [_PENTATONIC[i] + 12 for i in [0, 2, 3, 4]]  # one octave up
+        t = 0.0
+        note_i = 0
+        while t < duration_s:
+            semi = arp_notes[note_i % len(arp_notes)]
+            freq = _hz(semi) * 4  # two octaves up for synth register
+            _add_at(mix, _synth_note(freq, beat / 2 * 0.8), int(t * SR))
+            t += beat / 2
+            note_i += 1
+
+    # --- Normalise to 80% of full scale ---
+    peak = np.abs(mix).max()
+    if peak > 0:
+        mix *= 0.8 / peak
+    return mix
+
+
+def _write_wav(samples: np.ndarray, path: Path) -> None:
+    """Write float32 mono samples as 16-bit PCM WAV."""
+    pcm = (samples * 32767).clip(-32767, 32767).astype(np.int16)
+    with wave.open(str(path), "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SR)
+        wf.writeframes(pcm.tobytes())
+
+
+def generate_and_save(prompt: str, bgm_dir: Path, duration_s: int = 30) -> Path:
+    """Generate one techno track and save it to bgm_dir. Returns the path.
+
+    `prompt` is used only for logging; style is picked randomly.
+    """
+    bgm_dir.mkdir(parents=True, exist_ok=True)
+    style = random.choice(TECHNO_STYLES)
+    samples = generate_techno(duration_s=duration_s, style=style)
+    slug = str(int(time.time() * 1000))
+    out = bgm_dir / f"techno_{slug}.wav"
+    _write_wav(samples, out)
+    size_kb = out.stat().st_size // 1024
+    logger.info("generated track: %s (%dKB, %s, %d BPM)",
+                out.name, size_kb, style["desc"], style["bpm"])
+    return out
 
 
 def pool_count(bgm_dir: Path) -> int:
@@ -81,58 +253,11 @@ def list_tracks(bgm_dir: Path) -> list[dict]:
     return result
 
 
-def generate_track(prompt: str, duration_s: int = 30) -> bytes:
-    """Call HF MusicGen and return raw WAV bytes.
-
-    Raises RuntimeError if token is missing or the API call fails.
-    """
-    token = _token()
-    if not token:
-        raise RuntimeError(
-            "HF token not configured — set MANAGER_HF_TOKEN or HF_TOKEN env var"
-        )
-    resp = requests.post(
-        _HF_API_URL,
-        headers={"Authorization": f"Bearer {token}"},
-        json={"inputs": prompt, "parameters": {"duration": duration_s}},
-        timeout=180,    # model cold-start can take 60–90s; generation another 30s
-    )
-    if resp.status_code == 503:
-        # Model loading — wait and retry once
-        logger.info("MusicGen model loading (503), waiting 30s then retrying")
-        time.sleep(30)
-        resp = requests.post(
-            _HF_API_URL,
-            headers={"Authorization": f"Bearer {token}"},
-            json={"inputs": prompt, "parameters": {"duration": duration_s}},
-            timeout=180,
-        )
-    if not resp.ok:
-        raise RuntimeError(f"HF API error {resp.status_code}: {resp.text[:200]}")
-    return resp.content
-
-
-def generate_and_save(prompt: str, bgm_dir: Path, duration_s: int = 30) -> Path:
-    """Generate one track and save it to bgm_dir. Returns the saved path."""
-    bgm_dir.mkdir(parents=True, exist_ok=True)
-    wav_bytes = generate_track(prompt, duration_s)
-    slug = str(int(time.time() * 1000))
-    out = bgm_dir / f"techno_{slug}.wav"
-    out.write_bytes(wav_bytes)
-    logger.info("saved generated track: %s (%d KB)", out.name, len(wav_bytes) // 1024)
-    return out
-
-
 def replenish(target: int | None = None) -> int:
     """Generate tracks until bgm_dir has `target` files.
 
-    Returns the number of tracks generated. Skips gracefully if no token is set.
+    Returns the number of tracks generated.
     """
-    token = _token()
-    if not token:
-        logger.warning("music_gen: no HF token configured — skipping replenish")
-        return 0
-
     bgm_dir = Path(settings.bgm_dir)
     target = target or settings.bgm_pool_target
     current = pool_count(bgm_dir)
@@ -144,17 +269,16 @@ def replenish(target: int | None = None) -> int:
 
     generated = 0
     for _ in range(need):
-        prompt = random.choice(TECHNO_PROMPTS)
+        style = random.choice(TECHNO_STYLES)
         try:
-            out = generate_and_save(prompt, bgm_dir)
+            out = generate_and_save(style["desc"], bgm_dir)
             with session_scope() as session:
                 quota.log(session, kind="music_gen", status="success",
-                          detail=f"generated {out.name}: {prompt[:80]}")
+                          detail=f"generated {out.name}: {style['desc']} {style['bpm']}bpm")
             generated += 1
         except Exception as e:
             logger.error("music_gen: track generation failed: %s", e)
             with session_scope() as session:
-                quota.log(session, kind="music_gen", status="error",
-                          detail=str(e)[:200])
+                quota.log(session, kind="music_gen", status="error", detail=str(e)[:200])
 
     return generated
