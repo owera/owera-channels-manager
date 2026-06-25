@@ -132,16 +132,17 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
 
     # BGM pool — surface pool health so the agent can top it up on demand.
+    # bgm_dir/bgm_pool_min/bgm_pool_target live on app.config.settings, not the DB model.
     from pathlib import Path
     from app.services import music_gen as _mg
-    _bgm_dir = Path(cfg.bgm_dir)
+    _bgm_dir = Path(settings.bgm_dir)
     _pool_count = _mg.pool_count(_bgm_dir)
     bgm_pool = {
         "count": _pool_count,
-        "min": cfg.bgm_pool_min,
-        "target": cfg.bgm_pool_target,
+        "min": settings.bgm_pool_min,
+        "target": settings.bgm_pool_target,
         "bgm_dir": str(_bgm_dir),
-        "is_low": _pool_count < cfg.bgm_pool_min,
+        "is_low": _pool_count < settings.bgm_pool_min,
     }
 
     return {
