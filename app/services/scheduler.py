@@ -15,6 +15,7 @@ from app.services import (
     analytics_loop,
     autofill_loop,
     metrics_loop,
+    music_gen,
     publish_loop,
     render_loop,
 )
@@ -31,6 +32,19 @@ def _safe(fn, name):
         except Exception as e:  # never let a tick kill the scheduler thread
             logger.exception(f"{name} tick failed: {e}")
     return wrapper
+
+
+def _music_replenish_tick() -> None:
+    """Generate techno tracks if the BGM pool is below bgm_pool_min."""
+    from pathlib import Path
+    bgm_dir = Path(settings.bgm_dir)
+    current = music_gen.pool_count(bgm_dir)
+    if current >= settings.bgm_pool_min:
+        return
+    logger.info("BGM pool at %d (min %d) — triggering replenish", current, settings.bgm_pool_min)
+    n = music_gen.replenish()
+    if n:
+        logger.info("BGM replenish: generated %d new tracks", n)
 
 
 def start() -> None:
@@ -75,9 +89,18 @@ def start() -> None:
         id="autofill", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
+    # BGM pool replenish: generate techno tracks when the pool runs low. Runs daily;
+    # first check is 2 min after startup (after recovery settles). No-ops if pool is
+    # already at target or if no HF token is configured.
+    _scheduler.add_job(
+        _safe(_music_replenish_tick, "music_replenish"),
+        "interval", hours=24,
+        id="music_replenish", max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
     _scheduler.start()
     logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "
-                "analytics %sh / autofill %smin)",
+                "analytics %sh / autofill %smin / music_replenish 24h)",
                 settings.render_tick_seconds, settings.publish_tick_seconds,
                 settings.metrics_tick_hours, settings.analytics_tick_hours,
                 settings.autofill_tick_minutes)
