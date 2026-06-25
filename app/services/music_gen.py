@@ -1,8 +1,8 @@
 """Generate techno background music via local procedural synthesis.
 
-Uses numpy to synthesise kick drums, hi-hats, bass lines, and synth pads
-that sound like minimal/dark techno. Generates 30-second WAV files instantly
-(< 1s per track) with no API key or GPU required.
+Uses numpy + scipy to synthesise kick drums, hi-hats, bass lines, synth pads,
+room reverb, and a cycling low-pass filter sweep — the defining sound of techno.
+Generates 30-second WAV files in < 2s with no API key or GPU required.
 
 Variety comes from randomised BPM, bass patterns, synth arpeggios, and
 hi-hat density across 20 defined style presets.
@@ -15,6 +15,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import butter, fftconvolve, sosfilt
 
 from app.config import settings
 from app.db import session_scope
@@ -130,6 +131,49 @@ def _add_at(mix: np.ndarray, signal: np.ndarray, offset: int) -> None:
     mix[offset:end] += signal[:end - offset]
 
 
+def _apply_reverb(signal: np.ndarray, room: float = 0.4, wet: float = 0.18) -> np.ndarray:
+    """Convolve with a synthetic room impulse response.
+
+    room  — decay time in seconds (longer = bigger room).
+    wet   — mix ratio: 0 = dry, 1 = fully wet.
+    """
+    ir_len = int(SR * room)
+    t_ir = np.arange(ir_len) / SR
+    # Exponentially decaying noise burst as impulse response
+    ir = np.exp(-t_ir / (room * 0.5)) * np.random.randn(ir_len).astype(np.float32)
+    ir[0] = 1.0   # identity at t=0 preserves the dry signal's transient
+    ir = ir / (np.abs(ir).max() + 1e-9)
+    wet_sig = fftconvolve(signal, ir)[:len(signal)].astype(np.float32)
+    return (signal * (1.0 - wet) + wet_sig * wet).astype(np.float32)
+
+
+def _apply_filter_sweep(signal: np.ndarray, f_low: float = 300.0,
+                        f_high: float = 7000.0, cycles: int = 2,
+                        n_blocks: int = 32) -> np.ndarray:
+    """Cycling low-pass filter sweep: opens from f_low → f_high and back, `cycles` times.
+
+    This is the defining sound of techno — muffled at the start of each cycle,
+    fully open at the peak, then closing again for the next drop.
+    """
+    nyq = SR / 2.0
+    block = len(signal) // n_blocks
+    result = np.empty_like(signal)
+
+    for i in range(n_blocks):
+        # Sinusoidal sweep position: 0 → 1 → 0 per cycle
+        phase = (i / n_blocks) * cycles * 2 * np.pi
+        t = (1.0 - np.cos(phase)) / 2.0          # 0..1 smooth cosine envelope
+        cutoff = f_low + (f_high - f_low) * t
+        cutoff_norm = min(cutoff / nyq * 0.98, 0.98)
+
+        sos = butter(4, cutoff_norm, btype="low", output="sos")
+        start = i * block
+        end = start + block if i < n_blocks - 1 else len(signal)
+        result[start:end] = sosfilt(sos, signal[start:end])
+
+    return result.astype(np.float32)
+
+
 def generate_techno(duration_s: int = 30, style: dict | None = None,
                     seed: int | None = None) -> np.ndarray:
     """Synthesise a techno track. Returns float32 mono samples at SR."""
@@ -142,7 +186,10 @@ def generate_techno(duration_s: int = 30, style: dict | None = None,
     bpm = style["bpm"]
     beat = 60.0 / bpm
     total = int(duration_s * SR)
-    mix = np.zeros(total, dtype=np.float32)
+
+    # Separate layers so effects can be applied selectively
+    drums = np.zeros(total, dtype=np.float32)   # kick + clap + hi-hats
+    tonal = np.zeros(total, dtype=np.float32)   # bass + synth (gets filter sweep)
 
     bass_pattern = style["bass"]
     hh_density = style["hh"]
@@ -151,26 +198,26 @@ def generate_techno(duration_s: int = 30, style: dict | None = None,
     # --- Kick: four-on-the-floor ---
     t = 0.0
     while t < duration_s:
-        _add_at(mix, _kick(), int(t * SR))
+        _add_at(drums, _kick(), int(t * SR))
         t += beat
 
     # --- Clap/snare: beats 2 and 4 ---
     t = beat
     while t < duration_s:
-        _add_at(mix, _clap(), int(t * SR))
+        _add_at(drums, _clap(), int(t * SR))
         t += beat * 2
 
     # --- Closed hi-hat ---
     step = beat / 2 if hh_density == "8th" else beat / 4
     t = step
     while t < duration_s:
-        _add_at(mix, _hihat(), int(t * SR))
+        _add_at(drums, _hihat(), int(t * SR))
         t += step
 
     # --- Open hi-hat: every bar (4 beats), on the "and" of beat 4 ---
     t = beat * 3.5
     while t < duration_s:
-        _add_at(mix, _hihat(open_=True), int(t * SR))
+        _add_at(drums, _hihat(open_=True), int(t * SR))
         t += beat * 4
 
     # --- Bass line: one note per beat ---
@@ -179,21 +226,32 @@ def generate_techno(duration_s: int = 30, style: dict | None = None,
     while t < duration_s:
         semi = _PENTATONIC[bass_pattern[beat_n % len(bass_pattern)]]
         freq = _hz(semi)
-        _add_at(mix, _bass_note(freq, beat * 0.88), int(t * SR))
+        _add_at(tonal, _bass_note(freq, beat * 0.88), int(t * SR))
         t += beat
         beat_n += 1
 
     # --- Synth arpeggio (optional): eighth notes, higher octave ---
     if use_synth:
-        arp_notes = [_PENTATONIC[i] + 12 for i in [0, 2, 3, 4]]  # one octave up
+        arp_notes = [_PENTATONIC[i] + 12 for i in [0, 2, 3, 4]]
         t = 0.0
         note_i = 0
         while t < duration_s:
             semi = arp_notes[note_i % len(arp_notes)]
-            freq = _hz(semi) * 4  # two octaves up for synth register
-            _add_at(mix, _synth_note(freq, beat / 2 * 0.8), int(t * SR))
+            freq = _hz(semi) * 4
+            _add_at(tonal, _synth_note(freq, beat / 2 * 0.8), int(t * SR))
             t += beat / 2
             note_i += 1
+
+    # --- Filter sweep on tonal layer (bass + synth) ---
+    # Cycles and sweep range vary by style for variety
+    sweep_cycles = 1 if duration_s <= 15 else 2
+    tonal = _apply_filter_sweep(tonal, f_low=250.0, f_high=6500.0, cycles=sweep_cycles)
+
+    # --- Mix layers ---
+    mix = drums + tonal
+
+    # --- Room reverb on the full mix (subtle — keeps drums punchy) ---
+    mix = _apply_reverb(mix, room=0.35, wet=0.15)
 
     # --- Normalise to 80% of full scale ---
     peak = np.abs(mix).max()
