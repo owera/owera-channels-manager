@@ -53,7 +53,7 @@ TECHNO_STYLES = [
 
 # Minor pentatonic intervals in semitones from root C1 (32.70 Hz)
 _ROOT_HZ = 32.70
-_PENTATONIC = [0, 3, 5, 7, 10, 12]  # minor pentatonic + octave
+_PENTATONIC = [0, 3, 5, 7, 10, 12, 15, 17]  # minor pentatonic, two octaves
 
 
 def _hz(semitones: int) -> float:
