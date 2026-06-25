@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, func, select
 
+from pathlib import Path
+
 from app.config import settings
 from app.db import app_settings
 from app.models import (Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus)
@@ -184,6 +186,27 @@ def detect(session: Session) -> dict:
                 "suggested_action": "produce or trim drafts", "auto": True,
             })
 
+    # BGM pool health — flag when the music pool is below the minimum threshold.
+    # The scheduled replenish job fires daily; if the agent sees this it can trigger
+    # an on-demand top-up via POST /api/music/generate.
+    bgm_pool_issues = []
+    try:
+        from app.services import music_gen as _mg
+        bgm_dir = Path(settings.bgm_dir)
+        pool_count = _mg.pool_count(bgm_dir)
+        if pool_count < cfg.bgm_pool_min:
+            need = cfg.bgm_pool_target - pool_count
+            bgm_pool_issues.append({
+                "count": pool_count,
+                "min": cfg.bgm_pool_min,
+                "target": cfg.bgm_pool_target,
+                "need": need,
+                "suggested_action": f"POST /api/music/generate {{\"count\": {need}}}",
+                "auto": True,
+            })
+    except Exception:
+        pass
+
     # Board inventory — days of DRAFT+QUEUED work per channel vs the horizon cap.
     # Informational: not counted in issue totals, but visible to the growth agent.
     board_inventory = []
@@ -210,7 +233,7 @@ def detect(session: Session) -> dict:
         "stuck_rendering": stuck_rendering, "stuck_publishing": stuck_publishing,
         "stuck_review": stuck_review, "oauth": oauth, "cooldown": cooldown,
         "quota": quota_walls, "error_runs_24h": error_runs_24h,
-        "board_overflow": board_overflow,
+        "board_overflow": board_overflow, "bgm_pool_low": bgm_pool_issues,
     }
     # board_inventory is informational — excluded from issue counts.
     extra = {"board_inventory": board_inventory}
