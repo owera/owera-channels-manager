@@ -230,3 +230,7 @@ class Settings(SQLModel, table=True):
     # Ceiling: stop refilling a topic's idea bench once it has this many pending
     # (draft+queued) videos. Bounds the board's IDEAS column so it can't grow daily.
     topic_autogen_target: int = 6
+    # How many days of render work to keep in the idea bench (DRAFT+QUEUED) per channel.
+    # Channel board cap = daily_render_budget × board_horizon_days. Autofill and manual
+    # idea generation both stop once the channel hits this inventory level.
+    board_horizon_days: int = 2
