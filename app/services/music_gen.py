@@ -48,7 +48,7 @@ TECHNO_PROMPTS = [
     "drone techno 120 bpm, deep low-end, minimal, meditative, slow evolving textures",
 ]
 
-_HF_API_URL = "https://api-inference.huggingface.co/models/facebook/musicgen-small"
+_HF_API_URL = "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
 _AUDIO_EXTS = {".mp3", ".m4a", ".wav"}
 
 
