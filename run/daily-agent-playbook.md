@@ -86,6 +86,12 @@ learn what works. Treat it as your standing instructions.
   Note `days_of_inventory` and `at_capacity` per channel. A channel `at_capacity:true`
   means the idea bench already has `board_horizon_days` worth of render work — do NOT
   generate more ideas or adopt new trends for it this run.
+- **BGM pool:** read `state.bgm_pool` — note `count`, `min`, `target`, and `is_low`.
+  If `is_low:true`, the music pool is below the safety threshold and rendered videos may
+  get no background audio; treat it as a triage item (see step 1.5).
+  Also check `state.issues.error_runs_24h` for entries with `kind:"music_gen"` — a
+  recurring synthesis error means the scheduled replenish job is broken and needs a code
+  fix (counts toward the ≤ 2 code-change cap).
 
 ### 1.1 Monetization milestone check
 `state.monetization_by_channel[channel_id]` gives subscriber count, watch hours, and
@@ -125,6 +131,7 @@ back after and quote the after-state in the report; never claim a fix you didn't
 | `stuck_rendering`/`stuck_publishing` (past timeout, loop didn't catch it) | `requeue` / `retry` | ≤ 5 |
 | `stuck_review` (gate backlog > 48h) | approve the good ones / reject the bad ones | judgment |
 | one topic producing repeated failures | `PATCH /api/topics/{id} {"weight":0}` + note it | — |
+| `bgm_pool_low` (auto) | `POST /api/music/generate {"count": <need>}` (cap at 10 per run); then re-read `GET /api/music` to confirm count went up — quote the before/after in the report | ≤ 10 tracks |
 | `cooldown` / `quota` (escalate) | usually self-resets — monitor; only nudge `daily_publish_budget`↓ or `publish_drip_minutes`↑ a small step **with** a written reason | small step |
 | `oauth` ≠ connected (escalate) | **you cannot fix this** — lead the report with a `⚠ Needs operator` line: reconnect channel N | report-only |
 | `error_runs_24h` recurring signature | this is a real bug — fix the **root cause** in step 4 (counts toward the ≤2 code-change cap) | ≤2 code |
@@ -181,6 +188,27 @@ Pick the highest-leverage few; you don't have to do all of them every run:
 - **Sharpen a theme:** improve a topic's `theme_prompt` via `PATCH /api/topics/{id}` so
   future ideas are better targeted.
 - Keep every action logged automatically (the API writes `JobRun`s); don't bypass it.
+
+### 3.5 BGM pool management
+The video render pipeline picks a random background track from `bgm_dir` for every
+video. Keeping the pool healthy and varied directly improves every rendered video.
+
+**Each run, after triage:**
+- If `bgm_pool.is_low` (already fixed in triage above) — done for this step.
+- If pool is healthy but growing stale (track count hasn't changed in several days),
+  generate a small batch to refresh the variety: `POST /api/music/generate {"count": 5}`.
+  Do this at most once per run and only if the pipeline produced ≥ 1 video since the
+  last agent run (i.e., there is demand — no point adding tracks if nothing is rendering).
+- **Never delete tracks from the pool** unless a track is confirmed broken (zero-byte or
+  corrupt file). Variety is the point; old tracks are fine.
+- Consider tuning `bgm_pool_target` (via `PATCH /api/settings`) if render volume grows.
+  A reasonable target is `3 × daily_render_budget` so the pool is never exhausted even
+  during a burst render day.
+- **Music-gen errors in step 4:** if `error_runs_24h` shows recurring `kind:"music_gen"`
+  failures, that is a code bug in `app/services/music_gen.py` — diagnose and fix it
+  (counts toward the ≤ 2 code-change cap). Quote the error signature from the issues
+  digest and verify the fix by calling `POST /api/music/generate {"count": 1}` and
+  confirming a file appears in `GET /api/music`.
 
 ### 4. Improve the app (≤ 2 small changes)
 Choose improvements the data points to. Examples (let analytics pick, don't do all):
@@ -269,7 +297,10 @@ risky, skip it — doing nothing is always safe.
 | Generate ideas | `POST /api/topics/{id}/generate` `{count}` |
 | Queue a draft for production | `POST /api/videos/{id}/produce` |
 | Channel budgets / pause | `PATCH /api/channels/{id}` `{daily_render_budget,daily_publish_budget,paused}` |
-| Global settings | `PATCH /api/settings` `{publish_drip_minutes,topic_autogen_enabled,topic_autogen_min_pending}` |
+| Global settings | `PATCH /api/settings` `{publish_drip_minutes,topic_autogen_enabled,topic_autogen_min_pending,bgm_pool_min,bgm_pool_target}` |
+| BGM pool status | `GET /api/music` |
+| Generate BGM tracks | `POST /api/music/generate` `{"count": N}` (cap 20 per call) |
+| Delete a BGM track | `DELETE /api/music/{filename}` |
 | Audit log | `GET /api/runs?limit=100` |
 
 Example:
