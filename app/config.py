@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     litellm_model: str = "anthropic/claude-opus-4-8"
 
+    # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
+    hf_token: str = ""
+    # BGM pool auto-replenish thresholds
+    bgm_pool_min: int = 5       # trigger replenish when pool drops below this
+    bgm_pool_target: int = 15   # fill up to this many tracks
+
     # Scheduler defaults (also editable per-row in the Settings table)
     render_tick_seconds: int = 15
     publish_tick_seconds: int = 60
