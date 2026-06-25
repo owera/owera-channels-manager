@@ -184,6 +184,27 @@ def detect(session: Session) -> dict:
                 "suggested_action": "produce or trim drafts", "auto": True,
             })
 
+    # Board inventory — days of DRAFT+QUEUED work per channel vs the horizon cap.
+    # Informational: not counted in issue totals, but visible to the growth agent.
+    board_inventory = []
+    for ch in channels:
+        daily_cap = ch.daily_render_budget
+        if daily_cap > 0:
+            pending = session.exec(
+                select(func.count(Video.id)).where(
+                    Video.channel_id == ch.id,
+                    Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED])
+                )
+            ).one()
+            days = round(pending / daily_cap, 1)
+            board_inventory.append({
+                "channel_id": ch.id, "name": ch.name,
+                "pending": pending, "daily_render_budget": daily_cap,
+                "days_of_inventory": days,
+                "board_horizon_days": cfg.board_horizon_days,
+                "at_capacity": days >= cfg.board_horizon_days,
+            })
+
     buckets = {
         "failed": failed, "rejected": rejected,
         "stuck_rendering": stuck_rendering, "stuck_publishing": stuck_publishing,
@@ -191,6 +212,8 @@ def detect(session: Session) -> dict:
         "quota": quota_walls, "error_runs_24h": error_runs_24h,
         "board_overflow": board_overflow,
     }
+    # board_inventory is informational — excluded from issue counts.
+    extra = {"board_inventory": board_inventory}
     # needs_operator = anything explicitly non-auto (OAuth, quota walls, cooldown).
     needs_operator = sum(
         1 for b in buckets.values() for item in b
@@ -200,6 +223,7 @@ def detect(session: Session) -> dict:
     return {
         "now": now.isoformat(),
         **buckets,
+        **extra,
         "summary": {"total_issues": total, "needs_operator": needs_operator,
                     "clean": total == 0},
         "channel_names": names,

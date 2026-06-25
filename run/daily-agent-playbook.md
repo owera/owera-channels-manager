@@ -82,6 +82,10 @@ learn what works. Treat it as your standing instructions.
   `?sort=ctr` and `?sort=avg_view_pct` for the per-video leaderboard. If `measured` is
   0, analytics aren't flowing yet (channel not reconsented for the analytics scope) —
   note it in the report and skip analytics-driven actions this run.
+- **Board inventory:** read `state.issues.board_inventory` (or `GET /api/agent/issues`).
+  Note `days_of_inventory` and `at_capacity` per channel. A channel `at_capacity:true`
+  means the idea bench already has `board_horizon_days` worth of render work — do NOT
+  generate more ideas or adopt new trends for it this run.
 
 ### 1.1 Monetization milestone check
 `state.monetization_by_channel[channel_id]` gives subscriber count, watch hours, and
@@ -140,12 +144,22 @@ an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
 - Write down 1–3 concrete, falsifiable hypotheses for this run.
 
 ### 3. Act on the channels (via the REST API)
+**Board capacity gate — check before every idea/trend action:**
+Read `board_inventory` from step 1. For each channel:
+- `at_capacity:true` → **skip idea generation and trend adoption entirely** for that
+  channel this run. The pipeline already has enough work; more ideas just pile up unseen.
+- `days_of_inventory < 0.5` → the bench is low; prioritize refilling by generating ideas
+  or adopting a trend before anything else.
+- Only produce (DRAFT → QUEUED) if the channel has fewer queued videos than its
+  `daily_render_budget` (i.e., less than 1 day of active work in QUEUED state).
+
 Pick the highest-leverage few; you don't have to do all of them every run:
 - **Weight winners up / losers down:** `PATCH /api/topics/{id} {"weight": N}`
   (1 = normal, 2–4 = winner refills more, 0 = soft-pause, no new ideas). Use the
   weight knob, not deletion.
 - **Feed winners:** `POST /api/topics/{id}/generate {"count": 8}` to add fresh ideas to
   a proven theme; optionally `POST /api/videos/{id}/produce` to queue the best drafts.
+  Only do this if the channel is NOT at board capacity.
 - **Trend research & smart adoption** (the deliberate trend pipeline — do this every run):
   1. **Research** with WebSearch across the niche + language — new model/framework/tool
      releases and what's spiking (Hacker News, PyPI/npm trending, Reddit, release notes).
@@ -161,7 +175,7 @@ Pick the highest-leverage few; you don't have to do all of them every run:
      "content_format","momentum","score","status","decision_reason"}` (upserts by term).
   5. **Adopt the top 1–2 only**: `POST /api/trends/{id}/adopt {"produce_count":3,"idea_count":8}`
      — creates a topic, seeds ideas, and auto-produces a few so it renders today. Don't
-     flood; quality over volume.
+     flood; quality over volume. **Skip if the channel is at board capacity.**
 - **One-off new topic** (non-trend): `POST /api/topics {"channel_id":N,"name":"…",
   "theme_prompt":"…","content_format":"short|long","create_playlist":true}`.
 - **Sharpen a theme:** improve a topic's `theme_prompt` via `PATCH /api/topics/{id}` so

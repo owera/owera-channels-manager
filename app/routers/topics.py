@@ -109,6 +109,22 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     count = max(0, min(body.count, ceiling - current_drafts))
     if count == 0:
         return {"generated": 0, "reason": "idea ceiling reached"}
+    # Also cap at the channel-level board horizon: don't generate more ideas than the
+    # channel can render within board_horizon_days (same guard as autofill).
+    if cfg.board_horizon_days > 0:
+        ch = session.get(Channel, t.channel_id)
+        if ch:
+            channel_pending = session.exec(
+                select(func.count(Video.id)).where(
+                    Video.channel_id == t.channel_id,
+                    Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED])
+                )
+            ).one()
+            board_cap = ch.daily_render_budget * cfg.board_horizon_days
+            board_space = max(0, board_cap - channel_pending)
+            count = min(count, board_space)
+            if count == 0:
+                return {"generated": 0, "reason": "board at capacity (horizon reached)"}
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
     try:
         ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing),
