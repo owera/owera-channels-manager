@@ -48,7 +48,7 @@ _ACCENTS = ["#5b8cff", "#00c9a7", "#ff6b35", "#9b5fe0",
 # The universal GSAP timeline loop is embedded in each template — it animates every
 # .clip from its data-start/data-duration attributes, no per-clip tweens needed.
 _TEMPLATES = {
-    # 1. Near-black bg, gradient top bar, text slides up from below.
+    # 1. Near-black bg, gradient top bar, glow bloom bg, words stagger up.
     "bold_dark": """\
 <!doctype html>
 <html lang="en" data-resolution="__RES__">
@@ -60,30 +60,39 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
 #root{width:__W__px;height:__H__px;position:relative}
 #top-bar{position:absolute;top:0;left:0;width:100%;height:8px;
   background:linear-gradient(90deg,__ACCENT__,#a36bff)}
+#bg-motion{position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse at 80% 15%,__ACCENT__44,transparent 55%)}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
   font-size:__FS__px;font-weight:800;line-height:1.1;letter-spacing:-1px;
-  text-shadow:0 4px 24px rgba(0,0,0,.7)}
+  text-shadow:0 4px 24px rgba(0,0,0,.7);z-index:1}
+.word{display:inline-block}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
        data-start="0" data-duration="__DUR__">
     <div id="top-bar"></div>
+    <div id="bg-motion" style="opacity:0"></div>
     __CLIPS__
   </div>
   <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({paused:true});
+  tl.fromTo('#bg-motion',{opacity:0},{opacity:0.6,duration:__DUR__,ease:"sine.inOut"},0);
   document.querySelectorAll('.clip').forEach(el => {
-    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.6;
-    tl.fromTo(el,{opacity:0,y:28},{opacity:1,y:0,duration:f,ease:"power2.out"},s);
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
+    const f = el.dataset.w === "3" ? 0.85 : 0.6;
+    const words = el.querySelectorAll('.word');
+    const target = words.length > 1 ? words : el;
+    tl.fromTo(target,{opacity:0,y:28},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
+    if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},"<0.35").to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power2.in"},s+d-f);
   });
   window.__timelines["master"] = tl;
   </script>
 </body></html>""",
 
-    # 2. Off-white bg, dark text, thin accent line at bottom — clean editorial.
+    # 2. Off-white bg, dark text, floating accent dots, words stagger up.
     "light_minimal": """\
 <!doctype html>
 <html lang="en" data-resolution="__RES__">
@@ -94,29 +103,43 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
   overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
 #root{width:__W__px;height:__H__px;position:relative}
 #bottom-bar{position:absolute;bottom:0;left:0;width:100%;height:6px;background:__ACCENT__}
+#bg-motion{position:absolute;inset:0;z-index:0;pointer-events:none}
+.dot{position:absolute;width:5px;height:5px;border-radius:50%;background:__ACCENT__;opacity:0}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#111;opacity:0;
-  font-size:__FS__px;font-weight:700;line-height:1.15;letter-spacing:-0.5px}
+  font-size:__FS__px;font-weight:700;line-height:1.15;letter-spacing:-0.5px;z-index:1}
+.word{display:inline-block}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
        data-start="0" data-duration="__DUR__">
     <div id="bottom-bar"></div>
+    <div id="bg-motion">
+      <span class="dot" style="top:18%;left:12%"></span>
+      <span class="dot" style="top:72%;left:78%"></span>
+      <span class="dot" style="top:44%;left:91%"></span>
+      <span class="dot" style="top:85%;left:23%"></span>
+    </div>
     __CLIPS__
   </div>
   <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({paused:true});
+  tl.fromTo('#bg-motion .dot',{opacity:0,y:10},{opacity:0.3,y:0,stagger:__DUR__*0.25,duration:1.2,ease:"sine.out"},0);
   document.querySelectorAll('.clip').forEach(el => {
-    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.5;
-    tl.fromTo(el,{opacity:0,y:20},{opacity:1,y:0,duration:f,ease:"power1.out"},s);
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
+    const f = el.dataset.w === "3" ? 0.85 : 0.5;
+    const words = el.querySelectorAll('.word');
+    const target = words.length > 1 ? words : el;
+    tl.fromTo(target,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power1.out"},s);
+    if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},"<0.35").to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power1.in"},s+d-f);
   });
   window.__timelines["master"] = tl;
   </script>
 </body></html>""",
 
-    # 3. Vivid radial gradient bg (accent color), white text scales in — energetic.
+    # 3. Vivid radial gradient bg, breathing overlay, words stagger up — energetic.
     "gradient_kinetic": """\
 <!doctype html>
 <html lang="en" data-resolution="__RES__">
@@ -127,29 +150,38 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
   background:radial-gradient(ellipse at 35% 25%,__ACCENT__ 0%,#0b0b16 68%);
   overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
 #root{width:__W__px;height:__H__px;position:relative}
+#bg-motion{position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse at 35% 25%,__ACCENT__ 0%,transparent 55%)}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
   font-size:__FS__px;font-weight:900;line-height:1.08;letter-spacing:-1.5px;
-  text-shadow:0 2px 32px rgba(0,0,0,.75)}
+  text-shadow:0 2px 32px rgba(0,0,0,.75);z-index:1}
+.word{display:inline-block}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
        data-start="0" data-duration="__DUR__">
+    <div id="bg-motion" style="opacity:0.3"></div>
     __CLIPS__
   </div>
   <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({paused:true});
+  tl.fromTo('#bg-motion',{opacity:0.3,scale:1},{opacity:0.7,scale:1.1,duration:__DUR__,ease:"sine.inOut"},0);
   document.querySelectorAll('.clip').forEach(el => {
-    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.7;
-    tl.fromTo(el,{opacity:0,scale:0.91},{opacity:1,scale:1,duration:f,ease:"back.out(1.2)"},s);
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
+    const f = el.dataset.w === "3" ? 0.85 : 0.7;
+    const words = el.querySelectorAll('.word');
+    const target = words.length > 1 ? words : el;
+    tl.fromTo(target,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
+    if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},"<0.35").to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:1.05,duration:f,ease:"power2.in"},s+d-f);
   });
   window.__timelines["master"] = tl;
   </script>
 </body></html>""",
 
-    # 4. Very dark bg, accent color left border + glow on each clip — techy/neon.
+    # 4. Very dark bg, neon glow, scanlines sweep across, words stagger from left.
     "neon_accent": """\
 <!doctype html>
 <html lang="en" data-resolution="__RES__">
@@ -159,30 +191,43 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
 html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
   overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
 #root{width:__W__px;height:__H__px;position:relative}
+#bg-motion{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.scan{position:absolute;left:0;width:100%;height:1px;background:__ACCENT__;opacity:0.2}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
   font-size:__FS__px;font-weight:800;line-height:1.1;
   border-bottom:4px solid __ACCENT__;
-  text-shadow:0 0 48px __ACCENT__}
+  text-shadow:0 0 48px __ACCENT__;z-index:1}
+.word{display:inline-block}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
        data-start="0" data-duration="__DUR__">
+    <div id="bg-motion">
+      <div class="scan" style="top:30%"></div>
+      <div class="scan" style="top:60%"></div>
+      <div class="scan" style="top:90%"></div>
+    </div>
     __CLIPS__
   </div>
   <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({paused:true});
+  tl.fromTo('#bg-motion .scan',{x:'-100%'},{x:'0%',stagger:__DUR__/4,duration:1.5,ease:"power2.inOut"},0);
   document.querySelectorAll('.clip').forEach(el => {
-    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.5;
-    tl.fromTo(el,{opacity:0,x:-32},{opacity:1,x:0,duration:f,ease:"power3.out"},s);
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
+    const f = el.dataset.w === "3" ? 0.85 : 0.5;
+    const words = el.querySelectorAll('.word');
+    const target = words.length > 1 ? words : el;
+    tl.fromTo(target,{opacity:0,x:-32},{opacity:1,x:0,stagger:0.04,duration:0.28,ease:"power3.out"},s);
+    if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},"<0.35").to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,x:24,duration:f,ease:"power2.in"},s+d-f);
   });
   window.__timelines["master"] = tl;
   </script>
 </body></html>""",
 
-    # 5. Accent fills entire bg with a dark diagonal overlay — vivid, social-native.
+    # 5. Accent fills entire bg, overlay pulses, words stagger up — vivid, social-native.
     "vivid_color": """\
 <!doctype html>
 <html lang="en" data-resolution="__RES__">
@@ -193,22 +238,32 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
   font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
 #root{width:__W__px;height:__H__px;position:relative;
   background:linear-gradient(145deg,__ACCENT__ 0%,rgba(0,0,0,.42) 100%)}
+#bg-motion{position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:__ACCENT__;mix-blend-mode:overlay}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
   font-size:__FS__px;font-weight:900;line-height:1.08;
-  text-shadow:0 3px 20px rgba(0,0,0,.5)}
+  text-shadow:0 3px 20px rgba(0,0,0,.5);z-index:1}
+.word{display:inline-block}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
        data-start="0" data-duration="__DUR__">
+    <div id="bg-motion" style="opacity:0.4"></div>
     __CLIPS__
   </div>
   <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({paused:true});
+  tl.fromTo('#bg-motion',{opacity:0.4},{opacity:0.72,duration:__DUR__*0.5,ease:"sine.inOut"},0);
+  tl.fromTo('#bg-motion',{opacity:0.72},{opacity:0.4,duration:__DUR__*0.5,ease:"sine.inOut"},__DUR__*0.5);
   document.querySelectorAll('.clip').forEach(el => {
-    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.55;
-    tl.fromTo(el,{opacity:0,scale:1.07},{opacity:1,scale:1,duration:f,ease:"power2.out"},s);
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
+    const f = el.dataset.w === "3" ? 0.85 : 0.55;
+    const words = el.querySelectorAll('.word');
+    const target = words.length > 1 ? words : el;
+    tl.fromTo(target,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
+    if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},"<0.35").to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:0.95,duration:f,ease:"power2.in"},s+d-f);
   });
   window.__timelines["master"] = tl;
@@ -370,6 +425,7 @@ def _clips_from_json(raw: str, duration: float) -> list[dict] | None:
                 "text": str(c["text"])[:120].strip(),
                 "start": round(float(c["start"]), 3),
                 "duration": round(float(c["duration"]), 3),
+                "w": max(1, min(3, int(c.get("w", 1)))),
             })
         return clips
     except Exception:
@@ -392,11 +448,22 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
     """Inject validated clips into a template and return the final index.html."""
     pad = max(60, int(width * 0.08))
     fs = max(32, int(width * 0.065))
-    clip_els = [
-        f'<div class="clip" data-start="{c["start"]}" data-duration="{c["duration"]}" '
-        f'data-track-index="{i}">{_esc(c["text"])}</div>'
-        for i, c in enumerate(clips)
-    ]
+    clip_els = []
+    for i, c in enumerate(clips):
+        w = c.get("w", 1)
+        if w == 3:
+            style = f' style="font-size:{int(fs*1.45)}px;color:{accent}"'
+        elif w == 2:
+            style = f' style="font-size:{int(fs*1.15)}px"'
+        else:
+            style = ""
+        words_html = " ".join(
+            f'<span class="word">{word}</span>' for word in _esc(c["text"]).split()
+        )
+        clip_els.append(
+            f'<div class="clip" data-start="{c["start"]}" data-duration="{c["duration"]}" '
+            f'data-track-index="{i}" data-w="{w}"{style}>{words_html}</div>'
+        )
     return (_TEMPLATES[template_name]
             .replace("__RES__", resolution)
             .replace("__W__", str(width))
@@ -422,13 +489,15 @@ def _generate_composition(subject: str, script: str, resolution: str,
         "Respond with ONLY a valid JSON array — no prose, no markdown, no code fences. "
         f"Rules: {n_clips} clips (±2 is fine); each text ≤ 8 words; "
         f"no overlapping time windows; cover 0..{duration}s; "
-        "clips must be in chronological order."
+        "clips must be in chronological order. "
+        "Add \"w\": 1|2|3 to each clip: exactly one gets w=3 (the single core reveal or punchline); "
+        "2-4 get w=2 (supporting highlights); all others w=1."
     )
     prompt = (
         f"Video title: {subject}\n"
         f"Duration: {duration}s\n"
         f"Narration:\n{script}\n\n"
-        f'Return {n_clips} clips as: [{{"text":"...","start":0.0,"duration":{spacing}}}, ...]'
+        f'Return {n_clips} clips as: [{{"text":"...","start":0.0,"duration":{spacing},"w":1}}, ...]'
     )
     raw = _llm(prompt, system=system, max_tokens=900).strip()
     clips = _clips_from_json(raw, duration)
