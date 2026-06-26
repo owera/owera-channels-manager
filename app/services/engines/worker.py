@@ -14,10 +14,14 @@ render loop polls.
 
 import asyncio
 import hashlib
+import json
+import logging
 import os
 import re
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger("manager.worker")
 
 from app.config import REPO_DIR, settings
 from app.services.engines.base import STATE_COMPLETE, STATE_FAILED
@@ -31,6 +35,187 @@ _ASPECTS = {
     "16:9": ("landscape", 1920, 1080),
     "1:1": ("square", 1080, 1080),
 }
+
+# Accent colors cycled per subject hash — gives each video a consistent color identity.
+_ACCENTS = ["#5b8cff", "#00c9a7", "#ff6b35", "#9b5fe0",
+            "#ff3b5c", "#2ec4b6", "#ff85a1", "#f9c74f"]
+
+# Five visually distinct composition templates. Placeholders:
+#   __RES__    resolution preset   __W__ / __H__   pixel dimensions
+#   __DUR__    duration (float)    __ACCENT__       hex accent color
+#   __PAD__    horizontal padding  __FS__           primary font-size px
+#   __CLIPS__  rendered clip <div> elements
+# The universal GSAP timeline loop is embedded in each template — it animates every
+# .clip from its data-start/data-duration attributes, no per-clip tweens needed.
+_TEMPLATES = {
+    # 1. Near-black bg, gradient top bar, text slides up from below.
+    "bold_dark": """\
+<!doctype html>
+<html lang="en" data-resolution="__RES__">
+<head><meta charset="UTF-8"/>
+<script src="gsap.min.js"></script>
+<style>
+html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
+  overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+#root{width:__W__px;height:__H__px;position:relative}
+#top-bar{position:absolute;top:0;left:0;width:100%;height:8px;
+  background:linear-gradient(90deg,__ACCENT__,#a36bff)}
+.clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
+  font-size:__FS__px;font-weight:800;line-height:1.1;letter-spacing:-1px;
+  text-shadow:0 4px 24px rgba(0,0,0,.7)}
+</style></head>
+<body>
+  <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
+       data-start="0" data-duration="__DUR__">
+    <div id="top-bar"></div>
+    __CLIPS__
+  </div>
+  <script>
+  window.__timelines = window.__timelines || {};
+  const tl = gsap.timeline({paused:true});
+  document.querySelectorAll('.clip').forEach(el => {
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.6;
+    tl.fromTo(el,{opacity:0,y:28},{opacity:1,y:0,duration:f,ease:"power2.out"},s);
+    if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power2.in"},s+d-f);
+  });
+  window.__timelines["master"] = tl;
+  </script>
+</body></html>""",
+
+    # 2. Off-white bg, dark text, thin accent line at bottom — clean editorial.
+    "light_minimal": """\
+<!doctype html>
+<html lang="en" data-resolution="__RES__">
+<head><meta charset="UTF-8"/>
+<script src="gsap.min.js"></script>
+<style>
+html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
+  overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+#root{width:__W__px;height:__H__px;position:relative}
+#bottom-bar{position:absolute;bottom:0;left:0;width:100%;height:6px;background:__ACCENT__}
+.clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#111;opacity:0;
+  font-size:__FS__px;font-weight:700;line-height:1.15;letter-spacing:-0.5px}
+</style></head>
+<body>
+  <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
+       data-start="0" data-duration="__DUR__">
+    <div id="bottom-bar"></div>
+    __CLIPS__
+  </div>
+  <script>
+  window.__timelines = window.__timelines || {};
+  const tl = gsap.timeline({paused:true});
+  document.querySelectorAll('.clip').forEach(el => {
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.5;
+    tl.fromTo(el,{opacity:0,y:20},{opacity:1,y:0,duration:f,ease:"power1.out"},s);
+    if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power1.in"},s+d-f);
+  });
+  window.__timelines["master"] = tl;
+  </script>
+</body></html>""",
+
+    # 3. Vivid radial gradient bg (accent color), white text scales in — energetic.
+    "gradient_kinetic": """\
+<!doctype html>
+<html lang="en" data-resolution="__RES__">
+<head><meta charset="UTF-8"/>
+<script src="gsap.min.js"></script>
+<style>
+html,body{margin:0;padding:0;width:__W__px;height:__H__px;
+  background:radial-gradient(ellipse at 35% 25%,__ACCENT__ 0%,#0b0b16 68%);
+  overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+#root{width:__W__px;height:__H__px;position:relative}
+.clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
+  font-size:__FS__px;font-weight:900;line-height:1.08;letter-spacing:-1.5px;
+  text-shadow:0 2px 32px rgba(0,0,0,.75)}
+</style></head>
+<body>
+  <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
+       data-start="0" data-duration="__DUR__">
+    __CLIPS__
+  </div>
+  <script>
+  window.__timelines = window.__timelines || {};
+  const tl = gsap.timeline({paused:true});
+  document.querySelectorAll('.clip').forEach(el => {
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.7;
+    tl.fromTo(el,{opacity:0,scale:0.91},{opacity:1,scale:1,duration:f,ease:"back.out(1.2)"},s);
+    if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:1.05,duration:f,ease:"power2.in"},s+d-f);
+  });
+  window.__timelines["master"] = tl;
+  </script>
+</body></html>""",
+
+    # 4. Very dark bg, accent color left border + glow on each clip — techy/neon.
+    "neon_accent": """\
+<!doctype html>
+<html lang="en" data-resolution="__RES__">
+<head><meta charset="UTF-8"/>
+<script src="gsap.min.js"></script>
+<style>
+html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
+  overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+#root{width:__W__px;height:__H__px;position:relative}
+.clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
+  font-size:__FS__px;font-weight:800;line-height:1.1;
+  border-bottom:4px solid __ACCENT__;
+  text-shadow:0 0 48px __ACCENT__}
+</style></head>
+<body>
+  <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
+       data-start="0" data-duration="__DUR__">
+    __CLIPS__
+  </div>
+  <script>
+  window.__timelines = window.__timelines || {};
+  const tl = gsap.timeline({paused:true});
+  document.querySelectorAll('.clip').forEach(el => {
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.5;
+    tl.fromTo(el,{opacity:0,x:-32},{opacity:1,x:0,duration:f,ease:"power3.out"},s);
+    if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,x:24,duration:f,ease:"power2.in"},s+d-f);
+  });
+  window.__timelines["master"] = tl;
+  </script>
+</body></html>""",
+
+    # 5. Accent fills entire bg with a dark diagonal overlay — vivid, social-native.
+    "vivid_color": """\
+<!doctype html>
+<html lang="en" data-resolution="__RES__">
+<head><meta charset="UTF-8"/>
+<script src="gsap.min.js"></script>
+<style>
+html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
+  font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+#root{width:__W__px;height:__H__px;position:relative;
+  background:linear-gradient(145deg,__ACCENT__ 0%,rgba(0,0,0,.42) 100%)}
+.clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
+  font-size:__FS__px;font-weight:900;line-height:1.08;
+  text-shadow:0 3px 20px rgba(0,0,0,.5)}
+</style></head>
+<body>
+  <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
+       data-start="0" data-duration="__DUR__">
+    __CLIPS__
+  </div>
+  <script>
+  window.__timelines = window.__timelines || {};
+  const tl = gsap.timeline({paused:true});
+  document.querySelectorAll('.clip').forEach(el => {
+    const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.55;
+    tl.fromTo(el,{opacity:0,scale:1.07},{opacity:1,scale:1,duration:f,ease:"power2.out"},s);
+    if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:0.95,duration:f,ease:"power2.in"},s+d-f);
+  });
+  window.__timelines["master"] = tl;
+  </script>
+</body></html>""",
+}
+_TEMPLATE_KEYS = list(_TEMPLATES.keys())
 
 
 def _status(handle: str, **fields) -> None:
@@ -100,6 +285,16 @@ def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
     return resp.choices[0].message.content or ""
 
 
+def _word_count_bounds(params: dict) -> tuple[int, int]:
+    """Acceptable word count range for a generated script.  Scripts outside this band
+    on the first try get one retry with an explicit word count constraint."""
+    n = int(params.get("paragraph_number") or 2)
+    if (params.get("content_format") or "short") == "long":
+        target = max(400, min(700, 500 + (n - 6) * 50))
+        return int(target * 0.65), int(target * 1.35)
+    return 50, 140
+
+
 def _generate_script(subject: str, params: dict) -> str:
     n = int(params.get("paragraph_number") or 2)
     if (params.get("content_format") or "short") == "long":
@@ -131,64 +326,132 @@ def _generate_script(subject: str, params: dict) -> str:
         )
         max_tokens = 600
     text = _llm(prompt, max_tokens=max_tokens).strip()
-    # Strip accidental markdown/quote wrapping.
-    return re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
+    text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
+
+    # Word-count guard: if far outside the target range, retry once with an explicit hint.
+    lo, hi = _word_count_bounds(params)
+    wc = len(text.split())
+    if not (lo <= wc <= hi):
+        logger.debug("script word count %d outside [%d,%d] for %r; retrying", wc, lo, hi, subject)
+        retry = _llm(
+            prompt + f"\n\nIMPORTANT: Your response MUST be between {lo} and {hi} words. "
+            "Count carefully before responding.",
+            max_tokens=max_tokens,
+        ).strip()
+        retry = re.sub(r"^[\"'`]+|[\"'`]+$", "", retry).strip()
+        if retry:
+            text = retry
+
+    return text
 
 
-_COMPOSITION_SYSTEM = """You are an expert HyperFrames composition author. HyperFrames renders an HTML \
-file to MP4 by seeking a paused GSAP timeline frame by frame. Output a SINGLE \
-self-contained index.html and NOTHING else (no markdown fences, no prose).
+def _pick_template(subject: str) -> tuple[str, str]:
+    """Deterministic (subject-hash) template name + accent color — same title always
+    gets the same look, but different titles get visually distinct compositions."""
+    h = int(hashlib.sha1(subject.encode()).hexdigest(), 16)
+    name = _TEMPLATE_KEYS[h % len(_TEMPLATE_KEYS)]
+    accent = _ACCENTS[h % len(_ACCENTS)]
+    return name, accent
 
-HARD RULES — a violation makes the render fail:
-1. <html lang="en" data-resolution="{RES}"> ... </html>.
-2. Load GSAP from the local file: <script src="gsap.min.js"></script>. No CDNs, no other <script src>.
-3. The root element MUST be:
-   <div id="root" data-composition-id="master" data-width="{W}" data-height="{H}" data-start="0" data-duration="{DUR}"> ... </div>
-4. Every animated/timed element MUST have class="clip" and data-start, data-duration, data-track-index (unique integer per element).
-5. End <body> with EXACTLY this timeline script — do NOT hand-write per-element tweens. This
-   single loop animates every .clip from its data-start/data-duration, which keeps the output
-   short so it is never truncated (every .clip MUST therefore have valid numeric data-start
-   and data-duration):
-   <script>
-   window.__timelines = window.__timelines || {};
-   const tl = gsap.timeline({paused:true});
-   document.querySelectorAll('.clip').forEach(el => {
-     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration), f = 0.6;
-     tl.fromTo(el, {opacity:0, y:28}, {opacity:1, y:0, duration:f, ease:"power2.out"}, s);
-     if (s + d < {DUR} - 0.1) tl.to(el, {opacity:0, duration:f, ease:"power2.in"}, s + d - f);
-   });
-   window.__timelines["master"] = tl;
-   </script>
-6. Deterministic only: NO Math.random, NO Date.now, NO fetch/network, NO external images/fonts/video.
-7. All timing must fit within 0..{DUR} seconds. Keep text inside safe margins (>=80px from edges).
-8. ONE TEXT BLOCK AT A TIME: the [data-start, data-start+data-duration] windows of your .clip
-   elements MUST NOT overlap — give each phrase its own slot, so only one shows at a time
-   (the timeline above fades each clip in at its data-start and out at the end of its window).
 
-STYLE: modern, bold, high-contrast motion graphics. A title clip, then 8-16 short phrase clips \
-revealed ONE at a time in a single centered focal area — each cleanly replaces the previous, \
-never cluttered or overlapping. Big, readable system-sans type. Tasteful dark or vivid background."""
+def _clips_from_json(raw: str, duration: float) -> list[dict] | None:
+    """Parse the LLM's JSON clip array. Returns None on any parse/schema error."""
+    try:
+        # The model sometimes wraps the array in prose or a ```json fence.
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        data = json.loads(m.group(0) if m else raw)
+        if not isinstance(data, list) or len(data) < 3:
+            return None
+        clips = []
+        for c in data:
+            if not all(k in c for k in ("text", "start", "duration")):
+                return None
+            clips.append({
+                "text": str(c["text"])[:120].strip(),
+                "start": round(float(c["start"]), 3),
+                "duration": round(float(c["duration"]), 3),
+            })
+        return clips
+    except Exception:
+        return None
+
+
+def _validate_clips(clips: list[dict], duration: float) -> bool:
+    """Verify: no overlapping windows, positive durations, all within video length."""
+    intervals = sorted((c["start"], c["start"] + c["duration"]) for c in clips)
+    for i, (s, e) in enumerate(intervals):
+        if s < -0.05 or e > duration + 0.6 or e - s < 0.5:
+            return False
+        if i > 0 and s < intervals[i - 1][1] - 0.12:   # 120ms tolerance for float rounding
+            return False
+    return True
+
+
+def _assemble_composition(clips: list[dict], template_name: str, accent: str,
+                          resolution: str, width: int, height: int, duration: float) -> str:
+    """Inject validated clips into a template and return the final index.html."""
+    pad = max(60, int(width * 0.08))
+    fs = max(32, int(width * 0.065))
+    clip_els = [
+        f'<div class="clip" data-start="{c["start"]}" data-duration="{c["duration"]}" '
+        f'data-track-index="{i}">{_esc(c["text"])}</div>'
+        for i, c in enumerate(clips)
+    ]
+    return (_TEMPLATES[template_name]
+            .replace("__RES__", resolution)
+            .replace("__W__", str(width))
+            .replace("__H__", str(height))
+            .replace("__DUR__", str(duration))
+            .replace("__ACCENT__", accent)
+            .replace("__PAD__", str(pad))
+            .replace("__FS__", str(fs))
+            .replace("__CLIPS__", "\n    ".join(clip_els)))
 
 
 def _generate_composition(subject: str, script: str, resolution: str,
                           width: int, height: int, duration: float) -> str:
-    system = (_COMPOSITION_SYSTEM
-              .replace("{RES}", resolution).replace("{W}", str(width))
-              .replace("{H}", str(height)).replace("{DUR}", str(duration)))
-    prompt = (
-        f"Topic/title: {subject}\n\nNarration (visuals should reinforce this, do not just "
-        f"dump it verbatim):\n{script}\n\nThe video is {duration} seconds at {width}x{height} "
-        f"({resolution}). Author the index.html now."
+    """Generate a composition by asking the LLM for clip content only, then injecting
+    into a pre-authored template.  Falls back to empty string on failure (caller will
+    use _fallback_composition).  Token usage is ~90% lower than the old full-HTML approach."""
+    template_name, accent = _pick_template(subject)
+    n_clips = max(6, min(12, int(duration / 4)))
+    spacing = round(duration / n_clips, 2)
+
+    system = (
+        "You extract phrase clips from a video narration for a motion-graphics composition. "
+        "Respond with ONLY a valid JSON array — no prose, no markdown, no code fences. "
+        f"Rules: {n_clips} clips (±2 is fine); each text ≤ 8 words; "
+        f"no overlapping time windows; cover 0..{duration}s; "
+        "clips must be in chronological order."
     )
-    html = _llm(prompt, system=system, max_tokens=8000).strip()
-    return _strip_fences(html)
+    prompt = (
+        f"Video title: {subject}\n"
+        f"Duration: {duration}s\n"
+        f"Narration:\n{script}\n\n"
+        f'Return {n_clips} clips as: [{{"text":"...","start":0.0,"duration":{spacing}}}, ...]'
+    )
+    raw = _llm(prompt, system=system, max_tokens=900).strip()
+    clips = _clips_from_json(raw, duration)
+    if clips and _validate_clips(clips, duration):
+        return _assemble_composition(clips, template_name, accent,
+                                     resolution, width, height, duration)
 
+    # Retry with rigid evenly-spaced timing so the model only writes the text.
+    retry_prompt = (
+        f"Video title: {subject}\n"
+        f"Duration: {duration}s\n"
+        f"Extract exactly {n_clips} short phrases (≤8 words each) from this narration "
+        f"and space them {spacing}s apart starting at 0.0:\n{script}\n\n"
+        f"Return ONLY: [{{'\"text\":\"...\",\"start\":0.0,\"duration\":{spacing}}},"
+        f" {{\"text\":\"...\",\"start\":{spacing},\"duration\":{spacing}}}, ...]"
+    )
+    raw2 = _llm(retry_prompt, system=system, max_tokens=900).strip()
+    clips2 = _clips_from_json(raw2, duration)
+    if clips2 and _validate_clips(clips2, duration):
+        return _assemble_composition(clips2, template_name, accent,
+                                     resolution, width, height, duration)
 
-def _strip_fences(text: str) -> str:
-    m = re.search(r"```(?:html)?\s*(.*?)```", text, re.DOTALL)
-    if m:
-        return m.group(1).strip()
-    return text
+    return ""   # signals to run_job to use _fallback_composition
 
 
 def _looks_valid(html: str) -> bool:
