@@ -144,6 +144,7 @@ export interface ParamsOptions {
   video_transition_mode: (string | null)[];
   video_source: string[];
   subtitle_position: string[];
+  bgm_type: string[];
   voices: string[];
   fonts: string[];
   bgm_files: string[];

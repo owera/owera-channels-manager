@@ -11,6 +11,7 @@ const SELECT_SOURCE: Record<string, keyof ParamsOptions> = {
   video_transition_mode: "video_transition_mode",
   video_source: "video_source",
   subtitle_position: "subtitle_position",
+  bgm_type: "bgm_type",
 };
 
 // Sensible defaults pre-filled into a new profile (mirror the proven channel settings).

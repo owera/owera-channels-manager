@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
-from app.config import MPT_DIR
+from app.config import MPT_DIR, settings
 from app.db import get_session
 from app.models import RenderProfile, utcnow
 from app.schemas import ProfileCreate, ProfileUpdate
@@ -98,7 +98,12 @@ def params_options():
         fonts = sorted(p.name for p in _FONTS_DIR.iterdir()
                        if p.suffix.lower() in (".ttf", ".ttc", ".otf"))
 
-    bgm = [f.get("name") for f in mpt.list_musics()]
+    # Read BGM files directly from the musicgen pool (same source as the render worker).
+    bgm_dir = Path(settings.bgm_dir)
+    bgm = sorted(
+        p.name for p in bgm_dir.glob("*")
+        if p.suffix.lower() in (".mp3", ".m4a", ".wav")
+    ) if bgm_dir.exists() else []
 
     return {
         "defaults": DEFAULT_PARAMS,
@@ -107,6 +112,7 @@ def params_options():
         "video_transition_mode": [None, "Shuffle", "FadeIn", "FadeOut", "SlideIn", "SlideOut"],
         "video_source": ["pexels", "pixabay", "coverr", "local"],
         "subtitle_position": ["bottom", "top", "center", "custom"],
+        "bgm_type": ["random", ""],          # random = auto-pick from pool; "" = silence
         "voices": voices,
         "fonts": fonts or ["STHeitiMedium.ttc"],
         "bgm_files": bgm,
@@ -117,7 +123,7 @@ def params_options():
             "video_aspect": "select", "video_concat_mode": "select",
             "video_transition_mode": "select", "video_clip_duration": "int",
             "paragraph_number": "int", "voice_name": "voice", "voice_rate": "float",
-            "voice_volume": "float", "bgm_type": "text", "bgm_file": "bgm",
+            "voice_volume": "float", "bgm_type": "select", "bgm_file": "bgm",
             "bgm_volume": "float", "subtitle_enabled": "bool",
             "subtitle_position": "select", "custom_position": "float",
             "font_name": "font", "font_size": "int", "text_fore_color": "color",
