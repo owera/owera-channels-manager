@@ -4,15 +4,15 @@ import { Field, SectionLabel, Toggle } from "../ui";
 export default function Settings() {
   const { data: s } = useSettings();
   const m = useMut();
-  if (!s) return <div className="p-8 font-mono text-fog-400">loading…</div>;
+  if (!s) return <div className="p-4 md:p-8 font-mono text-fog-400">loading…</div>;
 
   const patch = (body: any) => m.updateSettings.mutate(body);
 
   return (
-    <div className="p-8 max-w-[760px]">
-      <header className="mb-8">
+    <div className="p-4 md:p-8 max-w-[760px]">
+      <header className="mb-6 md:mb-8">
         <div className="label mb-2">// settings</div>
-        <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Settings</h1>
+        <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Settings</h1>
       </header>
 
       <div className="panel p-6 mb-6">

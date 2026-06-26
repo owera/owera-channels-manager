@@ -24,7 +24,8 @@ body {
     radial-gradient(circle at 0% 100%, rgba(86, 200, 230, 0.05), transparent 40%),
     radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: auto, auto, 22px 22px;
-  background-attachment: fixed;
+  /* iOS Safari doesn't support background-attachment:fixed; use scroll for mobile compat */
+  background-attachment: scroll;
 }
 
 /* fine film grain overlay */

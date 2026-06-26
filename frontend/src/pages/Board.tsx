@@ -198,7 +198,7 @@ export default function Board() {
   const shown = (videos || []).filter((v) => !topicFilter || v.topic_id === topicFilter);
   const editingLive = editing ? shown.find((v) => v.id === editing.id) ?? editing : null;
 
-  if (!channels?.length) return <div className="p-8"><Empty>Add a channel first.</Empty></div>;
+  if (!channels?.length) return <div className="p-4 md:p-8"><Empty>Add a channel first.</Empty></div>;
 
   const produceAll = () => {
     const ids = shown.filter((v) => v.status === "draft").map((v) => v.id);
@@ -225,25 +225,25 @@ export default function Board() {
   (topics ?? []).forEach((t) => { formats[t.id] = t.content_format; });
 
   return (
-    <div className="p-8 h-full flex flex-col">
-      <header className="flex items-end justify-between mb-5">
+    <div className="p-4 md:p-8 h-full flex flex-col">
+      <header className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
           <div className="label mb-2">// video queue</div>
-          <div className="flex items-center gap-3">
-            <select className="bg-transparent font-display font-extrabold text-4xl text-fog-50 tracking-tight focus:outline-none cursor-pointer"
+          <div className="flex items-center gap-2 sm:gap-3">
+            <select className="bg-transparent font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight focus:outline-none cursor-pointer"
               value={active} onChange={(e) => nav(`/board/${e.target.value}`)}>
               {channels.map((c) => <option key={c.id} value={c.id} className="bg-ink-700 text-base font-sans">{c.name}</option>)}
             </select>
-            <span className="text-fog-400 font-display text-4xl">▾</span>
+            <span className="text-fog-400 font-display text-2xl sm:text-4xl">▾</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <select className="input !w-auto" value={topicFilter ?? ""}
             onChange={(e) => { e.target.value ? setSp({ topic: e.target.value }) : setSp({}); }}>
             <option value="">all topics</option>
             {topics?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <Link to="/channels" className="btn">+ topics &amp; ideas</Link>
+          <Link to="/channels" className="btn whitespace-nowrap">+ topics</Link>
         </div>
       </header>
 

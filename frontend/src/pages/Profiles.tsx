@@ -403,14 +403,14 @@ export default function Profiles() {
   const channelName = (id: number | null) => id ? channels?.find((c) => c.id === id)?.name : "shared";
 
   return (
-    <div className="p-8 max-w-[1100px]">
-      <header className="flex items-end justify-between mb-8">
+    <div className="p-4 md:p-8 max-w-[1100px]">
+      <header className="flex flex-wrap items-end justify-between gap-4 mb-6 md:mb-8">
         <div>
           <div className="label mb-2">// render profiles</div>
-          <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Render Profiles</h1>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Render Profiles</h1>
           <p className="text-fog-300 text-sm mt-2 max-w-xl">Reusable presets over the full generation surface — voice, aspect, subtitle styling, music, transitions, script length. Assign per channel or per topic.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button className="btn" onClick={() => setPack(true)}>+ language pack</button>
           <button className="btn btn-signal" onClick={() => setEditing({})}>+ new profile</button>
         </div>
@@ -419,7 +419,7 @@ export default function Profiles() {
       {!profiles?.length ? (
         <Empty>No profiles yet — the engine defaults apply. Create one to customize the look.</Empty>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {profiles.map((p) => {
             const params = JSON.parse(p.params_json || "{}");
             return (

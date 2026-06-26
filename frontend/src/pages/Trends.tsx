@@ -111,10 +111,10 @@ export default function Trends() {
   const FILTERS: (TrendStatus | "all")[] = ["all", "researched", "watching", "adopted", "rejected"];
 
   return (
-    <div className="p-8 max-w-[1400px]">
+    <div className="p-4 md:p-8 max-w-[1400px]">
       <header className="mb-6">
         <div className="label mb-2">// trends</div>
-        <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Trend Radar</h1>
+        <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Trend Radar</h1>
         <p className="text-fog-300 text-sm mt-2 max-w-2xl">
           What the growth agent is researching across the AI/tech niche, scored for fit. Adopting a
           trend spins up a topic, seeds ideas, and auto-produces a few. The agent adopts the top picks

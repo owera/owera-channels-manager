@@ -8,17 +8,17 @@ import Settings from "./pages/Settings";
 import Trends from "./pages/Trends";
 
 const NAV = [
-  { to: "/", label: "Overview", end: true, code: "00" },
-  { to: "/board", label: "Queue Board", code: "01" },
-  { to: "/channels", label: "Channels", code: "02" },
-  { to: "/trends", label: "Trends", code: "03" },
-  { to: "/profiles", label: "Render Profiles", code: "04" },
-  { to: "/settings", label: "Settings", code: "05" },
+  { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
+  { to: "/board", label: "Queue Board", short: "Board", code: "01" },
+  { to: "/channels", label: "Channels", short: "Channels", code: "02" },
+  { to: "/trends", label: "Trends", short: "Trends", code: "03" },
+  { to: "/profiles", label: "Render Profiles", short: "Profiles", code: "04" },
+  { to: "/settings", label: "Settings", short: "Config", code: "05" },
 ];
 
 function Sidebar() {
   return (
-    <aside className="w-60 shrink-0 border-r border-ink-line bg-ink-800/60 flex flex-col">
+    <aside className="hidden md:flex w-60 shrink-0 border-r border-ink-line bg-ink-800/60 flex-col">
       <div className="px-5 pt-6 pb-5 border-b border-ink-line">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 bg-signal rounded-sm shadow-glow" />
@@ -52,11 +52,33 @@ function Sidebar() {
   );
 }
 
+function BottomNav() {
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 md:hidden z-40 bg-ink-800/95 backdrop-blur-sm border-t border-ink-line flex">
+      {NAV.map((n) => (
+        <NavLink
+          key={n.to}
+          to={n.to}
+          end={n.end}
+          className={({ isActive }) =>
+            `flex-1 flex flex-col items-center pt-2 pb-3 gap-0.5 font-mono text-[8px] uppercase tracking-widest transition-colors ${
+              isActive ? "text-signal" : "text-fog-400"
+            }`
+          }
+        >
+          <span className="font-display font-extrabold text-[14px] leading-none tabular-nums">{n.code}</span>
+          <span>{n.short}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
 export default function App() {
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto pb-[56px] md:pb-0">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/board" element={<Board />} />
@@ -68,6 +90,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
+      <BottomNav />
     </div>
   );
 }

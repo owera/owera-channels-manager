@@ -262,17 +262,17 @@ export default function Channels() {
   const selected = channels?.find((c) => c.id === sel) || channels?.[0];
 
   return (
-    <div className="p-8 max-w-[1400px]">
-      <header className="flex items-end justify-between mb-8">
+    <div className="p-4 md:p-8 max-w-[1400px]">
+      <header className="flex items-end justify-between mb-6 md:mb-8">
         <div><div className="label mb-2">// channels</div>
-          <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Channels</h1></div>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Channels</h1></div>
         <button className="btn btn-signal" onClick={() => setOpen(true)}>+ add channel</button>
       </header>
 
       {!channels?.length ? (
         <Empty>No channels yet. Click <span className="text-signal">+ add channel</span> to begin.</Empty>
       ) : (
-        <div className="grid grid-cols-[260px_1fr] gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4 md:gap-6">
           <div className="space-y-1.5">
             {channels.map((c) => (
               <button key={c.id} onClick={() => setSel(c.id)}

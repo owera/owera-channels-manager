@@ -130,11 +130,11 @@ export default function Dashboard() {
   const active = rows?.flatMap((r) => r.active.map((a) => ({ ...a, channel: r.channel.name }))) ?? [];
 
   return (
-    <div className="p-8 max-w-[1500px]">
+    <div className="p-4 md:p-8 max-w-[1500px]">
       <header className="flex items-end justify-between mb-6">
         <div>
           <div className="label mb-2">// overview</div>
-          <h1 className="font-display font-extrabold text-4xl text-fog-50 tracking-tight">Control Room</h1>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Control Room</h1>
         </div>
         <div className="flex items-center gap-4 font-mono text-xs">
           {settings?.youtube_quota_reset_at && (
@@ -165,12 +165,12 @@ export default function Dashboard() {
         ) : (
           <div className="space-y-2">
             {active.map((a) => (
-              <div key={a.id} className="flex items-center gap-3">
+              <div key={a.id} className="flex items-center gap-2 sm:gap-3">
                 <Dot hex={STATUS_META[a.status].hex} pulse />
-                <span className="font-mono text-[10px] uppercase tracking-wider w-[88px]" style={{ color: STATUS_META[a.status].hex }}>{STATUS_META[a.status].label}</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider w-[72px] sm:w-[88px] shrink-0" style={{ color: STATUS_META[a.status].hex }}>{STATUS_META[a.status].label}</span>
                 <span className="text-sm text-fog-100 truncate flex-1">{a.subject}</span>
-                <span className="label text-fog-400">{a.channel}</span>
-                <div className="w-28 h-1.5 bg-ink-500 rounded-full overflow-hidden">
+                <span className="label text-fog-400 hidden sm:inline">{a.channel}</span>
+                <div className="hidden sm:block w-28 h-1.5 bg-ink-500 rounded-full overflow-hidden">
                   <div className="h-full" style={{ width: `${a.render_progress}%`, background: STATUS_META[a.status].hex }} />
                 </div>
                 <span className="label tabular-nums w-8 text-right">{a.render_progress}%</span>
@@ -196,10 +196,10 @@ export default function Dashboard() {
       <div className="panel divide-y divide-ink-line/60">
         {!runs?.length && <div className="px-4 py-6 text-fog-400 font-mono text-xs">no activity yet</div>}
         {runs?.slice(0, 16).map((r) => (
-          <div key={r.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
+          <div key={r.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 font-mono text-xs">
             <Dot hex={r.status === "success" ? "#c9f24e" : r.status === "error" ? "#f7768e" : "#56c8e6"} />
-            <span className="text-fog-400 tabular-nums w-[112px] shrink-0">{new Date(r.created_at + "Z").toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-            <span className="uppercase tracking-wider text-fog-200 w-[92px] shrink-0">{r.kind}</span>
+            <span className="text-fog-400 tabular-nums shrink-0 text-[10px] sm:text-xs w-[86px] sm:w-[112px]">{new Date(r.created_at + "Z").toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+            <span className="hidden sm:inline uppercase tracking-wider text-fog-200 w-[92px] shrink-0">{r.kind}</span>
             <span className="text-fog-300 truncate flex-1">{r.detail || r.status}</span>
             {r.quota_cost > 0 && <span className="text-fog-400 shrink-0">−{r.quota_cost}u</span>}
           </div>
