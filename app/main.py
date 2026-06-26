@@ -1,10 +1,13 @@
+import base64
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.requests import Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import ensure_dirs, load_dotenv_into_env, settings
@@ -38,6 +41,26 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def basic_auth(request: Request, call_next):
+    """HTTP Basic Auth guard. Only active when MANAGER_APP_PASSWORD is set in .env."""
+    if not settings.app_password:
+        return await call_next(request)
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
+            _username, _, password = decoded.partition(":")
+            if secrets.compare_digest(password, settings.app_password):
+                return await call_next(request)
+        except Exception:
+            pass
+    return Response(
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Owera Channels Manager"'},
+    )
 
 for r in (channels, playlists, profiles, topics, videos, queue, media, settings_router,
           youtube_admin, trends, music):

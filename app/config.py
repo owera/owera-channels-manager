@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 7070
 
+    # Optional HTTP Basic Auth password for public access. Any username + this
+    # password is accepted. Empty string = no auth (safe for local-only use).
+    app_password: str = ""
+
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_storage_dir: str = str(MPT_DIR / "storage" / "tasks")
