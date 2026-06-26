@@ -72,8 +72,12 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
         return
     out_png = Path(video.video_path).parent / "thumb_custom.png"
     try:
+        import json as _json
+        _params = _json.loads(video.overrides_json or "{}")
         png = thumbnail.make_thumbnail_png(
-            video.subject, video.title, out_png)
+            video.subject, video.title, out_png,
+            topic_id=video.topic_id or 0,
+            content_format=_params.get("content_format", "short"))
         if not png:
             quota.log(session, kind="thumbnail", status="error", video_id=video.id,
                       channel_id=channel.id, detail="thumbnail generation failed")

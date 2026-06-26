@@ -27,30 +27,52 @@ _W, _H = 1920, 1080
 _OUT_W, _OUT_H = 1280, 720
 _RENDER_TIMEOUT = 240            # a static card renders fast; never stall a publish
 
+# Eight accent colors — thumbnail picks by topic_id so same topic = same brand color.
+_THUMB_PALETTE = [
+    ("#5b8cff", "#1b2a6b"),   # blue
+    ("#00c9a7", "#0b2e22"),   # teal
+    ("#ff6b35", "#2e1208"),   # orange
+    ("#9b5fe0", "#1a0b2e"),   # purple
+    ("#ff3b5c", "#2e0b12"),   # red
+    ("#2ec4b6", "#0b2228"),   # cyan
+    ("#ff85a1", "#2e0b1a"),   # pink
+    ("#f9c74f", "#2e2208"),   # gold
+]
 
-def _hook_text(subject: str, title: str | None) -> str:
+
+def _hook_text(subject: str, title: str | None,
+               content_format: str = "short") -> str:
     """A punchy 3–6 word thumbnail hook. LLM with a deterministic fallback."""
     base = (title or subject or "").strip()
     try:
+        fmt_hint = ("short-form vertical video" if content_format == "short"
+                    else "long-form YouTube video")
         system = (
             "You write YouTube thumbnail hooks. Return ONLY a single punchy hook of "
             "3 to 6 words that creates curiosity — no quotes, no emojis, no hashtags, "
-            "no trailing punctuation. Prefer concrete, high-contrast words. "
+            "no trailing punctuation. Prefer concrete, high-contrast words. Use natural "
+            "capitalization (Title Case or ALL CAPS for single key words only if it adds "
+            "punch — never force everything to uppercase). "
             "Always respond in the same language as the video title."
         )
-        out = _llm(f"Video title: {base}\n\nWrite the thumbnail hook.",
-                   system=system, max_tokens=40).strip()
+        prompt = (
+            f"Video title: {base}\n"
+            f"Format: {fmt_hint}\n\n"
+            "Write the thumbnail hook."
+        )
+        out = _llm(prompt, system=system, max_tokens=100).strip()
         out = re.sub(r'^["\'`]+|["\'`]+$', "", out).splitlines()[0].strip()
         words = out.split()
-        if 2 <= len(words) <= 8 and len(out) <= 48:
-            return out.upper()
+        if 2 <= len(words) <= 8 and len(out) <= 60:
+            return out
     except Exception as e:
         logger.info("thumbnail hook LLM failed, using title: %s", e)
-    # Fallback: first ~5 words of the title.
-    return " ".join(base.split()[:5]).upper() or "WATCH THIS"
+    # Fallback: first ~5 words of the title in Title Case.
+    return " ".join(base.split()[:5]).title() or "Watch This"
 
 
-def _thumbnail_html(hook: str) -> str:
+def _thumbnail_html(hook: str, accent: str = "#5b8cff",
+                    bg_deep: str = "#1b2a6b") -> str:
     """A deterministic, guaranteed-valid static hook card. One clip, fully visible
     for the whole (tiny) duration; the timeline is non-empty so HyperFrames seeks it
     cleanly, and every extracted frame shows the text."""
@@ -64,9 +86,9 @@ def _thumbnail_html(hook: str) -> str:
   html,body{{margin:0;padding:0;width:{_W}px;height:{_H}px;overflow:hidden;
     font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}}
   #root{{width:{_W}px;height:{_H}px;position:relative;
-    background:radial-gradient(120% 120% at 20% 0%,#1b2a6b 0%,#0b0b16 60%)}}
+    background:radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#0b0b16 60%)}}
   #accent{{position:absolute;left:0;top:0;height:18px;width:100%;
-    background:linear-gradient(90deg,#5b8cff,#a36bff,#ff5bb0)}}
+    background:linear-gradient(90deg,{accent},#a36bff,#ff5bb0)}}
   #hook{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     padding:0 {pad}px;box-sizing:border-box;text-align:center;color:#fff;opacity:1;
     font-size:{font}px;font-weight:800;line-height:1.04;letter-spacing:-2px;
@@ -109,15 +131,19 @@ def _extract_frame(mp4: Path, out_png: Path) -> None:
         raise RuntimeError(f"ffmpeg thumbnail extract failed: {(r.stderr or '')[-300:]}")
 
 
-def make_thumbnail_png(subject: str, title: str | None, out_png: Path) -> Path | None:
+def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
+                       topic_id: int = 0,
+                       content_format: str = "short") -> Path | None:
     """Build a custom thumbnail PNG at `out_png`. Returns the path, or None on any
     failure (caller treats thumbnails as best-effort)."""
     out_png = Path(out_png)
+    accent, bg_deep = _THUMB_PALETTE[topic_id % len(_THUMB_PALETTE)]
     work = out_png.parent / ".thumb_work"
     try:
         work.mkdir(parents=True, exist_ok=True)
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
-        (work / "index.html").write_text(_thumbnail_html(_hook_text(subject, title)))
+        hook = _hook_text(subject, title, content_format=content_format)
+        (work / "index.html").write_text(_thumbnail_html(hook, accent=accent, bg_deep=bg_deep))
         _render(work, work / "thumb.mp4")
         _extract_frame(work / "thumb.mp4", out_png)
         return out_png
