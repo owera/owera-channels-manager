@@ -83,7 +83,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
     const f = el.dataset.w === "3" ? 0.85 : 0.6;
     const words = el.querySelectorAll('.word');
-    tl.set(el,{opacity:1},s);
+    tl.set(el,{opacity:1,immediateRender:false},s);
     tl.fromTo(words.length ? words : el,{opacity:0,y:28},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power2.in"},s+d-f);
@@ -130,7 +130,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
     const f = el.dataset.w === "3" ? 0.85 : 0.5;
     const words = el.querySelectorAll('.word');
-    tl.set(el,{opacity:1},s);
+    tl.set(el,{opacity:1,immediateRender:false},s);
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power1.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power1.in"},s+d-f);
@@ -172,7 +172,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
     const f = el.dataset.w === "3" ? 0.85 : 0.7;
     const words = el.querySelectorAll('.word');
-    tl.set(el,{opacity:1},s);
+    tl.set(el,{opacity:1,immediateRender:false},s);
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:1.05,duration:f,ease:"power2.in"},s+d-f);
@@ -218,7 +218,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
     const f = el.dataset.w === "3" ? 0.85 : 0.5;
     const words = el.querySelectorAll('.word');
-    tl.set(el,{opacity:1},s);
+    tl.set(el,{opacity:1,immediateRender:false},s);
     tl.fromTo(words.length ? words : el,{opacity:0,x:-32},{opacity:1,x:0,stagger:0.04,duration:0.28,ease:"power3.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,x:24,duration:f,ease:"power2.in"},s+d-f);
@@ -261,7 +261,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
     const s = parseFloat(el.dataset.start), d = parseFloat(el.dataset.duration);
     const f = el.dataset.w === "3" ? 0.85 : 0.55;
     const words = el.querySelectorAll('.word');
-    tl.set(el,{opacity:1},s);
+    tl.set(el,{opacity:1,immediateRender:false},s);
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:0.95,duration:f,ease:"power2.in"},s+d-f);
