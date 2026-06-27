@@ -68,6 +68,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
   text-shadow:0 4px 24px rgba(0,0,0,.7);z-index:1}
 .word{display:inline-block}
 .clip-text{display:block;width:100%;text-align:center}
+.clip-emoji{display:block;font-size:calc(__FS__px * 0.85);line-height:1;margin-bottom:0.15em;opacity:0;transform:scale(0.5)}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -85,6 +86,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
     const f = el.dataset.w === "3" ? 0.85 : 0.6;
     const words = el.querySelectorAll('.word');
     tl.set(el,{opacity:1,immediateRender:false},s);
+    const em0=el.querySelector('.clip-emoji');if(em0)tl.fromTo(em0,{opacity:0,scale:0.4},{opacity:1,scale:1,duration:0.18,ease:"back.out(2)"},Math.max(0,s-0.12));
     tl.fromTo(words.length ? words : el,{opacity:0,y:28},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power2.in"},s+d-f);
@@ -111,6 +113,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
   font-size:__FS__px;font-weight:700;line-height:1.35;letter-spacing:-0.5px;z-index:1}
 .word{display:inline-block}
 .clip-text{display:block;width:100%;text-align:center}
+.clip-emoji{display:block;font-size:calc(__FS__px * 0.85);line-height:1;margin-bottom:0.15em;opacity:0;transform:scale(0.5)}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -133,6 +136,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
     const f = el.dataset.w === "3" ? 0.85 : 0.5;
     const words = el.querySelectorAll('.word');
     tl.set(el,{opacity:1,immediateRender:false},s);
+    const em1=el.querySelector('.clip-emoji');if(em1)tl.fromTo(em1,{opacity:0,scale:0.4},{opacity:1,scale:1,duration:0.18,ease:"back.out(2)"},Math.max(0,s-0.12));
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power1.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,duration:f,ease:"power1.in"},s+d-f);
@@ -160,6 +164,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
   text-shadow:0 2px 32px rgba(0,0,0,.75);z-index:1}
 .word{display:inline-block}
 .clip-text{display:block;width:100%;text-align:center}
+.clip-emoji{display:block;font-size:calc(__FS__px * 0.85);line-height:1;margin-bottom:0.15em;opacity:0;transform:scale(0.5)}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -176,6 +181,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
     const f = el.dataset.w === "3" ? 0.85 : 0.7;
     const words = el.querySelectorAll('.word');
     tl.set(el,{opacity:1,immediateRender:false},s);
+    const em2=el.querySelector('.clip-emoji');if(em2)tl.fromTo(em2,{opacity:0,scale:0.4},{opacity:1,scale:1,duration:0.18,ease:"back.out(2)"},Math.max(0,s-0.12));
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:1.05,duration:f,ease:"power2.in"},s+d-f);
@@ -203,6 +209,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
   text-shadow:0 0 48px __ACCENT__;z-index:1}
 .word{display:inline-block}
 .clip-text{display:block;width:100%;text-align:center}
+.clip-emoji{display:block;font-size:calc(__FS__px * 0.85);line-height:1;margin-bottom:0.15em;opacity:0;transform:scale(0.5)}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -223,6 +230,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
     const f = el.dataset.w === "3" ? 0.85 : 0.5;
     const words = el.querySelectorAll('.word');
     tl.set(el,{opacity:1,immediateRender:false},s);
+    const em3=el.querySelector('.clip-emoji');if(em3)tl.fromTo(em3,{opacity:0,scale:0.4},{opacity:1,scale:1,duration:0.18,ease:"back.out(2)"},Math.max(0,s-0.12));
     tl.fromTo(words.length ? words : el,{opacity:0,x:-32},{opacity:1,x:0,stagger:0.04,duration:0.28,ease:"power3.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,x:24,duration:f,ease:"power2.in"},s+d-f);
@@ -250,6 +258,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
   text-shadow:0 3px 20px rgba(0,0,0,.5);z-index:1}
 .word{display:inline-block}
 .clip-text{display:block;width:100%;text-align:center}
+.clip-emoji{display:block;font-size:calc(__FS__px * 0.85);line-height:1;margin-bottom:0.15em;opacity:0;transform:scale(0.5)}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -267,6 +276,7 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
     const f = el.dataset.w === "3" ? 0.85 : 0.55;
     const words = el.querySelectorAll('.word');
     tl.set(el,{opacity:1,immediateRender:false},s);
+    const em4=el.querySelector('.clip-emoji');if(em4)tl.fromTo(em4,{opacity:0,scale:0.4},{opacity:1,scale:1,duration:0.18,ease:"back.out(2)"},Math.max(0,s-0.12));
     tl.fromTo(words.length ? words : el,{opacity:0,y:20},{opacity:1,y:0,stagger:0.04,duration:0.28,ease:"power2.out"},s);
     if (el.dataset.w === "3") { tl.to(el,{scale:1.04,duration:0.15,ease:"power1.in"},s+0.35).to(el,{scale:1,duration:0.15,ease:"power1.out"}); }
     if (s+d < __DUR__-0.1) tl.to(el,{opacity:0,scale:0.95,duration:f,ease:"power2.in"},s+d-f);
@@ -431,6 +441,7 @@ def _clips_from_json(raw: str, duration: float) -> list[dict] | None:
                 "start": round(float(c["start"]), 3),
                 "duration": round(float(c["duration"]), 3),
                 "w": max(1, min(3, int(c.get("w", 1)))),
+                "emoji": str(c.get("emoji", ""))[:2].strip(),
             })
         return clips
     except Exception:
@@ -468,10 +479,12 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
         words_html = " ".join(
             f'<span class="word">{word}</span>' for word in _esc(c["text"]).split()
         )
+        emoji = c.get("emoji", "")
+        emoji_html = f'<div class="clip-emoji">{emoji}</div>' if emoji else ""
         clip_els.append(
             f'<div class="clip" data-start="{c["start"]}" data-duration="{c["duration"]}" '
             f'data-track-index="{i}" data-w="{w}"{style}>'
-            f'<span class="clip-text">{words_html}</span></div>'
+            f'{emoji_html}<span class="clip-text">{words_html}</span></div>'
         )
     return (_TEMPLATES[template_name]
             .replace("__RES__", resolution)
@@ -500,7 +513,10 @@ def _generate_composition(subject: str, script: str, resolution: str,
         f"no overlapping time windows; cover 0..{duration}s; "
         "clips must be in chronological order. "
         "Add \"w\": 1|2|3 to each clip: exactly one gets w=3 (the single core reveal or punchline); "
-        "2-4 get w=2 (supporting highlights); all others w=1."
+        "2-4 get w=2 (supporting highlights); all others w=1. "
+        "Also add \"emoji\": one single emoji character that visually represents each clip's topic "
+        "(e.g. \"💸\" for cost, \"⚠️\" for warning, \"🔥\" for urgency, \"🧠\" for AI/cognition). "
+        "No multi-emoji strings — exactly one character per clip."
     )
     prompt = (
         f"Video title: {subject}\n"
@@ -678,7 +694,9 @@ def _pick_bgm(params: dict, handle: str) -> Path | None:
         bgm_dir = REPO_DIR / "channel" / "music"
     if not bgm_dir.exists():
         return None
-    tracks = sorted(p for p in bgm_dir.glob("*") if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
+    wav_tracks = sorted(p for p in bgm_dir.glob("techno_*.wav"))
+    all_tracks = sorted(p for p in bgm_dir.glob("*") if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
+    tracks = wav_tracks or all_tracks
     if not tracks:
         return None
     if isinstance(bgm_type, str) and bgm_type not in ("", "random"):

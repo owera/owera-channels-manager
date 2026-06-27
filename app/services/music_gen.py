@@ -670,7 +670,8 @@ def generate_and_save(prompt: str, bgm_dir: Path, duration_s: int = 30) -> Path:
 def pool_count(bgm_dir: Path) -> int:
     if not bgm_dir.exists():
         return 0
-    return sum(1 for p in bgm_dir.iterdir() if p.suffix.lower() in _AUDIO_EXTS)
+    return sum(1 for p in bgm_dir.iterdir()
+               if p.suffix.lower() == ".wav" and p.stem.startswith("techno_"))
 
 
 def list_tracks(bgm_dir: Path) -> list[dict]:
