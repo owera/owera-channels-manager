@@ -64,9 +64,10 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#0b0b16;
   background:radial-gradient(ellipse at 80% 15%,__ACCENT__44,transparent 55%)}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
-  font-size:__FS__px;font-weight:800;line-height:1.1;letter-spacing:-1px;
+  font-size:__FS__px;font-weight:800;line-height:1.35;letter-spacing:-1px;
   text-shadow:0 4px 24px rgba(0,0,0,.7);z-index:1}
 .word{display:inline-block}
+.clip-text{display:block;width:100%;text-align:center}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -107,8 +108,9 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#f7f7fa;
 .dot{position:absolute;width:5px;height:5px;border-radius:50%;background:__ACCENT__;opacity:0}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#111;opacity:0;
-  font-size:__FS__px;font-weight:700;line-height:1.15;letter-spacing:-0.5px;z-index:1}
+  font-size:__FS__px;font-weight:700;line-height:1.35;letter-spacing:-0.5px;z-index:1}
 .word{display:inline-block}
+.clip-text{display:block;width:100%;text-align:center}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -154,9 +156,10 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;
   background:radial-gradient(ellipse at 35% 25%,__ACCENT__ 0%,transparent 55%)}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
-  font-size:__FS__px;font-weight:900;line-height:1.08;letter-spacing:-1.5px;
+  font-size:__FS__px;font-weight:900;line-height:1.35;letter-spacing:-1.5px;
   text-shadow:0 2px 32px rgba(0,0,0,.75);z-index:1}
 .word{display:inline-block}
+.clip-text{display:block;width:100%;text-align:center}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -195,10 +198,11 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;background:#050508;
 .scan{position:absolute;left:0;width:100%;height:1px;background:__ACCENT__;opacity:0.2}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
-  font-size:__FS__px;font-weight:800;line-height:1.1;
+  font-size:__FS__px;font-weight:800;line-height:1.35;
   border-bottom:4px solid __ACCENT__;
   text-shadow:0 0 48px __ACCENT__;z-index:1}
 .word{display:inline-block}
+.clip-text{display:block;width:100%;text-align:center}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -242,9 +246,10 @@ html,body{margin:0;padding:0;width:__W__px;height:__H__px;overflow:hidden;
   background:__ACCENT__;mix-blend-mode:overlay}
 .clip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:0 __PAD__px;box-sizing:border-box;text-align:center;color:#fff;opacity:0;
-  font-size:__FS__px;font-weight:900;line-height:1.08;
+  font-size:__FS__px;font-weight:900;line-height:1.35;
   text-shadow:0 3px 20px rgba(0,0,0,.5);z-index:1}
 .word{display:inline-block}
+.clip-text{display:block;width:100%;text-align:center}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="__W__" data-height="__H__"
@@ -452,7 +457,10 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
     for i, c in enumerate(clips):
         w = c.get("w", 1)
         if w == 3:
-            style = f' style="font-size:{int(fs*1.45)}px;color:{accent}"'
+            if template_name == "light_minimal":
+                style = f' style="font-size:{int(fs*1.3)}px;font-weight:900"'
+            else:
+                style = f' style="font-size:{int(fs*1.3)}px;color:{accent}"'
         elif w == 2:
             style = f' style="font-size:{int(fs*1.15)}px"'
         else:
@@ -462,7 +470,8 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
         )
         clip_els.append(
             f'<div class="clip" data-start="{c["start"]}" data-duration="{c["duration"]}" '
-            f'data-track-index="{i}" data-w="{w}"{style}>{words_html}</div>'
+            f'data-track-index="{i}" data-w="{w}"{style}>'
+            f'<span class="clip-text">{words_html}</span></div>'
         )
     return (_TEMPLATES[template_name]
             .replace("__RES__", resolution)
