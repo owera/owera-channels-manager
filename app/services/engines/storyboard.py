@@ -301,6 +301,11 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
         for k in range(li + 1, ri):
             starts[k] = ls + (rs - ls) * ((k - li) / span)
 
+    # The opening beat must cover the start — a short with dead air over its first
+    # seconds is the worst case (the hook is everything). Pin beat 0 to 0.0 regardless
+    # of where its cue matched; later beats stay word-synced.
+    starts[0] = 0.0
+
     # Enforce monotonic minimum spacing, then derive durations with the inter-beat gap.
     for i in range(1, n):
         if starts[i] < starts[i - 1] + _MIN_DUR:

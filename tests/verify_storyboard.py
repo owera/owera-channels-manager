@@ -65,6 +65,13 @@ ok(abs(b2[2]["start"] - 2.0) < 1e-6, "beat 2 lands on 'echo' (2.0s)")
 starts = [b["start"] for b in b2]
 ok(starts == sorted(starts), "starts are monotonic")
 ok(storyboard.validate_storyboard(b2, 4.0), "word-synced storyboard validates")
+# the opening beat must pin to 0 even when its cue matches mid-narration (no dead air)
+b_open = [{"type": "hook", "cue": "delta echo", "text": "H"},   # cue is at ~1.5s, not the start
+          {"type": "stat", "cue": "golf hotel", "value": "1"},
+          {"type": "statement", "cue": "charlie", "text": "B"},
+          {"type": "cta", "cue": "hotel", "text": "C"}]
+storyboard.align_storyboard(b_open, words, 4.0)
+ok(b_open[0]["start"] == 0.0, "first beat pins to 0.0 even when its cue matches later")
 
 # --- align: graceful degradation --------------------------------------------
 print("align_storyboard (degradation)")
