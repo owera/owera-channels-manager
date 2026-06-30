@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import settings
+from app.services.engines.theme import PALETTE
 from app.services.engines.worker import _ASSETS, _esc, _llm
 
 logger = logging.getLogger("manager.thumbnail")
@@ -27,17 +28,10 @@ _W, _H = 1920, 1080
 _OUT_W, _OUT_H = 1280, 720
 _RENDER_TIMEOUT = 240            # a static card renders fast; never stall a publish
 
-# Eight accent colors — thumbnail picks by topic_id so same topic = same brand color.
-_THUMB_PALETTE = [
-    ("#5b8cff", "#1b2a6b"),   # blue
-    ("#00c9a7", "#0b2e22"),   # teal
-    ("#ff6b35", "#2e1208"),   # orange
-    ("#9b5fe0", "#1a0b2e"),   # purple
-    ("#ff3b5c", "#2e0b12"),   # red
-    ("#2ec4b6", "#0b2228"),   # cyan
-    ("#ff85a1", "#2e0b1a"),   # pink
-    ("#f9c74f", "#2e2208"),   # gold
-]
+# Accent palette keyed by topic_id (same topic = same brand color). Canonical home is
+# theme.PALETTE — the in-video composition resolves the SAME list by topic_id so a
+# video's motion accent matches its thumbnail.
+_THUMB_PALETTE = PALETTE
 
 
 def _hook_text(subject: str, title: str | None,

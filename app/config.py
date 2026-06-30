@@ -63,6 +63,22 @@ class Settings(BaseSettings):
     autofill_tick_minutes: int = 20           # how often to top up low topic idea queues
     autofill_batch: int = 8                   # ideas generated per topic refill
 
+    # --- Composition (HyperFrames storyboard) -----------------------------------
+    # Which beat types the LLM may use and the validator will accept. This is the
+    # phase gate: Phase A ships pure HTML/CSS beats; add "code"/"command" (Phase B)
+    # and "diagram" (Phase C) only after the SVG/monospace smoke render passes.
+    # Any beat the model emits whose type is not listed here is downgraded to
+    # "statement", so widening this list is the only switch needed to roll a phase out.
+    composition_beat_types: list[str] = [
+        "hook", "statement", "stat", "compare", "list", "term_define", "quote", "cta",
+    ]
+    # Post-render blank-frame guard: a sampled 32x32 gray frame with pixel stddev
+    # below this (0-255 scale) counts as "blank". A render is rejected only when
+    # ALL sampled frames are blank (avoids false positives on dark hook frames).
+    composition_blank_stddev: float = 4.0
+    # "storyboard" = new typed-beat path; "legacy" = old clip-array path (kill switch).
+    composition_version: str = "storyboard"
+
 
 settings = Settings()
 

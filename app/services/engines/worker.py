@@ -24,7 +24,11 @@ from pathlib import Path
 logger = logging.getLogger("manager.worker")
 
 from app.config import REPO_DIR, settings
+from app.services.engines import theme  # leaf module (no internal deps) — safe to import here
 from app.services.engines.base import STATE_COMPLETE, STATE_FAILED
+
+# Single-source HTML escaper (also re-exported to thumbnail.py, which imports _esc here).
+_esc = theme.esc
 
 _ASSETS = Path(__file__).resolve().parent / "assets"
 _RENDER_TIMEOUT = 1800           # 30 min hard cap on the CLI subprocess
@@ -307,16 +311,21 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         script = _generate_script(subject, params)
         _status(handle, script=script, progress=12)
 
-        # 2. Voiceover (edge-tts) -> narration.mp3
+        # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
         narration = job_dir / "narration.mp3"
-        _tts(script, _voice(params), narration)
+        words = _tts(script, _voice(params), narration)
+        (job_dir / "narration_words.json").write_text(json.dumps(words))
         narr_secs = _probe_duration(narration) or 12.0
         duration = max(4.0, round(narr_secs + 0.6, 2))   # small tail so visuals don't cut early
         _status(handle, progress=25)
 
-        # 3. Composition (LLM, with a deterministic fallback) -> index.html (+ gsap)
+        # 3. Composition (typed storyboard, with a deterministic fallback) -> index.html (+ gsap)
         (job_dir / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
-        html = _generate_composition(subject, script, resolution, width, height, duration)
+        html = _generate_composition(
+            subject, script, words, resolution, width, height, duration,
+            topic_id=params.get("topic_id"),
+            content_format=params.get("content_format") or "short",
+        )
         if not _looks_valid(html):
             html = _fallback_composition(subject, script, resolution, width, height, duration)
         (job_dir / "index.html").write_text(html)
@@ -328,6 +337,15 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             _render(job_dir, silent)
         except Exception as e:
             (job_dir / "render-error.txt").write_text(str(e))
+            html = _fallback_composition(subject, script, resolution, width, height, duration)
+            (job_dir / "index.html").write_text(html)
+            _render(job_dir, silent)
+
+        # 4b. Post-render pixel check. A structurally-valid composition can still render
+        # blank (the dea9405 incident). If EVERY sampled frame is blank, rebuild with the
+        # deterministic fallback and re-render once — accepted unconditionally (no loop).
+        if not _has_visible_frames(silent):
+            (job_dir / "blank-detected.txt").write_text("post-render frames blank; rebuilt with fallback")
             html = _fallback_composition(subject, script, resolution, width, height, duration)
             (job_dir / "index.html").write_text(html)
             _render(job_dir, silent)
@@ -497,11 +515,33 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
             .replace("__CLIPS__", "\n    ".join(clip_els)))
 
 
-def _generate_composition(subject: str, script: str, resolution: str,
-                          width: int, height: int, duration: float) -> str:
-    """Generate a composition by asking the LLM for clip content only, then injecting
-    into a pre-authored template.  Falls back to empty string on failure (caller will
-    use _fallback_composition).  Token usage is ~90% lower than the old full-HTML approach."""
+def _generate_composition(subject: str, script: str, words: list[dict], resolution: str,
+                          width: int, height: int, duration: float, *,
+                          topic_id=None, content_format: str = "short") -> str:
+    """Build the composition index.html. Default path is the typed word-synced
+    storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
+    the old clip-array path below as a kill switch. Returns "" on failure so run_job
+    falls back to the deterministic _fallback_composition."""
+    if settings.composition_version == "legacy":
+        return _generate_composition_legacy(subject, script, resolution, width, height, duration)
+    try:
+        from app.services.engines import storyboard  # lazy: avoids any import-order risk
+        html = storyboard.compose(
+            subject=subject, script=script, words=words, duration=duration,
+            resolution=resolution, width=width, height=height, topic_id=topic_id,
+            content_format=content_format, allowed_types=settings.composition_beat_types,
+            llm=_llm,
+        )
+        return html or ""
+    except Exception as e:
+        logger.warning("storyboard compose failed for %r: %s", subject, e)
+        return ""
+
+
+def _generate_composition_legacy(subject: str, script: str, resolution: str,
+                                 width: int, height: int, duration: float) -> str:
+    """Legacy path: ask the LLM for clip text only, inject into a pre-authored template.
+    Kept behind MANAGER_COMPOSITION_VERSION=legacy as a kill switch."""
     template_name, accent = _pick_template(subject)
     n_clips = max(6, min(12, int(duration / 4)))
     spacing = round(duration / n_clips, 2)
@@ -635,8 +675,7 @@ def _key_lines(script: str, k: int = 4) -> list[str]:
     return out or ["Watch to the end"]
 
 
-def _esc(s: str) -> str:
-    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+# _esc is defined once at module top as theme.esc (single source; re-exported here).
 
 
 # --------------------------------------------------------------------------- media steps
@@ -646,15 +685,36 @@ def _voice(params: dict) -> str:
     return re.sub(r"-(Male|Female)$", "", v)        # edge-tts wants the bare voice id
 
 
-def _tts(text: str, voice: str, out_path: Path) -> None:
+def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
+    """Synthesize narration and capture per-word timing.
+
+    Uses ``Communicate(boundary="WordBoundary")`` + ``.stream()`` (the default is
+    SentenceBoundary, which we don't want) so the service emits a WordBoundary event
+    per spoken word — ``offset``/``duration`` in 100-ns ticks — interleaved with the
+    audio chunks. The returned word list lets the composition step land each visual
+    on the actual spoken word instead of guessing even spacing. The list may be empty
+    if the voice/service emits no boundaries; callers degrade gracefully."""
     import edge_tts
 
+    words: list[dict] = []
+
     async def _gen() -> None:
-        await edge_tts.Communicate(text, voice).save(str(out_path))
+        comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
+        with open(out_path, "wb") as f:
+            async for chunk in comm.stream():
+                if chunk["type"] == "audio":
+                    f.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    words.append({
+                        "text": chunk.get("text", ""),
+                        "start": (chunk.get("offset") or 0) / 1e7,
+                        "dur": (chunk.get("duration") or 0) / 1e7,
+                    })
 
     asyncio.run(_gen())
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"edge-tts produced no audio for voice {voice}")
+    return words
 
 
 def _probe_duration(path: Path) -> float | None:
@@ -667,6 +727,40 @@ def _probe_duration(path: Path) -> float | None:
         return float(r.stdout.strip())
     except (subprocess.SubprocessError, ValueError):
         return None
+
+
+def _has_visible_frames(mp4: Path, samples: int = 6, threshold: float | None = None) -> bool:
+    """Post-render blank guard. Samples a few frames, downscales each to 32x32 gray, and
+    measures pixel spread. Returns False only when EVERY sampled frame is near-uniform
+    (so a deliberately dark hook frame won't trip it). Returns True if it can't sample
+    (never blocks a render on its own uncertainty). Zero new dependencies — ffmpeg + math."""
+    thr = settings.composition_blank_stddev if threshold is None else threshold
+    dur = _probe_duration(mp4) or 0.0
+    if dur <= 0:
+        return True
+    seen_any = False
+    for k in range(samples):
+        t = dur * (k + 0.5) / samples
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(mp4),
+                 "-frames:v", "1", "-vf", "scale=32:32", "-f", "rawvideo",
+                 "-pix_fmt", "gray", "-"],
+                capture_output=True, timeout=30,
+            )
+        except subprocess.SubprocessError:
+            continue
+        data = r.stdout
+        if len(data) < 1024:           # expect 32*32 = 1024 gray bytes
+            continue
+        seen_any = True
+        mean = sum(data) / len(data)
+        var = sum((b - mean) ** 2 for b in data) / len(data)
+        if (var ** 0.5) >= thr:        # this frame has visible content
+            return True
+    # If we sampled frames and none cleared the threshold, it's blank. If we couldn't
+    # sample at all, don't block (return True).
+    return not seen_any
 
 
 def _render(job_dir: Path, out_path: Path) -> None:

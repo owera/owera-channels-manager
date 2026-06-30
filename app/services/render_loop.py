@@ -18,6 +18,7 @@ from app.db import app_settings, session_scope
 from app.models import Channel, RenderProfile, Topic, Video, VideoStatus, utcnow
 from app.services import metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
+from app.services.engines.worker import _has_visible_frames
 from app.services.mpt_client import build_video_params
 from app.services.topic_playlist import ensure_topic_playlist
 
@@ -98,6 +99,16 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     dest = dest_dir / "video.mp4"
     shutil.copy(src, dest)
     video.video_path = str(dest)
+
+    # Last gate before APPROVED -> auto-publish: reject a blank render (covers every
+    # engine, including ones without the worker-side pre-mux pixel check).
+    if not _has_visible_frames(dest):
+        video.status = VideoStatus.FAILED
+        video.error = "post-render frames blank at finalize — not publishing"
+        quota.log(session, kind="render", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=video.error)
+        return
+
     video.script = task.get("script") or video.script
 
     thumb = dest_dir / "thumb.jpg"
@@ -198,6 +209,7 @@ def _submit_new(session: Session) -> None:
             _format_overrides(fmt),
         )
         params["content_format"] = fmt
+        params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:
