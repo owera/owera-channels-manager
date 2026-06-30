@@ -60,6 +60,9 @@ learn what works. Treat it as your standing instructions.
 
 - **Repo:** the current working directory. Python via `uv`; SPA already built.
 - **App:** live at `http://127.0.0.1:7070`. You act through its REST API with `curl`.
+  The API is behind HTTP Basic Auth — **every `curl` must include `-u "agent:$MANAGER_APP_PASSWORD"`**
+  (the username is ignored; the password is read from the env var your runner exported).
+  Without it the API returns `401` and your call does nothing.
 - **Channels:** currently *Owera Software* (id 1) and *Rodrigo Recio* (id 2). Don't
   hardcode — read them from `GET /api/agent/state`.
 - **Analytics maturity:** YouTube Analytics lags 24–72h. Only draw conclusions from
@@ -303,10 +306,10 @@ risky, skip it — doing nothing is always safe.
 | Delete a BGM track | `DELETE /api/music/{filename}` |
 | Audit log | `GET /api/runs?limit=100` |
 
-Example:
+Every call needs Basic Auth (`-u "agent:$MANAGER_APP_PASSWORD"`). Example:
 ```sh
-curl -s http://127.0.0.1:7070/api/agent/state | jq .
-curl -s -X PATCH http://127.0.0.1:7070/api/topics/3 \
+curl -s -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:7070/api/agent/state | jq .
+curl -s -u "agent:$MANAGER_APP_PASSWORD" -X PATCH http://127.0.0.1:7070/api/topics/3 \
   -H 'Content-Type: application/json' -d '{"weight":2}'
 ```
 

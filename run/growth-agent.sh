@@ -16,6 +16,13 @@ cd "$REPO" || exit 1
 # launchd gives a minimal PATH; put uv, claude, node/npx, ffmpeg, git on it.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# The API is guarded by HTTP Basic Auth when MANAGER_APP_PASSWORD is set (see
+# app/main.py basic_auth middleware). Load it from .env and export it so both the
+# health check below and the agent's own curl calls can authenticate. Empty is
+# fine: the middleware disables itself, and `-u agent:` is then harmless.
+MANAGER_APP_PASSWORD="$(grep -E '^MANAGER_APP_PASSWORD=' "$REPO/.env" 2>/dev/null | head -n1 | cut -d= -f2-)"
+export MANAGER_APP_PASSWORD
+
 LOG="$HOME/Library/Logs/owera-growth-agent.log"
 LOCK="$REPO/run/.growth-agent.lock"
 ts() { date "+%Y-%m-%d %H:%M:%S"; }
@@ -39,8 +46,8 @@ if ! command -v claude >/dev/null 2>&1; then
   log "ERROR: 'claude' CLI not found on PATH — install Claude Code or fix PATH"
   exit 1
 fi
-if ! curl -sf -o /dev/null http://127.0.0.1:7070/api/dashboard; then
-  log "app not reachable on :7070 — skipping (is the manager running?)"
+if ! curl -sf -o /dev/null -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:7070/api/dashboard; then
+  log "app not reachable / auth failed on :7070 — skipping (is the manager running? is MANAGER_APP_PASSWORD correct?)"
   exit 0
 fi
 
