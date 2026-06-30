@@ -169,6 +169,12 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         except Exception as e:
             quota.log(session, kind="playlist_add", status="error", video_id=video.id,
                       channel_id=channel.id, detail=str(e))
+            # If the playlist was deleted on YouTube, the local mapping is stale and
+            # will 404 on every future publish for this topic. Drop the dead mapping so
+            # the safety-net branch above auto-recreates a fresh playlist next publish.
+            if topic is not None and topic.playlist_id and youtube.is_playlist_missing(e):
+                topic.playlist_id = None
+                session.add(topic)
 
 
 def tick() -> None:

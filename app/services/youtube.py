@@ -504,3 +504,15 @@ def _classify(e: HttpError) -> Exception:
     if reason in _DAILY_CAP_REASONS:
         return QuotaExceeded(str(e), reason=reason)
     return e
+
+
+def is_playlist_missing(e) -> bool:
+    """True if an HttpError means the target playlist no longer exists on YouTube
+    (deleted out-of-band), i.e. reason 'playlistNotFound' or a bare HTTP 404. The
+    publish loop uses this to drop a stale local->YouTube playlist mapping so it gets
+    recreated, instead of 404-looping on every future publish for that topic."""
+    if not isinstance(e, HttpError):
+        return False
+    if _error_reason(e) == "playlistnotfound":
+        return True
+    return getattr(getattr(e, "resp", None), "status", None) == 404
