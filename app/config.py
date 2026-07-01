@@ -64,13 +64,14 @@ class Settings(BaseSettings):
     autofill_batch: int = 8                   # ideas generated per topic refill
 
     # --- Composition (HyperFrames storyboard) -----------------------------------
-    # Which beat types the LLM may use and the validator will accept. This is the
-    # phase gate: Phase A ships pure HTML/CSS beats; add "code"/"command" (Phase B)
-    # and "diagram" (Phase C) only after the SVG/monospace smoke render passes.
-    # Any beat the model emits whose type is not listed here is downgraded to
-    # "statement", so widening this list is the only switch needed to roll a phase out.
+    # Which beat types the LLM may use and the validator will accept. Any beat whose
+    # type is not listed here is downgraded to "statement", so this list is the rollout
+    # switch. All types are live (Phase A pure-HTML/CSS beats + Phase B/C code/command/
+    # diagram, verified to render under the pinned hyperframes). To roll back a type,
+    # remove it here; MANAGER_COMPOSITION_BEAT_TYPES can override via env (JSON array).
     composition_beat_types: list[str] = [
         "hook", "statement", "stat", "compare", "list", "term_define", "quote", "cta",
+        "code", "command", "diagram",
     ]
     # Post-render blank-frame guard: a sampled 32x32 gray frame with pixel stddev
     # below this (0-255 scale) counts as "blank". A render is rejected only when
