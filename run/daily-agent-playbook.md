@@ -78,11 +78,16 @@ learn what works. Treat it as your standing instructions.
 - **Engagement rubric:** `run/engagement-rubric.md` — the bottom-up definition of a good
   technical explainer and your standing quality standard. Read it every run; refine it only
   with evidence (a render-and-judge win or a matured cohort).
-- **Quality gate:** `run/rubric_review.py` renders a golden set through the REAL pipeline and
-  extracts a frame per beat for you to score against the rubric. Use it to baseline current
-  output and to compare before/after any generation-prompt change:
-  `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label <name>` (frames land under
-  `run/.rubric_review/<name>/`; READ them — you have vision).
+- **Quality gate:** `run/rubric_review.py` renders a golden set through the REAL pipeline (draft
+  quality by default — fast) and extracts a frame per beat for you to score against the rubric.
+  Use it to baseline current output and to compare before/after any generation-prompt change:
+  `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label <name> [--only <id>]` (frames land
+  under `run/.rubric_review/<name>/`; READ them — you have vision).
+  **CRITICAL — run it in the FOREGROUND as ONE blocking Bash command with a long timeout (set the
+  Bash `timeout` to 360000; the full set takes ~5 min, one `--only` subject ~60-75s). NEVER run it
+  in the background: this is a headless `claude -p` run and it EXITS when your turn yields, which
+  abandons a background render and aborts the whole daily run before you gate anything.** For the
+  before/after gate, prefer `--only <id>` on 1–2 subjects that exercise the lever you changed.
 - **Experiment log:** `run/experiments.jsonl` — append-only structured memory of every
   engagement experiment (hypothesis → predicted signal → verdict). Read it at start, settle
   matured ones, append new ones. (Skip any line containing `_schema`.)
@@ -188,9 +193,11 @@ whose ship date is ≥ 72h ago, judge it and mark `promoted` (keep) or `reverted
   metric to force a verdict.
 
 **Baseline the current output.** Run `PYTHONPATH=. .venv/bin/python run/rubric_review.py
---label baseline`, READ the extracted frames + each subject's script/title/thumbnail hook,
-and score every rubric lever **2** (strong) / **1** (weak) / **0** (broken). The weakest lever
-with the highest priority is your target for step 4.
+--label baseline` **as ONE foreground blocking Bash call with `timeout: 360000` — never in the
+background** (see Environment: a backgrounded render aborts the headless run). It takes ~5 min;
+wait for it. Then READ the extracted frames + each subject's script/title/thumbnail hook and
+score every rubric lever **2** (strong) / **1** (weak) / **0** (broken). The weakest lever with
+the highest priority is your target for step 4.
 
 ### 3. Act on the channels (via the REST API)
 **Board capacity gate — check before every idea/trend action:**
@@ -264,9 +271,10 @@ engaging, one lever at a time, **proven on a real render before it ships.**
    (`app/services/engines/storyboard.py`), `thumbnail._hook_text`, or the `metadata` /
    `video_gen` title prompt. Prompt/copy changes are the safe class — strongly prefer them.
 3. **Run the MANDATORY gate — never ship on faith:**
-   - `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label after` (you already have
-     `--label baseline` from step 2). READ both frame sets and re-score. **The target lever
-     must go UP and no other lever may drop.**
+   - `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label after --only <id>` on the 1–2
+     golden subjects that exercise the lever you changed (foreground, one blocking call — never
+     background it; ~60-75s/subject). READ the `after` frames against the matching `baseline`
+     frames from step 2 and re-score. **The target lever must go UP and no other lever may drop.**
    - `PYTHONPATH=. .venv/bin/python tests/verify_storyboard.py` must stay green.
    - Every golden render must report `visible=True` and none `used_fallback` (the harness
      prints both).

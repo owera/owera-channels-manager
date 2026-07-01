@@ -15,7 +15,13 @@ Usage (from repo root):
 Options:
     --label NAME   output subdir under run/.rubric_review/ (default: "sample")
     --only ID      render just one golden-set entry by id (e.g. ch1-code)
+    --quality Q    draft | standard | high (default: draft — fast, for the gate)
     --list         print the golden set and exit
+
+IMPORTANT (headless runs): run this in the FOREGROUND as a single blocking command with a
+long timeout (the golden set takes a few minutes). Do NOT background it — a headless
+`claude -p` run exits when the turn yields, abandoning a background render. For a quick
+before/after gate on one lever, use `--only <id>` (one subject ≈ 30-60s at draft quality).
 
 Output: run/.rubric_review/<label>/<id>/  (index.html, render.mp4, b*_<type>.png,
         plus manifest.json summarizing every subject). This dir is gitignored.
@@ -124,8 +130,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", default="sample")
     ap.add_argument("--only", default=None)
+    ap.add_argument("--quality", default="draft", choices=["draft", "standard", "high"])
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
+
+    # Render fast by default — the gate judges hook/variety/clarity/layout, not final polish.
+    # This is a separate process from the running manager, so overriding here is harmless.
+    settings.hyperframes_render_quality = args.quality
 
     if args.list:
         for e in GOLDEN:
