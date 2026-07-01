@@ -179,6 +179,14 @@ an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
   retention). Look for patterns: which themes, which format (short vs long), which
   title/thumbnail styles correlate with higher CTR and watch %.
 - Write down 1–3 concrete, falsifiable hypotheses for this run.
+- **Creative-attribution signals** (use as data matures): the per-video leaderboard
+  (`GET /api/channels/{id}/video-analytics`) now carries `average_view_duration` (seconds
+  watched — pair it with `avg_view_pct`; high pct + low seconds = a short fully watched, not deep
+  engagement) and `creation_config` (the beat mix, hook style, theme, voice, bgm each video was
+  made with). When several published videos share a creative choice, compare their engagement to
+  attribute what actually works — this is how a rubric lever graduates from render-judged
+  (SIGNAL-SCARCE) to data-measured (SIGNAL-RICH). `by_topic`/`by_format` also now report
+  `avg_view_duration`.
 
 **Settle matured experiments.** For each `status:"running"` line in `run/experiments.jsonl`
 whose ship date is ≥ 72h ago, judge it and mark `promoted` (keep) or `reverted`:

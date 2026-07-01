@@ -5,6 +5,7 @@ calls run in FastAPI's threadpool (the path operations are sync), so they don't
 block the event loop.
 """
 
+import json as _json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -144,8 +145,18 @@ def list_subscribers(channel_id: int, session: Session = Depends(get_session)):
 
 # ---- Per-video analytics (the performance leaderboard) -------------------
 
-_SORTABLE = {"views", "ctr", "avg_view_pct", "watch_time_minutes", "impressions",
-             "likes", "comments", "subscribers_gained", "published_at"}
+_SORTABLE = {"views", "ctr", "avg_view_pct", "average_view_duration", "watch_time_minutes",
+             "impressions", "likes", "comments", "subscribers_gained", "published_at"}
+
+
+def _parse_json(s):
+    """Parse a stored JSON string (e.g. Video.creation_config); None on empty/invalid."""
+    if not s:
+        return None
+    try:
+        return _json.loads(s)
+    except (ValueError, TypeError):
+        return None
 
 
 def _latest_metrics(session: Session, channel_id: int) -> dict[int, VideoMetric]:
@@ -264,12 +275,15 @@ def video_analytics(channel_id: int, sort: str = "views",
             "impressions": m.impressions if m else 0,
             "ctr": m.ctr if m else 0.0,
             "avg_view_pct": m.avg_view_pct if m else 0.0,
+            "average_view_duration": m.average_view_duration if m else 0.0,
             "watch_time_minutes": m.watch_time_minutes if m else 0,
             "likes": m.likes if m else 0,
             "comments": m.comments if m else 0,
             "subscribers_gained": m.subscribers_gained if m else 0,
             "captured_at": m.captured_at if m else None,
             "has_data": m is not None,
+            # the "treatment" signal — how this video was made — for creative attribution
+            "creation_config": _parse_json(v.creation_config),
         })
     items.sort(key=lambda it: (it.get(sort) is not None, it.get(sort)), reverse=True)
     measured = sum(1 for it in items if it["has_data"])
@@ -289,7 +303,7 @@ def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_ses
         return {**extra, "video_count": 0, "measured": 0, "views": 0,
                 "impressions": 0, "watch_time_minutes": 0, "likes": 0,
                 "comments": 0, "subscribers_gained": 0, "_ctr_sum": 0.0,
-                "_avp_sum": 0.0}
+                "_avp_sum": 0.0, "_avd_sum": 0.0}
 
     by_topic: dict[int, dict] = {}
     by_format: dict[str, dict] = {}
@@ -312,14 +326,17 @@ def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_ses
                 bucket["subscribers_gained"] += m.subscribers_gained
                 bucket["_ctr_sum"] += m.ctr
                 bucket["_avp_sum"] += m.avg_view_pct
+                bucket["_avd_sum"] += m.average_view_duration
 
     def _finish(bucket: dict) -> dict:
         n = bucket.pop("measured")
         ctr_sum = bucket.pop("_ctr_sum")
         avp_sum = bucket.pop("_avp_sum")
+        avd_sum = bucket.pop("_avd_sum")
         bucket["measured"] = n
         bucket["avg_ctr"] = round(ctr_sum / n, 4) if n else 0.0
         bucket["avg_view_pct"] = round(avp_sum / n, 2) if n else 0.0
+        bucket["avg_view_duration"] = round(avd_sum / n, 1) if n else 0.0
         bucket["avg_views"] = round(bucket["views"] / n, 1) if n else 0.0
         return bucket
 
