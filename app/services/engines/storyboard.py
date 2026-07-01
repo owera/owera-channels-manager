@@ -600,7 +600,10 @@ def render_code(b, ctx):
     lang = ('<div class="code-lang">' + theme.esc(b["lang"]) + "</div>") if b.get("lang") else ""
     lines = "".join('<span class="ln' + (" hl" if j in hl else "") + '">' + theme.esc(ln) + "</span>"
                     for j, ln in enumerate(b["lines"]))
-    inner = lang + '<pre class="code">' + lines + "</pre>"
+    # Shrink the whole block to the longest line so monospace never clips (mono advance ~0.6em).
+    maxlen = max((len(ln) for ln in b["lines"]), default=1)
+    fs = int(max(24, min(ctx["width"] * 0.052, (ctx["width"] * 0.80) / (maxlen * 0.62))))
+    inner = lang + '<pre class="code" style="font-size:' + str(fs) + 'px">' + lines + "</pre>"
     tw = []
     if b.get("lang"):
         tw.append(_from(bid + " .code-lang", s, "opacity:0", "opacity:1", dur=0.2))
@@ -612,9 +615,13 @@ def render_command(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
     out = "".join('<span class="cmd-out">' + theme.esc(o) + "</span>" for o in b.get("output", []))
-    inner = ('<div class="cmd"><div class="cmd-line"><span class="cmd-prompt">' +
-             theme.esc(b.get("prompt", "$")) + '</span> <span class="cmd-cmd">' +
-             theme.esc(b["command"]) + "</span></div>" + out + "</div>")
+    # Shrink to the longest line (command or any output row) so nothing clips.
+    maxlen = max([len(b.get("prompt", "$")) + 1 + len(b["command"])] +
+                 [len(o) for o in b.get("output", [])] or [1])
+    fs = int(max(22, min(ctx["width"] * 0.05, (ctx["width"] * 0.80) / (maxlen * 0.62))))
+    inner = ('<div class="cmd" style="font-size:' + str(fs) + 'px"><div class="cmd-line">'
+             '<span class="cmd-prompt">' + theme.esc(b.get("prompt", "$")) + '</span> '
+             '<span class="cmd-cmd">' + theme.esc(b["command"]) + "</span></div>" + out + "</div>")
     tw = [_from(bid + " .cmd-cmd", s, "opacity:0", "opacity:1", dur=0.2)]
     for j in range(len(b.get("output", []))):
         # children of .cmd: .cmd-line (1), then .cmd-out (2,3,...)
@@ -747,8 +754,8 @@ _TYPE_DOCS = {
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
     "cta": 'cta: {"cue","text"(≤4w),"sub"?} — closing call to action; exactly one, last.',
-    "code": 'code: {"cue","lang","lines":[str](≤8),"highlight":[int]} — a short code snippet; highlight key line indices.',
-    "command": 'command: {"cue","prompt":"$","command","output":[str](≤4)} — a terminal command and its output.',
+    "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen),"highlight":[int]} — a short snippet; highlight key line indices.',
+    "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows.',
 }
 
