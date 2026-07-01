@@ -111,4 +111,40 @@ with tempfile.TemporaryDirectory() as d:
     ok(worker._has_visible_frames(black) is False, "detects an all-black clip as blank")
     ok(worker._has_visible_frames(color) is True, "passes a clip with visible content")
 
+# --- all beat types build into valid HTML (guards every renderer) ------------
+print("build_index_html (all beat types)")
+ALL = [
+    {"type": "hook", "cue": "", "text": "Hook line", "emoji": "🔥"},
+    {"type": "statement", "cue": "", "text": "A statement", "w": 3},
+    {"type": "stat", "cue": "", "value": "42", "unit": "ms", "label": "per call"},
+    {"type": "compare", "cue": "", "title": "X vs Y",
+     "left": {"title": "X", "items": ["a"]}, "right": {"title": "Y", "items": ["b"]}},
+    {"type": "list", "cue": "", "title": "Steps", "ordered": True,
+     "items": [{"text": "one"}, {"text": "two"}]},
+    {"type": "term_define", "cue": "", "term": "Chunking", "definition": "splitting text into pieces"},
+    {"type": "quote", "cue": "", "text": "A memorable line", "attribution": "me"},
+    {"type": "code", "cue": "", "lang": "python",
+     "lines": ["from sentence_transformers import CrossEncoder", "y = rerank(x)"], "highlight": [1]},
+    {"type": "command", "cue": "", "prompt": "$", "command": "pip install rerankers", "output": ["done"]},
+    {"type": "diagram", "cue": "", "layout": "pipeline",
+     "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "edges": [{"from": "a", "to": "b"}]},
+    {"type": "cta", "cue": "", "text": "Follow", "sub": "more"},
+]
+storyboard.align_storyboard(ALL, [], 44.0)
+html = storyboard.build_index_html(ALL, theme.resolve(1, "x"), "portrait", 1080, 1920, 44.0)
+ok(worker._looks_valid(html), "all-beat-types storyboard passes _looks_valid")
+for cls in ("beat hook", "beat stat", "beat cmp", "beat lst", "beat term", "beat quote",
+            "beat code", "beat cmd", "beat diagram", "beat cta"):
+    ok(cls in html, f"renders {cls!r}")
+ok('class="code" style="font-size:' in html, "code beat emits an adaptive font-size (no clip)")
+ok('marker-end="url(#ar)"' in html, "diagram emits arrowhead marker")
+
+# --- variety guard (R2: no all-statement storyboards) ------------------------
+print("_variety_ok")
+ok(storyboard._variety_ok([{"type": "hook"}, {"type": "stat"}, {"type": "compare"}, {"type": "cta"}]),
+   "varied storyboard passes the variety guard")
+ok(not storyboard._variety_ok([{"type": "hook"}, {"type": "statement"}, {"type": "statement"},
+                               {"type": "statement"}, {"type": "cta"}]),
+   "mostly-statement storyboard fails the variety guard")
+
 print(f"\nALL {_checks} CHECKS PASSED")

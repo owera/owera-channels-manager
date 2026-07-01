@@ -5,6 +5,13 @@ run once a day, unattended, inside this repository, with the manager app live at
 **http://127.0.0.1:7070**. Your job: grow the channels day by day and make this app
 better at growing them — a closed loop of **measure → learn → act → improve**.
 
+**Your highest-leverage work is improving the ENGAGEMENT QUALITY of the videos** — how well
+they hook, hold, and pay off as *technical explainers* — not just steering which topics get
+made. `run/engagement-rubric.md` is your standing quality standard. Each run you make **one
+evidence-backed improvement to the weakest high-leverage lever, proven on a real render before
+it ships** (never on faith). Volume/topic steering (weights, trends) still matters, but it is
+subordinate to making each video better.
+
 This file is versioned in git and you are allowed to improve it (carefully) as you
 learn what works. Treat it as your standing instructions.
 
@@ -68,6 +75,19 @@ learn what works. Treat it as your standing instructions.
 - **Analytics maturity:** YouTube Analytics lags 24–72h. Only draw conclusions from
   videos with `age_hours >= 72`. Newer videos are "too early to tell."
 - **Reports:** append one dated markdown file per run under `run/agent-reports/`.
+- **Engagement rubric:** `run/engagement-rubric.md` — the bottom-up definition of a good
+  technical explainer and your standing quality standard. Read it every run; refine it only
+  with evidence (a render-and-judge win or a matured cohort).
+- **Quality gate:** `run/rubric_review.py` renders a golden set through the REAL pipeline and
+  extracts a frame per beat for you to score against the rubric. Use it to baseline current
+  output and to compare before/after any generation-prompt change:
+  `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label <name>` (frames land under
+  `run/.rubric_review/<name>/`; READ them — you have vision).
+- **Experiment log:** `run/experiments.jsonl` — append-only structured memory of every
+  engagement experiment (hypothesis → predicted signal → verdict). Read it at start, settle
+  matured ones, append new ones. (Skip any line containing `_schema`.)
+- **Regression suite:** `PYTHONPATH=. .venv/bin/python tests/verify_storyboard.py` — must
+  stay green after any prompt/composition change.
 
 ---
 
@@ -77,6 +97,8 @@ learn what works. Treat it as your standing instructions.
 - Check the kill switch and `scheduler_paused` (above).
 - `git status` must be clean; if not, stop and report (don't act on a dirty tree).
 - Note the date and the last report in `run/agent-reports/` so you can compare.
+- Read `run/engagement-rubric.md` (your quality standard) and `run/experiments.jsonl` (what
+  you've already tried) so this run compounds prior learning instead of re-litigating it.
 
 ### 1. Observe
 - `GET /api/agent/state` — one call: settings, dashboard, per-topic/format analytics,
@@ -153,6 +175,23 @@ an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
   title/thumbnail styles correlate with higher CTR and watch %.
 - Write down 1–3 concrete, falsifiable hypotheses for this run.
 
+**Settle matured experiments.** For each `status:"running"` line in `run/experiments.jsonl`
+whose ship date is ≥ 72h ago, judge it and mark `promoted` (keep) or `reverted`:
+- **SIGNAL-RICH** (the channel has several `measured` videos, and — Phase 2+ — a retention
+  curve): compare the predicted metric across the before/after cohorts, controlling for
+  topic/format where possible.
+- **SIGNAL-SCARCE** (the current reality at low subs — thin `measured`, no retention curve):
+  the render-and-judge rubric score is the evidence — re-run `rubric_review.py` and confirm
+  the shipped change still scores better than its pre-change baseline.
+- If reverted and the change is still in the code, `git revert` it (counts toward your ≤2
+  changes). If a cohort is too thin to judge, leave it `running` and say so — never invent a
+  metric to force a verdict.
+
+**Baseline the current output.** Run `PYTHONPATH=. .venv/bin/python run/rubric_review.py
+--label baseline`, READ the extracted frames + each subject's script/title/thumbnail hook,
+and score every rubric lever **2** (strong) / **1** (weak) / **0** (broken). The weakest lever
+with the highest priority is your target for step 4.
+
 ### 3. Act on the channels (via the REST API)
 **Board capacity gate — check before every idea/trend action:**
 Read `board_inventory` from step 1. For each channel:
@@ -213,19 +252,39 @@ video. Keeping the pool healthy and varied directly improves every rendered vide
   digest and verify the fix by calling `POST /api/music/generate {"count": 1}` and
   confirming a file appears in `GET /api/music`.
 
-### 4. Improve the app (≤ 2 small changes)
-Choose improvements the data points to. Examples (let analytics pick, don't do all):
-- Better **title/hook/script/thumbnail prompts** (`app/services/engines/worker.py`,
-  `app/services/thumbnail.py`, `app/services/video_gen.py`, metadata generation).
-- Better **idea generation** for a winning theme.
-- Small **pipeline** robustness or quality fixes the runs/logs reveal.
-- Tighten this **playbook** with what you learned.
+### 4. Improve engagement — ONE gated change (the core of the run)
+This is where you compound quality. Bottom-up: perfect what makes a technical explainer
+engaging, one lever at a time, **proven on a real render before it ships.**
 
-**Prefer the safest class of change.** Prompt/copy tweaks are low-risk; logic that moves
-videos between states is high-risk. When in doubt, do the prompt change and skip the
-logic change.
+1. **Pick the target.** From your step-2 rubric baseline, take the **weakest lever with the
+   highest priority** (`run/engagement-rubric.md` states the priority order — hook and
+   thumbnail/title lead). That lever names the exact prompt file to edit.
+2. **Make ONE focused change** to that lever's prompt file only — e.g. sharpen the hook
+   instruction in `worker._generate_script`, the storyboard `_system_prompt`
+   (`app/services/engines/storyboard.py`), `thumbnail._hook_text`, or the `metadata` /
+   `video_gen` title prompt. Prompt/copy changes are the safe class — strongly prefer them.
+3. **Run the MANDATORY gate — never ship on faith:**
+   - `PYTHONPATH=. .venv/bin/python run/rubric_review.py --label after` (you already have
+     `--label baseline` from step 2). READ both frame sets and re-score. **The target lever
+     must go UP and no other lever may drop.**
+   - `PYTHONPATH=. .venv/bin/python tests/verify_storyboard.py` must stay green.
+   - Every golden render must report `visible=True` and none `used_fallback` (the harness
+     prints both).
+   **Ship only if all three pass.** Otherwise revert the file (`git checkout -- <file>`) — a
+   no-op day is always safe. This gate is non-negotiable: a prompt change that doesn't demonstrably
+   improve a real render does not ship.
+4. **Log the experiment.** After committing (step 5), append one line to
+   `run/experiments.jsonl`: `{"date","rubric_lever","hypothesis","files","commit":"<sha>",
+   "predicted":{"metric","dir"},"baseline_note":"<the score/metric you measured>",
+   "status":"running","verdict":null}`. A future run settles it (step 2).
 
-**If you touch the video/channel state machine, trace the whole lifecycle FIRST.**
+**Cap:** at most **one promoted improvement** (plus, if needed, one experiment you settled or
+reverted) per run — still ≤2 file touches. Quality over volume.
+
+**Non-engagement code (fallback).** If the rubric baseline is already strong and a recurring
+bug or a pipeline-robustness issue is clearly the higher-leverage work this run, fix that
+instead (same ≤2 cap, same verify-before-commit gate). **If you touch the video/channel state
+machine, trace the whole lifecycle FIRST.**
 A status is only meaningful by *which loop consumes it*. Before changing any
 `Video.status` (or channel state) transition, write down — in the report — the full path:
 which loop selects that status, what it does next, and what each downstream loop will do
@@ -254,6 +313,12 @@ risky, skip it — doing nothing is always safe.
   **`## Triage`** section (issues found, what you auto-fixed with the after-state proof,
   what you escalated), what you learned (winners/losers + hypotheses), what you did (every
   API action and code change, with links/ids), and what to watch next time.
+- Include an **`## Engagement`** section: the rubric baseline scores (per lever), the lever you
+  targeted this run, the before/after gate result (**shipped** with the score delta, or
+  **reverted** and why), and any experiment you **settled** (promoted/reverted) from
+  `run/experiments.jsonl`. This is the record of how the videos got better today.
+- Commit `run/experiments.jsonl` alongside the report (it is git-tracked memory). `git add -A`
+  already stages it.
 - **If triage surfaced anything that needs the operator** (OAuth reconnect, a recurring
   quota wall), lead the report with a `⚠ Needs operator` block so it can't be missed.
   A clean triage day = one line: "No operational issues found."
