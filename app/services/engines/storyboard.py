@@ -636,8 +636,9 @@ def _diagram_svg(nodes, edges, layout, portrait):
     landscape); edges connect node box edges with an arrowhead marker."""
     n = len(nodes)
     centers = {}   # id -> (cx, cy, near, far)  near/far = top/bottom (portrait) or left/right
-    parts = ['<defs><marker id="ar" markerWidth="12" markerHeight="12" refX="9" refY="4" '
-             'orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="var(--accent)"/></marker></defs>']
+    defs = ('<defs><marker id="ar" markerWidth="12" markerHeight="12" refX="9" refY="4" '
+            'orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="var(--accent)"/></marker></defs>')
+    node_parts, edge_parts = [], []   # edges drawn first (behind), nodes on top
 
     def node_g(x, y, w, h, label):
         return ('<g class="node"><rect x="%d" y="%d" width="%d" height="%d" rx="16"/>'
@@ -651,7 +652,7 @@ def _diagram_svg(nodes, edges, layout, portrait):
         for k, nd in enumerate(nodes):
             y = 10 + k * (bh + gap)
             centers[nd["id"]] = (x + bw / 2, y + bh / 2, y, y + bh)
-            parts.append(node_g(x, y, bw, bh, nd["label"]))
+            node_parts.append(node_g(x, y, bw, bh, nd["label"]))
     else:
         bw, bh, gap, vbh = 240, 110, 64, 220
         total = n * bw + (n - 1) * gap
@@ -661,7 +662,7 @@ def _diagram_svg(nodes, edges, layout, portrait):
         for k, nd in enumerate(nodes):
             x = x0 + k * (bw + gap)
             centers[nd["id"]] = (x + bw / 2, y + bh / 2, x, x + bw)
-            parts.append(node_g(x, y, bw, bh, nd["label"]))
+            node_parts.append(node_g(x, y, bw, bh, nd["label"]))
 
     drawn = edges or [{"from": nodes[k]["id"], "to": nodes[k + 1]["id"]} for k in range(n - 1)]
     e_count = 0
@@ -673,13 +674,13 @@ def _diagram_svg(nodes, edges, layout, portrait):
             x1, y1, x2, y2 = a[0], a[3], c[0], c[2]
         else:
             x1, y1, x2, y2 = a[3], a[1], c[2], c[1]
-        parts.append('<line class="edge" x1="%d" y1="%d" x2="%d" y2="%d" marker-end="url(#ar)"/>'
-                     % (x1, y1, x2, y2))
+        edge_parts.append('<line class="edge" x1="%d" y1="%d" x2="%d" y2="%d" marker-end="url(#ar)"/>'
+                          % (x1, y1, x2, y2))
         if e.get("label"):
-            parts.append('<text class="elabel" x="%d" y="%d" text-anchor="middle">%s</text>'
-                         % ((x1 + x2) / 2, (y1 + y2) / 2 - 8, theme.esc(e["label"])))
+            edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="middle">%s</text>'
+                              % ((x1 + x2) / 2, (y1 + y2) / 2 - 8, theme.esc(e["label"])))
         e_count += 1
-    return '<svg viewBox="0 0 %d %d" class="dsvg">%s</svg>' % (vbw, vbh, "".join(parts)), e_count
+    return '<svg viewBox="0 0 %d %d" class="dsvg">%s</svg>' % (vbw, vbh, "".join([defs] + edge_parts + node_parts)), e_count
 
 
 def render_diagram(b, ctx):
