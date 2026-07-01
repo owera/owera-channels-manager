@@ -110,6 +110,8 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         return
 
     video.script = task.get("script") or video.script
+    if task.get("creation_config"):
+        video.creation_config = json.dumps(task["creation_config"])
 
     thumb = dest_dir / "thumb.jpg"
     if _make_thumbnail(dest, thumb):

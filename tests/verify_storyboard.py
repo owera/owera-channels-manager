@@ -139,6 +139,14 @@ for cls in ("beat hook", "beat stat", "beat cmp", "beat lst", "beat term", "beat
 ok('class="code" style="font-size:' in html, "code beat emits an adaptive font-size (no clip)")
 ok('marker-end="url(#ar)"' in html, "diagram emits arrowhead marker")
 
+# --- creation_config capture (Phase 2 treatment signal) ----------------------
+print("_creation_config")
+cc = worker._creation_config("x", {"topic_id": 1, "content_format": "short"}, html,
+                             "word " * 50, 44.0, "portrait", None, False)
+ok(cc["beat_count"] == len(ALL), "creation_config captures the full beat mix")
+ok("code" in cc["beat_types"] and cc["theme"]["accent"] and cc["composition_version"],
+   "creation_config records beat_types + theme + version")
+
 # --- variety guard (R2: no all-statement storyboards) ------------------------
 print("_variety_ok")
 ok(storyboard._variety_ok([{"type": "hook"}, {"type": "stat"}, {"type": "compare"}, {"type": "cta"}]),

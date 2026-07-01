@@ -127,6 +127,10 @@ class Video(SQLModel, table=True):
     video_path: Optional[str] = None
     thumb_path: Optional[str] = None
     script: Optional[str] = None
+    # JSON snapshot of the creative choices this video was made with (beat mix, theme,
+    # voice, bgm, script length, …) — the "treatment" signal joined to VideoMetric for
+    # learning what drives engagement. Recorded at finalize; captured now (can't backfill).
+    creation_config: Optional[str] = None
 
     # gate / metadata
     title: Optional[str] = None
@@ -183,6 +187,7 @@ class VideoMetric(SQLModel, table=True):
     ctr: float = 0.0                      # impressionClickThroughRate (0..1)
     avg_view_pct: float = 0.0             # averageViewPercentage (0..100)
     watch_time_minutes: int = 0          # estimatedMinutesWatched
+    average_view_duration: float = 0.0   # seconds watched per view (avg); pairs with avg_view_pct
     likes: int = 0
     comments: int = 0
     subscribers_gained: int = 0

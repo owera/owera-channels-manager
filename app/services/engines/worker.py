@@ -326,8 +326,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             topic_id=params.get("topic_id"),
             content_format=params.get("content_format") or "short",
         )
+        used_fallback = False
         if not _looks_valid(html):
             html = _fallback_composition(subject, script, resolution, width, height, duration)
+            used_fallback = True
         (job_dir / "index.html").write_text(html)
         _status(handle, progress=45)
 
@@ -338,6 +340,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         except Exception as e:
             (job_dir / "render-error.txt").write_text(str(e))
             html = _fallback_composition(subject, script, resolution, width, height, duration)
+            used_fallback = True
             (job_dir / "index.html").write_text(html)
             _render(job_dir, silent)
 
@@ -347,16 +350,45 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         if not _has_visible_frames(silent):
             (job_dir / "blank-detected.txt").write_text("post-render frames blank; rebuilt with fallback")
             html = _fallback_composition(subject, script, resolution, width, height, duration)
+            used_fallback = True
             (job_dir / "index.html").write_text(html)
             _render(job_dir, silent)
         _status(handle, progress=80)
 
         # 5. Mux narration + BGM under the video -> final.mp4
-        _mux(silent, narration, _pick_bgm(params, handle),
-             float(params.get("bgm_volume") or 0.2), job_dir / "final.mp4")
-        _status(handle, progress=100, state=STATE_COMPLETE)
+        bgm = _pick_bgm(params, handle)
+        _mux(silent, narration, bgm, float(params.get("bgm_volume") or 0.2), job_dir / "final.mp4")
+
+        # Record the creative choices (the "treatment" signal) for later analytics joins.
+        cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback)
+        _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
+
+
+def _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback) -> dict:
+    """Snapshot the creative choices this video was made with — the 'treatment' signal the
+    growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
+    raises (a bad snapshot must not fail a render)."""
+    try:
+        th = theme.resolve(params.get("topic_id"), subject)
+        beats = re.findall(r'class="beat ([a-z_]+)"', html)
+        return {
+            "composition_version": settings.composition_version,
+            "content_format": params.get("content_format") or "short",
+            "resolution": resolution,
+            "voice": _voice(params),
+            "theme": {"accent": th["accent"], "bg_variant": th["bg_variant"]},
+            "beat_types": beats,
+            "beat_count": len(beats),
+            "bgm": (bgm.name if bgm else None),
+            "bgm_volume": float(params.get("bgm_volume") or 0.2),
+            "script_words": len(script.split()),
+            "duration": duration,
+            "used_fallback": used_fallback,
+        }
+    except Exception as e:
+        return {"error": f"creation_config failed: {type(e).__name__}: {e}"}
 
 
 # --------------------------------------------------------------------------- LLM steps

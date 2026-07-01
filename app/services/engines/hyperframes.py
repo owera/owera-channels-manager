@@ -83,6 +83,7 @@ class HyperFramesEngine:
             "progress": int(s.get("progress") or 0),
             "script": s.get("script"),
             "error": s.get("error"),
+            "creation_config": s.get("creation_config"),
         }
 
     def final_path(self, handle: str) -> Path:
