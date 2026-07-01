@@ -42,17 +42,24 @@ def _hook_text(subject: str, title: str | None,
         fmt_hint = ("short-form vertical video" if content_format == "short"
                     else "long-form YouTube video")
         system = (
-            "You write YouTube thumbnail hooks. Return ONLY a single punchy hook of "
-            "3 to 6 words that creates curiosity — no quotes, no emojis, no hashtags, "
-            "no trailing punctuation. Prefer concrete, high-contrast words. Use natural "
-            "capitalization (Title Case or ALL CAPS for single key words only if it adds "
-            "punch — never force everything to uppercase). "
+            "You write YouTube thumbnail hooks. The hook is shown NEXT TO the title, so "
+            "repeating the title wastes the slot — the hook must open a curiosity GAP the "
+            "title doesn't: name the stakes, the pain, or a surprising claim and WITHHOLD "
+            "the resolution, or reframe with a fresh metaphor, so the viewer has to watch to "
+            "find out. Do NOT reuse the title's distinctive words — the specific tool, "
+            "technique, or number it names (e.g. if the title says 'reranking in 5 lines', "
+            "the hook must not say 'reranking' or '5 lines'). Pick a different angle. "
+            "Return ONLY a single punchy hook of 3 to 6 words — no quotes, no emojis, no "
+            "hashtags, no trailing punctuation. Prefer concrete, high-contrast words. Use "
+            "natural capitalization (Title Case or ALL CAPS for single key words only if it "
+            "adds punch — never force everything to uppercase). "
             "Always respond in the same language as the video title."
         )
         prompt = (
             f"Video title: {base}\n"
             f"Format: {fmt_hint}\n\n"
-            "Write the thumbnail hook."
+            "Write the thumbnail hook — a curiosity gap that does NOT repeat the title's "
+            "words."
         )
         out = _llm(prompt, system=system, max_tokens=100).strip()
         out = re.sub(r'^["\'`]+|["\'`]+$', "", out).splitlines()[0].strip()
