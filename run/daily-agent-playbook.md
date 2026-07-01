@@ -281,6 +281,12 @@ engaging, one lever at a time, **proven on a real render before it ships.**
    **Ship only if all three pass.** Otherwise revert the file (`git checkout -- <file>`) — a
    no-op day is always safe. This gate is non-negotiable: a prompt change that doesn't demonstrably
    improve a real render does not ship.
+   - **Make it LIVE.** If the change is to app code the running manager executes (e.g.
+     `thumbnail.py`, `metadata.py`, `worker.py`, publish/render logic), **restart the manager after
+     you commit** (`launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager`; then re-check
+     `GET /api/dashboard` = 200). `rubric_review.py` renders in its OWN process reading the files
+     from disk — it proves the change is good but does NOT update the running app. A shipped change
+     that isn't restarted in never takes effect in production.
 4. **Log the experiment.** After committing (step 5), append one line to
    `run/experiments.jsonl`: `{"date","rubric_lever","hypothesis","files","commit":"<sha>",
    "predicted":{"metric","dir"},"baseline_note":"<the score/metric you measured>",
