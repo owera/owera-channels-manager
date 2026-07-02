@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd timer for the growth-agent daily run SUPERVISOR.
+
+  Runs run/run-check.sh once a day at 10:00 local — ~1h after the 09:00 growth-agent run —
+  which invokes headless Claude Code with run/run-check-prompt.md. It only VERIFIES the run
+  finished cleanly (pushed, reported, app-code applied) and finishes anything left; it never
+  does growth/engagement work. Install this only when you want that supervision.
+
+  This is a TEMPLATE — replace the placeholder paths before installing:
+    /Users/you  ->  your home dir ($HOME)
+
+  Install:
+    sed "s|/Users/you|$HOME|g" run/com.owera.run-check.plist \
+      > ~/Library/LaunchAgents/com.owera.run-check.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.run-check.plist
+
+  Kill switch (stop the next check without unloading):
+    touch run/run-check.disabled
+  Remove the timer entirely:
+    launchctl bootout gui/$(id -u)/com.owera.run-check
+  Run once now to test:
+    launchctl kickstart -k gui/$(id -u)/com.owera.run-check
+  Logs:
+    tail -f ~/Library/Logs/owera-run-check.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.owera.run-check</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/you/src/owera-channels-manager/run/run-check.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/you/src/owera-channels-manager</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/you</string>
+    </dict>
+
+    <!-- Once a day at 10:00 local, ~1h after the 09:00 growth-agent run. Periodic timer,
+         not a daemon: no RunAtLoad, no KeepAlive. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/owera-run-check.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/owera-run-check.log</string>
+</dict>
+</plist>

@@ -12,3 +12,4 @@ frontend/dist/
 run/.growth-agent.lock
 run/.rubric_review/
 .claude/
+run/.run-check.lock
