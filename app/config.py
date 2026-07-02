@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     render_poll_seconds: int = 10
     render_timeout_seconds: int = 2400        # 40 min hard cap per render
     publish_timeout_seconds: int = 900        # recover a video stuck 'publishing' past this
+    publish_max_retries: int = 5              # after this many stuck-publish recoveries, mark the video failed instead of re-queuing (a permanently-stalling upload must not block the channel forever)
     youtube_daily_quota_cap: int = 9000       # safety cap below the ~10k API quota
     metrics_tick_hours: int = 6               # channel-stats snapshot cadence (≤1/day each)
     analytics_tick_hours: int = 12            # per-video analytics snapshot cadence (≤1/day each)

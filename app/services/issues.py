@@ -67,6 +67,11 @@ def _failed_action(v: Video, age_hours: float | None) -> tuple[str, bool]:
     """(suggested_action, auto) for a FAILED video. With full autonomy the agent fixes
     all of these; the action tells it *how*."""
     if v.video_path:
+        if v.retry_count >= settings.publish_max_retries:
+            # Upload stalled past the timeout on every attempt (see publish_loop recovery
+            # cap). Auto-retrying just re-enters the same stall and blocks the channel's
+            # drip for another timeout window — escalate for a human decision instead.
+            return "retry", False       # exhausted publish retries → needs operator, not auto-retry
         return "retry", True            # render succeeded, failed at publish → re-approve
     if _is_transient(v.error) and v.retry_count < MAX_RETRIES:
         return "requeue", True          # transient render error → re-render

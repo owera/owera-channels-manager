@@ -43,23 +43,41 @@ def _recover_stuck_publishing(session: Session) -> None:
     advances 'approved' videos, so without this a stuck upload would sit forever.
 
     Skips uploads still inside the timeout window, so a genuinely in-flight upload is
-    never reset out from under itself."""
+    never reset out from under itself.
+
+    Recovery is capped: an upload that keeps stalling (e.g. a resumable upload that hangs
+    with no HTTP timeout) is re-queued at most ``publish_max_retries`` times, then marked
+    ``failed`` instead of re-queued. Otherwise it re-queues → re-publishes → stalls forever,
+    and — because recovery flips it back to APPROVED (in_flight → 0) before the channel loop
+    runs — it defeats the in-flight guard and blocks every other publish on that channel."""
     now = datetime.now(timezone.utc)
     timeout = settings.publish_timeout_seconds
+    cap = settings.publish_max_retries
     for v in session.exec(select(Video).where(Video.status == VideoStatus.PUBLISHING)).all():
         started = v.last_attempt_at or v.updated_at
         if started and started.tzinfo is None:        # SQLite returns naive datetimes
             started = started.replace(tzinfo=timezone.utc)
         if started and (now - started).total_seconds() < timeout:
             continue
+        v.retry_count += 1
+        if v.retry_count >= cap:
+            # Given up: park it as failed so it stops blocking the channel's publish drip.
+            v.status = VideoStatus.FAILED
+            v.render_progress = 0
+            v.error = (f"upload repeatedly stalled: stuck 'publishing' past {timeout}s on "
+                       f"{v.retry_count} attempts — gave up re-queuing to unblock the channel")
+            session.add(v)
+            quota.log(session, kind="publish", status="error", video_id=v.id,
+                      channel_id=v.channel_id,
+                      detail=f"gave up on stuck publish after {v.retry_count} attempts — marked failed")
+            continue
         v.status = VideoStatus.APPROVED
         v.render_progress = 0
         v.error = None
-        v.retry_count += 1
         session.add(v)
         quota.log(session, kind="publish", status="error", video_id=v.id,
                   channel_id=v.channel_id,
-                  detail=f"recovered stuck publish (>{timeout}s) — re-queued")
+                  detail=f"recovered stuck publish (>{timeout}s) — re-queued (attempt {v.retry_count}/{cap})")
     session.commit()
 
 
