@@ -35,6 +35,14 @@ learn what works. Treat it as your standing instructions.
      or a focused `uv run python -c …` that calls the function), and read the result back
      from the DB / API to confirm the intended effect actually happened. A change is not
      "done" until you have observed its effect, not assumed it.
+   - **Verify SYNCHRONOUSLY — NEVER wait for a future or scheduled event.** This is a headless
+     run: it EXITS the instant your turn yields, so a backgrounded command or a wait for a later
+     scheduled loop (a stuck-publish recovery, the publish drip, tomorrow's analytics) will never
+     report back — the session dies first, leaving your work **uncommitted/unpushed and no report
+     written**. Verify NOW with an isolated call/test (a `uv run python -c …` that invokes the
+     function directly against a crafted state — as with the publish-retry cap). If the *live*
+     effect can only be confirmed by a later loop, DO NOT wait for it: note it under "watch next
+     run" and proceed STRAIGHT to commit → push → report.
    - If you cannot exercise it, say so explicitly in the report and treat it as unverified.
    - If anything is wrong or unproven, `git revert` (or don't commit) — never ship on faith.
 4. **Destructive actions — tightly bounded.** Never delete channels, credentials,
