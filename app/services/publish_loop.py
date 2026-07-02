@@ -16,8 +16,8 @@ from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
 from app.services import quota, thumbnail, youtube
-from app.services.youtube import (NeedsConnect, QuotaExceeded, QUOTA_PLAYLISTITEM_INSERT,
-                                  QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
+from app.services.youtube import (NeedsConnect, QuotaExceeded, UploadStalled,
+                                  QUOTA_PLAYLISTITEM_INSERT, QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
 
 
 def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
@@ -153,6 +153,21 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   detail=f"quota exceeded: [{e.reason}] cooldown until "
                          f"{channel.cooldown_until.isoformat()}; {e}")
         raise
+    except UploadStalled as e:
+        # Transient socket stall (now caught fast by the HTTP timeout instead of hanging
+        # the whole window). Retry up to the cap, then give up so it stops occupying the drip.
+        video.retry_count += 1
+        cap = settings.publish_max_retries
+        if video.retry_count < cap:
+            video.status = VideoStatus.APPROVED
+            detail = f"upload stalled (retry {video.retry_count}/{cap}): {e}"
+        else:
+            video.status = VideoStatus.FAILED
+            video.error = f"upload stalled and gave up after {video.retry_count} attempts: {e}"
+            detail = video.error
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=detail)
+        return
     except Exception as e:
         video.status = VideoStatus.FAILED
         video.error = f"upload failed: {e}"
