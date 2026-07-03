@@ -19,6 +19,7 @@ os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 import httplib2
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow, InstalledAppFlow
@@ -96,7 +97,14 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError:
+            # Refresh token revoked/expired (invalid_grant). Return None so get_service
+            # raises the clean NeedsConnect that callers already handle — instead of
+            # leaking a RefreshError that leaves an upload stuck in PUBLISHING (mislabeled
+            # a "stall" by the recovery loop) and never flags the channel for reconnect.
+            return None
         tp.write_text(creds.to_json())
         return creds
     return None
