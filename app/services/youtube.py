@@ -18,7 +18,6 @@ from typing import Callable, Optional
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
-import google_auth_httplib2
 import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -64,17 +63,9 @@ class QuotaExceeded(Exception):
 
 
 class UploadStalled(Exception):
-    """The resumable upload's socket stalled/timed out (no HTTP error) — a transient
-    network condition. The publish loop retries it (up to publish_max_retries) rather
-    than failing the video outright."""
-
-
-def _authed_http(creds):
-    """An authorized httplib2 client with a socket timeout, so a stalling upload chunk
-    raises instead of hanging the whole publish window. httplib2.Http is not thread-safe,
-    but every caller builds a fresh service, so each gets its own client."""
-    return google_auth_httplib2.AuthorizedHttp(
-        creds, http=httplib2.Http(timeout=settings.youtube_http_timeout_seconds))
+    """A resumable-upload chunk raised a socket/connection error (not an HTTP error) —
+    a transient network condition. The publish loop retries it (up to publish_max_retries)
+    rather than failing the video outright."""
 
 
 def channel_dir(slug: str) -> Path:
@@ -119,7 +110,7 @@ def get_service(slug: str):
     creds = _load_creds(slug)
     if creds is None:
         raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
-    return build("youtube", "v3", http=_authed_http(creds))
+    return build("youtube", "v3", credentials=creds)
 
 
 def build_flow(slug: str, redirect_uri: str) -> Flow:
@@ -442,7 +433,7 @@ def get_analytics_service(slug: str):
     creds = _load_creds(slug, CONSENT_SCOPES)
     if creds is None:
         raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
-    return build("youtubeAnalytics", "v2", http=_authed_http(creds))
+    return build("youtubeAnalytics", "v2", credentials=creds)
 
 
 def _analytics_row(analytics, channel_yt_id, video_id, start_date, end_date, metrics) -> dict:
