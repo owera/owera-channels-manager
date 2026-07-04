@@ -646,7 +646,10 @@ def _diagram_svg(nodes, edges, layout, portrait):
                 % (x, y, w, h, x + w / 2, y + h / 2, theme.esc(label)))
 
     if portrait:
-        vbw, bw, bh, gap = 1000, 560, 120, 78
+        # Narrow viewBox (was 1000) so the vertically-stacked diagram fills more of the
+        # portrait frame instead of leaving ~55% dead space: .dsvg is width-fit, so a
+        # taller aspect ratio means more vertical fill (nodes also read larger on mobile).
+        vbw, bw, bh, gap = 760, 600, 120, 78
         vbh = int(n * bh + (n - 1) * gap + 20)
         x = (vbw - bw) / 2
         for k, nd in enumerate(nodes):
