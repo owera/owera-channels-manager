@@ -1,0 +1,5 @@
+# Append-only logs: on merge, keep every branch's added lines instead of conflicting.
+# The code agent appends one line per cycle to run/code-experiments.jsonl; two
+# in-flight PRs would otherwise collide on that shared file. `union` concatenates
+# both sides' additions (verified: a two-branch append merges clean, both lines kept).
+run/code-experiments.jsonl merge=union

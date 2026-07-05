@@ -73,3 +73,11 @@ Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated P
 - **caution:** touches `app/main.py` auth (HIGH) — isolated PR + test that the callback path is reachable
   without auth while everything else still 401s.
 - **acceptance:** callback reachable post-consent without Basic Auth; all other routes still guarded.
+
+### 9. Fix parallel-append conflicts on the cycle log — normal  *(discovered 2026-07-05; addressed in this PR)*
+- **why:** the playbook appends one line per cycle to `run/code-experiments.jsonl`; two in-flight
+  code-agent PRs both append after the same line and collide on merge.
+- **approach:** add `.gitattributes` with `run/code-experiments.jsonl merge=union` so git keeps both
+  sides' appended lines automatically.
+- **caution:** normal (repo config; no runtime surface).
+- **acceptance:** a two-branch append merges without conflict, both lines retained.
