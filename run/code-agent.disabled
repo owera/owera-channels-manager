@@ -1,0 +1,5 @@
+The autonomous code agent is OFF while this file exists.
+
+The runner (run/code-agent.sh) and launchd timer (run/com.owera.code-agent.plist) are shipped disabled
+on purpose. Delete this file to arm the headless nightly runner. The interactive `/loop` (see
+docs/AUTONOMY.md) works regardless of this file — this only gates the unattended launchd runner.

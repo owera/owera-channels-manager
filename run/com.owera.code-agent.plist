@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd timer for the Owera autonomous CODE agent.
+
+  Runs run/code-agent.sh once a night, which invokes headless Claude Code against this
+  repo with run/code-agent-playbook.md. The agent is autonomous within the guardrails
+  in the playbook: DRAFT PRs only, never pushes to main, one change per cycle, gated
+  before every PR. Install this only when you want unattended overnight PRs.
+
+  SHIPPED OFF: run/code-agent.disabled is committed, so even a loaded timer no-ops
+  until you `rm run/code-agent.disabled`.
+
+  This is a TEMPLATE — replace the placeholder paths before installing:
+    /Users/you                       -> your home dir ($HOME)
+    .../src/owera-channels-manager   -> your checkout
+
+  Enable (only when you intend to run the autonomous code agent):
+    rm run/code-agent.disabled
+    sed "s|/Users/you|$HOME|g" run/com.owera.code-agent.plist \
+      > ~/Library/LaunchAgents/com.owera.code-agent.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.owera.code-agent.plist
+
+  Kill switch (stop the next run without unloading):
+    touch run/code-agent.disabled
+  Remove the timer entirely:
+    launchctl bootout gui/$(id -u)/com.owera.code-agent
+  Run once now to test:
+    launchctl kickstart -k gui/$(id -u)/com.owera.code-agent
+  Logs:
+    tail -f ~/Library/Logs/owera-code-agent.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.owera.code-agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/you/src/owera-channels-manager/run/code-agent.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/you/src/owera-channels-manager</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd does not inherit the login shell PATH; the script also sets this. -->
+        <key>PATH</key>
+        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/you</string>
+    </dict>
+
+    <!-- Once a night at 02:00 local time — avoids the 09:00-10:00 growth-agent window.
+         A periodic timer, not a daemon: do NOT RunAtLoad and do NOT KeepAlive. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/owera-code-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/owera-code-agent.log</string>
+</dict>
+</plist>
