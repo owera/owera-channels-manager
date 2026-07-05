@@ -421,6 +421,13 @@ def _base_css(width: int, height: int, th: dict) -> str:
         ".diagram .node{opacity:0}"
         ".diagram .edge{stroke:var(--accent);stroke-width:4;fill:none}"
         ".diagram .elabel{fill:var(--fg-dim);font-size:26px;opacity:0}"
+        # cmp — portrait only: side-by-side columns waste the tall frame (small text,
+        # ~70% dead space) and squeeze the centered VS badge into the card text. Stack
+        # the cards full-width with the badge in normal flow between them.
+        + ((".cmp .cmp-cols{flex-direction:column;align-items:center;gap:.5em}"
+            ".cmp .cmp-col{flex:none;max-width:88%;width:88%;box-sizing:border-box}"
+            ".cmp .cmp-vs{position:static;transform:none;flex:none}")
+           if height >= width else "")
     )
 
 
