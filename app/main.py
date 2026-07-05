@@ -4,14 +4,16 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlmodel import Session, func, select
 
 from app.config import ensure_dirs, load_dotenv_into_env, settings
-from app.db import init_db
+from app.db import get_session, init_db
+from app.models import Channel, OAuthStatus, Video, VideoStatus
 from app.routers import (channels, media, music, playlists, profiles, queue,
                          settings as settings_router, topics, trends, videos,
                          youtube_admin)
@@ -46,6 +48,10 @@ app.add_middleware(
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
     """HTTP Basic Auth guard. Only active when MANAGER_APP_PASSWORD is set in .env."""
+    # Liveness endpoint stays unauthenticated so external uptime monitors can reach it;
+    # it exposes only aggregate counts, never channel names or tokens.
+    if request.url.path == "/health":
+        return await call_next(request)
     if not settings.app_password:
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
@@ -65,6 +71,35 @@ async def basic_auth(request: Request, call_next):
 for r in (channels, playlists, profiles, topics, videos, queue, media, settings_router,
           youtube_admin, trends, music):
     app.include_router(r.router)
+
+
+def _health_snapshot(session: Session) -> dict:
+    """Aggregate health for uptime monitors — no channel names or tokens. 'degraded'
+    when a channel can't publish (oauth not connected and not intentionally paused) or
+    any video is in the failed state."""
+    channels = session.exec(select(Channel)).all()
+    needs_attention = sum(
+        1 for c in channels
+        if c.oauth_status != OAuthStatus.CONNECTED and not c.paused
+    )
+    failed = int(session.exec(
+        select(func.count(Video.id)).where(Video.status == VideoStatus.FAILED)
+    ).one())
+    return {
+        "status": "degraded" if (needs_attention or failed) else "ok",
+        "channels_total": len(channels),
+        "channels_connected": sum(1 for c in channels
+                                  if c.oauth_status == OAuthStatus.CONNECTED),
+        "channels_paused": sum(1 for c in channels if c.paused),
+        "channels_needing_attention": needs_attention,
+        "videos_failed": failed,
+    }
+
+
+@app.get("/health")
+def health(session: Session = Depends(get_session)):
+    """Unauthenticated liveness + degradation summary for uptime monitors (aggregate-only)."""
+    return _health_snapshot(session)
 
 
 # Serve the built SPA (if present) with client-side-routing fallback.
