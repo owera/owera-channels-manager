@@ -420,7 +420,10 @@ def _base_css(width: int, height: int, th: dict) -> str:
         ".diagram .node text{fill:var(--fg);font-size:34px;font-weight:700}"
         ".diagram .node{opacity:0}"
         ".diagram .edge{stroke:var(--accent);stroke-width:4;fill:none}"
-        ".diagram .elabel{fill:var(--fg-dim);font-size:26px;opacity:0}"
+        # paint-order halo: the connector line passes behind the glyphs instead of
+        # striking through them (labels sit on/next to the edge line).
+        ".diagram .elabel{fill:var(--fg-dim);font-size:26px;opacity:0;"
+        "paint-order:stroke;stroke:rgba(12,15,26,.85);stroke-width:7px;stroke-linejoin:round}"
         # cmp — portrait only: side-by-side columns waste the tall frame (small text,
         # ~70% dead space) and squeeze the centered VS badge into the card text. Stack
         # the cards full-width with the badge in normal flow between them.
@@ -687,8 +690,15 @@ def _diagram_svg(nodes, edges, layout, portrait):
         edge_parts.append('<line class="edge" x1="%d" y1="%d" x2="%d" y2="%d" marker-end="url(#ar)"/>'
                           % (x1, y1, x2, y2))
         if e.get("label"):
-            edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="middle">%s</text>'
-                              % ((x1 + x2) / 2, (y1 + y2) / 2 - 8, theme.esc(e["label"])))
+            if portrait:
+                # Vertical connector: a centered label sits ON the line (strike-through)
+                # and its -8 baseline shift can clip the node border above — place it
+                # beside the line, vertically centered in the gap.
+                edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="start" dominant-baseline="middle">%s</text>'
+                                  % ((x1 + x2) / 2 + 18, (y1 + y2) / 2, theme.esc(e["label"])))
+            else:
+                edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="middle">%s</text>'
+                                  % ((x1 + x2) / 2, (y1 + y2) / 2 - 8, theme.esc(e["label"])))
         e_count += 1
     return '<svg viewBox="0 0 %d %d" class="dsvg">%s</svg>' % (vbw, vbh, "".join([defs] + edge_parts + node_parts)), e_count
 
