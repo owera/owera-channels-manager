@@ -796,7 +796,11 @@ def _system_prompt(allowed: list[str]) -> str:
         "into visuals: a number becomes a `stat`; a contrast/'X vs Y' becomes a `compare`; steps or "
         "reasons become a `list`; a key term becomes a `term_define`" +
         ("; code or a command becomes `code`/`command`; a flow/pipeline becomes a `diagram`" if has_bc else "") +
-        ".\n"
+        ".\n" +
+        ("2b. If the video is ABOUT a tool, API, protocol, or coding technique, include at least "
+         "one `code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars per "
+         "line) demonstrating the narration's claim — even when the narration never reads code "
+         "aloud. SHOW the thing the words only describe.\n" if has_bc else "") +
         "3. Use `statement` SPARINGLY — at MOST 2 in the whole video. A storyboard that is mostly "
         "`statement` is WRONG: it just re-displays the spoken words. Convert those into the richer "
         "types (" + rich + ") instead.\n"
