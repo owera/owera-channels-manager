@@ -10,6 +10,8 @@ Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated P
 ---
 
 ### 1. Fix portal OAuth reconnect (`redirect_uri_mismatch`) — HIGH
+- **urgency note (2026-07-06):** reduced — ch2's app is now published to Production with a fresh
+  token, so reconnects should be rare. Still worth fixing so the dashboard button works when needed.
 - **why:** reconnect from `channels.owera.com` fails; only `localhost` works. Root cause: uvicorn runs
   without `--proxy-headers`, so the `channels.owera.com` Host header makes `oauth_start` build a
   non-loopback `redirect_uri` the Desktop OAuth client rejects. This is why ch2 was down for ~3 days.
@@ -31,7 +33,7 @@ Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated P
 - **acceptance:** simulated expiry produces exactly one alert with a working reconnect link; no alert
   while healthy.
 
-### 3. Regression tests for the publish-path incidents — normal (high value)
+### 3. ✅ DONE (PR #6, merged 2026-07-05) Regression tests for the publish-path incidents — normal (high value)
 - **why:** every real outage was in the publish/upload path, which has thin tests.
 - **approach:** add dependency-free checks (extend `tests/verify_storyboard.py` or a new
   `tests/verify_publish.py`) reproducing: upload-stall retry cap, quota-cooldown handling, revoked-token →
@@ -46,14 +48,17 @@ Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated P
 - **caution:** touches oauth (HIGH) — isolated PR.
 - **acceptance:** documented one-command reconnect; `/verify` shows a channel going connected.
 
-### 5. `/health` endpoint + structured alerts off the issues digest — normal
+### 5. ✅ DONE (PR #7, merged 2026-07-05) `/health` endpoint — normal
 - **why:** no machine-readable health signal for uptime checks.
 - **approach:** add `GET /health` (no auth) returning per-channel oauth, publish-today vs budget, failed
   count, quota headroom, board-inventory days — sourced from the existing dashboard/issues services.
 - **caution:** normal (additive, read-only).
 - **acceptance:** `/health` returns accurate JSON; `/verify` drives it.
 
-### 6. Analytics-scope backfill flow — normal
+### 6. ✅ DONE operationally (2026-07-05/06) Analytics-scope backfill flow — normal
+- **resolution:** both channels were re-consented with the `yt-analytics.readonly` scope during the
+  OAuth reconnects; per-video analytics has been flowing since 07-04 (ch1 100/110, ch2 78/93 measured).
+  The in-app detect-and-reconsent flow is no longer needed while both tokens hold.
 - **why:** per-video analytics is `measured:0` because channels weren't consented for the analytics scope.
 - **approach:** detect missing `yt-analytics.readonly` grant and surface a one-click re-consent; backfill
   once granted.
@@ -74,10 +79,22 @@ Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated P
   without auth while everything else still 401s.
 - **acceptance:** callback reachable post-consent without Basic Auth; all other routes still guarded.
 
-### 9. Fix parallel-append conflicts on the cycle log — normal  *(discovered 2026-07-05; addressed in this PR)*
+### 9. ✅ DONE (PR #8, merged 2026-07-06) Fix parallel-append conflicts on the cycle log — normal
 - **why:** the playbook appends one line per cycle to `run/code-experiments.jsonl`; two in-flight
   code-agent PRs both append after the same line and collide on merge.
 - **approach:** add `.gitattributes` with `run/code-experiments.jsonl merge=union` so git keeps both
   sides' appended lines automatically.
 - **caution:** normal (repo config; no runtime surface).
 - **acceptance:** a two-branch append merges without conflict, both lines retained.
+
+### 10. Surface process-slot exhaustion before it breaks the pipeline — normal  *(discovered 2026-07-06)*
+- **why:** on 2026-07-06 the Mac ran out of process slots ("fork: Resource temporarily unavailable")
+  mid-supervisor-run; rendering/publishing spawn subprocesses, so exhaustion silently threatens the
+  drip. It recovered on its own, but nothing would have alerted anyone.
+- **approach:** add a `system` block to `GET /health` (process count via `len(psutil.pids())` or
+  `os.listdir('/proc')`-equivalent — on macOS use `sysctl kern.maxproc` + a cheap `ps` count or
+  `psutil` if already a dep; degrade status when usage >85%). Keep it dependency-light.
+- **caution:** normal (additive, read-only) — but measure without forking if possible (the failure
+  mode is precisely that forking stops working).
+- **acceptance:** /health reports process headroom and flips to degraded at the threshold; verified
+  by mocking the reading.
