@@ -4,11 +4,11 @@
 
   Runs run/code-agent.sh once a night, which invokes headless Claude Code against this
   repo with run/code-agent-playbook.md. The agent is autonomous within the guardrails
-  in the playbook: DRAFT PRs only, never pushes to main, one change per cycle, gated
-  before every PR. Install this only when you want unattended overnight PRs.
+  in the playbook: gated, reversible commits straight to main (growth-agent trust
+  model), one change per cycle, deployed and observed live, self-reverted on
+  post-deploy failure. Install this only when you want unattended overnight commits.
 
-  SHIPPED OFF: run/code-agent.disabled is committed, so even a loaded timer no-ops
-  until you `rm run/code-agent.disabled`.
+  Kill switch: `touch run/code-agent.disabled` makes a loaded timer no-op.
 
   This is a TEMPLATE — replace the placeholder paths before installing:
     /Users/you                       -> your home dir ($HOME)
