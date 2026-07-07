@@ -1,11 +1,12 @@
 # Code Agent Backlog
 
 Ranked by leverage — highest first. The code agent (`run/code-agent-playbook.md`) takes the top item it
-can finish end-to-end in one cycle, opens a draft PR, and checks it off. Re-rank freely as reality
-changes. Format per item: **why** · **approach** · **caution** · **acceptance**.
+can finish end-to-end in one cycle, ships it as a gated commit straight to `main`, and checks it off.
+Re-rank freely as reality changes. Format per item: **why** · **approach** · **caution** · **acceptance**.
 
-Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated PR + new regression test ·
-`GATED` = needs an operator step (deploy/OAuth/account) — do the code, note the step in the PR.
+Caution legend: `normal` = standard gate · `HIGH` = money-path file, isolated commit + new regression
+test · `GATED` = needs an operator step (OAuth/account/external) — ship the safely-inert code part and
+flag the operator step in the commit body.
 
 ---
 

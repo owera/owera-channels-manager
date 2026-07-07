@@ -2,11 +2,10 @@
 # Autonomous code-agent runner — invoked by launchd (com.owera.code-agent.plist).
 #
 # Runs headless Claude Code against this repo with run/code-agent-playbook.md. Fully
-# autonomous but bounded by the guardrails in the playbook: DRAFT PRs only, never
-# pushes to main, one change per cycle, gated before every PR.
-#
-# SHIPPED OFF: run/code-agent.disabled is committed, so this no-ops until you remove
-# it. Enable with:  rm run/code-agent.disabled  (and load the plist — see the plist).
+# autonomous but bounded by the guardrails in the playbook: gated, reversible commits
+# straight to main (growth-agent trust model), one change per cycle, deployed and
+# observed live, self-reverted on post-deploy failure. Draft PR only as the fallback
+# for changes the gate can't fully verify.
 #
 # Kill switches (either stops the next run, no unload needed):
 #   touch run/code-agent.disabled      # hard off
