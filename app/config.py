@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 7070
 
+    # Base URL for the OAuth redirect_uri built by oauth_start (env:
+    # MANAGER_PUBLIC_BASE_URL). Empty = derive from the incoming request, which
+    # breaks behind the reverse proxy: a channels.owera.com Host produces a
+    # non-loopback redirect_uri the Desktop OAuth client rejects
+    # (redirect_uri_mismatch). Set it to a base the client accepts — e.g.
+    # http://localhost:7070 — so reconnects started from the portal work too.
+    public_base_url: str = ""
+
     # Optional HTTP Basic Auth password for public access. Any username + this
     # password is accepted. Empty string = no auth (safe for local-only use).
     app_password: str = ""

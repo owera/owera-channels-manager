@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus, utcnow
 from app.schemas import ChannelCreate, ChannelUpdate
@@ -108,7 +109,8 @@ def oauth_start(channel_id: int, request: Request, session: Session = Depends(ge
         raise HTTPException(404, "channel not found")
     if not youtube.has_client_secret(ch.slug):
         raise HTTPException(400, "upload client_secret.json first")
-    base = str(request.base_url).rstrip("/")
+    # MANAGER_PUBLIC_BASE_URL pins the redirect_uri (rationale on the setting).
+    base = settings.public_base_url.rstrip("/") or str(request.base_url).rstrip("/")
     redirect_uri = f"{base}/api/channels/{channel_id}/oauth/callback"
     try:
         flow = youtube.build_flow(ch.slug, redirect_uri)

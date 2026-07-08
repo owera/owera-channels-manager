@@ -10,7 +10,13 @@ flag the operator step in the commit body.
 
 ---
 
-### 1. Fix portal OAuth reconnect (`redirect_uri_mismatch`) — HIGH
+### 1. ✅ DONE (code shipped to main 2026-07-08; operator step pending) Fix portal OAuth reconnect (`redirect_uri_mismatch`) — HIGH
+- **resolution (2026-07-08):** `MANAGER_PUBLIC_BASE_URL` setting added; when set, `oauth_start` pins
+  the redirect_uri to it regardless of the incoming Host (unset = old request-derived behavior, so
+  localhost reconnects are unchanged). Regression suite: `tests/verify_oauth_redirect.py`.
+  **Operator step:** set `MANAGER_PUBLIC_BASE_URL=http://localhost:7070` in `.env` to activate
+  (Desktop OAuth clients only accept loopback redirects — consenting from another machine needs an
+  SSH tunnel to :7070, per the reconnect recipe in project memory).
 - **urgency note (2026-07-06):** reduced — ch2's app is now published to Production with a fresh
   token, so reconnects should be rare. Still worth fixing so the dashboard button works when needed.
 - **why:** reconnect from `channels.owera.com` fails; only `localhost` works. Root cause: uvicorn runs
