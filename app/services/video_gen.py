@@ -4,17 +4,56 @@ import re
 
 from app.config import settings
 
+# The channel's spoken language lives implicitly in its render-profile voice id
+# (e.g. "pt-BR-AntonioNeural"). Idea/script prompts must state it explicitly:
+# an LLM otherwise infers language from the topic/title text and can drift into
+# English on a Portuguese channel (three EN videos shipped to ch2 on 2026-07-07).
+_VOICE_LANGUAGES = {
+    "pt": "Brazilian Portuguese",
+    "en": "English",
+    "es": "Spanish",
+}
+
+
+def language_from_voice(voice_name: str | None) -> str | None:
+    """Map a voice id like 'pt-BR-AntonioNeural[-Male]' to a language name for prompts."""
+    if not voice_name:
+        return None
+    return _VOICE_LANGUAGES.get(voice_name.split("-", 1)[0].lower())
+
+
+def channel_language(session, channel_id: int | None) -> str | None:
+    """Language of a channel's default render-profile voice (None if unknown)."""
+    import json
+
+    from app.models import Channel, RenderProfile
+
+    ch = session.get(Channel, channel_id) if channel_id else None
+    if not ch or not ch.default_render_profile_id:
+        return None
+    profile = session.get(RenderProfile, ch.default_render_profile_id)
+    if not profile:
+        return None
+    try:
+        voice = json.loads(profile.params_json or "{}").get("voice_name")
+    except ValueError:
+        return None
+    return language_from_voice(voice)
+
 
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
-                   n: int = 8, content_format: str = "short") -> list[str]:
+                   n: int = 8, content_format: str = "short",
+                   language: str | None = None) -> list[str]:
     import litellm
 
     avoid = "\n".join(f"- {s}" for s in existing[-60:])
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
+    lang_rule = (f"\nHARD RULE: write every title in {language} — the channel publishes "
+                 f"exclusively in {language}, whatever language the theme name is in." if language else "")
     if content_format == "long":
         prompt = (
             f"Generate {n} distinct, compelling ideas for in-depth long-form YouTube videos, "
-            f"all about the theme: \"{topic_name}\".{guidance}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}\n"
             "Each must be a clear, specific, search-friendly video title (6-15 words) covering a "
             "substantial topic worth several minutes. "
             "RULE: lead with a question, tension, or situation the viewer already feels — NOT the "
@@ -37,7 +76,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     else:
         prompt = (
             f"Generate {n} distinct, engaging short-video ideas for a YouTube Shorts channel, "
-            f"all about the theme: \"{topic_name}\".{guidance}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}\n"
             "Each must be a concise, hooky video title under 12 words, covering a specific angle "
             "of the theme. "
             "RULE: lead with the viewer's situation or mistake — NOT the solution. The hook works "

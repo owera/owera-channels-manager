@@ -445,6 +445,14 @@ def _generate_script(subject: str, params: dict) -> str:
             "Return ONLY the spoken words."
         )
         max_tokens = 600
+    # Pin the script language to the channel's voice: without this the LLM follows
+    # the title's language, so a stray English idea gets an English script narrated
+    # by the Portuguese voice (shipped to ch2 on 2026-07-07).
+    from app.services.video_gen import language_from_voice
+    lang = language_from_voice(params.get("voice_name"))
+    if lang:
+        prompt += (f" HARD RULE: write the entire script in {lang}, regardless of the "
+                   f"title's language — this channel narrates exclusively in {lang}.")
     text = _llm(prompt, max_tokens=max_tokens).strip()
     text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
 

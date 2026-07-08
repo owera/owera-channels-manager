@@ -127,7 +127,8 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     # 2. Seed ideas; auto-produce the first `produce_count` (QUEUED), rest as DRAFT.
     try:
         ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
-                                         max(1, body.idea_count), fmt)
+                                         max(1, body.idea_count), fmt,
+                                         language=video_gen.channel_language(session, ch.id))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     mx_v = session.exec(

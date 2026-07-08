@@ -46,7 +46,8 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic.id)).all()
     try:
         ideas = video_gen.generate_ideas(
-            topic.name, topic.theme_prompt, list(existing), batch, topic.content_format)
+            topic.name, topic.theme_prompt, list(existing), batch, topic.content_format,
+            language=video_gen.channel_language(session, topic.channel_id))
     except Exception as e:
         logger.info("autofill skipped for topic '%s': %s", topic.name, e)
         return 0

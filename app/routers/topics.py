@@ -128,7 +128,8 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
     try:
         ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing),
-                                         count, t.content_format)
+                                         count, t.content_format,
+                                         language=video_gen.channel_language(session, t.channel_id))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0
