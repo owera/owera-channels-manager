@@ -104,6 +104,13 @@ def _chars_clip(text, n: int) -> str:
     return s[:n].strip()
 
 
+def _code_line_clip(text, n: int) -> str:
+    """Like _chars_clip but keeps leading indentation — code lines carry meaning in
+    leading whitespace (a `return` under a `def` must stay indented)."""
+    s = str(text).rstrip()
+    return s[:n].rstrip()
+
+
 def _coerce_beat(raw: dict, allowed: set) -> dict | None:
     """Validate + clamp one raw beat. Unknown/out-of-allowlist types downgrade to
     ``statement``. Returns None only if it can't be salvaged into anything."""
@@ -179,7 +186,7 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
 
     # Phase B/C: accept + clamp here; rendered only once their renderers are registered.
     if btype == "code":
-        lines = [_chars_clip(x, 60) for x in (raw.get("lines") or []) if str(x).strip()][:8]
+        lines = [_code_line_clip(x, 60) for x in (raw.get("lines") or []) if str(x).strip()][:8]
         if not lines:
             return None
         hl = [i for i in (raw.get("highlight") or []) if isinstance(i, int)]
@@ -775,7 +782,7 @@ _TYPE_DOCS = {
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
     "cta": 'cta: {"cue","text"(≤4w),"sub"?} — closing call to action; exactly one, last.',
-    "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen),"highlight":[int]} — a short snippet; highlight key line indices.',
+    "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows.',
 }
