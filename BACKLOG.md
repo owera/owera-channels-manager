@@ -94,7 +94,12 @@ flag the operator step in the commit body.
 - **caution:** normal (repo config; no runtime surface).
 - **acceptance:** a two-branch append merges without conflict, both lines retained.
 
-### 10. Surface process-slot exhaustion before it breaks the pipeline — normal  *(discovered 2026-07-06)*
+### 10. ✅ DONE (code shipped to main 2026-07-09) Surface process-slot exhaustion before it breaks the pipeline — normal
+- **resolution (2026-07-09):** `GET /health` now includes `system.processes` (`count`/`max`/`pct_used`
+  from `kern.maxproc` + a `ps -A` count via two cheap subprocess reads); `status` flips to `degraded`
+  at ≥85% usage. A failed reading (sysctl/ps unavailable — the exact failure mode being watched for)
+  returns `None` rather than crashing `/health` or flipping status. Regression suite:
+  `tests/verify_health.py` (mocked-reading + real-reading checks).
 - **why:** on 2026-07-06 the Mac ran out of process slots ("fork: Resource temporarily unavailable")
   mid-supervisor-run; rendering/publishing spawn subprocesses, so exhaustion silently threatens the
   drip. It recovered on its own, but nothing would have alerted anyone.
