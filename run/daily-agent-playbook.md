@@ -374,6 +374,48 @@ risky, skip it — doing nothing is always safe.
 
 ---
 
+## SUBSCRIBER OFFENSIVE — standing directives (operator-approved 2026-07-09)
+Growth is the mission and it stalled: ch1 sat at 9 subscribers for 11+ days across 125 published
+videos; only 5 videos EVER gained a subscriber — and 4 of those were long-form deep-technical, not
+the high-volume shorts. These directives OVERRIDE any conflicting older habit in this playbook.
+
+1. **CTR/impressions are NOT measurable — stop citing them.** The 2026-07-09 audit proved the
+   Analytics API rejects the impressions metric ("Unknown identifier"); every impressions/ctr=0 ever
+   stored was a fabricated default from a silently failing query (now removed). Never write
+   "CTR is 0" in a report again. **Your discovery signal is `VideoMetric.traffic_json`**
+   (browse/suggested/search views): BROWSE+SUGGESTED > 0 means the algorithm is testing the
+   video; all-external means it isn't. Read it every run once it flows.
+2. **Daily mix: 4 shorts + 1 long-form per channel** (within `daily_publish_budget=5`). Long-form
+   is the proven subscriber converter; shorts are the discovery funnel. Keep exactly one long
+   anchor topic weighted ≥2 per channel and make sure a long video actually publishes each day —
+   if none is in the pipeline by Observe time, produce one first.
+3. **Series beat singles.** For the proven winners (ch1: Copilot Credits; ch2: concrete-hardware
+   topics), title new videos as numbered series episodes ("… — Parte 3") and reference the next
+   episode in the close. "Part N tomorrow" is the strongest subscribe rationale a small channel has.
+4. **Experiment priority: R7 (CTA — its signal IS `subscribers_gained`) and R1 (hook) outrank R3
+   polish.** R3 has had 4 straight experiments; do not ship another R3 change while R7/R1 remain
+   untested.
+5. **Daily seeding kit — write it EVERY run** to `run/seeding/YYYY-MM-DD.md` (format in
+   `run/seeding/README.md`): per channel 2-3 ready-to-paste, platform-native posts (ch2: TabNews,
+   r/brdev; ch1: r/LocalLLaMA, dev.to, HN only when genuinely strong, LinkedIn) featuring the day's
+   best video with value-first framing (never a bare link), plus 2-3 thoughtful comment drafts for
+   fresh videos on adjacent larger channels. The OPERATOR posts these (~10 min/day) — you draft,
+   never post externally yourself. Track in the report which prior seeds got posted and any traffic
+   they produced (`traffic_json` EXT_URL).
+6. **Language integrity is sacred on ch2.** Metadata now generates in the channel language and
+   uploads carry `defaultAudioLanguage` — verify in Observe that new ch2 videos have PT-BR
+   titles/descriptions; any EN leak is a triage-level bug.
+7. **Checkpoints (set 2026-07-09, review daily, hard review 2026-07-23):** traffic_json flowing and
+   quoted in reports; ch2 54 → 75 subs; ch1 finally moves past 9; one named series running per
+   channel; every new video ships with CTA block + links + first comment. **Falsifier:** if
+   BROWSE+SUGGESTED views stay ~0 across the 07-09→07-23 cohort despite all of the above, the
+   problem is channel-level distribution — escalate to the operator with a recommendation to cut
+   cadence and audit channel standing rather than publishing more.
+8. **Monday reports get a `## Growth review` section**: subs delta by channel, traffic-source mix
+   shift, seeding results, series performance, and the single biggest bet for the coming week.
+
+---
+
 ## API quick reference (all on http://127.0.0.1:7070)
 
 | Goal | Call |

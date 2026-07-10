@@ -15,9 +15,30 @@ from pathlib import Path
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
-from app.services import quota, thumbnail, youtube
+from app.services import metadata, quota, thumbnail, video_gen, youtube
 from app.services.youtube import (NeedsConnect, QuotaExceeded, UploadStalled,
-                                  QUOTA_PLAYLISTITEM_INSERT, QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
+                                  QUOTA_COMMENT_INSERT, QUOTA_PLAYLISTITEM_INSERT,
+                                  QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
+
+# Localized author first-comment (engagement seed + series pointer). Keyed by
+# BCP-47 prefix; en is the fallback.
+_FIRST_COMMENT = {
+    "pt": "O que você mudaria nesse setup? Leio todos os comentários.",
+    "en": "What would you change here? I read every comment.",
+}
+_FIRST_COMMENT_PLAYLIST = {
+    "pt": "▶ Série completa:",
+    "en": "▶ Full series:",
+}
+
+
+def _first_comment_text(language_code: str | None, playlist_yt_id: str | None) -> str:
+    lang = (language_code or "en").split("-")[0].lower()
+    text = _FIRST_COMMENT.get(lang, _FIRST_COMMENT["en"])
+    if playlist_yt_id:
+        tail = _FIRST_COMMENT_PLAYLIST.get(lang, _FIRST_COMMENT_PLAYLIST["en"])
+        text += f"\n{tail} https://www.youtube.com/playlist?list={playlist_yt_id}"
+    return text
 
 
 def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
@@ -136,12 +157,32 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   channel_id=channel.id, detail=f"needs reconnect: {e}")
         return
 
+    # Ensure the topic playlist BEFORE upload so the description can link it.
+    from app.services.topic_playlist import ensure_topic_playlist
+    topic = session.get(Topic, video.topic_id)
+    if topic and not topic.playlist_id:
+        try:
+            ensure_topic_playlist(session, topic, channel)
+            session.refresh(topic)
+        except Exception:
+            pass  # best-effort: publish must not fail over a playlist
+    pl = session.get(Playlist, topic.playlist_id) if topic and topic.playlist_id else None
+
+    # Subscriber machinery: language-tagged upload + CTA/links description block.
+    language_code = video_gen.channel_language_code(session, channel.id)
+    video.description = metadata.finalize_description(
+        video.description or "", language_code, channel.yt_channel_id,
+        pl.yt_playlist_id if pl else None)
+    session.add(video)
+    session.commit()
+
     tags = json.loads(video.tags_json) if video.tags_json else []
     privacy = video.privacy or channel.default_privacy
     try:
         video_id = youtube.upload_video(
             service, video.video_path, video.title or video.subject,
             video.description or "", tags, privacy, progress_cb=_progress,
+            language_code=language_code,
         )
     except QuotaExceeded as e:
         video.status = VideoStatus.APPROVED
@@ -186,13 +227,18 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     # Custom thumbnail (biggest CTR lever) — best-effort, never fails the publish.
     _set_custom_thumbnail(session, service, channel, video, video_id)
 
-    # Add to the topic's playlist (auto-create if it's somehow still missing).
-    from app.services.topic_playlist import ensure_topic_playlist
-    topic = session.get(Topic, video.topic_id)
-    if topic and not topic.playlist_id:
-        ensure_topic_playlist(session, topic, channel)
-        session.refresh(topic)
-    pl = session.get(Playlist, topic.playlist_id) if topic and topic.playlist_id else None
+    # Author first comment (engagement seed + series pointer) — best-effort.
+    try:
+        youtube.insert_comment(service, video_id,
+                               _first_comment_text(language_code,
+                                                   pl.yt_playlist_id if pl else None))
+        quota.log(session, kind="comment", status="success", video_id=video.id,
+                  channel_id=channel.id, quota_cost=QUOTA_COMMENT_INSERT)
+    except Exception as e:
+        quota.log(session, kind="comment", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=str(e)[:300])
+
+    # Add to the topic's playlist (ensured before upload; recover if it vanished).
     if pl:
         try:
             youtube.add_to_playlist(service, pl.yt_playlist_id, video_id)
@@ -230,7 +276,8 @@ def tick() -> None:
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:
                 continue
             if (quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD
-                    + QUOTA_THUMBNAIL_SET > settings.youtube_daily_quota_cap):
+                    + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT
+                    > settings.youtube_daily_quota_cap):
                 continue
             if not _drip_ok(session, channel, cfg.publish_drip_minutes):
                 continue

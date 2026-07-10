@@ -44,6 +44,7 @@ QUOTA_PLAYLISTITEM_INSERT = 50
 QUOTA_CHANNEL_UPDATE = 50
 QUOTA_SUBSCRIPTION_WRITE = 50
 QUOTA_THUMBNAIL_SET = 50
+QUOTA_COMMENT_INSERT = 50
 QUOTA_LIST = 1
 QUOTA_ANALYTICS_QUERY = 1
 
@@ -166,21 +167,34 @@ def disconnect(slug: str) -> None:
 
 # ---- Publishing ----------------------------------------------------------
 
-def upload_video(service, video_path: str, title: str, description: str,
-                 tags: list[str], privacy: str,
-                 progress_cb: Optional[Callable[[int], None]] = None) -> str:
-    body = {
-        "snippet": {
-            "title": (title or "")[:100],
-            "description": (description or "")[:5000],
-            "tags": (tags or [])[:30],
-            "categoryId": CATEGORY_SCIENCE_TECH,
-        },
+def _upload_body(title: str, description: str, tags: list[str], privacy: str,
+                 language_code: Optional[str] = None) -> dict:
+    """videos().insert body. language_code (BCP-47, e.g. 'pt-BR') sets both
+    defaultLanguage and defaultAudioLanguage so YouTube can match the video to the
+    right language audience — critical for the PT-BR channel's discovery."""
+    snippet = {
+        "title": (title or "")[:100],
+        "description": (description or "")[:5000],
+        "tags": (tags or [])[:30],
+        "categoryId": CATEGORY_SCIENCE_TECH,
+    }
+    if language_code:
+        snippet["defaultLanguage"] = language_code
+        snippet["defaultAudioLanguage"] = language_code
+    return {
+        "snippet": snippet,
         "status": {
             "privacyStatus": privacy,
             "selfDeclaredMadeForKids": False,
         },
     }
+
+
+def upload_video(service, video_path: str, title: str, description: str,
+                 tags: list[str], privacy: str,
+                 progress_cb: Optional[Callable[[int], None]] = None,
+                 language_code: Optional[str] = None) -> str:
+    body = _upload_body(title, description, tags, privacy, language_code)
     # 2 MB chunks so the resumable upload reports incremental progress.
     media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True,
                             chunksize=2 * 1024 * 1024)
@@ -199,6 +213,23 @@ def upload_video(service, video_path: str, title: str, description: str,
         if status and progress_cb:
             progress_cb(int(status.progress() * 100))
     return response["id"]
+
+
+def insert_comment(service, video_id: str, text: str) -> str:
+    """Post an author top-level comment on a video (the 'first comment' engagement
+    seed — the creator's comment sits on top of an empty comment section). Callers
+    treat failures as best-effort, like thumbnails."""
+    try:
+        resp = service.commentThreads().insert(
+            part="snippet",
+            body={"snippet": {
+                "videoId": video_id,
+                "topLevelComment": {"snippet": {"textOriginal": text[:9000]}},
+            }},
+        ).execute()
+    except HttpError as e:
+        raise _classify(e)
+    return resp["id"]
 
 
 def set_thumbnail(service, video_id: str, png_path: str) -> None:
@@ -458,9 +489,16 @@ def _analytics_row(analytics, channel_yt_id, video_id, start_date, end_date, met
 
 def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
                           start_date: str, end_date: str) -> dict:
-    """Per-video analytics over [start_date, end_date] (YYYY-MM-DD). Two queries: core
-    metrics + the impressions/CTR pair (owner-only, often empty for new/low videos).
-    Returns a normalized dict ready for a VideoMetric row."""
+    """Per-video analytics over [start_date, end_date] (YYYY-MM-DD). Returns a
+    normalized dict ready for a VideoMetric row.
+
+    NOTE (2026-07-09 audit): thumbnail impressions / impressionClickThroughRate are
+    NOT exposed by the YouTube Analytics API v2 targeted queries — every query form
+    returns 400 "Unknown identifier (impressions)". The old second query silently
+    failed forever, so every impressions/ctr=0 stored before this date was a
+    fabricated default, not a measurement. Impressions/CTR stay 0 in VideoMetric
+    (Studio-only data); use traffic_json (browse/suggested/search views) as the
+    discovery signal instead."""
     raw: dict = {}
     try:
         raw.update(_analytics_row(
@@ -469,12 +507,6 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
             "likes,comments,subscribersGained"))
     except HttpError as e:
         raise _classify(e)
-    try:
-        raw.update(_analytics_row(
-            analytics, channel_yt_id, video_id, start_date, end_date,
-            "impressions,impressionClickThroughRate"))
-    except Exception:
-        pass  # impressions/CTR can be unavailable; tolerate
 
     def _n(key, cast=int):
         v = raw.get(key)
@@ -494,6 +526,40 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
         "comments": _n("comments"),
         "subscribers_gained": _n("subscribersGained"),
     }
+
+
+def fetch_traffic_sources(analytics, channel_yt_id: str, video_id: str,
+                          start_date: str, end_date: str) -> dict:
+    """Where a video's views come from: {'sources': {type: {views, watch_min}},
+    'search_terms': {term: views}}. Answers the question the channel has never been
+    able to ask — is anything coming from browse/suggested/search, or only external?
+    Search terms are fetched only when YT_SEARCH actually has views. Best-effort:
+    partial data beats no data; failures return whatever was gathered."""
+    out: dict = {"sources": {}, "search_terms": {}}
+    try:
+        resp = analytics.reports().query(
+            ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
+            dimensions="insightTrafficSourceType", filters=f"video=={video_id}",
+            metrics="views,estimatedMinutesWatched", maxResults=25,
+        ).execute()
+        for row in resp.get("rows") or []:
+            out["sources"][str(row[0])] = {"views": int(row[1] or 0),
+                                           "watch_min": int(row[2] or 0)}
+    except Exception:
+        return out
+    if out["sources"].get("YT_SEARCH", {}).get("views", 0) > 0:
+        try:
+            resp = analytics.reports().query(
+                ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
+                dimensions="insightTrafficSourceDetail",
+                filters=f"video=={video_id};insightTrafficSourceType==YT_SEARCH",
+                metrics="views", sort="-views", maxResults=10,
+            ).execute()
+            for row in resp.get("rows") or []:
+                out["search_terms"][str(row[0])] = int(row[1] or 0)
+        except Exception:
+            pass
+    return out
 
 
 # Daily-cap reasons: both the API project quota and the per-channel upload cap.

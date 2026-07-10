@@ -289,9 +289,11 @@ def regenerate_metadata(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
+    from app.services import video_gen
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    meta = metadata.generate(v.subject, v.script or "", fmt)
+    meta = metadata.generate(v.subject, v.script or "", fmt,
+                             language=video_gen.channel_language(session, v.channel_id))
     v.title, v.description = meta["title"], meta["description"]
     v.tags_json = json.dumps(meta["tags"])
     v.metadata_generated = True

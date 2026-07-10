@@ -25,7 +25,7 @@ logger = logging.getLogger("manager.analytics")
 
 # Videos younger than this have no analytics data yet (API latency); skip them.
 _MIN_MATURITY_HOURS = 24
-# Quota reserved per video: two analytics queries (core + impressions/CTR).
+# Quota reserved per video: core query + (for viewed videos) traffic-source queries.
 _QUOTA_PER_VIDEO = 2 * youtube.QUOTA_ANALYTICS_QUERY
 
 
@@ -74,6 +74,18 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
         quota.log(session, kind="analytics", status="error", channel_id=channel.id,
                   video_id=video.id, detail=str(e), quota_cost=0)
         return None
+    # Traffic-source attribution: only worth a query once the video has views.
+    traffic_json = None
+    if data["views"] > 0:
+        try:
+            traffic = youtube.fetch_traffic_sources(
+                analytics, channel.yt_channel_id, video.yt_video_id, start_date, end_date)
+            if traffic.get("sources"):
+                import json as _json
+                traffic_json = _json.dumps(traffic)
+        except Exception as e:
+            logger.info("traffic sources skipped for video %s: %s", video.id, e)
+
     m = VideoMetric(
         video_id=video.id,
         channel_id=channel.id,
@@ -86,6 +98,7 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
         likes=data["likes"],
         comments=data["comments"],
         subscribers_gained=data["subscribers_gained"],
+        traffic_json=traffic_json,
     )
     session.add(m)
     quota.log(session, kind="analytics", status="success", channel_id=channel.id,
