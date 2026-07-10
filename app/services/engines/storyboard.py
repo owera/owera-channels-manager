@@ -32,6 +32,7 @@ _MIN_BEATS = 4
 _MAX_BEATS = 14
 _GAP = 0.12
 _MIN_DUR = 0.5
+_TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 
 
 # --------------------------------------------------------------------------- JS/string helpers
@@ -317,6 +318,18 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
     for i in range(1, n):
         if starts[i] < starts[i - 1] + _MIN_DUR:
             starts[i] = starts[i - 1] + _MIN_DUR
+
+    # Tail floor: the last two beats carry the payoff and the CTA, and the LLM tends to
+    # anchor both on the script's final words — a closing visual that flashes for under
+    # ~2s is a wasted beat. Pull late tail starts EARLIER (never later), stealing the
+    # time from a long predecessor; earlier beats stay word-synced.
+    for i in range(max(n - 2, 1), n):
+        target = duration - _TAIL_MIN * (n - i)
+        if target <= starts[i - 1] + _MIN_DUR:
+            continue  # clip too short to grant the floor — keep pure word-sync
+        if starts[i] > target:
+            hi = (starts[i + 1] - _MIN_DUR) if i + 1 < n else duration
+            starts[i] = max(starts[i - 1] + _MIN_DUR, min(target, hi))
     for i, b in enumerate(beats):
         b["start"] = round(max(0.0, starts[i]), 3)
         end = duration if i == n - 1 else max(starts[i] + _MIN_DUR, starts[i + 1] - _GAP)
@@ -814,7 +827,15 @@ def _system_prompt(allowed: list[str]) -> str:
         "4. Structure: EXACTLY one `hook` first, then 4-9 varied explanatory beats, EXACTLY one "
         "`cta` last. 6-11 beats total, in chronological order.\n"
         "5. Write all visible text in the SAME language as the narration. Keep code, commands, and "
-        "identifiers in their original language.\n\n"
+        "identifiers in their original language.\n"
+        "6. PACING — cue spacing IS screen time: a beat runs from its cue until the NEXT beat's "
+        "cue, so the narration words between consecutive cues are all the time that beat gets. "
+        "Budget one beat per ~8-14 words and distribute cues over the WHOLE script: hook covers "
+        "ONLY the first sentence (anchor beat 2 where sentence 2 begins), no gap over ~25 words "
+        "(split it), and `diagram`/`compare`/`code` get ~10+ words of room. Plan the ending "
+        "BACKWARDS: the `cta` cue sits ~8-10 words before the script ends, and the payoff beat "
+        "before it gets the ~10 preceding words — a final visual that flashes for under 2 "
+        "seconds is a wasted beat. NEVER anchor two beats inside the same short sentence.\n\n"
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues):\n"
         '{"beats":[\n'
