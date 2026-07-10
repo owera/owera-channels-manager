@@ -30,7 +30,15 @@ flag the operator step in the commit body.
 - **acceptance:** reconnect initiated from the portal produces a redirect_uri Google accepts; localhost
   path unchanged; regression test green.
 
-### 2. Self-healing OAuth alert on token expiry — HIGH
+### 2. ✅ DONE (code shipped to main 2026-07-10) Self-healing OAuth alert on token expiry — HIGH
+- **resolution (2026-07-10):** `app/services/notify.py` fires exactly one alert per
+  CONNECTED→EXPIRED flip (ERROR log always; webhook POST when `MANAGER_ALERT_WEBHOOK_URL` is set —
+  Slack-compatible payload, best-effort, 5s timeout, never raises into the caller). Hooked at both
+  transition sites: `publish_loop._publish_one` (NeedsConnect) and the dashboard
+  `GET /oauth-status` probe. Alert body carries a ready reconnect recipe honoring
+  `MANAGER_PUBLIC_BASE_URL`. Regression suite: `tests/verify_notify.py` (24 checks).
+  **Operator (optional):** set `MANAGER_ALERT_WEBHOOK_URL` in `.env` to get pushed alerts
+  (Slack/Discord incoming-webhook compatible); without it the alert is a log line + the existing digest.
 - **why:** a revoked token today only surfaces in the issues digest; nobody is pinged, so ch2 died
   silently. Detection exists (`362691a`) but is passive.
 - **approach:** when a channel flips to `EXPIRED`, emit an alert (log + optional Slack/push webhook via a
@@ -47,6 +55,22 @@ flag the operator step in the commit body.
   `NeedsConnect` → channel skipped, drip spacing. Pure unit-level where possible (no live YouTube).
 - **caution:** normal (tests only).
 - **acceptance:** new checks pass and would have caught the historical failures.
+
+### 3b. Close the remaining silent-death detectors (found by 2026-07-10 review) — HIGH
+- **why:** the expiry alert (#2) only fires from sites that flip `oauth_status`. Review of all token
+  consumers found paths where a dead channel still dies silently: `metrics_loop.record_snapshot` and
+  the analytics loop swallow `NeedsConnect` at INFO without flipping status (so during a publishing
+  lull nothing alerts); a CONNECTED channel whose token *file* vanishes flips to DISCONNECTED (route)
+  or is misclassified EXPIRED (publish loop) — DISCONNECTED never alerts; a failed reconnect consent
+  sets ERROR, halting publishing unalerted, and the later ERROR→EXPIRED flip is guard-suppressed;
+  admin endpoints 409 on NeedsConnect without flipping status.
+- **approach:** consolidate the transition into one choke point (e.g. `notify.mark_dead(channel,
+  new_status, error)` that captures prev, assigns, and alerts on any CONNECTED→dead flip except the
+  operator `/disconnect` route), then have metrics/analytics/admin NeedsConnect handlers call it.
+- **caution:** touches the loops + oauth classification (HIGH) — isolated commit + extend
+  `tests/verify_notify.py` per site.
+- **acceptance:** killing a token alerts within one metrics/analytics tick even with no queued
+  videos; token-file loss and failed-consent halts alert too; still exactly one alert per incident.
 
 ### 4. Bake the loopback reconnect helper into the app — normal
 - **why:** reconnect currently needs an ad-hoc external script; make it first-class.

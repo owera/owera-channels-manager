@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus, utcnow
 from app.schemas import ChannelCreate, ChannelUpdate
-from app.services import youtube
+from app.services import notify, youtube
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -174,6 +174,7 @@ def oauth_status(channel_id: int, session: Session = Depends(get_session)):
     ch = session.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
+    prev_status = ch.oauth_status
     try:
         youtube.get_service(ch.slug)
         ch.oauth_status = OAuthStatus.CONNECTED
@@ -186,5 +187,9 @@ def oauth_status(channel_id: int, session: Session = Depends(get_session)):
         ch.oauth_error = str(e)[:300]
     session.add(ch)
     session.commit()
+    # Alert only once the flip is durable — a failed commit must not disarm the
+    # transition guard, and the webhook POST must not sit inside the write.
+    if ch.oauth_status == OAuthStatus.EXPIRED:
+        notify.oauth_expired(ch, ch.oauth_error, prev_status)
     return {"oauth_status": ch.oauth_status, "error": ch.oauth_error,
             "has_client_secret": youtube.has_client_secret(ch.slug)}

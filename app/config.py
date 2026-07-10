@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # http://localhost:7070 — so reconnects started from the portal work too.
     public_base_url: str = ""
 
+    # Optional alert webhook (env: MANAGER_ALERT_WEBHOOK_URL). When a channel's
+    # OAuth token flips CONNECTED -> EXPIRED, app/services/notify.py POSTs a JSON
+    # payload (Slack "text" + Discord "content" keys) here, on top of the ERROR
+    # log line it always writes. Empty = log-only.
+    alert_webhook_url: str = ""
+
     # Optional HTTP Basic Auth password for public access. Any username + this
     # password is accepted. Empty string = no auth (safe for local-only use).
     app_password: str = ""
