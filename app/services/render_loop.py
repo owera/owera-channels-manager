@@ -118,9 +118,11 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.thumb_path = str(thumb)
 
     if not video.metadata_generated:
+        from app.services import video_gen
         topic = session.get(Topic, video.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
-        meta = metadata.generate(video.subject, video.script or "", fmt)
+        meta = metadata.generate(video.subject, video.script or "", fmt,
+                                 language=video_gen.channel_language(session, video.channel_id))
         video.title = video.title or meta["title"]
         video.description = video.description or meta["description"]
         video.tags_json = video.tags_json or json.dumps(meta["tags"])

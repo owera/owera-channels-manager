@@ -191,6 +191,10 @@ class VideoMetric(SQLModel, table=True):
     likes: int = 0
     comments: int = 0
     subscribers_gained: int = 0
+    # JSON: {"sources": {trafficSourceType: {views, watch_min}}, "search_terms": {term: views}}
+    # — where views come from (browse/suggested/search/external), the attribution data
+    # the subscriber-growth loop optimizes against. Null when the video has no views yet.
+    traffic_json: Optional[str] = None
     captured_at: datetime = Field(default_factory=utcnow, index=True)
 
 

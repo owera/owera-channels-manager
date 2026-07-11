@@ -134,6 +134,44 @@ flag the operator step in the commit body.
 - **caution:** normal (repo config; no runtime surface).
 - **acceptance:** a two-branch append merges without conflict, both lines retained.
 
+### 11. R7 spoken-CTA experiment (SUBSCRIBER OFFENSIVE) — normal (high value)
+- **why:** R7's signal is literally `subscribers_gained` and it has never been tested; narration has
+  no follow-ask at all. The 5 videos that ever gained subs all delivered deep specific value — a
+  contextual one-line ask at the close converts exactly that moment.
+- **approach:** `worker.py` script prompts (short `:435`, long `:421`): add a final-line directive —
+  one contextual, non-generic follow ask tied to the value just delivered, in the channel language
+  (e.g. "Sigo publicando isso todo dia — inscreve-te pra não perder a parte 3"). Align the visual
+  CTA beat sub-text. Ship as a gated experiment logged in `run/experiments.jsonl` predicting
+  `subscribers_gained` up.
+- **caution:** normal (prompt change; render-judge gate).
+- **acceptance:** golden-set renders show the ask in-language, natural, ≤1 line; experiment logged.
+
+### 12. Publish windows — audience-peak drip (SUBSCRIBER OFFENSIVE) — HIGH
+- **why:** publishing is drip-whenever; small channels get their best algorithmic test in the first
+  hours, so publishing at audience-dead hours wastes it.
+- **approach:** per-channel allowed publish windows (ch2 ≈ 12:00 & 19:00 BRT; ch1 ≈ 9:00–12:00 ET) as
+  channel fields checked in `publish_loop.tick` alongside `_drip_ok`; native `publishAt` scheduling
+  later.
+- **caution:** touches `publish_loop.py` (HIGH) — isolated commit + regression test in
+  `tests/verify_publish.py`.
+- **acceptance:** videos only publish inside the window; test proves the gate; drip otherwise unchanged.
+
+### 13. Long-form chapters in descriptions (SUBSCRIBER OFFENSIVE) — normal
+- **why:** chapters lift long-form retention and search; beat timings already exist in the storyboard.
+- **approach:** derive `MM:SS <beat headline>` lines from storyboard beat starts at metadata/publish
+  time for `content_format=long`; append to description before the CTA block.
+- **caution:** normal.
+- **acceptance:** a long video's description carries valid ascending chapters; YouTube renders them.
+
+### 14. ch2 back-catalog backfill tool (SUBSCRIBER OFFENSIVE) — normal
+- **why:** ~20 top ch2 videos carry EN-biased metadata from the hardcoded en-US era; they're the
+  channel's best assets and undiscoverable in PT.
+- **approach:** one-shot script (`run/backfill_ch2_metadata.py`): regenerate title/description in
+  PT-BR (`metadata.generate` with language), re-apply via `videos().update` (≈50u each, ≤10/day to
+  respect quota), `finalize_description` links included; dry-run mode first; log each change.
+- **caution:** touches live published videos — dry-run + operator-reviewed list before the real run.
+- **acceptance:** top-20 list updated over ~2 days; titles/descriptions visibly PT-BR on YouTube.
+
 ### 10. ✅ DONE (code shipped to main 2026-07-09) Surface process-slot exhaustion before it breaks the pipeline — normal
 - **resolution (2026-07-09):** `GET /health` now includes `system.processes` (`count`/`max`/`pct_used`
   from `kern.maxproc` + a `ps -A` count via two cheap subprocess reads); `status` flips to `degraded`

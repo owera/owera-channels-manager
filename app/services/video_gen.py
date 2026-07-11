@@ -14,12 +14,27 @@ _VOICE_LANGUAGES = {
     "es": "Spanish",
 }
 
+# BCP-47 codes for YouTube metadata (defaultLanguage/defaultAudioLanguage) and the
+# MPT /social-metadata language parameter. Keyed by the same voice-id prefix.
+LANGUAGE_CODES = {
+    "pt": "pt-BR",
+    "en": "en-US",
+    "es": "es-ES",
+}
+
 
 def language_from_voice(voice_name: str | None) -> str | None:
     """Map a voice id like 'pt-BR-AntonioNeural[-Male]' to a language name for prompts."""
     if not voice_name:
         return None
     return _VOICE_LANGUAGES.get(voice_name.split("-", 1)[0].lower())
+
+
+def code_from_voice(voice_name: str | None) -> str | None:
+    """Map a voice id to a BCP-47 code ('pt-BR-Antonio…' -> 'pt-BR')."""
+    if not voice_name:
+        return None
+    return LANGUAGE_CODES.get(voice_name.split("-", 1)[0].lower())
 
 
 def channel_language(session, channel_id: int | None) -> str | None:
@@ -39,6 +54,25 @@ def channel_language(session, channel_id: int | None) -> str | None:
     except ValueError:
         return None
     return language_from_voice(voice)
+
+
+def channel_language_code(session, channel_id: int | None) -> str | None:
+    """BCP-47 code of a channel's default render-profile voice (None if unknown)."""
+    import json
+
+    from app.models import Channel, RenderProfile
+
+    ch = session.get(Channel, channel_id) if channel_id else None
+    if not ch or not ch.default_render_profile_id:
+        return None
+    profile = session.get(RenderProfile, ch.default_render_profile_id)
+    if not profile:
+        return None
+    try:
+        voice = json.loads(profile.params_json or "{}").get("voice_name")
+    except ValueError:
+        return None
+    return code_from_voice(voice)
 
 
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
