@@ -34,7 +34,13 @@ from app.config import settings
 # with the narrow SCOPES, so existing youtube-only tokens keep publishing even before
 # a channel has been re-consented for analytics.
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
-CONSENT_SCOPES = SCOPES + ["https://www.googleapis.com/auth/yt-analytics.readonly"]
+# force-ssl is required for comment endpoints (commentThreads.insert — the author
+# first-comment machinery 403s without it). Granted at consent time; the narrow
+# Data-API load (SCOPES) stays unchanged so pre-reconsent tokens keep publishing.
+CONSENT_SCOPES = SCOPES + [
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+]
 CATEGORY_SCIENCE_TECH = "28"
 
 # Estimated quota costs (units) — YouTube Data API v3.
