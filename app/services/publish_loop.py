@@ -51,6 +51,22 @@ def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
 
 
 def _next_approved(session: Session, channel_id: int) -> Video | None:
+    # Daily mix: until a long-form has published this quota day, give the slot to
+    # the oldest approved long-form. Plain FIFO never reaches one behind a deep
+    # short backlog (4-shorts-+-1-long directive; longs convert subscribers).
+    if not quota.published_long_today(session, channel_id):
+        video = session.exec(
+            select(Video)
+            .join(Topic, Topic.id == Video.topic_id)
+            .where(
+                Video.channel_id == channel_id,
+                Video.status == VideoStatus.APPROVED,
+                Topic.content_format == "long",
+            )
+            .order_by(Video.approved_at, Video.id)
+        ).first()
+        if video:
+            return video
     return session.exec(
         select(Video).where(
             Video.channel_id == channel_id, Video.status == VideoStatus.APPROVED

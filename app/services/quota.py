@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, func, select
 
-from app.models import JobRun, Video, VideoStatus
+from app.models import JobRun, Topic, Video, VideoStatus
 
 
 def _next_pt_midnight_utc(now: datetime) -> datetime:
@@ -79,6 +79,21 @@ def published_today(session: Session, channel_id: int) -> int:
 
 def rendered_today(session: Session, channel_id: int) -> int:
     return _count(session, channel_id, "render", _day_start())
+
+
+def published_long_today(session: Session, channel_id: int) -> int:
+    """Long-form videos published this quota day. The publish loop reserves the
+    day's first free slot for a long-form until this is nonzero."""
+    return session.exec(
+        select(func.count(Video.id))
+        .join(Topic, Topic.id == Video.topic_id)
+        .where(
+            Video.channel_id == channel_id,
+            Video.status == VideoStatus.PUBLISHED,
+            Video.published_at >= _quota_day_start(),
+            Topic.content_format == "long",
+        )
+    ).one()
 
 
 def quota_spent_today(session: Session, channel_id: int) -> int:
