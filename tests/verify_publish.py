@@ -117,9 +117,12 @@ def _raise_needs_connect(slug):
 
 
 youtube.get_service = _raise_needs_connect
+_ORIG_HAS = youtube.has_token
+youtube.has_token = lambda slug: True   # revoked = the token *file* still exists
 publish_loop._publish_one(s, ch, v)
 ok(ch.oauth_status == OAuthStatus.EXPIRED, "revoked token flips the channel to EXPIRED")
 ok(v.status == VideoStatus.APPROVED, "video returns to approved, not stranded in publishing")
+youtube.has_token = _ORIG_HAS
 
 # --- publish_one: upload stall retry-then-fail -------------------------------
 print("publish_one: upload stall retry-then-fail")

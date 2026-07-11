@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models import Channel, ChannelMetric, Topic, Video, VideoMetric, VideoStatus
 from app.schemas import BrandingUpdate, SubscribeBody
-from app.services import analytics_loop, metrics_loop, quota, youtube
+from app.services import analytics_loop, metrics_loop, notify, quota, youtube
 from app.services.youtube import (NeedsConnect, QUOTA_CHANNEL_UPDATE,
                                   QUOTA_SUBSCRIPTION_WRITE)
 
@@ -22,13 +22,18 @@ router = APIRouter(prefix="/api/channels/{channel_id}", tags=["youtube-admin"])
 
 
 def _connected(session: Session, channel_id: int):
-    """Return (channel, youtube_service) or raise a clean HTTP error."""
+    """Return (channel, youtube_service) or raise a clean HTTP error. A dead
+    token discovered here flips (and alerts) the channel before the 409 — the
+    409 alone would leave the dashboard showing CONNECTED and nobody paged."""
     ch = session.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
     try:
         return ch, youtube.get_service(ch.slug)
     except NeedsConnect as e:
+        # Committed here because the HTTPException unwinds the request
+        # without one.
+        notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(409, f"channel not connected: {e}")
 
 

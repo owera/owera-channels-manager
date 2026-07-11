@@ -121,6 +121,13 @@ def oauth_start(channel_id: int, request: Request, session: Session = Depends(ge
     return {"auth_url": url}
 
 
+def _fail_consent(session: Session, ch: Channel, error: str) -> None:
+    """A failed consent halts publishing just like an expiry: flip to ERROR
+    through the choke point so a previously-CONNECTED channel alerts (a
+    reconnect of an already-dead one stays silent)."""
+    notify.mark_dead_committed(session, ch, error, status=OAuthStatus.ERROR)
+
+
 @router.get("/{channel_id}/oauth/callback")
 def oauth_callback(channel_id: int, request: Request, code: str | None = None,
                    error: str | None = None, session: Session = Depends(get_session)):
@@ -129,17 +136,17 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
     ch = session.get(Channel, channel_id)
     flow = _pending_flows.pop(channel_id, None)
     if error or not code or not flow or not ch:
-        if ch:
-            ch.oauth_status = OAuthStatus.ERROR
-            ch.oauth_error = error or "consent was cancelled or timed out"
-            session.add(ch); session.commit()
+        # Flip only on a real failure of a pending consent. A hit with no
+        # pending flow and no error (page refresh after success, replayed
+        # redirect, restart-emptied _pending_flows) says nothing about the
+        # token — leave the channel's status untouched.
+        if ch and (error or flow):
+            _fail_consent(session, ch, error or "consent was cancelled or timed out")
         return HTMLResponse(_callback_html("Connection failed", error or "consent cancelled", False))
     try:
         identity = youtube.finish_flow(ch.slug, flow, code)
     except Exception as e:
-        ch.oauth_status = OAuthStatus.ERROR
-        ch.oauth_error = str(e)
-        session.add(ch); session.commit()
+        _fail_consent(session, ch, str(e))
         return HTMLResponse(_callback_html("Connection failed", str(e)[:200], False))
     ch.yt_channel_id = identity.get("id")
     ch.yt_channel_title = identity.get("title")
@@ -160,6 +167,8 @@ def disconnect(channel_id: int, session: Session = Depends(get_session)):
     if not ch:
         raise HTTPException(404, "channel not found")
     youtube.disconnect(ch.slug)
+    # Operator-initiated: deliberately bypasses notify.mark_dead — an
+    # intentional disconnect must not page anyone.
     ch.oauth_status = OAuthStatus.DISCONNECTED
     ch.yt_channel_id = None
     ch.yt_channel_title = None
@@ -174,22 +183,13 @@ def oauth_status(channel_id: int, session: Session = Depends(get_session)):
     ch = session.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
-    prev_status = ch.oauth_status
     try:
         youtube.get_service(ch.slug)
         ch.oauth_status = OAuthStatus.CONNECTED
         ch.oauth_error = None
-    except youtube.NeedsConnect as e:
-        ch.oauth_status = OAuthStatus.EXPIRED if youtube.has_token(ch.slug) else OAuthStatus.DISCONNECTED
-        ch.oauth_error = str(e)
-    except Exception as e:  # refresh failure, bad/old-scope token, etc.
-        ch.oauth_status = OAuthStatus.EXPIRED if youtube.has_token(ch.slug) else OAuthStatus.DISCONNECTED
-        ch.oauth_error = str(e)[:300]
-    session.add(ch)
-    session.commit()
-    # Alert only once the flip is durable — a failed commit must not disarm the
-    # transition guard, and the webhook POST must not sit inside the write.
-    if ch.oauth_status == OAuthStatus.EXPIRED:
-        notify.oauth_expired(ch, ch.oauth_error, prev_status)
+        session.add(ch)
+        session.commit()
+    except Exception as e:  # NeedsConnect, refresh failure, bad/old-scope token, etc.
+        notify.mark_dead_committed(session, ch, str(e))
     return {"oauth_status": ch.oauth_status, "error": ch.oauth_error,
             "has_client_secret": youtube.has_client_secret(ch.slug)}

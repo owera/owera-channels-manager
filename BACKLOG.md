@@ -56,7 +56,23 @@ flag the operator step in the commit body.
 - **caution:** normal (tests only).
 - **acceptance:** new checks pass and would have caught the historical failures.
 
-### 3b. Close the remaining silent-death detectors (found by 2026-07-10 review) — HIGH
+### 3b. ✅ DONE (code shipped to main 2026-07-11) Close the remaining silent-death detectors — HIGH
+- **resolution (2026-07-11):** `notify.mark_dead()` / `mark_dead_committed()` are now the single
+  choke point: capture prev status, classify via `dead_status_for` (EXPIRED = token file present,
+  DISCONNECTED = gone), flip + **commit first**, then alert exactly once on any CONNECTED→dead
+  transition. Wired at: publish loop, metrics loop (the publishing-lull detector), analytics loop
+  (with a narrow-scope re-probe so a missing analytics scope only skips, never kills), admin 409s
+  (`youtube_admin._connected`), playlist sync/create 400s, the oauth-status probe, and failed
+  consents (CONNECTED→ERROR now alerts; stale/replayed callbacks no longer touch status). Operator
+  `/disconnect` deliberately stays silent. Regression suite: `tests/verify_notify.py` (62 checks).
+- **follow-ups (accepted tradeoffs, do separately if they bite):** (a) a *transient* RefreshError
+  (Google 5xx during token refresh) is coerced to NeedsConnect by `_load_creds`, so a blip can
+  false-positive a flip+page — distinguishing `invalid_grant` from transport errors is a youtube.py
+  (HIGH) change; (b) cancelling a re-consent of a healthy CONNECTED channel still flips it to ERROR
+  (pre-existing) — now alerted, but a re-probe-before-flip would avoid halting it; (c)
+  `topic_playlist.ensure_topic_playlist` still swallows NeedsConnect (next probe catches the death
+  one tick later); (d) missing client_secret.json with a token present classifies EXPIRED — the
+  alert's Error text carries the real cause.
 - **why:** the expiry alert (#2) only fires from sites that flip `oauth_status`. Review of all token
   consumers found paths where a dead channel still dies silently: `metrics_loop.record_snapshot` and
   the analytics loop swallow `NeedsConnect` at INFO without flipping status (so during a publishing

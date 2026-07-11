@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.db import session_scope
 from app.models import Channel, ChannelMetric, OAuthStatus
-from app.services import quota, youtube
+from app.services import notify, quota, youtube
 from app.services.quota import _day_start
 
 logger = logging.getLogger("manager.metrics")
@@ -36,6 +36,11 @@ def record_snapshot(session: Session, channel: Channel) -> ChannelMetric | None:
     try:
         service = youtube.get_service(channel.slug)
         data = youtube.fetch_channel(service)
+    except youtube.NeedsConnect as e:
+        # A dead token on a channel with nothing queued never reaches the publish
+        # loop — this daily probe is the alert path during a publishing lull.
+        notify.mark_dead_committed(session, channel, str(e))
+        return None
     except Exception as e:
         logger.info("metrics snapshot skipped for %s: %s", channel.slug, e)
         return None

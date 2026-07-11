@@ -130,13 +130,10 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         service = youtube.get_service(channel.slug)
     except NeedsConnect as e:
         from app.services import notify
-        prev_status = channel.oauth_status
-        channel.oauth_status = OAuthStatus.EXPIRED
-        channel.oauth_error = str(e)
         video.status = VideoStatus.APPROVED
         quota.log(session, kind="publish", status="error", video_id=video.id,
                   channel_id=channel.id, detail=f"needs reconnect: {e}")
-        notify.oauth_expired(channel, str(e), prev_status)
+        notify.mark_dead_committed(session, channel, str(e))
         return
 
     tags = json.loads(video.tags_json) if video.tags_json else []

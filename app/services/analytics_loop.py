@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Video, VideoMetric, VideoStatus
-from app.services import quota, youtube
+from app.services import notify, quota, youtube
 from app.services.quota import _day_start
 
 logger = logging.getLogger("manager.analytics")
@@ -93,6 +93,19 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
     return m
 
 
+def _dead_token_error(slug: str) -> str | None:
+    """The NeedsConnect message if the narrow-scope (upload) token is dead,
+    None when it still loads — i.e. an analytics failure is scope-only or
+    transient and must not kill the channel."""
+    try:
+        youtube.get_service(slug)
+        return None
+    except youtube.NeedsConnect as e:
+        return str(e)
+    except Exception:
+        return None
+
+
 def _snapshot_channel(session: Session, channel: Channel, now: datetime,
                       force: bool = False) -> int:
     """Snapshot every due, mature published video for one channel; returns the count
@@ -101,7 +114,13 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
     try:
         analytics = youtube.get_analytics_service(channel.slug)
     except Exception as e:
-        # Not reconsented for the analytics scope yet (or token unrefreshable).
+        # Distinguish a genuinely dead token from one merely missing the
+        # analytics scope: the narrow-scope Data-API creds still load for the
+        # latter, and only the former may flip (and alert) the channel.
+        dead = _dead_token_error(channel.slug)
+        if dead is not None:
+            notify.mark_dead_committed(session, channel, dead)
+            return 0
         logger.info("analytics unavailable for %s (reconnect for analytics?): %s",
                     channel.slug, e)
         return 0
