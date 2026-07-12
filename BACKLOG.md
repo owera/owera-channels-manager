@@ -88,12 +88,41 @@ flag the operator step in the commit body.
 - **acceptance:** killing a token alerts within one metrics/analytics tick even with no queued
   videos; token-file loss and failed-consent halts alert too; still exactly one alert per incident.
 
-### 4. Bake the loopback reconnect helper into the app — normal
+### 4. ✅ DONE (code shipped to main 2026-07-12) Bake the loopback reconnect helper into the app — normal
+- **resolution (2026-07-12):** `PYTHONPATH=. uv run python -m app.reconnect <slug-or-id>` runs the
+  whole Desktop-client loopback consent (port 8077 default, `--no-browser` for the SSH-tunnel
+  recipe; own redirect loop, so stray connections/preconnects can't abort a pending consent the way
+  `run_local_server`'s single-request server can). Encodes the 07-05/11 incident lessons: verifies
+  refresh-token issuance, full scope grant (unchecked-checkbox trap; `--allow-partial` to override)
+  and same-YouTube-channel identity (`--force` to re-bind) BEFORE writing anything;
+  `youtube.save_token` writes atomically (0600), keeps the old token as `token.json.bak`, and the
+  web consent path shares it; `_load_creds`' refresh persist is now atomic too and yields to a token
+  replaced mid-refresh; `disconnect()` removes `.bak`/stranded tmp files; the dead-channel alert
+  recipe now leads with the CLI. No manager restart needed. Documented in README (LAN notes + Tips).
+  Regression suite: `tests/verify_reconnect.py` (47 checks, real loopback server + real code
+  exchange against a local mock token endpoint). Follow-up spun off as 4b.
 - **why:** reconnect currently needs an ad-hoc external script; make it first-class.
 - **approach:** add an endpoint/CLI that runs the localhost-loopback consent flow and writes the token,
   bypassing the portal-Host and basic-auth-callback issues. Reuse `youtube.build_flow` / `finish_flow`.
 - **caution:** touches oauth (HIGH) — isolated PR.
 - **acceptance:** documented one-command reconnect; `/verify` shows a channel going connected.
+
+### 4b. Extend the reconnect grant guards to the web consent path — HIGH
+- **why (from #4's code review, 2026-07-12):** the CLI now verifies refresh-token issuance, full
+  scope grant, and same-channel identity BEFORE saving; the web path (`oauth_callback` →
+  `youtube.finish_flow`) still saves first and verifies nothing, so a wrong-account or
+  partial-scope UI reconnect can still save a bad token and rebind the channel — and a second bad
+  consent rotates the last good token out of `token.json.bak`. Pre-existing behavior, out of #4's
+  focused scope.
+- **approach:** reorder `finish_flow` to exchange → verify identity → save; hoist the CLI's guard
+  block into a shared helper both paths call (natural sibling: a `mark_connected` counterpart to
+  `notify.mark_dead_committed`, which would also de-duplicate the CONNECTED-update block copied
+  between `oauth_callback` and `app/reconnect.py`). Surface mismatch/partial-grant on the callback
+  error page instead of saving.
+- **caution:** touches `channels.py` oauth + `youtube.py` (HIGH) — isolated commit, extend
+  `tests/verify_oauth_redirect.py`/`verify_reconnect.py`.
+- **acceptance:** a wrong-account or partial-scope web consent saves nothing and shows why; the
+  happy path still connects; suites green.
 
 ### 5. ✅ DONE (PR #7, merged 2026-07-05) `/health` endpoint — normal
 - **why:** no machine-readable health signal for uptime checks.

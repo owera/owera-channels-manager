@@ -48,7 +48,9 @@ _DEAD_PHRASE = {
 
 def reconnect_recipe(channel_id: int) -> str:
     base = (settings.public_base_url or f"http://localhost:{settings.port}").rstrip("/")
-    return (f"open {base}/ and hit Reconnect on the channel, or "
+    return (f"run `PYTHONPATH=. uv run python -m app.reconnect {channel_id}` in the "
+            f"manager directory (one-command loopback consent; see README), or "
+            f"open {base}/ and hit Reconnect on the channel, or "
             f"POST {base}/api/channels/{channel_id}/oauth/start "
             f"and open the returned auth_url")
 

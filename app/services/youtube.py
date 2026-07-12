@@ -7,6 +7,7 @@ Generalizes channel/upload.py to:
   - quota-aware error classification
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -100,7 +101,8 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
     tp = token_path(slug)
     if not tp.exists():
         return None
-    creds = Credentials.from_authorized_user_file(str(tp), scopes or SCOPES)
+    raw = tp.read_text()
+    creds = Credentials.from_authorized_user_info(json.loads(raw), scopes or SCOPES)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
@@ -112,7 +114,16 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
             # leaking a RefreshError that leaves an upload stuck in PUBLISHING (mislabeled
             # a "stall" by the recovery loop) and never flags the channel for reconnect.
             return None
-        tp.write_text(creds.to_json())
+        try:
+            changed = tp.read_text() != raw if tp.exists() else True
+        except OSError:
+            changed = True
+        if changed:
+            # Someone replaced the token while we were refreshing (e.g. the
+            # reconnect CLI saving a fresh grant). The new token wins on disk;
+            # our refreshed creds are still good for this one call.
+            return creds
+        _write_atomic(tp, creds.to_json())
         return creds
     return None
 
@@ -145,14 +156,38 @@ def authorization_url(flow: Flow) -> str:
     return url
 
 
+def _write_atomic(tp: Path, text: str) -> None:
+    """Write-then-rename so a crash mid-write can never truncate a token file.
+    The tmp name carries the pid so two writers (web consent + reconnect CLI,
+    or a loop's refresh persist) never collide on the intermediate file."""
+    tmp = tp.parent / f"{tp.name}.{os.getpid()}.tmp"
+    tmp.write_text(text)
+    tmp.chmod(0o600)
+    tmp.replace(tp)
+
+
+def save_token(slug: str, creds: Credentials) -> None:
+    """Persist consent credentials atomically, keeping the previous token as
+    token.json.bak — a bad re-consent must never destroy the only working token.
+    (The copy, not a rename, keeps token.json present throughout so a concurrent
+    get_service never sees the file missing.)"""
+    channel_dir(slug).mkdir(parents=True, exist_ok=True)
+    tp = token_path(slug)
+    if tp.exists():
+        _write_atomic(tp.parent / (tp.name + ".bak"), tp.read_text())
+    _write_atomic(tp, creds.to_json())
+
+
+def identity_for_creds(creds: Credentials) -> dict:
+    """The YouTube channel identity behind a set of credentials."""
+    return fetch_identity(build("youtube", "v3", credentials=creds))
+
+
 def finish_flow(slug: str, flow: Flow, code: str) -> dict:
     """Exchange the authorization code for tokens, persist them, capture identity."""
     flow.fetch_token(code=code)
-    creds = flow.credentials
-    channel_dir(slug).mkdir(parents=True, exist_ok=True)
-    token_path(slug).write_text(creds.to_json())
-    service = build("youtube", "v3", credentials=creds)
-    return fetch_identity(service)
+    save_token(slug, flow.credentials)
+    return identity_for_creds(flow.credentials)
 
 
 def fetch_identity(service) -> dict:
@@ -166,9 +201,13 @@ def fetch_identity(service) -> dict:
 
 
 def disconnect(slug: str) -> None:
+    """Remove every credential artifact — including the .bak kept by save_token
+    and any stranded .tmp — so an operator disconnect leaves no live refresh
+    token behind on disk."""
     tp = token_path(slug)
-    if tp.exists():
-        tp.unlink()
+    for p in [tp, tp.parent / (tp.name + ".bak"), *tp.parent.glob(tp.name + ".*.tmp")]:
+        if p.exists():
+            p.unlink()
 
 
 # ---- Publishing ----------------------------------------------------------

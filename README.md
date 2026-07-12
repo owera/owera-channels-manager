@@ -173,6 +173,8 @@ Then browse to `http://<your-LAN-IP>:7070`. Notes:
   like Tailscale.
 - **Connect/reconnect channels from `localhost:7070` on the host machine** — Google only
   allows OAuth loopback redirects, so the consent flow won't complete from a LAN IP.
+  (Or skip the UI: `PYTHONPATH=. uv run python -m app.reconnect <slug>` runs the whole
+  loopback consent from a terminal — see Tips below.)
 - **macOS:** port 7070 avoids the AirPlay Receiver, which squats on `*:7000`. Allow the
   incoming-connection firewall prompt if it appears.
 
@@ -233,8 +235,19 @@ Every effect is visible: a committed daily report, each code change as a git com
 ## Tips & troubleshooting
 
 - **Channel shows `expired`?** OAuth apps in "Testing" expire their refresh token about
-  weekly. Click **Reconnect** in the UI to refresh it. Publishing the app's consent screen
-  (moving it out of "Testing") stops the expiry.
+  weekly. Click **Reconnect** in the UI to refresh it, or run the one-command loopback
+  reconnect from the manager directory (no restart needed afterwards):
+
+  ```sh
+  PYTHONPATH=. uv run python -m app.reconnect <channel-slug>
+  ```
+
+  It opens the consent in your browser (tick **Select all** on the scope checkboxes),
+  verifies the grant is complete and belongs to the *same* YouTube channel before saving
+  anything, keeps the previous token as `token.json.bak`, and flips the channel to
+  connected. Browser on another machine? Add `--no-browser`, tunnel the port
+  (`ssh -L 8077:localhost:8077 you@mac`), and open the printed URL there.
+  Publishing the app's consent screen (moving it out of "Testing") stops the expiry.
 - **Uploads paused for a while?** YouTube allows roughly 6 uploads/day per project, and
   brand-new or unverified channels are capped even lower. When a daily limit is hit, the
   channel backs off and retries after the limit resets — your approved videos stay queued,
