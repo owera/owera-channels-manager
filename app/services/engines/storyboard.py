@@ -794,7 +794,12 @@ _TYPE_DOCS = {
     "list": 'list: {"cue","title"(≤6w),"ordered":bool,"items":[{"text"(≤6w),"emoji"?}](≤5)} — points revealed one by one.',
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
-    "cta": 'cta: {"cue","text"(≤4w),"sub"?} — closing call to action; exactly one, last.',
+    "cta": 'cta: {"cue","text"(≤4w),"sub"(≤6w)} — closing FOLLOW ask; exactly one, last. '
+           '"text" is a follow verb in the narration language ("Follow", "Segue"). "sub" is '
+           'REQUIRED and gives the reason to follow: what the viewer GETS NEXT from the channel '
+           '(tomorrow\'s topic, the next part of this series, the daily cadence — e.g. '
+           '"Daily AI-engineering fixes", "Parte 2: amanhã") — NEVER a repeat of this video\'s '
+           'point, NEVER generic ("like and subscribe").',
     "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows.',
@@ -844,7 +849,7 @@ def _system_prompt(allowed: list[str]) -> str:
         ' {"type":"stat","cue":"five hundred characters","value":"500","unit":"chars","label":"cut mid-idea"},\n'
         ' {"type":"compare","cue":"chunk by meaning instead","left":{"title":"By characters","items":["splits ideas","loses context"]},"right":{"title":"By meaning","items":["whole thoughts","keeps context"]}},\n'
         ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n'
-        ' {"type":"cta","cue":"cut it into thoughts","text":"Follow"}\n]}'
+        ' {"type":"cta","cue":"cut it into thoughts","text":"Follow","sub":"New RAG fix tomorrow"}\n]}'
     )
 
 
