@@ -31,13 +31,16 @@ from googleapiclient.http import MediaFileUpload
 from app.config import settings
 
 # Full youtube scope so we can manage playlists, not just upload. Analytics read is
-# requested only at CONSENT time; the Data-API path (get_service) keeps loading creds
-# with the narrow SCOPES, so existing youtube-only tokens keep publishing even before
-# a channel has been re-consented for analytics.
+# requested only at CONSENT time. The Data-API path (get_service) loads creds with NO
+# scope pin: google-auth sends the pinned list in the refresh grant and Google narrows
+# the refreshed access token to exactly that list, so pinning SCOPES here silently
+# stripped already-granted force-ssl on every refresh (403 on all first comments
+# 2026-07-12) and then persisted the narrowed list back into token.json. Unpinned,
+# a refresh returns every scope the refresh token granted — old youtube-only tokens
+# keep publishing, re-consented tokens keep force-ssl + analytics.
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
-# force-ssl is required for comment endpoints (commentThreads.insert — the author
-# first-comment machinery 403s without it). Granted at consent time; the narrow
-# Data-API load (SCOPES) stays unchanged so pre-reconsent tokens keep publishing.
+# Everything requested at consent time. force-ssl is required for comment endpoints
+# (commentThreads.insert — the author first-comment machinery 403s without it).
 CONSENT_SCOPES = SCOPES + [
     "https://www.googleapis.com/auth/youtube.force-ssl",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
@@ -102,7 +105,13 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
     if not tp.exists():
         return None
     raw = tp.read_text()
-    creds = Credentials.from_authorized_user_info(json.loads(raw), scopes or SCOPES)
+    info = json.loads(raw)
+    if scopes is None:
+        # Unpinned load (see SCOPES note): drop the stored scopes field too —
+        # from_authorized_user_info falls back to it, and tokens persisted by the
+        # pre-fix refresh path carry a narrowed list that would keep re-narrowing.
+        info.pop("scopes", None)
+    creds = Credentials.from_authorized_user_info(info, scopes)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
