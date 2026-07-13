@@ -413,6 +413,21 @@ the high-volume shorts. These directives OVERRIDE any conflicting older habit in
    cadence and audit channel standing rather than publishing more.
 8. **Monday reports get a `## Growth review` section**: subs delta by channel, traffic-source mix
    shift, seeding results, series performance, and the single biggest bet for the coming week.
+9. **ch1 WEDGE REPOSITIONING (operator-approved 2026-07-13; review 2026-08-01).** Diagnosis: ch1
+   converts ~0 subs despite healthy distribution (+697 views the week of 07-07 at 46.5% cohort avp
+   → 0 subs; 145 videos → 3 subs lifetime) because it rents the saturated generic-EN-AI crowd
+   instead of owning a niche. Directives:
+   - **The wedge is Copilot pricing/credits + framework comparisons + agents-explained** — the only
+     formats that ever converted on ch1 (all 3 lifetime sub-gainers) and where real search demand
+     found us ("copilot power bi/panel"). Weights set 2026-07-13: t15→3 (wedge lead), t6→2, t5
+     stays 2 (long anchor); idea generation and series creation for ch1 go to wedge topics first.
+   - **t3 (Prompt & Context short) is PARKED at weight 0** — 68 videos, 947 views, zero subs ever.
+     Do NOT revive it without a measured conversion signal; generic one-off AI tips are banned as
+     new ch1 topics. New trend adoptions for ch1 must state which wedge they serve.
+   - **Measure conversion, not views, for ch1**: per-video `subscribers_gained` (R7 CTA live since
+     07-12 makes this attributable). Quote ch1 subs-per-video in every report.
+   - **Hard review 2026-08-01:** if ch1 is still <15 subs, lead the report with a recommendation to
+     PAUSE ch1 (with the case), so the operator can decide — do not let it drift flat forever.
 
 ---
 
