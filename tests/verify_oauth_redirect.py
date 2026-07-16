@@ -1,23 +1,30 @@
-"""Dependency-free regression checks for the OAuth redirect_uri (portal reconnect).
+"""Dependency-free regression checks for the web OAuth consent path.
 
 This project has no pytest; run directly:
     PYTHONPATH=. .venv/bin/python tests/verify_oauth_redirect.py
 
-Reproduces the redirect_uri_mismatch incident that kept ch2 disconnected for
-~3 days: oauth_start built the redirect_uri from the incoming Host header, so a
-reconnect initiated through the reverse proxy (Host: channels.owera.com) produced
-a non-loopback redirect_uri the Desktop OAuth client rejects. With
+Part 1 reproduces the redirect_uri_mismatch incident that kept ch2 disconnected
+for ~3 days: oauth_start built the redirect_uri from the incoming Host header,
+so a reconnect initiated through the reverse proxy (Host: channels.owera.com)
+produced a non-loopback redirect_uri the Desktop OAuth client rejects. With
 MANAGER_PUBLIC_BASE_URL set, the redirect_uri is pinned to a registered base no
 matter which Host the request arrived on; unset keeps the old request-derived
 behavior so localhost reconnects are unchanged.
 
-Drives the real /oauth/start endpoint with a real (offline) Google Flow built
-from a fake Desktop client_secret.json — no network, no creds, temp dirs only.
-Exits non-zero on the first failed assertion.
+Part 2 covers the verify-before-save grant guards (BACKLOG 4b): a web consent
+that comes back without a refresh token, with partial scopes, or from the wrong
+Google account must save NOTHING and leave oauth_status untouched — pre-4b the
+callback saved first and looked later, so a botched re-consent clobbered the
+working token and rotated the previous one out of token.json.bak. Drives the
+real /oauth/start + /oauth/callback endpoints against a local mock of Google's
+token endpoint (the only stub besides the identity lookup) — no network, no
+creds, temp dirs only. Exits non-zero on the first failed assertion.
 """
+import http.server
 import json
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -30,6 +37,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus
 from app.routers import channels as channels_router
+from app.services import notify, youtube
 
 _checks = 0
 
@@ -111,4 +119,260 @@ ok(start_redirect_uri("channels.owera.com") == f"http://localhost:7070{CALLBACK}
    "trailing slash in the setting does not double the slash")
 
 settings.public_base_url = ""
+
+
+# ============================================================================
+# Part 2 — verify-before-save grant guards on the web consent path (BACKLOG 4b)
+# ============================================================================
+
+settings.alert_webhook_url = ""  # hermetic: ERROR flips must never POST anywhere
+
+
+# ---- verify_grant unit checks (no flow, fake creds) -------------------------
+class FakeCreds:
+    def __init__(self, refresh_token="r", granted_scopes=None, scopes=None):
+        self.refresh_token = refresh_token
+        self.granted_scopes = (youtube.CONSENT_SCOPES if granted_scopes is None
+                               else granted_scopes)
+        self.scopes = scopes
+
+
+def rejected(creds, **kw):
+    try:
+        youtube.verify_grant(creds, **kw)
+        return None
+    except youtube.GrantRejected as e:
+        return e
+
+
+print("verify_grant guards (unit)")
+IDENT = {"id": "UCbound", "title": "Bound Channel"}
+ok(youtube.verify_grant(FakeCreds(), fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+   "full grant with matching identity returns the identity")
+e = rejected(FakeCreds(refresh_token=None), fetch_identity_fn=lambda c: dict(IDENT))
+ok(e and e.code == "no_refresh_token" and "refresh token" in str(e),
+   "missing refresh token rejected (no_refresh_token)")
+e = rejected(FakeCreds(granted_scopes=youtube.SCOPES),
+             fetch_identity_fn=lambda c: dict(IDENT))
+ok(e and e.code == "partial_scopes" and "yt-analytics.readonly" in str(e),
+   "partial grant rejected, missing scopes named (partial_scopes)")
+ok(youtube.verify_grant(FakeCreds(granted_scopes=youtube.SCOPES), allow_partial=True,
+                        fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+   "allow_partial overrides exactly the scope guard")
+
+
+def _boom(creds):
+    raise RuntimeError("backendError 503")
+
+
+e = rejected(FakeCreds(), fetch_identity_fn=_boom)
+ok(e and e.code == "identity_check_failed" and "identity check failed" in str(e),
+   "identity lookup failure rejected (identity_check_failed)")
+e = rejected(FakeCreds(), fetch_identity_fn=lambda c: {"id": None, "title": None})
+ok(e and e.code == "no_channel" and "no YouTube channel" in str(e),
+   "account without a channel rejected (no_channel)")
+e = rejected(FakeCreds(), expected_channel_id="UCother", expected_channel_title="Other",
+             fetch_identity_fn=lambda c: dict(IDENT))
+ok(e and e.code == "channel_mismatch" and "UCother" in str(e) and "UCbound" in str(e),
+   "wrong-channel identity rejected, both ids named (channel_mismatch)")
+ok(youtube.verify_grant(FakeCreds(), expected_channel_id="UCother", allow_rebind=True,
+                        fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+   "allow_rebind overrides exactly the identity guard")
+
+# ---- end-to-end: real /oauth/start + /oauth/callback ------------------------
+# The only stubs are Google's token endpoint (local mock HTTP server) and the
+# identity lookup (module attribute); the Flow, code exchange, verify_grant,
+# save_token, and mark_connected are all the real code paths.
+_token_response: dict = {}
+
+
+class _TokenHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        body = json.dumps({k: v for k, v in _token_response.items()
+                           if not k.startswith("_")}).encode()
+        self.send_response(_token_response.get("_status", 200))
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+_token_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _TokenHandler)
+threading.Thread(target=_token_srv.serve_forever, daemon=True).start()
+
+SLUG2 = "verify-consent"
+(tmp / SLUG2).mkdir()
+(tmp / SLUG2 / "client_secret.json").write_text(json.dumps({
+    "installed": {
+        "client_id": "verify.apps.googleusercontent.com",
+        "client_secret": "verify-secret",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": f"http://127.0.0.1:{_token_srv.server_port}/token",
+        "redirect_uris": ["http://localhost"],
+    }
+}))
+TOKEN = tmp / SLUG2 / "token.json"
+BAK = tmp / SLUG2 / "token.json.bak"
+
+with Session(engine) as s:
+    ch2 = Channel(slug=SLUG2, name="Verify Consent", oauth_status=OAuthStatus.CONNECTED,
+                  yt_channel_id="UCbound", yt_channel_title="Bound Channel")
+    s.add(ch2)
+    s.commit()
+    s.refresh(ch2)
+    CH2_ID = ch2.id
+
+_identity: dict = {}
+
+
+def _fake_identity(creds):
+    if _identity.get("_raise"):
+        raise RuntimeError(_identity["_raise"])
+    return {k: v for k, v in _identity.items() if not k.startswith("_")}
+
+
+youtube.identity_for_creds = _fake_identity
+
+
+def seed_tokens():
+    TOKEN.write_text(json.dumps({"token": "GOOD-OLD-TOKEN",
+                                 "refresh_token": "GOOD-OLD-REFRESH"}))
+    BAK.write_text(json.dumps({"token": "OLDER-BAK"}))
+
+
+def channel_row():
+    with Session(engine) as s:
+        row = s.get(Channel, CH2_ID)
+        return {"status": row.oauth_status, "error": row.oauth_error,
+                "name": row.name, "yt_id": row.yt_channel_id}
+
+
+def set_channel(**fields):
+    with Session(engine) as s:
+        row = s.get(Channel, CH2_ID)
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+
+
+def consent(token_resp: dict, identity: dict):
+    """Drive a full web consent: /oauth/start then the redirect callback."""
+    _token_response.clear()
+    _token_response.update(token_resp)
+    _identity.clear()
+    _identity.update(identity)
+    r = client.post(f"/api/channels/{CH2_ID}/oauth/start",
+                    headers={"host": "localhost:7070"})
+    assert r.status_code == 200, f"/oauth/start -> {r.status_code}: {r.text[:200]}"
+    return client.get(f"/api/channels/{CH2_ID}/oauth/callback?code=fake-code&state=x")
+
+
+def full_token(**over):
+    d = {"access_token": "new-access", "token_type": "Bearer", "expires_in": 3600,
+         "refresh_token": "new-refresh", "scope": " ".join(youtube.CONSENT_SCOPES)}
+    d.update(over)
+    return d
+
+
+def unchanged(before):
+    return (TOKEN.read_bytes(), BAK.read_bytes()) == before
+
+
+print("web consent: rejections save nothing and preserve oauth_status")
+seed_tokens()
+before = (TOKEN.read_bytes(), BAK.read_bytes())
+
+r = consent(full_token(), {"id": "UCother", "title": "Other Channel"})
+ok("Consent rejected" in r.text and "UCother" in r.text and "UCbound" in r.text,
+   "wrong-account consent shows the mismatch (both channel ids)")
+ok("Disconnect" in r.text, "mismatch page carries the web remediation hint")
+row = channel_row()
+ok(row["status"] == OAuthStatus.CONNECTED and row["error"] is None,
+   "channel stays CONNECTED after wrong-account consent")
+ok(unchanged(before), "token.json and .bak byte-identical after wrong-account consent")
+
+r = consent(full_token(), {"id": "UCother", "title": "<img src=x onerror=alert(1)>"})
+ok("<img" not in r.text and "&lt;img" in r.text,
+   "Google-supplied channel title is HTML-escaped on the rejection page")
+ok("window.close" not in r.text,
+   "rejection page does not self-close (the message is the only trace the user gets)")
+
+r = consent(full_token(), {"id": "UCother", "title": "T" * 500})
+ok("Disconnect" in r.text, "remediation hint survives truncation of an oversized message")
+
+r = consent(full_token(scope=" ".join(youtube.SCOPES)), dict(IDENT))
+ok("Consent rejected" in r.text and "missing scope" in r.text,
+   "partial-scope consent rejected (unchecked-checkbox trap)")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED and unchanged(before),
+   "partial-scope consent left status and tokens untouched")
+
+no_refresh = full_token()
+del no_refresh["refresh_token"]
+r = consent(no_refresh, dict(IDENT))
+ok("Consent rejected" in r.text and "refresh token" in r.text,
+   "refresh-token-less consent rejected")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED and unchanged(before),
+   "refresh-token-less consent left status and tokens untouched")
+
+r = consent(full_token(), {"_raise": "backendError 503"})
+ok("Consent rejected" in r.text and "identity check failed" in r.text,
+   "identity-lookup failure rejected as transient")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED and unchanged(before),
+   "identity-lookup failure left status and tokens untouched")
+
+print("web consent: replayed callback and exchange failure")
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?code=fake-code&state=x")
+ok("cancelled" in r.text and channel_row()["status"] == OAuthStatus.CONNECTED,
+   "replayed callback (no pending flow) leaves the channel untouched")
+
+r = consent({"_status": 500, "error": "internal_failure"}, dict(IDENT))
+ok("Connection failed" in r.text, "token-exchange failure shows the failure page")
+row = channel_row()
+ok(row["status"] == OAuthStatus.ERROR and row["error"],
+   "token-exchange failure flips the channel to ERROR (a real halted consent)")
+ok(unchanged(before), "token-exchange failure wrote nothing")
+
+print("web consent: verified happy path saves and connects")
+set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
+r = consent(full_token(), {"id": "UCbound", "title": "Bound Channel Renamed"})
+ok("Connected" in r.text, "verified consent shows the success page")
+ok("window.close" in r.text, "success page still self-closes")
+saved = json.loads(TOKEN.read_text())
+ok(saved.get("refresh_token") == "new-refresh", "token.json holds the new grant")
+ok("GOOD-OLD-REFRESH" in BAK.read_text(),
+   "previous token rotated into token.json.bak")
+row = channel_row()
+ok(row["status"] == OAuthStatus.CONNECTED and row["error"] is None,
+   "channel CONNECTED with error cleared (mark_connected)")
+ok(row["name"] == "Bound Channel Renamed" and row["yt_id"] == "UCbound",
+   "identity re-bound: display name follows the real YouTube title")
+
+print("web consent: DB flip failure after a verified save")
+set_channel(oauth_status=OAuthStatus.EXPIRED, oauth_error="dead")
+seed_tokens()
+_orig_mark_connected = notify.mark_connected
+
+
+def _boom_mark_connected(session, channel, identity):
+    raise RuntimeError("database is locked")
+
+
+notify.mark_connected = _boom_mark_connected
+try:
+    r = consent(full_token(), {"id": "UCbound", "title": "Bound Channel"})
+finally:
+    notify.mark_connected = _orig_mark_connected
+ok("Token saved" in r.text and "do NOT redo" in r.text,
+   "commit failure after save shows the do-not-redo-the-consent page")
+ok(json.loads(TOKEN.read_text()).get("refresh_token") == "new-refresh",
+   "the verified token IS on disk despite the failed status flip")
+ok(channel_row()["status"] == OAuthStatus.EXPIRED,
+   "only the status flip is missing (the next oauth-status probe repairs it)")
+
+_token_srv.shutdown()
 print(f"ALL {_checks} CHECKS PASSED")

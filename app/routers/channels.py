@@ -1,3 +1,5 @@
+import html
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
@@ -10,6 +12,8 @@ from app.models import Channel, OAuthStatus, utcnow
 from app.schemas import ChannelCreate, ChannelUpdate
 from app.services import notify, youtube
 
+logger = logging.getLogger("manager.channels")
+
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 # In-memory OAuth flows awaiting their redirect callback (keyed by channel id).
@@ -19,6 +23,11 @@ _pending_flows: dict[int, object] = {}
 
 def _callback_html(title: str, message: str, ok: bool) -> str:
     color = "#c9f24e" if ok else "#f7768e"
+    # Both strings land in HTML text nodes and carry remote content (the error
+    # query param; Google-supplied channel titles inside GrantRejected messages).
+    # Failure pages stay open — the message is the only trace the user gets.
+    title, message = html.escape(title, quote=False), html.escape(message, quote=False)
+    close = "<script>setTimeout(()=>window.close(),2500)</script>" if ok else ""
     return f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
 <style>body{{background:#08090b;color:#cdd3da;font-family:ui-monospace,monospace;
 display:grid;place-items:center;height:100vh;margin:0}}
@@ -26,7 +35,7 @@ display:grid;place-items:center;height:100vh;margin:0}}
 h1{{color:{color};font-size:18px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 12px}}
 p{{color:#6c7681;font-size:13px;margin:0}}</style></head>
 <body><div class=box><h1>{title}</h1><p>{message}</p></div>
-<script>setTimeout(()=>window.close(),2500)</script></body></html>"""
+{close}</body></html>"""
 
 
 def _slugify(s: str) -> str:
@@ -121,6 +130,14 @@ def oauth_start(channel_id: int, request: Request, session: Session = Depends(ge
     return {"auth_url": url}
 
 
+# Web-flavored remediation per GrantRejected.code (the CLI appends --force /
+# --allow-partial hints instead; codes without an entry already self-explain).
+_GRANT_HINTS = {
+    "channel_mismatch": " Disconnect the channel first if you really mean to "
+                        "re-bind it (or use the reconnect CLI with --force).",
+}
+
+
 def _fail_consent(session: Session, ch: Channel, error: str) -> None:
     """A failed consent halts publishing just like an expiry: flip to ERROR
     through the choke point so a previously-CONNECTED channel alerts (a
@@ -144,21 +161,36 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
             _fail_consent(session, ch, error or "consent was cancelled or timed out")
         return HTMLResponse(_callback_html("Connection failed", error or "consent cancelled", False))
     try:
-        identity = youtube.finish_flow(ch.slug, flow, code)
+        identity = youtube.finish_flow(ch.slug, flow, code,
+                                       expected_channel_id=ch.yt_channel_id,
+                                       expected_channel_title=ch.yt_channel_title)
+    except youtube.GrantRejected as e:
+        # The grant failed verification BEFORE anything was written: the
+        # existing token and oauth_status still describe the last working
+        # credential, so a healthy channel keeps publishing through a
+        # botched re-consent — do NOT flip status here. The log line is the
+        # durable trace (the callback page is the only other one).
+        logger.warning("consent for channel '%s' rejected (%s): %s", ch.slug, e.code, e)
+        msg = str(e)[:400] + _GRANT_HINTS.get(e.code, "")
+        return HTMLResponse(_callback_html("Consent rejected", msg, False))
     except Exception as e:
         _fail_consent(session, ch, str(e))
         return HTMLResponse(_callback_html("Connection failed", str(e)[:200], False))
-    ch.yt_channel_id = identity.get("id")
-    ch.yt_channel_title = identity.get("title")
-    # Consolidate: the channel's display name follows the real YouTube title.
-    if identity.get("title"):
-        ch.name = identity["title"]
-    ch.oauth_status = OAuthStatus.CONNECTED
-    ch.oauth_error = None
-    ch.updated_at = utcnow()
-    session.add(ch); session.commit()
+    display = identity.get("title") or ch.name
+    try:
+        notify.mark_connected(session, ch, identity)
+    except Exception as e:
+        # Same contract the CLI prints: the token IS saved and valid, only the
+        # status flip is missing — a re-consent would rotate the good token
+        # into token.json.bak for nothing.
+        logger.error("channel '%s': token saved but the status update failed: %s", ch.slug, e)
+        return HTMLResponse(_callback_html(
+            "Token saved, status update failed",
+            f"The new token for {display} is saved and working, but the dashboard status "
+            "could not be updated — do NOT redo the consent. Open the dashboard (or the "
+            "channel's oauth-status endpoint) to refresh it.", False))
     return HTMLResponse(_callback_html(
-        "Connected", f"{identity.get('title') or ch.name} is linked. You can close this tab.", True))
+        "Connected", f"{display} is linked. You can close this tab.", True))
 
 
 @router.post("/{channel_id}/disconnect")

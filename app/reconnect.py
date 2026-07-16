@@ -36,8 +36,8 @@ import wsgiref.util
 
 from sqlmodel import Session, select
 
-from app.models import Channel, OAuthStatus, utcnow
-from app.services import youtube
+from app.models import Channel
+from app.services import notify, youtube
 
 SCOPE_REMINDER = (
     "NOTE: on Google's consent screen the scope checkboxes are UNCHECKED by default —\n"
@@ -51,6 +51,13 @@ _SUCCESS_HTML = (b"<html><body style='font-family:sans-serif;text-align:center;"
 
 # Test seam: the one call that needs a live Google grant.
 _fetch_identity = youtube.identity_for_creds
+
+# CLI-flavored remediation appended per GrantRejected.code — the escape hatches
+# only the terminal offers (the web callback hints Disconnect-first instead).
+_CLI_HINTS = {
+    "partial_scopes": " (or pass --allow-partial to save anyway)",
+    "channel_mismatch": " Pass --force to re-bind the channel intentionally.",
+}
 
 
 class ReconnectError(Exception):
@@ -140,34 +147,16 @@ def reconnect(session: Session, ident: str, port: int = 8077, open_browser: bool
         # access_denied, mismatching state, token-endpoint failures, …
         raise ReconnectError(f"consent failed: {e} — nothing was changed")
 
-    if not creds.refresh_token:
-        raise ReconnectError("Google returned no refresh token — the grant would die "
-                             "within the hour. Token NOT saved; re-run the consent.")
-    # granted_scopes is what the user actually ticked; absent means the grant
-    # matched the request (RFC 6749 §5.1), so falling back to the requested set
-    # is the spec reading, not a fail-open.
-    granted = creds.granted_scopes or creds.scopes or []
-    missing = sorted(set(youtube.CONSENT_SCOPES) - set(granted))
-    if missing and not allow_partial:
-        raise ReconnectError(
-            "grant is missing scope(s): " + ", ".join(missing) + ". Token NOT saved — "
-            "re-run and click 'Select all' on the consent screen (or pass "
-            "--allow-partial to save anyway).")
+    # The shared verify-before-save guards (youtube.verify_grant — also the web
+    # consent path); only the flag hints are CLI-specific.
     try:
-        identity = _fetch_identity(creds)
-    except Exception as e:
-        raise ReconnectError(f"token exchanged but the identity check failed: {e} — "
-                             "token NOT saved; existing token untouched. If this looks "
-                             "transient, just re-run.")
-    if not identity.get("id"):
-        raise ReconnectError("consented account/brand has no YouTube channel attached — "
-                             "wrong pick on the account chooser? Token NOT saved.")
-    if ch.yt_channel_id and identity["id"] != ch.yt_channel_id and not force:
-        raise ReconnectError(
-            f"consented account owns YouTube channel {identity['id']} "
-            f"({identity.get('title')}), but '{ch.slug}' is bound to {ch.yt_channel_id} "
-            f"({ch.yt_channel_title}). Wrong Google account on the picker? Token NOT "
-            "saved. Pass --force to re-bind the channel intentionally.")
+        identity = youtube.verify_grant(
+            creds, expected_channel_id=ch.yt_channel_id,
+            expected_channel_title=ch.yt_channel_title, label=f"'{ch.slug}'",
+            allow_partial=allow_partial, allow_rebind=force,
+            fetch_identity_fn=_fetch_identity)
+    except youtube.GrantRejected as e:
+        raise ReconnectError(str(e) + _CLI_HINTS.get(e.code, ""))
 
     try:
         youtube.save_token(ch.slug, creds)
@@ -175,22 +164,16 @@ def reconnect(session: Session, ident: str, port: int = 8077, open_browser: bool
         raise ReconnectError(f"could not write the token: {e} — existing token untouched")
 
     prev_status = ch.oauth_status
-    ch.yt_channel_id = identity["id"]
-    ch.yt_channel_title = identity.get("title")
-    if identity.get("title"):
-        ch.name = identity["title"]
-    ch.oauth_status = OAuthStatus.CONNECTED
-    ch.oauth_error = None
-    ch.updated_at = utcnow()
     try:
-        session.add(ch)
-        session.commit()
+        notify.mark_connected(session, ch, identity)
     except Exception as e:
         # The token IS on disk and valid; only the status flip is missing.
         raise ReconnectError(
             f"token SAVED but the DB update failed ({e}) — the channel may still show "
             f"'{prev_status}'. Hit GET /api/channels/{ch.id}/oauth-status (or open the "
             "dashboard) to flip it connected; do NOT redo the consent.")
+    # Outside the guarded block: after a successful commit, a refresh failure
+    # must not masquerade as "the DB update failed".
     session.refresh(ch)
     return ch
 

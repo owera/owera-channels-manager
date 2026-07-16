@@ -63,6 +63,17 @@ class NeedsConnect(Exception):
     """Token missing or unrefreshable — UI must trigger an interactive connect."""
 
 
+class GrantRejected(Exception):
+    """A freshly-exchanged consent grant failed verification BEFORE anything was
+    saved — no token written, no channel state changed. `code` identifies which
+    guard fired so each caller (web callback, reconnect CLI) can append its own
+    remediation hint (Disconnect-first vs --force / --allow-partial)."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
 class QuotaExceeded(Exception):
     """A YouTube daily cap was hit — caller should stop publishing for this channel
     until it resets. `reason` is the YouTube error reason (e.g. 'uploadlimitexceeded'
@@ -192,11 +203,66 @@ def identity_for_creds(creds: Credentials) -> dict:
     return fetch_identity(build("youtube", "v3", credentials=creds))
 
 
-def finish_flow(slug: str, flow: Flow, code: str) -> dict:
-    """Exchange the authorization code for tokens, persist them, capture identity."""
+def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = None,
+                 expected_channel_title: Optional[str] = None,
+                 label: str = "this channel",
+                 allow_partial: bool = False, allow_rebind: bool = False,
+                 fetch_identity_fn: Optional[Callable[[Credentials], dict]] = None) -> dict:
+    """Verify a freshly-exchanged grant BEFORE anything touches disk or DB — the
+    three checks learned from the 2026-07-05/11 reconnect incidents (rationale
+    in app/reconnect.py's docstring): a refresh token was issued, every consent
+    scope was granted, and the consented account owns the SAME YouTube channel
+    (`expected_channel_id`) the slug is bound to. Returns the {id, title}
+    identity on success; raises GrantRejected (with .code) otherwise."""
+    if not creds.refresh_token:
+        raise GrantRejected(
+            "Google returned no refresh token — the grant would die within the "
+            "hour. Token NOT saved; re-run the consent.", code="no_refresh_token")
+    # granted_scopes is what the user actually ticked; absent means the grant
+    # matched the request (RFC 6749 §5.1), so falling back to the requested set
+    # is the spec reading, not a fail-open.
+    granted = creds.granted_scopes or creds.scopes or []
+    missing = sorted(set(CONSENT_SCOPES) - set(granted))
+    if missing and not allow_partial:
+        raise GrantRejected(
+            "grant is missing scope(s): " + ", ".join(missing) + ". Token NOT "
+            "saved — re-run and click 'Select all' (\"Selecionar tudo\") on the "
+            "consent screen.", code="partial_scopes")
+    try:
+        identity = (fetch_identity_fn or identity_for_creds)(creds)
+    except Exception as e:
+        raise GrantRejected(
+            f"token exchanged but the identity check failed: {e} — token NOT "
+            "saved; existing token untouched. If this looks transient, just "
+            "re-run.", code="identity_check_failed")
+    if not identity.get("id"):
+        raise GrantRejected(
+            "consented account/brand has no YouTube channel attached — wrong "
+            "pick on the account chooser? Token NOT saved.", code="no_channel")
+    if expected_channel_id and identity["id"] != expected_channel_id and not allow_rebind:
+        raise GrantRejected(
+            f"consented account owns YouTube channel {identity['id']} "
+            f"({identity.get('title')}), but {label} is bound to "
+            f"{expected_channel_id} ({expected_channel_title}). Wrong Google "
+            "account on the picker? Token NOT saved.", code="channel_mismatch")
+    return identity
+
+
+def finish_flow(slug: str, flow: Flow, code: str, *,
+                expected_channel_id: Optional[str] = None,
+                expected_channel_title: Optional[str] = None) -> dict:
+    """Exchange the authorization code, verify the grant, and only then persist
+    the token; returns the verified identity. Order matters (BACKLOG 4b): the
+    pre-existing save-then-look order meant a wrong-account or partial-scope web
+    consent clobbered a working token and rotated the previous one out of
+    token.json.bak. GrantRejected propagates with nothing written."""
     flow.fetch_token(code=code)
+    identity = verify_grant(flow.credentials,
+                            expected_channel_id=expected_channel_id,
+                            expected_channel_title=expected_channel_title,
+                            label=f"'{slug}'")
     save_token(slug, flow.credentials)
-    return identity_for_creds(flow.credentials)
+    return identity
 
 
 def fetch_identity(service) -> dict:

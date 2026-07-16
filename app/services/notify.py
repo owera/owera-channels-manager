@@ -30,7 +30,7 @@ import logging
 import httpx
 
 from app.config import settings
-from app.models import Channel, OAuthStatus
+from app.models import Channel, OAuthStatus, utcnow
 
 logger = logging.getLogger("manager.notify")
 
@@ -95,6 +95,25 @@ def mark_dead_committed(session, channel: Channel, error: str | None, *,
     if flipped:
         alert_dead(channel, error)
     return flipped
+
+
+def mark_connected(session, channel: Channel, identity: dict) -> None:
+    """The CONNECTED counterpart of mark_dead_committed: bind the verified
+    YouTube identity, clear the error, flip the status, and commit. Shared by
+    the web consent callback and the reconnect CLI so the two paths cannot
+    drift. Call only AFTER youtube.verify_grant accepted the grant and the
+    token is on disk; a commit failure propagates to the caller (the token
+    remains saved — only the status flip is missing)."""
+    channel.yt_channel_id = identity.get("id")
+    channel.yt_channel_title = identity.get("title")
+    # The channel's display name follows the real YouTube title.
+    if identity.get("title"):
+        channel.name = identity["title"]
+    channel.oauth_status = OAuthStatus.CONNECTED
+    channel.oauth_error = None
+    channel.updated_at = utcnow()
+    session.add(channel)
+    session.commit()
 
 
 def alert_dead(channel: Channel, error: str | None) -> None:

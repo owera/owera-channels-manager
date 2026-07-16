@@ -107,7 +107,17 @@ flag the operator step in the commit body.
 - **caution:** touches oauth (HIGH) — isolated PR.
 - **acceptance:** documented one-command reconnect; `/verify` shows a channel going connected.
 
-### 4b. Extend the reconnect grant guards to the web consent path — HIGH
+### 4b. ✅ DONE (code shipped to main 2026-07-16) Extend the reconnect grant guards to the web consent path — HIGH
+- **resolution (2026-07-16):** `youtube.verify_grant` is the shared verify-before-save guard block
+  (refresh-token issuance, full scope grant, same-channel identity — raises `GrantRejected` with a
+  `.code` BEFORE anything touches disk or DB); `finish_flow` reordered to exchange → verify → save,
+  so a wrong-account/partial-scope/dead web consent saves NOTHING, leaves `oauth_status` untouched
+  (a healthy channel keeps publishing through a botched re-consent), and the callback page says
+  exactly why (per-code remediation hints: web says Disconnect-first, CLI keeps --force /
+  --allow-partial). `notify.mark_connected` is the CONNECTED counterpart of `mark_dead_committed`;
+  both the web callback and the reconnect CLI now flip status through it. Regression suite:
+  `tests/verify_oauth_redirect.py` grew 5 → 32 checks (verify_grant unit guards + end-to-end
+  /oauth/start → /oauth/callback against a local mock of Google's token endpoint).
 - **why (from #4's code review, 2026-07-12):** the CLI now verifies refresh-token issuance, full
   scope grant, and same-channel identity BEFORE saving; the web path (`oauth_callback` →
   `youtube.finish_flow`) still saves first and verifies nothing, so a wrong-account or
@@ -123,6 +133,28 @@ flag the operator step in the commit body.
   `tests/verify_oauth_redirect.py`/`verify_reconnect.py`.
 - **acceptance:** a wrong-account or partial-scope web consent saves nothing and shows why; the
   happy path still connects; suites green.
+
+### 4c. Consent-path hardening follow-ups (from 4b's code review, 2026-07-16) — normal
+- **why:** accepted-with-rationale findings from shipping 4b, none blocking but each a real papercut.
+- **items, roughly by leverage:**
+  (a) `_pending_flows` is keyed by channel id, so a second `/oauth/start` (double-click, two tabs)
+  overwrites the pending flow and completing the FIRST consent fails the exchange and flips a
+  CONNECTED channel to ERROR — key by OAuth `state` instead, which would also let stale
+  `?error=` hits (browser-history replays) be distinguished from real pending-consent failures
+  (today `error` with no pending flow still flips; pinned deliberately in `verify_notify.py`).
+  (b) `GrantRejected` codes are bare string literals coupled across three files
+  (raise sites in `youtube.py`, `_GRANT_HINTS` in `channels.py`, `_CLI_HINTS` in `reconnect.py`)
+  with `dict.get(code, "")` swallowing any drift — hoist code constants into `youtube.py`.
+  (c) `GET /oauth-status` still hand-rolls its flip-to-CONNECTED instead of calling
+  `notify.mark_connected` — and it is the designated recovery path when `mark_connected` fails.
+  (d) `verify_grant`'s `fetch_identity_fn` param exists only to preserve `reconnect.py`'s legacy
+  `_fetch_identity` test seam; standardize on patching `youtube.identity_for_creds` and drop both.
+  (e) the web/CLI consent completions still hand-sequence verify → save → flip separately; a shared
+  `complete_consent` helper would make the 4b ordering unforgeable.
+  (f) the "click 'Select all'" consent-screen remediation string is duplicated between
+  `youtube.verify_grant` and `reconnect.SCOPE_REMINDER`.
+- **caution:** (a)/(c)/(e) touch the oauth flow (HIGH, isolated commits); (b)/(d)/(f) normal.
+- **acceptance:** per-item; suites stay green.
 
 ### 5. ✅ DONE (PR #7, merged 2026-07-05) `/health` endpoint — normal
 - **why:** no machine-readable health signal for uptime checks.
