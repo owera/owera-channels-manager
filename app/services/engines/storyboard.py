@@ -33,6 +33,7 @@ _MAX_BEATS = 14
 _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
+_MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
 
 
 # --------------------------------------------------------------------------- JS/string helpers
@@ -319,17 +320,30 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
         if starts[i] < starts[i - 1] + _MIN_DUR:
             starts[i] = starts[i - 1] + _MIN_DUR
 
-    # Tail floor: the last two beats carry the payoff and the CTA, and the LLM tends to
-    # anchor both on the script's final words — a closing visual that flashes for under
-    # ~2s is a wasted beat. Pull late tail starts EARLIER (never later), stealing the
-    # time from a long predecessor; earlier beats stay word-synced.
-    for i in range(max(n - 2, 1), n):
-        target = duration - _TAIL_MIN * (n - i)
-        if target <= starts[i - 1] + _MIN_DUR:
-            continue  # clip too short to grant the floor — keep pure word-sync
-        if starts[i] > target:
-            hi = (starts[i + 1] - _MIN_DUR) if i + 1 < n else duration
-            starts[i] = max(starts[i - 1] + _MIN_DUR, min(target, hi))
+    # Beat floor (backward relaxation): the LLM tends to bunch several cues on one dense
+    # sentence — worst at the close, where payoff + CTA anchor on the final words — so
+    # beats flash by too fast for their animation to even land. Walk backward pulling
+    # starts EARLIER (never later): each beat gets a soft floor (_TAIL_MIN for the last
+    # two, _MID_MIN elsewhere), granted only while the predecessors can still fit their
+    # own floors (prefix feasibility) — so a bunched tail steals from the first beat
+    # with slack, while a genuinely too-short clip keeps pure word-sync. Beat 0 stays
+    # pinned at 0.
+    def _floor(j: int) -> float:
+        return _TAIL_MIN if j >= n - 2 else _MID_MIN
+
+    prefix = [0.0] * (n + 1)  # prefix[i] = minimum span beats 0..i-1 need at their floors
+    for j in range(n):
+        prefix[j + 1] = prefix[j] + _floor(j)
+    for i in range(n - 1, 0, -1):
+        nxt = starts[i + 1] if i + 1 < n else duration
+        target = nxt - _floor(i)
+        if starts[i] > target and prefix[i] <= target:
+            starts[i] = target
+        elif starts[i] > nxt - _MIN_DUR:
+            starts[i] = nxt - _MIN_DUR  # floor infeasible — just follow the moved successor
+    for i in range(1, n):  # safety: pathological clips must still validate
+        if starts[i] < starts[i - 1] + _MIN_DUR:
+            starts[i] = starts[i - 1] + _MIN_DUR
     for i, b in enumerate(beats):
         b["start"] = round(max(0.0, starts[i]), 3)
         end = duration if i == n - 1 else max(starts[i] + _MIN_DUR, starts[i + 1] - _GAP)
