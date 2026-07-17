@@ -144,6 +144,9 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
             Video.status == VideoStatus.PUBLISHED,
             Video.yt_video_id.is_not(None),
         )
+        # Newest first: when the quota cap cuts the pass short, starve the old,
+        # slow-moving tail — never the fresh cohort the growth loop steers by.
+        .order_by(Video.published_at.desc())
     ).all()
     cap = settings.youtube_daily_quota_cap
     recorded = 0
