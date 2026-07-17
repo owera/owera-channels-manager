@@ -20,6 +20,7 @@ httpx calls — no network, no creds. Exits non-zero on the first failure.
 """
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -418,26 +419,62 @@ print("oauth_callback wiring: failed consent alerts once; stale callbacks don't 
 s = fresh_session()
 ch = make_channel(s, slug="ch-consent")
 
+
+def seed_flow(state, channel_id):
+    channels_router._pending_flows[state] = channels_router._PendingFlow(
+        channel_id, object(), time.monotonic())
+
+
 cap = CaptureAlerts()
-channels_router.oauth_callback(ch.id, None, code=None, error="access_denied", session=s)
+seed_flow("st-live", ch.id)
+channels_router.oauth_callback(ch.id, None, code=None, state="st-live",
+                               error="access_denied", session=s)
 s.refresh(ch)
 ok(ch.oauth_status == OAuthStatus.ERROR, "a failed consent flips a CONNECTED channel to ERROR")
 ok(len(cap.records) == 1, "and alerts exactly once")
+ok("st-live" not in channels_router._pending_flows,
+   "the failed consent consumed its pending flow")
 
 ch_dead = make_channel(s, slug="ch-consent-dead", oauth_status=OAuthStatus.EXPIRED)
-channels_router.oauth_callback(ch_dead.id, None, code=None, error="access_denied", session=s)
+seed_flow("st-dead", ch_dead.id)
+channels_router.oauth_callback(ch_dead.id, None, code=None, state="st-dead",
+                               error="access_denied", session=s)
 s.refresh(ch_dead)
 ok(ch_dead.oauth_status == OAuthStatus.ERROR and len(cap.records) == 1,
    "a failed reconnect of an already-dead channel records ERROR but stays silent")
 
-# A replayed/stale callback (no pending flow, no error param — e.g. the operator
+# A replayed/stale callback (state matching no pending flow — e.g. the operator
 # refreshes the success page) must not kill a healthy channel.
 ch_ok = make_channel(s, slug="ch-consent-ok")
-channels_router.oauth_callback(ch_ok.id, None, code="abc123", error=None, session=s)
+channels_router.oauth_callback(ch_ok.id, None, code="abc123", state="st-gone",
+                               error=None, session=s)
 s.refresh(ch_ok)
 ok(ch_ok.oauth_status == OAuthStatus.CONNECTED,
    "a stale/replayed callback leaves a CONNECTED channel untouched")
 ok(len(cap.records) == 1, "and alerts nothing")
+
+# BACKLOG 4c-a: an ?error= hit whose state matches no pending flow (browser
+# history replaying an old cancelled-consent redirect) must not kill either —
+# pre-4c-a any error param flipped a CONNECTED channel to ERROR.
+channels_router.oauth_callback(ch_ok.id, None, code=None, state="st-gone",
+                               error="access_denied", session=s)
+s.refresh(ch_ok)
+ok(ch_ok.oauth_status == OAuthStatus.CONNECTED,
+   "a replayed ?error= redirect (no pending flow) leaves a CONNECTED channel untouched")
+ok(len(cap.records) == 1, "and alerts nothing")
+
+# A state minted for ANOTHER channel's consent neither fails this channel nor
+# gets consumed — the other channel's consent can still complete.
+seed_flow("st-other", ch.id)
+channels_router.oauth_callback(ch_ok.id, None, code=None, state="st-other",
+                               error="access_denied", session=s)
+s.refresh(ch_ok)
+ok(ch_ok.oauth_status == OAuthStatus.CONNECTED,
+   "another channel's state can't fail this channel")
+ok("st-other" in channels_router._pending_flows,
+   "and the other channel's pending flow survives")
+channels_router._pending_flows.clear()
+ok(len(cap.records) == 1, "cross-channel state hit alerts nothing")
 cap.close()
 
 print(f"\nALL {_checks} CHECKS PASSED")

@@ -25,6 +25,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -260,16 +261,23 @@ def set_channel(**fields):
         s.commit()
 
 
+def start_consent(channel_id=CH2_ID) -> str:
+    """POST /oauth/start; return the state Google would echo on the redirect."""
+    r = client.post(f"/api/channels/{channel_id}/oauth/start",
+                    headers={"host": "localhost:7070"})
+    assert r.status_code == 200, f"/oauth/start -> {r.status_code}: {r.text[:200]}"
+    return parse_qs(urlparse(r.json()["auth_url"]).query)["state"][0]
+
+
 def consent(token_resp: dict, identity: dict):
-    """Drive a full web consent: /oauth/start then the redirect callback."""
+    """Drive a full web consent: /oauth/start then the redirect callback,
+    echoing the real state the way Google does."""
     _token_response.clear()
     _token_response.update(token_resp)
     _identity.clear()
     _identity.update(identity)
-    r = client.post(f"/api/channels/{CH2_ID}/oauth/start",
-                    headers={"host": "localhost:7070"})
-    assert r.status_code == 200, f"/oauth/start -> {r.status_code}: {r.text[:200]}"
-    return client.get(f"/api/channels/{CH2_ID}/oauth/callback?code=fake-code&state=x")
+    state = start_consent()
+    return client.get(f"/api/channels/{CH2_ID}/oauth/callback?code=fake-code&state={state}")
 
 
 def full_token(**over):
@@ -373,6 +381,72 @@ ok(json.loads(TOKEN.read_text()).get("refresh_token") == "new-refresh",
    "the verified token IS on disk despite the failed status flip")
 ok(channel_row()["status"] == OAuthStatus.EXPIRED,
    "only the status flip is missing (the next oauth-status probe repairs it)")
+
+# ============================================================================
+# Part 3 — state-keyed pending flows (BACKLOG 4c-a)
+# ============================================================================
+# Pre-4c-a, _pending_flows was keyed by channel id: a second /oauth/start
+# (double-click, two tabs) overwrote the first flow, so completing the FIRST
+# consent failed the exchange and flipped a CONNECTED channel to ERROR — and
+# any replayed ?error= redirect flipped it too.
+
+print("state-keyed flows: double-click, superseded leftover, replayed ?error=")
+set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
+seed_tokens()
+_token_response.clear()
+_token_response.update(full_token())
+_identity.clear()
+_identity.update({"id": "UCbound", "title": "Bound Channel"})
+
+state1 = start_consent()
+state2 = start_consent()
+ok(state1 != state2, "each /oauth/start mints its own state")
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?code=fake-code&state={state1}")
+ok("Connected" in r.text,
+   "completing the FIRST consent succeeds despite a second start (double-click)")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+   "channel CONNECTED after the double-click consent")
+
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state2}")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+   "cancelling the leftover second consent (superseded by the success) doesn't flip")
+
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state1}")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+   "a browser-history replay of an ?error= redirect (consumed state) doesn't flip")
+
+# A state minted for another channel's consent is not this channel's: it must
+# neither complete nor fail this channel, and must stay pending for its owner.
+state_other = start_consent(channel_id=CH_ID)
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_other}")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+   "another channel's state can't fail this channel")
+ok(state_other in channels_router._pending_flows,
+   "and the other channel's flow is still pending")
+channels_router._pending_flows.pop(state_other, None)
+
+channels_router._pending_flows["st-abandoned"] = channels_router._PendingFlow(
+    CH2_ID, object(), time.monotonic() - channels_router._PENDING_FLOW_TTL - 1)
+start_consent()
+ok("st-abandoned" not in channels_router._pending_flows,
+   "starts prune abandoned flows past the TTL")
+
+# TTL is also enforced at consumption: an expired-but-unpruned flow (no start
+# ever ran to sweep it) reads as stale — a session-restored ancient consent
+# cancel must not flip the channel days later.
+channels_router._pending_flows["st-expired"] = channels_router._PendingFlow(
+    CH2_ID, object(), time.monotonic() - channels_router._PENDING_FLOW_TTL - 1)
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state=st-expired")
+ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+   "cancelling an expired pending consent doesn't flip the channel")
+ok("st-expired" not in channels_router._pending_flows,
+   "and the expired entry is consumed")
+
+state_real = start_consent()
+r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_real}")
+row = channel_row()
+ok(row["status"] == OAuthStatus.ERROR and "access_denied" in (row["error"] or ""),
+   "a genuine cancel of a pending consent still flips to ERROR")
 
 _token_srv.shutdown()
 print(f"ALL {_checks} CHECKS PASSED")

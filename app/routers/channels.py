@@ -1,6 +1,9 @@
 import html
 import logging
 import re
+import threading
+import time
+from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
@@ -16,9 +19,68 @@ logger = logging.getLogger("manager.channels")
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
-# In-memory OAuth flows awaiting their redirect callback (keyed by channel id).
-# Single-user, short-lived (a consent completes in seconds) — fine in memory.
-_pending_flows: dict[int, object] = {}
+# In-memory OAuth flows awaiting their redirect callback, keyed by the flow's
+# `state` (the CSRF token Google echoes back on success AND error redirects).
+# Keying by state — not channel id — means a second /oauth/start (double-click,
+# two tabs) can't orphan the first consent, and a replayed callback (browser
+# history revisiting an old ?error= redirect) matches no pending entry, so it
+# can't flip a healthy channel (BACKLOG 4c-a). Single-user, short-lived — fine
+# in memory. All access goes through the three helpers below: these sync
+# routes run on FastAPI's threadpool, so the lock keeps consumption atomic (a
+# double-delivered redirect must not 500 or exchange the same code twice).
+class _PendingFlow(NamedTuple):
+    channel_id: int
+    flow: object
+    started_at: float  # time.monotonic()
+
+
+_pending_flows: dict[str, _PendingFlow] = {}
+_pending_flows_lock = threading.Lock()
+
+# Abandoned starts (clicked but never consented) accumulate instead of
+# overwriting each other: age out anything older than one very generous
+# consent (2FA + unverified-app interstitials included), and cap the registry
+# outright — the endpoint is reachable without auth when MANAGER_APP_PASSWORD
+# is unset, and each entry pins a live Flow object.
+_PENDING_FLOW_TTL = 30 * 60
+_PENDING_FLOWS_MAX = 32
+
+
+def _remember_flow(state: str, channel_id: int, flow: object) -> None:
+    now = time.monotonic()
+    with _pending_flows_lock:
+        for st in [st for st, e in _pending_flows.items()
+                   if now - e.started_at > _PENDING_FLOW_TTL]:
+            del _pending_flows[st]
+        _pending_flows[state] = _PendingFlow(channel_id, flow, now)
+        while len(_pending_flows) > _PENDING_FLOWS_MAX:
+            del _pending_flows[next(iter(_pending_flows))]  # oldest insertion
+
+
+def _pop_pending_flow(state: str | None, channel_id: int):
+    """Consume and return the pending flow for `state`, iff it belongs to
+    `channel_id` and hasn't aged out. A state minted for another channel's
+    consent stays pending for that channel; an expired entry is consumed but
+    not returned, so a session-restored ancient consent (completed OR
+    cancelled) reads as stale rather than acting on the channel."""
+    with _pending_flows_lock:
+        entry = _pending_flows.get(state) if state else None
+        if entry is None or entry.channel_id != channel_id:
+            return None
+        del _pending_flows[state]
+    if time.monotonic() - entry.started_at > _PENDING_FLOW_TTL:
+        return None
+    return entry.flow
+
+
+def _supersede_flows(channel_id: int) -> None:
+    """Drop every start still pending for a channel that just got a verified
+    token (the other tab of a double-click): cancelling that stale consent
+    screen later must not flip the freshly-connected channel to ERROR."""
+    with _pending_flows_lock:
+        for st in [st for st, e in _pending_flows.items()
+                   if e.channel_id == channel_id]:
+            del _pending_flows[st]
 
 
 def _callback_html(title: str, message: str, ok: bool) -> str:
@@ -123,10 +185,10 @@ def oauth_start(channel_id: int, request: Request, session: Session = Depends(ge
     redirect_uri = f"{base}/api/channels/{channel_id}/oauth/callback"
     try:
         flow = youtube.build_flow(ch.slug, redirect_uri)
-        url = youtube.authorization_url(flow)
+        url, state = youtube.authorization_url(flow)
     except Exception as e:
         raise HTTPException(400, f"could not start OAuth: {e}")
-    _pending_flows[channel_id] = flow
+    _remember_flow(state, channel_id, flow)
     return {"auth_url": url}
 
 
@@ -147,17 +209,19 @@ def _fail_consent(session: Session, ch: Channel, error: str) -> None:
 
 @router.get("/{channel_id}/oauth/callback")
 def oauth_callback(channel_id: int, request: Request, code: str | None = None,
-                   error: str | None = None, session: Session = Depends(get_session)):
+                   state: str | None = None, error: str | None = None,
+                   session: Session = Depends(get_session)):
     """Google redirects here after consent. Exchange the code, store the token,
     capture the channel identity, and show a small close-me page."""
     ch = session.get(Channel, channel_id)
-    flow = _pending_flows.pop(channel_id, None)
+    flow = _pop_pending_flow(state, channel_id)
     if error or not code or not flow or not ch:
-        # Flip only on a real failure of a pending consent. A hit with no
-        # pending flow and no error (page refresh after success, replayed
-        # redirect, restart-emptied _pending_flows) says nothing about the
-        # token — leave the channel's status untouched.
-        if ch and (error or flow):
+        # Flip only on a real failure of a consent that was actually pending.
+        # A hit whose state matches nothing (page refresh after success,
+        # browser-history replay of an old ?error= redirect, restart-emptied
+        # _pending_flows) says nothing about the token — leave the channel's
+        # status untouched.
+        if ch and flow:
             _fail_consent(session, ch, error or "consent was cancelled or timed out")
         return HTMLResponse(_callback_html("Connection failed", error or "consent cancelled", False))
     try:
@@ -169,13 +233,18 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
         # existing token and oauth_status still describe the last working
         # credential, so a healthy channel keeps publishing through a
         # botched re-consent — do NOT flip status here. The log line is the
-        # durable trace (the callback page is the only other one).
+        # durable trace (the callback page is the only other one). Sibling
+        # pending starts deliberately survive a rejection (unlike a success)
+        # so the operator can retry from the other tab with the right
+        # account; the cost is that cancelling that tab instead still flips
+        # (the re-probe-before-flip in BACKLOG 4c would remove that too).
         logger.warning("consent for channel '%s' rejected (%s): %s", ch.slug, e.code, e)
         msg = str(e)[:400] + _GRANT_HINTS.get(e.code, "")
         return HTMLResponse(_callback_html("Consent rejected", msg, False))
     except Exception as e:
         _fail_consent(session, ch, str(e))
         return HTMLResponse(_callback_html("Connection failed", str(e)[:200], False))
+    _supersede_flows(channel_id)
     display = identity.get("title") or ch.name
     try:
         notify.mark_connected(session, ch, identity)

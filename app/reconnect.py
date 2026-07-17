@@ -100,7 +100,7 @@ def _consent(slug: str, port: int, open_browser: bool, timeout: int):
                                                handler_class=_QuietHandler)
     try:
         flow = youtube.build_flow(slug, f"http://localhost:{server.server_port}/")
-        url = youtube.authorization_url(flow)  # the exact knobs the web consent uses
+        url, _state = youtube.authorization_url(flow)  # the exact knobs the web consent uses
         print(SCOPE_REMINDER)
         print(f"\nOpen this URL in a browser signed into the channel's Google "
               f"account:\n{url}\n")

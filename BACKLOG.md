@@ -137,11 +137,20 @@ flag the operator step in the commit body.
 ### 4c. Consent-path hardening follow-ups (from 4b's code review, 2026-07-16) — normal
 - **why:** accepted-with-rationale findings from shipping 4b, none blocking but each a real papercut.
 - **items, roughly by leverage:**
-  (a) `_pending_flows` is keyed by channel id, so a second `/oauth/start` (double-click, two tabs)
-  overwrites the pending flow and completing the FIRST consent fails the exchange and flips a
-  CONNECTED channel to ERROR — key by OAuth `state` instead, which would also let stale
-  `?error=` hits (browser-history replays) be distinguished from real pending-consent failures
-  (today `error` with no pending flow still flips; pinned deliberately in `verify_notify.py`).
+  (a) ✅ DONE (code shipped to main 2026-07-17) — `_pending_flows` is now keyed by OAuth `state`
+  (`_PendingFlow` NamedTuple values; all access through lock-guarded `_remember_flow` /
+  `_pop_pending_flow` / `_supersede_flows`): a double-clicked `/oauth/start` no longer orphans the
+  first consent; a replayed `?error=` hit (browser-history) matches no pending entry and leaves the
+  channel untouched (the old always-flip-on-error pin in `verify_notify.py` was replaced); a
+  verified success supersedes the channel's other pending starts; a 30-min TTL enforced at
+  consumption plus a 32-entry cap bound the registry. Accepted residuals: a cancel arriving after a
+  manager restart is now silent (the next probe catches a genuinely dead token), and sibling starts
+  deliberately survive a GrantRejected so the other tab can retry with the right account —
+  cancelling that tab instead still flips (the re-probe-before-flip idea from 3b would remove that
+  too). Suites: `verify_oauth_redirect.py` 32 → 50, `verify_notify.py` 62 → 68 checks.
+  (Original problem, for context: keyed by channel id, a second `/oauth/start` overwrote the
+  pending flow, completing the FIRST consent failed the exchange and flipped a CONNECTED channel
+  to ERROR, and any `?error=` hit with no pending flow flipped too.)
   (b) `GrantRejected` codes are bare string literals coupled across three files
   (raise sites in `youtube.py`, `_GRANT_HINTS` in `channels.py`, `_CLI_HINTS` in `reconnect.py`)
   with `dict.get(code, "")` swallowing any drift — hoist code constants into `youtube.py`.

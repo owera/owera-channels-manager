@@ -167,13 +167,16 @@ def build_flow(slug: str, redirect_uri: str) -> Flow:
     return Flow.from_client_secrets_file(str(cs), scopes=CONSENT_SCOPES, redirect_uri=redirect_uri)
 
 
-def authorization_url(flow: Flow) -> str:
-    url, _state = flow.authorization_url(
+def authorization_url(flow: Flow) -> tuple[str, str]:
+    """Returns (url, state). The state is the CSRF token Google echoes back on
+    the redirect — the web callback pairs redirects with their pending flow by
+    it; the reconnect CLI validates it inside fetch_token instead."""
+    url, state = flow.authorization_url(
         access_type="offline",          # request a refresh token
         include_granted_scopes="true",
         prompt="consent",               # force refresh-token issuance on re-consent
     )
-    return url
+    return url, state
 
 
 def _write_atomic(tp: Path, text: str) -> None:
