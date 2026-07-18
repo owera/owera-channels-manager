@@ -892,8 +892,26 @@ def _variety_ok(beats) -> bool:
     return bool(mid) and mid.count("statement") <= 2 and len(_rich_types(beats)) >= 2
 
 
+# The CTA's ask is the follow verb — R7's core signal is subscribers_gained, so the
+# ask MUST be a follow ask, not an action verb ("Try it") and not an English default on a
+# non-English channel. The LLM violated the prompt rule ~half the time (07-18 baseline:
+# ch1-code emitted "Try it"), so — like the R4 pacing floor — code owns this guarantee
+# deterministically. The LLM keeps authoring only the `sub` (the reason to follow).
+_FOLLOW_VERBS = {
+    "english": "Follow",
+    "brazilian portuguese": "Siga",
+    "portuguese": "Siga",
+    "spanish": "Sigue",
+}
+
+
+def _follow_verb(language: str | None) -> str:
+    return _FOLLOW_VERBS.get((language or "").strip().lower(), "Follow")
+
+
 def compose(*, subject, script, words, duration, resolution, width, height,
-            topic_id=None, content_format="short", allowed_types=None, llm) -> str | None:
+            topic_id=None, content_format="short", allowed_types=None, language=None,
+            llm) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -928,6 +946,13 @@ def compose(*, subject, script, words, duration, resolution, width, height,
         rb = parse_storyboard(retry, allowed)
         if rb and (_variety_ok(rb) or len(_rich_types(rb)) > len(_rich_types(beats))):
             beats = rb
+
+    # R7: force the CTA's ask to the follow verb in the narration language — whatever the
+    # LLM wrote (an action verb, an English "Subscribe" leak). The `sub` it authored stays.
+    verb = _follow_verb(language)
+    for b in beats:
+        if b.get("type") == "cta":
+            b["text"] = verb
 
     align_storyboard(beats, words, duration)
     if not validate_storyboard(beats, duration):

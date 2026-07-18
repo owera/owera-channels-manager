@@ -76,10 +76,12 @@ def _render_subject(entry: dict, out_dir: Path) -> dict:
     words = worker._tts(script, worker._voice(params), out_dir / "narration.mp3")
     dur = max(4.0, round((worker._probe_duration(out_dir / "narration.mp3") or 12.0) + 0.6, 2))
 
+    from app.services.video_gen import language_from_voice
     html = storyboard.compose(
         subject=subject, script=script, words=words, duration=dur,
         resolution="portrait", width=1080, height=1920, topic_id=entry["topic_id"],
-        content_format=fmt, allowed_types=settings.composition_beat_types, llm=worker._llm,
+        content_format=fmt, allowed_types=settings.composition_beat_types,
+        language=language_from_voice(entry["voice"]), llm=worker._llm,
     )
     used_fallback = not html
     if used_fallback:
