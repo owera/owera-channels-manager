@@ -74,6 +74,29 @@ class GrantRejected(Exception):
         self.code = code
 
 
+class GrantCode:
+    """Stable identifiers for which guard raised a GrantRejected. The raise sites
+    (verify_grant, below) and the per-caller remediation-hint dicts (channels.py
+    _GRANT_HINTS, reconnect.py _CLI_HINTS) all key off these constants instead of
+    bare string literals, so a rename fails loudly at import instead of a
+    dict.get(code, "") silently dropping the hint (BACKLOG 4c-b)."""
+
+    NO_REFRESH_TOKEN = "no_refresh_token"
+    PARTIAL_SCOPES = "partial_scopes"
+    IDENTITY_CHECK_FAILED = "identity_check_failed"
+    NO_CHANNEL = "no_channel"
+    CHANNEL_MISMATCH = "channel_mismatch"
+
+
+# Every code verify_grant can raise — hint dicts assert their keys are a subset
+# of this, so a hint keyed on a stale/misspelled code is caught by the suite.
+GRANT_CODES = frozenset({
+    GrantCode.NO_REFRESH_TOKEN, GrantCode.PARTIAL_SCOPES,
+    GrantCode.IDENTITY_CHECK_FAILED, GrantCode.NO_CHANNEL,
+    GrantCode.CHANNEL_MISMATCH,
+})
+
+
 class QuotaExceeded(Exception):
     """A YouTube daily cap was hit — caller should stop publishing for this channel
     until it resets. `reason` is the YouTube error reason (e.g. 'uploadlimitexceeded'
@@ -220,7 +243,7 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
     if not creds.refresh_token:
         raise GrantRejected(
             "Google returned no refresh token — the grant would die within the "
-            "hour. Token NOT saved; re-run the consent.", code="no_refresh_token")
+            "hour. Token NOT saved; re-run the consent.", code=GrantCode.NO_REFRESH_TOKEN)
     # granted_scopes is what the user actually ticked; absent means the grant
     # matched the request (RFC 6749 §5.1), so falling back to the requested set
     # is the spec reading, not a fail-open.
@@ -230,24 +253,24 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
         raise GrantRejected(
             "grant is missing scope(s): " + ", ".join(missing) + ". Token NOT "
             "saved — re-run and click 'Select all' (\"Selecionar tudo\") on the "
-            "consent screen.", code="partial_scopes")
+            "consent screen.", code=GrantCode.PARTIAL_SCOPES)
     try:
         identity = (fetch_identity_fn or identity_for_creds)(creds)
     except Exception as e:
         raise GrantRejected(
             f"token exchanged but the identity check failed: {e} — token NOT "
             "saved; existing token untouched. If this looks transient, just "
-            "re-run.", code="identity_check_failed")
+            "re-run.", code=GrantCode.IDENTITY_CHECK_FAILED)
     if not identity.get("id"):
         raise GrantRejected(
             "consented account/brand has no YouTube channel attached — wrong "
-            "pick on the account chooser? Token NOT saved.", code="no_channel")
+            "pick on the account chooser? Token NOT saved.", code=GrantCode.NO_CHANNEL)
     if expected_channel_id and identity["id"] != expected_channel_id and not allow_rebind:
         raise GrantRejected(
             f"consented account owns YouTube channel {identity['id']} "
             f"({identity.get('title')}), but {label} is bound to "
             f"{expected_channel_id} ({expected_channel_title}). Wrong Google "
-            "account on the picker? Token NOT saved.", code="channel_mismatch")
+            "account on the picker? Token NOT saved.", code=GrantCode.CHANNEL_MISMATCH)
     return identity
 
 

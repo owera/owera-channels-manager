@@ -34,6 +34,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
+from app import reconnect
 from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus
@@ -179,6 +180,22 @@ ok(e and e.code == "channel_mismatch" and "UCother" in str(e) and "UCbound" in s
 ok(youtube.verify_grant(FakeCreds(), expected_channel_id="UCother", allow_rebind=True,
                         fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
    "allow_rebind overrides exactly the identity guard")
+
+# ---- GrantCode constants / hint-dict drift (BACKLOG 4c-b) -------------------
+# Every code the raise sites above actually produced is a registered GrantCode,
+# and both caller hint dicts key only on registered codes — so a rename that
+# desyncs a raise site from GRANT_CODES (or a hint dict from either) fails here
+# instead of a dict.get(code, "") silently dropping the remediation string.
+_raised = {"no_refresh_token", "partial_scopes", "identity_check_failed",
+           "no_channel", "channel_mismatch"}
+ok(youtube.GRANT_CODES == _raised,
+   "GRANT_CODES exactly matches the codes verify_grant raises")
+ok(all(getattr(youtube.GrantCode, n.upper()) == n for n in _raised),
+   "each GrantCode constant equals its literal code string")
+ok(set(channels_router._GRANT_HINTS) <= youtube.GRANT_CODES,
+   "_GRANT_HINTS keys are all registered GrantCodes (no drift)")
+ok(set(reconnect._CLI_HINTS) <= youtube.GRANT_CODES,
+   "_CLI_HINTS keys are all registered GrantCodes (no drift)")
 
 # ---- end-to-end: real /oauth/start + /oauth/callback ------------------------
 # The only stubs are Google's token endpoint (local mock HTTP server) and the

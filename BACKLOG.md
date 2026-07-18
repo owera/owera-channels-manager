@@ -151,9 +151,14 @@ flag the operator step in the commit body.
   (Original problem, for context: keyed by channel id, a second `/oauth/start` overwrote the
   pending flow, completing the FIRST consent failed the exchange and flipped a CONNECTED channel
   to ERROR, and any `?error=` hit with no pending flow flipped too.)
-  (b) `GrantRejected` codes are bare string literals coupled across three files
-  (raise sites in `youtube.py`, `_GRANT_HINTS` in `channels.py`, `_CLI_HINTS` in `reconnect.py`)
-  with `dict.get(code, "")` swallowing any drift — hoist code constants into `youtube.py`.
+  (b) ✅ DONE (code shipped to main 2026-07-18) — `youtube.GrantCode` holds the five
+  code constants and `youtube.GRANT_CODES` the registered set; all five `verify_grant`
+  raise sites and both hint dicts (`_GRANT_HINTS`, `_CLI_HINTS`) key off the constants,
+  each hint dict now `assert`s its keys ⊆ `GRANT_CODES` at import, and
+  `tests/verify_oauth_redirect.py` (50 → 54 checks) asserts the raise-site codes, the
+  constants' literal values, and both hint dicts against `GRANT_CODES` — so a rename that
+  desyncs a raise site or a hint dict fails loudly instead of `dict.get(code, "")`
+  silently dropping the remediation string.
   (c) `GET /oauth-status` still hand-rolls its flip-to-CONNECTED instead of calling
   `notify.mark_connected` — and it is the designated recovery path when `mark_connected` fails.
   (d) `verify_grant`'s `fetch_identity_fn` param exists only to preserve `reconnect.py`'s legacy

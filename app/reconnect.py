@@ -55,9 +55,10 @@ _fetch_identity = youtube.identity_for_creds
 # CLI-flavored remediation appended per GrantRejected.code — the escape hatches
 # only the terminal offers (the web callback hints Disconnect-first instead).
 _CLI_HINTS = {
-    "partial_scopes": " (or pass --allow-partial to save anyway)",
-    "channel_mismatch": " Pass --force to re-bind the channel intentionally.",
+    youtube.GrantCode.PARTIAL_SCOPES: " (or pass --allow-partial to save anyway)",
+    youtube.GrantCode.CHANNEL_MISMATCH: " Pass --force to re-bind the channel intentionally.",
 }
+assert set(_CLI_HINTS) <= youtube.GRANT_CODES, "stale GrantRejected code in _CLI_HINTS"
 
 
 class ReconnectError(Exception):

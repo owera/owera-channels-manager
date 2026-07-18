@@ -195,9 +195,10 @@ def oauth_start(channel_id: int, request: Request, session: Session = Depends(ge
 # Web-flavored remediation per GrantRejected.code (the CLI appends --force /
 # --allow-partial hints instead; codes without an entry already self-explain).
 _GRANT_HINTS = {
-    "channel_mismatch": " Disconnect the channel first if you really mean to "
-                        "re-bind it (or use the reconnect CLI with --force).",
+    youtube.GrantCode.CHANNEL_MISMATCH: " Disconnect the channel first if you "
+        "really mean to re-bind it (or use the reconnect CLI with --force).",
 }
+assert set(_GRANT_HINTS) <= youtube.GRANT_CODES, "stale GrantRejected code in _GRANT_HINTS"
 
 
 def _fail_consent(session: Session, ch: Channel, error: str) -> None:
