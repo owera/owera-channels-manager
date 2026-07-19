@@ -187,11 +187,19 @@ flag the operator step in the commit body.
 - **caution:** oauth-adjacent (HIGH) — isolated PR.
 - **acceptance:** a channel missing the scope is flagged; after grant, analytics populate.
 
-### 7. Test coverage for least-covered service modules — normal
+### 7. Test coverage for least-covered service modules — normal (recurring)
 - **why:** broaden the safety net so future auto-changes are safer (compounds the loop's own gate).
 - **approach:** pick the least-covered `app/services/*` module each cycle; add meaningful branch tests.
 - **caution:** normal.
 - **acceptance:** new tests pass and exercise real branches (not smoke).
+- **progress:** `issues.py` (previously zero direct coverage) — `tests/verify_issues.py`
+  (63 checks, 2026-07-19): all four pure helpers, every branch of the `_failed_action`
+  publish-retry decision table, and `detect()` across all buckets (failed/rejected age
+  gates, stuck render/publish/review timeouts, oauth/cooldown/quota-wall escalations, the
+  auto-vs-needs-operator split, 24h error-signature grouping, board overflow, informational
+  board_inventory excluded from totals, and the filesystem-backed BGM-pool low signal).
+  Still uncovered `app/services/*`: `autofill_loop`, `mpt_client`, `music_gen`,
+  `render_loop`, `scheduler`, `topic_playlist` (next candidates).
 
 ### 8. Remove the basic-auth-on-callback smell + document reconnect — normal
 - **why:** the OAuth callback path goes through Basic Auth, which complicates browser reconnects.
