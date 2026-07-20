@@ -198,6 +198,14 @@ flag the operator step in the commit body.
   gates, stuck render/publish/review timeouts, oauth/cooldown/quota-wall escalations, the
   auto-vs-needs-operator split, 24h error-signature grouping, board overflow, informational
   board_inventory excluded from totals, and the filesystem-backed BGM-pool low signal).
+  `quota.py` (previously zero direct coverage) — `tests/verify_quota.py` (37 checks,
+  2026-07-20): the money-path daily counters/accounting. Time helpers
+  (`_next_pt_midnight_utc`/`next_quota_reset`/`_quota_day_start`/`_day_start` tz-awareness +
+  forward-only) and the upload-limit-rolling-24h vs quota-Pacific-midnight branch of
+  `cooldown_until_for` (case-insensitive); the DB counters against a controlled
+  JobRun/Video/Topic set — the quota-day vs UTC-day boundary, kind/status/channel filters,
+  `quota_spent_today` coalesce, the `published_long_today` Topic join, `in_flight_renders`,
+  `last_publish_at`, `daily_limit_hit`'s `quota exceeded:%` match, and `log()` truncation.
   Still uncovered `app/services/*`: `autofill_loop`, `mpt_client`, `music_gen`,
   `render_loop`, `scheduler`, `topic_playlist` (next candidates).
 
