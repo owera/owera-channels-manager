@@ -181,6 +181,14 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     # Ensure the topic playlist BEFORE upload so the description can link it.
     from app.services.topic_playlist import ensure_topic_playlist
     topic = session.get(Topic, video.topic_id)
+    # Drop a structurally-invalid stored id (stale placeholder/truncation that 404s
+    # on every playlistItems.insert) so a real playlist is created below instead.
+    if topic and topic.playlist_id:
+        _pl = session.get(Playlist, topic.playlist_id)
+        if _pl and not youtube.is_valid_playlist_id(_pl.yt_playlist_id):
+            topic.playlist_id = None
+            session.add(topic)
+            session.commit()
     if topic and not topic.playlist_id:
         try:
             ensure_topic_playlist(session, topic, channel)

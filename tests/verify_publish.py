@@ -22,7 +22,8 @@ from sqlmodel import Session, SQLModel, create_engine
 # Importing app.models defines every table=True model, registering them all on
 # SQLModel.metadata so create_all() below builds the full schema.
 from app.config import settings
-from app.models import Channel, JobRun, OAuthStatus, Video, VideoStatus, utcnow
+from app.models import (Channel, JobRun, OAuthStatus, Playlist, Topic, Video,
+                        VideoStatus, utcnow)
 from app.services import publish_loop, quota, youtube
 
 CAP = settings.publish_max_retries
@@ -204,5 +205,63 @@ quota.log(s, kind="publish", status="error", channel_id=ch.id,
           detail="quota exceeded: [quotaExceeded] cooldown until ...")
 s.commit()
 ok(quota.daily_limit_hit(s, ch.id) is True, "a 'quota exceeded:' error trips the daily-limit guard")
+
+# --- is_valid_playlist_id: reject stale placeholder ids ----------------------
+print("is_valid_playlist_id (structural validation)")
+ok(youtube.is_valid_playlist_id("PL" + "a" * 32) is True, "a real 34-char PL id is valid")
+ok(youtube.is_valid_playlist_id("PLSGdBtL5vHUY") is False, "a 13-char placeholder id is invalid")
+ok(youtube.is_valid_playlist_id(None) is False, "None is invalid")
+ok(youtube.is_valid_playlist_id("") is False, "empty string is invalid")
+
+# --- publish_one: an invalid stored playlist id is recreated before upload ----
+print("publish_one: invalid playlist id -> recreate real playlist (no 404 loop)")
+_GOOD_PL = "PL" + "Z" * 32  # a fresh, structurally-valid playlist id
+_added_to = []
+
+
+def _dummy_upload(*a, **k):
+    return "vid123"
+
+
+def _recreate_playlist(service, title, description="", privacy="public"):
+    return {"yt_playlist_id": _GOOD_PL, "title": title,
+            "description": description, "privacy": privacy}
+
+
+def _record_add(service, playlist_id, video_id):
+    _added_to.append(playlist_id)
+    return "item1"
+
+
+_ORIG_CREATE, _ORIG_ADD, _ORIG_COMMENT = (
+    youtube.create_playlist, youtube.add_to_playlist, youtube.insert_comment)
+youtube.get_service = _dummy_service
+youtube.upload_video = _dummy_upload
+youtube.create_playlist = _recreate_playlist
+youtube.add_to_playlist = _record_add
+youtube.insert_comment = lambda *a, **k: "c1"
+
+s = fresh_session()
+ch = make_channel(s)
+topic = Topic(channel_id=ch.id, name="OpenCode", theme_prompt="x")
+s.add(topic); s.commit(); s.refresh(topic)
+bad_pl = Playlist(channel_id=ch.id, yt_playlist_id="PLSGdBtL5vHUY", title="OpenCode")
+s.add(bad_pl); s.commit(); s.refresh(bad_pl)
+topic.playlist_id = bad_pl.id
+s.add(topic); s.commit()
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+               video_path="/tmp/x.mp4", title="T")
+publish_loop._publish_one(s, ch, v)
+s.refresh(topic); s.refresh(v)
+new_pl = s.get(Playlist, topic.playlist_id) if topic.playlist_id else None
+ok(v.status == VideoStatus.PUBLISHED, "video still publishes")
+ok(new_pl is not None and new_pl.yt_playlist_id == _GOOD_PL,
+   "topic remapped to a freshly-created valid playlist")
+ok(topic.playlist_id != bad_pl.id, "the invalid placeholder mapping was dropped")
+ok(_added_to == [_GOOD_PL], "add_to_playlist used the valid id, never the 404-ing placeholder")
+
+youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
+youtube.insert_comment = _ORIG_COMMENT
+youtube.get_service, youtube.upload_video = _ORIG_GET, _ORIG_UPLOAD
 
 print(f"\nALL {_checks} CHECKS PASSED")

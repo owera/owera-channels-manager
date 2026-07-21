@@ -739,6 +739,14 @@ def _classify(e: HttpError) -> Exception:
     return e
 
 
+def is_valid_playlist_id(pid) -> bool:
+    """A user-created YouTube playlist id is 'PL' + 32 chars (34 total). Some topics
+    carry a shorter placeholder/truncated id (e.g. a 13-char seed value) that will
+    404 on every playlistItems.insert — treat those as invalid so the publish path
+    recreates a real playlist instead of 404-looping forever."""
+    return isinstance(pid, str) and pid.startswith("PL") and len(pid) == 34
+
+
 def is_playlist_missing(e) -> bool:
     """True if an HttpError means the target playlist no longer exists on YouTube
     (deleted out-of-band), i.e. reason 'playlistNotFound' or a bare HTTP 404. The
