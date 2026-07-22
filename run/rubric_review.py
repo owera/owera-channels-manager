@@ -69,6 +69,11 @@ OUT_ROOT = Path(__file__).resolve().parent / ".rubric_review"
 def _render_subject(entry: dict, out_dir: Path) -> dict:
     """Run one golden subject through the full pipeline; return a manifest dict."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Clear stale per-beat frames from any prior render into this label dir. Beat count
+    # varies run-to-run, so leftover b{i}_{type}.png files (e.g. an old b9_cta) would not
+    # match this render's manifest and can be mis-scored against the wrong beat.
+    for old in out_dir.glob("b*.png"):
+        old.unlink()
     subject, fmt = entry["subject"], entry["format"]
     params = {"content_format": fmt, "paragraph_number": 2, "voice_name": entry["voice"]}
 
