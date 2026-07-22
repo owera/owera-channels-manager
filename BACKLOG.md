@@ -206,8 +206,17 @@ flag the operator step in the commit body.
   JobRun/Video/Topic set — the quota-day vs UTC-day boundary, kind/status/channel filters,
   `quota_spent_today` coalesce, the `published_long_today` Topic join, `in_flight_renders`,
   `last_publish_at`, `daily_limit_hit`'s `quota exceeded:%` match, and `log()` truncation.
+  `topic_playlist.py` (previously zero direct coverage) — `tests/verify_topic_playlist.py`
+  (32 checks, 2026-07-22): `ensure_topic_playlist`, the lazy playlist-creation choke point
+  hit by both production and publish. Every branch — the three early returns that must NOT
+  touch the YouTube API (None topic, already-mapped topic returns its int FK with no second
+  playlist minted, non-CONNECTED channel), the create_playlist-raises path (logs one
+  `playlist_add` error naming the topic, no half-written Playlist row, topic left unmapped,
+  zero quota), the happy path (Playlist row with the real 34-char yt id + `last_synced_at`,
+  `topic.playlist_id` mapped to the new integer FK, one `playlist_add` success logging the
+  50-unit `QUOTA_PLAYLIST_INSERT`), and the `theme_prompt=None -> ""` normalization.
   Still uncovered `app/services/*`: `autofill_loop`, `mpt_client`, `music_gen`,
-  `render_loop`, `scheduler`, `topic_playlist` (next candidates).
+  `render_loop`, `scheduler` (next candidates).
 
 ### 8. Remove the basic-auth-on-callback smell + document reconnect — normal
 - **why:** the OAuth callback path goes through Basic Auth, which complicates browser reconnects.
