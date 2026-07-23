@@ -399,6 +399,101 @@ ok(json.loads(TOKEN.read_text()).get("refresh_token") == "new-refresh",
 ok(channel_row()["status"] == OAuthStatus.EXPIRED,
    "only the status flip is missing (the next oauth-status probe repairs it)")
 
+# ---- the repair itself: GET /oauth-status (BACKLOG 4c-c) --------------------
+# Pre-4c-c the probe hand-rolled its flip to CONNECTED, so the repair it is
+# documented for (above, and in the reconnect CLI's error text) was half-done:
+# a consent whose mark_connected commit failed left the channel with a working
+# token and no bound identity, and the probe never bound it — the dashboard
+# kept showing the stale name and the next re-consent had no
+# expected_channel_id for verify_grant's wrong-account check.
+print("oauth-status probe: finishes the identity bind a failed consent left undone")
+_orig_get_service, _orig_fetch_identity = youtube.get_service, youtube.fetch_identity
+_probe: dict = {"service": object(), "identity": {"id": "UCbound", "title": "Bound Channel"},
+                "calls": 0}
+
+
+def _fake_get_service(slug):
+    if _probe.get("dead"):
+        raise youtube.NeedsConnect(
+            f"token missing/expired for channel '{slug}' — reconnect required")
+    return _probe["service"]
+
+
+def _fake_fetch_identity(service):
+    _probe["calls"] += 1
+    _probe["got_service"] = service
+    if _probe.get("raise"):
+        raise RuntimeError(_probe["raise"])
+    return dict(_probe["identity"])
+
+
+def probe():
+    return client.get(f"/api/channels/{CH2_ID}/oauth-status")
+
+
+youtube.get_service, youtube.fetch_identity = _fake_get_service, _fake_fetch_identity
+try:
+    # Exactly the after-state of the failed-flip case above, for a channel that
+    # never completed a first bind: good token on disk, status not flipped.
+    set_channel(oauth_status=OAuthStatus.EXPIRED, oauth_error="dead",
+                yt_channel_id=None, yt_channel_title=None, name="stale-name")
+    r = probe()
+    ok(r.json()["oauth_status"] == OAuthStatus.CONNECTED and r.json()["error"] is None,
+       "probing a healthy token reports CONNECTED with the error cleared")
+    row = channel_row()
+    ok(row["status"] == OAuthStatus.CONNECTED and row["error"] is None,
+       "and the repair is committed, not just reported")
+    ok(row["yt_id"] == "UCbound" and row["name"] == "Bound Channel",
+       "an unbound channel gets its identity bound through mark_connected")
+    ok(_probe["calls"] == 1 and _probe.get("got_service") is _probe["service"],
+       "the identity lookup ran once, against the service the probe just built")
+
+    # The dashboard polls this endpoint every 2.5s while a reconnect is in
+    # flight, so an already-bound channel must not spend a quota unit per tick.
+    _probe["calls"] = 0
+    set_channel(oauth_status=OAuthStatus.EXPIRED, oauth_error="dead")
+    probe()
+    probe()
+    ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+       "an already-bound channel still flips CONNECTED")
+    ok(_probe["calls"] == 0,
+       "and spends no quota: no channels().list once the identity is bound")
+
+    # get_service already proved the token refreshes, so a channels().list blip
+    # must not turn a healthy probe into a dead-channel flip.
+    set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None,
+                yt_channel_id=None, yt_channel_title=None)
+    _probe["raise"] = "backendError 503"
+    r = probe()
+    _probe.pop("raise")
+    ok(r.json()["oauth_status"] == OAuthStatus.CONNECTED,
+       "a failed identity lookup still reports CONNECTED (the token itself works)")
+    ok(channel_row()["status"] == OAuthStatus.CONNECTED,
+       "and never flips the channel dead")
+
+    # An account with no YouTube channel attached must not write a null
+    # identity over the row it was meant to repair.
+    set_channel(oauth_status=OAuthStatus.EXPIRED, yt_channel_id=None,
+                yt_channel_title=None, name="stale-name")
+    _probe["identity"] = {"id": None, "title": None}
+    probe()
+    _probe["identity"] = {"id": "UCbound", "title": "Bound Channel"}
+    row = channel_row()
+    ok(row["status"] == OAuthStatus.CONNECTED and row["yt_id"] is None
+       and row["name"] == "stale-name",
+       "an identity with no channel id binds nothing and leaves the name alone")
+
+    _probe["dead"] = True
+    set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None,
+                yt_channel_id="UCbound", yt_channel_title="Bound Channel")
+    probe()
+    _probe.pop("dead")
+    row = channel_row()
+    ok(row["status"] == OAuthStatus.EXPIRED and "reconnect" in (row["error"] or ""),
+       "a dead token still flips through mark_dead_committed (unchanged)")
+finally:
+    youtube.get_service, youtube.fetch_identity = _orig_get_service, _orig_fetch_identity
+
 # ============================================================================
 # Part 3 — state-keyed pending flows (BACKLOG 4c-a)
 # ============================================================================

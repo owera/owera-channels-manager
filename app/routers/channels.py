@@ -280,17 +280,49 @@ def disconnect(channel_id: int, session: Session = Depends(get_session)):
     return ch
 
 
+def _probe_connected(session: Session, ch: Channel, service) -> None:
+    """Record a channel whose token just probed healthy as CONNECTED.
+
+    This endpoint is the documented repair when a consent saved a good token
+    but its mark_connected commit failed — both the callback page and the
+    reconnect CLI point the operator here — and that failure is precisely the
+    case that leaves the channel with a working token and NO bound YouTube
+    identity. Flipping the status alone left the repair half-done: yt_channel_id
+    stayed empty, so the dashboard kept showing the stale name and the next
+    re-consent had no expected_channel_id for verify_grant's wrong-account
+    check. So when the identity is missing, finish the job through the same
+    notify.mark_connected choke point a successful consent uses.
+
+    An already-bound channel takes the cheap in-place flip: the dashboard polls
+    this endpoint every 2.5s while a reconnect is in flight, and
+    channels().list costs a quota unit per call.
+    """
+    if not ch.yt_channel_id:
+        try:
+            identity = youtube.fetch_identity(service)
+        except Exception as e:
+            # Best-effort: get_service already proved the token refreshes, so a
+            # channels().list blip must not turn a healthy probe into a
+            # dead-channel flip. Fall through to the plain status flip.
+            identity = {}
+            logger.warning("channel '%s': connected, but binding the YouTube "
+                           "identity failed: %s", ch.slug, e)
+        if identity.get("id"):
+            notify.mark_connected(session, ch, identity)
+            return
+    ch.oauth_status = OAuthStatus.CONNECTED
+    ch.oauth_error = None
+    session.add(ch)
+    session.commit()
+
+
 @router.get("/{channel_id}/oauth-status")
 def oauth_status(channel_id: int, session: Session = Depends(get_session)):
     ch = session.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
     try:
-        youtube.get_service(ch.slug)
-        ch.oauth_status = OAuthStatus.CONNECTED
-        ch.oauth_error = None
-        session.add(ch)
-        session.commit()
+        _probe_connected(session, ch, youtube.get_service(ch.slug))
     except Exception as e:  # NeedsConnect, refresh failure, bad/old-scope token, etc.
         notify.mark_dead_committed(session, ch, str(e))
     return {"oauth_status": ch.oauth_status, "error": ch.oauth_error,

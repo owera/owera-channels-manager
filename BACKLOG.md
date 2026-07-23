@@ -159,8 +159,17 @@ flag the operator step in the commit body.
   constants' literal values, and both hint dicts against `GRANT_CODES` — so a rename that
   desyncs a raise site or a hint dict fails loudly instead of `dict.get(code, "")`
   silently dropping the remediation string.
-  (c) `GET /oauth-status` still hand-rolls its flip-to-CONNECTED instead of calling
-  `notify.mark_connected` — and it is the designated recovery path when `mark_connected` fails.
+  (c) ✅ DONE (code shipped to main 2026-07-23) — `GET /oauth-status` was the designated repair
+  when a consent saved a good token but its `mark_connected` commit failed (both the callback page
+  and the reconnect CLI point the operator here), yet its hand-rolled flip only set the status: the
+  channel kept a working token with NO bound identity, so the dashboard showed the stale name and
+  the next re-consent had no `expected_channel_id` for `verify_grant`'s wrong-account check. The
+  probe now routes an **unbound** channel through `notify.mark_connected` with a freshly fetched
+  identity, finishing the repair; an already-bound channel keeps the cheap in-place flip because
+  the dashboard polls this endpoint every 2.5s during a reconnect and `channels().list` costs a
+  quota unit per call. Identity binding is best-effort — `get_service` already proved the token
+  refreshes, so a `channels().list` blip logs and falls through to the plain flip rather than
+  flipping a healthy channel dead. Suite: `verify_oauth_redirect.py` 54 → 64 checks.
   (d) `verify_grant`'s `fetch_identity_fn` param exists only to preserve `reconnect.py`'s legacy
   `_fetch_identity` test seam; standardize on patching `youtube.identity_for_creds` and drop both.
   (e) the web/CLI consent completions still hand-sequence verify → save → flip separately; a shared
