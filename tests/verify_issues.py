@@ -171,8 +171,80 @@ ok(d["summary"]["total_issues"] == 0, "clean system reports zero total issues")
 ok(d["summary"]["needs_operator"] == 0, "clean system needs no operator")
 for bucket in ("failed", "rejected", "stuck_rendering", "stuck_publishing",
                "stuck_review", "oauth", "cooldown", "quota", "error_runs_24h",
-               "board_overflow", "bgm_pool_low", "board_inventory"):
+               "board_overflow", "bgm_pool_low", "board_inventory",
+               "pipeline_starved"):
     ok(bucket in d, f"digest always carries the '{bucket}' bucket")
+ok(d["pipeline_starved"] == [],
+   "a channel that has never published is 'not started', not starved (no false positive)")
+
+
+# --- detect(): pipeline starvation ------------------------------------------
+# Regression guard for the 2026-07-18 -> 07-23 silent stall: nothing in the app
+# promotes DRAFT -> QUEUED, so when the agent stopped producing, the render loop
+# starved for 5 days while the digest reported clean and board_inventory still said
+# "at capacity" (drafts count toward pending). ch2's approved buffer drained to 0
+# and it published nothing on 07-23.
+print("detect (pipeline starvation: the silent 5-day render stall)")
+
+# the exact deadlock: drafts waiting, nothing queued/rendering, render slots free
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+for i in range(10):
+    make_video(s, ch, status=VideoStatus.DRAFT, position=i)
+for i in range(173):
+    make_video(s, ch, status=VideoStatus.PUBLISHED, position=100 + i)
+d = issues.detect(s)
+kinds = {e["kind"] for e in d["pipeline_starved"]}
+ok("render_starved" in kinds,
+   "drafts waiting + nothing queued/rendering + render budget free -> render_starved")
+ok("publish_starved" in kinds,
+   "an operating channel with 0 approved against a 5/day budget -> publish_starved")
+ok(all(e["auto"] for e in d["pipeline_starved"]),
+   "both starvation kinds are agent-fixable (auto), not operator escalations")
+ok(d["summary"]["clean"] is False, "a starved pipeline is NOT reported as a clean system")
+inv = d["board_inventory"][0]
+ok(inv["drafts"] == 10 and inv["queued"] == 0,
+   "board_inventory splits drafts vs queued so 'at_capacity' can't hide an empty render queue")
+ok(inv["at_capacity"] is True,
+   "the misleading at_capacity=True still holds — which is exactly why the split is needed")
+
+# work actually queued -> the render loop has something to do -> not render_starved
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+for i in range(10):
+    make_video(s, ch, status=VideoStatus.DRAFT, position=i)
+for i in range(5):
+    make_video(s, ch, status=VideoStatus.QUEUED, position=50 + i)
+for i in range(9):
+    make_video(s, ch, status=VideoStatus.APPROVED, position=70 + i)
+make_video(s, ch, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [],
+   "queued work + a full approved buffer -> no starvation issue at all")
+
+# drafts waiting but the day's render budget is already spent -> normal, not starved
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=2, daily_publish_budget=5)
+for i in range(10):
+    make_video(s, ch, status=VideoStatus.DRAFT, position=i)
+for i in range(9):
+    make_video(s, ch, status=VideoStatus.APPROVED, position=70 + i)
+make_video(s, ch, status=VideoStatus.PUBLISHED, position=99)
+for i in range(2):     # two renders already completed today = budget spent
+    s.add(JobRun(channel_id=ch.id, kind="render", status="success"))
+s.commit()
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [],
+   "no render headroom left today -> an empty queue is expected, not starvation")
+
+# a paused channel is the operator's choice, never a starvation alarm
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5, paused=True)
+for i in range(10):
+    make_video(s, ch, status=VideoStatus.DRAFT, position=i)
+make_video(s, ch, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [], "a paused channel is never flagged as starved")
 
 
 # --- detect(): failed / rejected buckets ------------------------------------

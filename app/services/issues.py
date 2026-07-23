@@ -214,23 +214,85 @@ def detect(session: Session) -> dict:
 
     # Board inventory — days of DRAFT+QUEUED work per channel vs the horizon cap.
     # Informational: not counted in issue totals, but visible to the growth agent.
+    # The draft/queued split matters: `pending` (and therefore `at_capacity`) counts
+    # BOTH, so a channel whose bench is all unproduced DRAFTs reads "at capacity" while
+    # the render loop — which only ever consumes QUEUED — has nothing to do.
     board_inventory = []
     for ch in channels:
         daily_cap = ch.daily_render_budget
         if daily_cap > 0:
-            pending = session.exec(
+            drafts = session.exec(
                 select(func.count(Video.id)).where(
-                    Video.channel_id == ch.id,
-                    Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED])
-                )
+                    Video.channel_id == ch.id, Video.status == VideoStatus.DRAFT)
             ).one()
+            queued = session.exec(
+                select(func.count(Video.id)).where(
+                    Video.channel_id == ch.id, Video.status == VideoStatus.QUEUED)
+            ).one()
+            pending = drafts + queued
             days = round(pending / daily_cap, 1)
             board_inventory.append({
                 "channel_id": ch.id, "name": ch.name,
-                "pending": pending, "daily_render_budget": daily_cap,
+                "pending": pending, "drafts": drafts, "queued": queued,
+                "daily_render_budget": daily_cap,
                 "days_of_inventory": days,
                 "board_horizon_days": cfg.board_horizon_days,
                 "at_capacity": days >= cfg.board_horizon_days,
+            })
+
+    # Pipeline starvation — the failure this digest was blind to for 5 days (07-18→07-23):
+    # nothing in the app promotes DRAFT → QUEUED (no scheduler job does it; only an
+    # explicit produce call), so once the agent stops producing, the render loop starves
+    # while `board_inventory` still reports "at capacity" (drafts count as pending).
+    # Publishing masks it until the APPROVED buffer drains — ch2 hit 0 and published
+    # nothing on 07-23. Two independent checks, both agent-fixable:
+    #   render_starved  — render capacity left today + drafts waiting + nothing in flight
+    #   publish_starved — less than one day of APPROVED inventory left to publish
+    pipeline_starved = []
+    for ch in channels:
+        if ch.paused:
+            continue
+        counts = {}
+        for st in (VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING,
+                   VideoStatus.APPROVED, VideoStatus.PUBLISHED):
+            counts[st] = session.exec(
+                select(func.count(Video.id)).where(
+                    Video.channel_id == ch.id, Video.status == st)
+            ).one()
+        drafts = counts[VideoStatus.DRAFT]
+        active = counts[VideoStatus.QUEUED] + counts[VideoStatus.RENDERING]
+        ready = counts[VideoStatus.APPROVED]
+        rendered_today = quota.rendered_today(session, ch.id)
+        render_headroom = ch.daily_render_budget - rendered_today
+
+        if render_headroom > 0 and drafts > 0 and active == 0:
+            pipeline_starved.append({
+                "channel_id": ch.id, "name": ch.name, "kind": "render_starved",
+                "drafts": drafts, "queued": counts[VideoStatus.QUEUED],
+                "rendering": counts[VideoStatus.RENDERING],
+                "rendered_today": rendered_today,
+                "daily_render_budget": ch.daily_render_budget,
+                "detail": (f"{drafts} draft(s) waiting, nothing queued or rendering, and "
+                           f"{render_headroom} render slot(s) left today — the render loop "
+                           f"only consumes QUEUED, so production has stalled"),
+                "suggested_action": "POST /api/videos/{id}/produce on the best drafts",
+                "auto": True,
+            })
+
+        # Only an *operating* channel can starve. A channel that has never published is
+        # not running dry, it simply hasn't started — flagging it would fire forever on
+        # every newly-added channel.
+        if (ch.daily_publish_budget > 0 and ready < ch.daily_publish_budget
+                and counts[VideoStatus.PUBLISHED] > 0):
+            pipeline_starved.append({
+                "channel_id": ch.id, "name": ch.name, "kind": "publish_starved",
+                "approved": ready, "daily_publish_budget": ch.daily_publish_budget,
+                "days_of_publish_inventory": round(ready / ch.daily_publish_budget, 1),
+                "detail": (f"only {ready} approved video(s) left against a "
+                           f"{ch.daily_publish_budget}/day publish budget — this channel "
+                           f"will miss publishes within a day"),
+                "suggested_action": "produce + render more drafts to refill the approved buffer",
+                "auto": True,
             })
 
     buckets = {
@@ -239,6 +301,7 @@ def detect(session: Session) -> dict:
         "stuck_review": stuck_review, "oauth": oauth, "cooldown": cooldown,
         "quota": quota_walls, "error_runs_24h": error_runs_24h,
         "board_overflow": board_overflow, "bgm_pool_low": bgm_pool_issues,
+        "pipeline_starved": pipeline_starved,
     }
     # board_inventory is informational — excluded from issue counts.
     extra = {"board_inventory": board_inventory}
