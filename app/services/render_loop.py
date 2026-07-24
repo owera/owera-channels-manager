@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.config import settings
 from app.db import app_settings, session_scope
@@ -232,9 +232,67 @@ def _submit_new(session: Session) -> None:
         in_flight += 1
 
 
+def _auto_produce(session: Session) -> None:
+    """Promote DRAFT -> QUEUED to fill today's free render capacity.
+
+    Nothing else in the app makes this transition (only an explicit produce call),
+    which is how the 07-18..07-23 stall happened: a full bench of drafts satisfied
+    the board-capacity gate while the render loop starved on an empty queue. The
+    render/publish loops already own every later transition, so closing this one
+    gap makes the pipeline self-sustaining.
+
+    Per non-paused channel: headroom = daily_render_budget - rendered_today -
+    (queued + rendering). Drafts from weight-0 or inactive topics are never touched
+    (weight 0 = operator-parked). If the APPROVED buffer holds no long-form, one
+    long draft is queued first so the publish loop's reserved daily long slot
+    (quota.published_long_today) can always be filled; remaining slots go to shorts
+    weight-first, then longs.
+    """
+    for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+        active = session.exec(
+            select(func.count(Video.id)).where(
+                Video.channel_id == ch.id,
+                Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)))
+        ).one()
+        headroom = ch.daily_render_budget - quota.rendered_today(session, ch.id) - active
+        if headroom <= 0:
+            continue
+        rows = session.exec(
+            select(Video, Topic).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id, Video.status == VideoStatus.DRAFT,
+                   Topic.active == True, Topic.weight > 0)  # noqa: E712
+            .order_by(Topic.weight.desc(), Video.position, Video.id)
+        ).all()
+        if not rows:
+            continue
+        longs = [v for v, t in rows if t.content_format == "long"]
+        shorts = [v for v, t in rows if t.content_format != "long"]
+        picks = []
+        if longs:
+            approved_longs = session.exec(
+                select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+                .where(Video.channel_id == ch.id,
+                       Video.status == VideoStatus.APPROVED,
+                       Topic.content_format == "long")
+            ).one()
+            if approved_longs == 0:
+                picks.append(longs.pop(0))
+        picks.extend(shorts[: headroom - len(picks)])
+        picks.extend(longs[: headroom - len(picks)])
+        for v in picks:
+            v.status = VideoStatus.QUEUED
+            session.add(v)
+            quota.log(session, kind="produce", status="success", video_id=v.id,
+                      channel_id=ch.id,
+                      detail="auto-produced: draft queued to fill free render capacity")
+        if picks:
+            logger.info("auto-produced %d draft(s) for channel %s", len(picks), ch.slug)
+
+
 def tick() -> None:
     with session_scope() as session:
         if app_settings(session).scheduler_paused:
             return
         _advance_in_flight(session)
+        _auto_produce(session)
         _submit_new(session)
