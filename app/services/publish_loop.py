@@ -179,16 +179,12 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         return
 
     # Ensure the topic playlist BEFORE upload so the description can link it.
+    # NOTE: never pre-judge a stored playlist id by its shape — YouTube returns more
+    # than one id format (13-char "PL…" ids are real and accept inserts). A genuinely
+    # dead playlist is detected by the add_to_playlist 404 below, which drops the
+    # mapping so the next publish recreates it.
     from app.services.topic_playlist import ensure_topic_playlist
     topic = session.get(Topic, video.topic_id)
-    # Drop a structurally-invalid stored id (stale placeholder/truncation that 404s
-    # on every playlistItems.insert) so a real playlist is created below instead.
-    if topic and topic.playlist_id:
-        _pl = session.get(Playlist, topic.playlist_id)
-        if _pl and not youtube.is_valid_playlist_id(_pl.yt_playlist_id):
-            topic.playlist_id = None
-            session.add(topic)
-            session.commit()
     if topic and not topic.playlist_id:
         try:
             ensure_topic_playlist(session, topic, channel)

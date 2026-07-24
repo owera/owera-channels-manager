@@ -206,25 +206,24 @@ quota.log(s, kind="publish", status="error", channel_id=ch.id,
 s.commit()
 ok(quota.daily_limit_hit(s, ch.id) is True, "a 'quota exceeded:' error trips the daily-limit guard")
 
-# --- is_valid_playlist_id: reject stale placeholder ids ----------------------
-print("is_valid_playlist_id (structural validation)")
-ok(youtube.is_valid_playlist_id("PL" + "a" * 32) is True, "a real 34-char PL id is valid")
-ok(youtube.is_valid_playlist_id("PLSGdBtL5vHUY") is False, "a 13-char placeholder id is invalid")
-ok(youtube.is_valid_playlist_id(None) is False, "None is invalid")
-ok(youtube.is_valid_playlist_id("") is False, "empty string is invalid")
-
-# --- publish_one: an invalid stored playlist id is recreated before upload ----
-print("publish_one: invalid playlist id -> recreate real playlist (no 404 loop)")
-_GOOD_PL = "PL" + "Z" * 32  # a fresh, structurally-valid playlist id
+# --- publish_one: a stored playlist id is trusted regardless of its shape -----
+# YouTube returns more than one playlist-id format (13-char "PL…" ids are live and
+# accept inserts — verified on the real channels 2026-07-24). Pre-judging ids by
+# length caused a recreate loop: one duplicate playlist per publish. The only
+# truthful invalidity signal is the add_to_playlist 404, tested further below.
+print("publish_one: a 13-char stored playlist id is kept and used (no recreate loop)")
+_SHORT_PL = "PLLdeDcM9G5vY"  # a real, live 13-char playlist id format
 _added_to = []
+_created = []
 
 
 def _dummy_upload(*a, **k):
     return "vid123"
 
 
-def _recreate_playlist(service, title, description="", privacy="public"):
-    return {"yt_playlist_id": _GOOD_PL, "title": title,
+def _record_create(service, title, description="", privacy="public"):
+    _created.append(title)
+    return {"yt_playlist_id": "PL" + "Z" * 32, "title": title,
             "description": description, "privacy": privacy}
 
 
@@ -237,7 +236,7 @@ _ORIG_CREATE, _ORIG_ADD, _ORIG_COMMENT = (
     youtube.create_playlist, youtube.add_to_playlist, youtube.insert_comment)
 youtube.get_service = _dummy_service
 youtube.upload_video = _dummy_upload
-youtube.create_playlist = _recreate_playlist
+youtube.create_playlist = _record_create
 youtube.add_to_playlist = _record_add
 youtube.insert_comment = lambda *a, **k: "c1"
 
@@ -245,20 +244,52 @@ s = fresh_session()
 ch = make_channel(s)
 topic = Topic(channel_id=ch.id, name="OpenCode", theme_prompt="x")
 s.add(topic); s.commit(); s.refresh(topic)
-bad_pl = Playlist(channel_id=ch.id, yt_playlist_id="PLSGdBtL5vHUY", title="OpenCode")
-s.add(bad_pl); s.commit(); s.refresh(bad_pl)
-topic.playlist_id = bad_pl.id
+short_pl = Playlist(channel_id=ch.id, yt_playlist_id=_SHORT_PL, title="OpenCode")
+s.add(short_pl); s.commit(); s.refresh(short_pl)
+topic.playlist_id = short_pl.id
 s.add(topic); s.commit()
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
                video_path="/tmp/x.mp4", title="T")
 publish_loop._publish_one(s, ch, v)
 s.refresh(topic); s.refresh(v)
-new_pl = s.get(Playlist, topic.playlist_id) if topic.playlist_id else None
-ok(v.status == VideoStatus.PUBLISHED, "video still publishes")
-ok(new_pl is not None and new_pl.yt_playlist_id == _GOOD_PL,
-   "topic remapped to a freshly-created valid playlist")
-ok(topic.playlist_id != bad_pl.id, "the invalid placeholder mapping was dropped")
-ok(_added_to == [_GOOD_PL], "add_to_playlist used the valid id, never the 404-ing placeholder")
+ok(v.status == VideoStatus.PUBLISHED, "video publishes")
+ok(topic.playlist_id == short_pl.id, "the 13-char playlist mapping is KEPT, not dropped")
+ok(_created == [], "no duplicate playlist was created")
+ok(_added_to == [_SHORT_PL], "add_to_playlist used the stored 13-char id")
+ok(v.added_to_playlist is True, "video recorded as added to the playlist")
+
+# --- publish_one: a genuinely dead playlist heals via the add 404 -------------
+print("publish_one: add_to_playlist 404 -> mapping dropped for recreate next publish")
+import httplib2
+from googleapiclient.errors import HttpError as _HttpError
+
+_dead_resp = httplib2.Response({"status": 404})
+_dead_resp.reason = "Not Found"
+_DEAD_404 = _HttpError(
+    _dead_resp, b'{"error": {"errors": [{"reason": "playlistNotFound"}]}}')
+
+
+def _add_raises_404(service, playlist_id, video_id):
+    raise _DEAD_404
+
+
+youtube.add_to_playlist = _add_raises_404
+s = fresh_session()
+ch = make_channel(s)
+topic = Topic(channel_id=ch.id, name="Dead", theme_prompt="x")
+s.add(topic); s.commit(); s.refresh(topic)
+dead_pl = Playlist(channel_id=ch.id, yt_playlist_id=_SHORT_PL, title="Dead")
+s.add(dead_pl); s.commit(); s.refresh(dead_pl)
+topic.playlist_id = dead_pl.id
+s.add(topic); s.commit()
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+               video_path="/tmp/x.mp4", title="T")
+publish_loop._publish_one(s, ch, v)
+s.commit()  # tick()'s session_scope commits after _publish_one returns
+s.refresh(topic); s.refresh(v)
+ok(v.status == VideoStatus.PUBLISHED, "the publish itself still succeeds on a dead playlist")
+ok(v.added_to_playlist is False, "video not marked added when the add 404s")
+ok(topic.playlist_id is None, "dead mapping dropped so next publish recreates the playlist")
 
 youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
 youtube.insert_comment = _ORIG_COMMENT
