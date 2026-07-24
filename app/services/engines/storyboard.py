@@ -813,7 +813,9 @@ _TYPE_DOCS = {
            'REQUIRED and gives the reason to follow: what the viewer GETS NEXT from the channel '
            '(tomorrow\'s topic, the next part of this series, the daily cadence — e.g. '
            '"Daily AI-engineering fixes", "Parte 2: amanhã") — NEVER a repeat of this video\'s '
-           'point, NEVER generic ("like and subscribe").',
+           'point, NEVER generic ("like and subscribe"). When the narration itself closes with '
+           'a spoken follow ask, anchor the cta cue on that closing ask and make "sub" the SAME '
+           'promise the narrator speaks (compressed to ≤6 words), not a different invented reason.',
     "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows.',
@@ -854,9 +856,11 @@ def _system_prompt(allowed: list[str]) -> str:
         "— a card frozen on screen for 8+ seconds is a DRAG that kills retention; split a long "
         "span with a `stat`/`term_define`/`list` that visualizes what those words say — and "
         "`diagram`/`compare`/`code` get ~10+ words of room. Plan the ending "
-        "BACKWARDS: the `cta` cue sits ~8-10 words before the script ends, and the payoff beat "
-        "before it gets the ~10 preceding words — a final visual that flashes for under 2 "
-        "seconds is a wasted beat. NEVER anchor two beats inside the same short sentence.\n\n"
+        "BACKWARDS: the narration closes with a spoken follow ask — the `cta` cue sits on the "
+        "FIRST words of that closing ask (~10-16 words before the script ends; never mid-ask), "
+        "and the payoff beat before it gets the ~10 preceding words — a final visual that "
+        "flashes for under 2 seconds is a wasted beat. NEVER anchor two beats inside the same "
+        "short sentence.\n\n"
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues):\n"
         '{"beats":[\n'

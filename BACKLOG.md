@@ -243,7 +243,22 @@ flag the operator step in the commit body.
 - **caution:** normal (repo config; no runtime surface).
 - **acceptance:** a two-branch append merges without conflict, both lines retained.
 
-### 11. R7 spoken-CTA experiment (SUBSCRIBER OFFENSIVE) — normal (high value)
+### 11. ✅ DONE (code shipped to main 2026-07-24) R7 spoken-CTA experiment (SUBSCRIBER OFFENSIVE) — normal (high value)
+- **resolution (2026-07-24):** both script prompts (`worker._generate_script` short + long) now
+  mandate a FINAL spoken line that is an EXPLICIT follow/subscribe ask (imperative, in the
+  script's language) welded to a named next-value — a tease without the ask fails, generic
+  'like and subscribe' without the next-value fails. The storyboard side aligns: the cta
+  type-doc tells the LLM to anchor the cta cue on the closing ask and make `sub` the SAME
+  promise the narrator speaks, and system-prompt rule 6's ending plan was re-pointed from
+  "~8-10 words before the end" to the ask's first words (~10-16; found by adversarial review —
+  the stale higher-priority rule would have cued the card mid-ask). Gated on 3 draft renders
+  (EN + 2 PT): asks natural + in-language ("Follow now, because tomorrow I'm showing you the
+  chunking fix…" / "Segue o canal, porque amanhã eu mostro…"), visual sub = spoken promise
+  ("Tomorrow: the chunking fix"), openers/pacing intact (min beat ≥1.91s, cta ≤7.07s < 8s drag
+  line). Experiment logged in `run/experiments.jsonl` predicting `subscribers_gained` up.
+  Residuals: `_words_clip` silently truncates an over-long cta `sub` at 6 words (log it if it
+  bites); short-form guard stays [50,140] — at `paragraph_number`≥3 the mandated extra line can
+  push compliant scripts past 140 and force a retry (default n=2 lands ~100w, clear of both).
 - **why:** R7's signal is literally `subscribers_gained` and it has never been tested; narration has
   no follow-ask at all. The 5 videos that ever gained subs all delivered deep specific value — a
   contextual one-line ask at the close converts exactly that moment.
