@@ -34,10 +34,12 @@ _CTA_LINES = {
     "pt": {
         "subscribe": "🔔 Inscreva-se — engenharia de IA na prática, todos os dias:",
         "playlist": "▶ Série completa:",
+        "chapters": "⏱ Capítulos:",
     },
     "en": {
         "subscribe": "🔔 Subscribe for daily hands-on AI engineering:",
         "playlist": "▶ Full series:",
+        "chapters": "⏱ Chapters:",
     },
 }
 
@@ -54,13 +56,18 @@ def _from_meta(subject: str, meta: dict) -> dict:
 
 
 def finalize_description(description: str, language_code: str | None,
-                         channel_yt_id: str | None, playlist_yt_id: str | None) -> str:
-    """Append the subscribe-CTA + links block (localized). Called at publish time.
-    Idempotent: if the block is already present (publish retry), returns unchanged."""
+                         channel_yt_id: str | None, playlist_yt_id: str | None,
+                         chapter_lines: list[str] | None = None) -> str:
+    """Append the chapters list (long-form, when derivable) and the subscribe-CTA +
+    links block (localized). Called at publish time. Idempotent: if a block is
+    already present (publish retry), it is not appended again."""
     base = (description or "").strip()
     if _SUB_CONFIRM_MARKER in base:
         return base
     lines = _CTA_LINES.get((language_code or "en").split("-")[0].lower(), _CTA_LINES["en"])
+    segments = []
+    if chapter_lines and lines["chapters"] not in base:
+        segments.append(lines["chapters"] + "\n" + "\n".join(chapter_lines))
     block = []
     if channel_yt_id:
         block.append(f"{lines['subscribe']} "
@@ -68,9 +75,11 @@ def finalize_description(description: str, language_code: str | None,
     if playlist_yt_id:
         block.append(f"{lines['playlist']} "
                      f"https://www.youtube.com/playlist?list={playlist_yt_id}")
-    if not block:
+    if block:
+        segments.append("\n".join(block))
+    if not segments:
         return base
-    out = (base + "\n\n" + "\n".join(block)).strip()
+    out = (base + "\n\n" + "\n\n".join(segments)).strip()
     return out[:5000]
 
 

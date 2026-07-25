@@ -280,7 +280,23 @@ flag the operator step in the commit body.
   `tests/verify_publish.py`.
 - **acceptance:** videos only publish inside the window; test proves the gate; drip otherwise unchanged.
 
-### 13. Long-form chapters in descriptions (SUBSCRIBER OFFENSIVE) — normal
+### 13. ✅ DONE (code shipped to main 2026-07-25) Long-form chapters in descriptions (SUBSCRIBER OFFENSIVE) — normal
+- **resolution (2026-07-25):** `app/services/chapters.py` derives `M:SS <headline>` chapter lines at
+  publish time from the beat divs the storyboard bakes into the render job dir's `index.html`
+  (`storage/hyperframes/<handle>/` outlives the render, so the already-approved long-form bench gets
+  chapters too; MPT/fallback renders quietly get none). Per-beat-type headline extraction against
+  the real renderer markup — stat count-up placeholder "0" never titles a chapter, the cta card is
+  skipped, angle brackets transliterate to ‹ › (the YouTube API rejects raw </> in descriptions —
+  found by the pre-ship review; a 400 would strand the video with the bad description already
+  committed). YouTube's chapter-render rules enforced: first at 0:00, ≥10s spacing on displayed
+  seconds, ≥10s final chapter, ≥3 survivors else no block at all.
+  `metadata.finalize_description(chapter_lines=…)` inserts the localized "⏱ Capítulos:/Chapters:"
+  block before the CTA links, idempotent across publish retries; `publish_loop._publish_one` wires
+  it for `content_format=long` only, best-effort (a chapters surprise can never fail a publish).
+  Suite: `tests/verify_chapters.py` (30 checks, coupled to the real `build_index_html` markup).
+  Residual (accepted, pre-existing mechanism): the 5000 description cap clips chars not bytes, and
+  a near-cap description can truncate the chapters/CTA tail — unreachable at today's ≤800-char
+  captions.
 - **why:** chapters lift long-form retention and search; beat timings already exist in the storyboard.
 - **approach:** derive `MM:SS <beat headline>` lines from storyboard beat starts at metadata/publish
   time for `content_format=long`; append to description before the CTA block.

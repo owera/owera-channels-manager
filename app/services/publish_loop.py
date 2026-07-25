@@ -194,10 +194,16 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     pl = session.get(Playlist, topic.playlist_id) if topic and topic.playlist_id else None
 
     # Subscriber machinery: language-tagged upload + CTA/links description block.
+    # Long-form also gets chapters derived from the storyboard beats still on disk
+    # in the render job dir (best-effort: None whenever they wouldn't render).
     language_code = video_gen.channel_language_code(session, channel.id)
+    ch_lines = None
+    if topic and topic.content_format == "long":
+        from app.services import chapters
+        ch_lines = chapters.chapter_lines_for_video(video)
     video.description = metadata.finalize_description(
         video.description or "", language_code, channel.yt_channel_id,
-        pl.yt_playlist_id if pl else None)
+        pl.yt_playlist_id if pl else None, chapter_lines=ch_lines)
     session.add(video)
     session.commit()
 
