@@ -477,12 +477,24 @@ def _shell(i: int, b: dict, cls: str, inner: str) -> str:
             '" data-duration="' + _r(b["dur"]) + '" data-track-index="' + str(i) + '">' + inner + "</div>")
 
 
+# Beats held past this get a slow zoom so the frame never fully freezes (R4 drag):
+# entrance tweens settle within ~1s, so anything longer is a static card without it.
+_DRIFT_MIN = 5.5
+
+
 def _wrap(i: int, ctx: dict, base_tweens: list[str]) -> list[str]:
     """Prepend the container reveal and append the exit fade (unless last beat)."""
     bid = "#b" + str(i)
     tw = [_set_on(bid, ctx["start"])] + base_tweens
+    end = ctx["start"] + ctx["dur"]
+    if ctx["dur"] > _DRIFT_MIN:
+        # linear so the motion reads as camera drift, not an animation with an arrival
+        t0 = ctx["start"] + 1.1
+        drift_dur = (end - 0.45) - t0
+        if drift_dur > 1.0:
+            tw.append(_to(bid, t0, "scale:1.045", dur=drift_dur, ease="none"))
     if not ctx["is_last"]:
-        tw.append(_fade_out(bid, ctx["start"] + ctx["dur"]))
+        tw.append(_fade_out(bid, end))
     return tw
 
 
