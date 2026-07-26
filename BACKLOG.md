@@ -344,3 +344,21 @@ flag the operator step in the commit body.
   mode is precisely that forking stops working).
 - **acceptance:** /health reports process headroom and flips to degraded at the threshold; verified
   by mocking the reading.
+
+### 15. Unify job-timestamp timezone in budget accounting — normal
+- **why (observed 2026-07-26):** both channels rendered **8 videos against a 5/day render budget**
+  in the 00:15–00:24 UTC burst. `JobRun.created_at` rows are written in local time (GMT-3: the
+  00:15 UTC renders show as `2026-07-25 21:15`) while `quota._day_start()` returns UTC midnight
+  and `_count` compares `created_at >= since` directly — so for the first 3 hours of every UTC
+  day the render-budget counter reads renders as "yesterday" and undercounts, letting the loop
+  overshoot the budget. Harmless to YT quota (renders are a local throttle) but it wastes compute,
+  distorts `rendered_today` in `/api/agent/state`, and the same naive-vs-UTC comparison pattern
+  may bite any other `_count`-based gate.
+- **approach:** store all JobRun timestamps as UTC (or make `_day_start`/`_quota_day_start`
+  produce naive-local datetimes consistently); audit every `created_at >=` comparison in
+  `quota.py` / `issues.py`; add a regression check with a frozen clock around the midnight edge.
+- **caution:** normal — but verify publish accounting (`_quota_day_start`, Pacific midnight)
+  still lines up with YouTube's quota reset after the change; publish drip is a money path.
+- **acceptance:** a render jobrun written at 00:15 UTC counts toward that UTC day's
+  `rendered_today`; nightly burst never exceeds `daily_render_budget`; verify suite covers the
+  midnight boundary.
