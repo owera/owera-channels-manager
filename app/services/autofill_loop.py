@@ -53,6 +53,7 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
         return 0
     if not ideas:
         return 0
+    ideas = ideas[:batch]  # board-space math assumes len <= batch; the LLM can return more
     mx = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)
     ).one() or 0
@@ -73,7 +74,12 @@ def tick() -> None:
         target = max(threshold, cfg.topic_autogen_target)  # ceiling never below the trigger
 
         channels = {ch.id: ch for ch in session.exec(select(Channel)).all()}
-        topics = session.exec(select(Topic).where(Topic.active == True)).all()  # noqa: E712
+        topics = list(session.exec(select(Topic).where(Topic.active == True)).all())  # noqa: E712
+        # High-weight topics must claim board space first: the horizon cap is shared
+        # per channel, so id-order iteration let low-id anchor topics drain it before
+        # the weighted winners were ever reached (07-26: t2/t5 filled both boards
+        # while the w3 short topics sat at 0 pending).
+        topics.sort(key=lambda t: (-(t.weight if t.weight is not None else 1), t.id))
 
         # Running totals per channel so multiple topics in one tick can't collectively
         # overshoot the board cap (updated after each successful refill).

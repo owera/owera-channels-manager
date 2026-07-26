@@ -144,4 +144,4 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             continue
         seen.add(title.lower())
         out.append(title)
-    return out
+    return out[:max(0, n)]  # the model often returns more lines than asked
