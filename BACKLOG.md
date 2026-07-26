@@ -270,7 +270,23 @@ flag the operator step in the commit body.
 - **caution:** normal (prompt change; render-judge gate).
 - **acceptance:** golden-set renders show the ask in-language, natural, ≤1 line; experiment logged.
 
-### 12. Publish windows — audience-peak drip (SUBSCRIBER OFFENSIVE) — HIGH
+### 12. ✅ DONE (code shipped to main 2026-07-26; inert until windows are set) Publish windows — audience-peak drip (SUBSCRIBER OFFENSIVE) — HIGH
+- **resolution (2026-07-26):** `Channel.publish_windows` ("HH:MM-HH:MM,…", start inclusive / end
+  exclusive, past-midnight wrap supported) + `Channel.publish_tz` (IANA name, unset = UTC), checked
+  by `publish_loop._window_ok` in `tick()` right after the cooldown gate (before the DB-aggregate
+  guards, so an out-of-window channel costs nothing). Unset = drip-whenever (today's behavior) —
+  **the feature ships inert; activating it is the growth agent's / operator's call:**
+  `PATCH /api/channels/{id}` with e.g. `{"publish_windows": "12:00-13:30,19:00-20:30",
+  "publish_tz": "America/Sao_Paulo"}` (ch2 ≈ 12:00 & 19:00 BRT; ch1 ≈ 9:00-12:00 ET per the
+  campaign analysis). The PATCH rejects malformed specs/tz names with a 400; a bad value that
+  reaches the DB anyway FAILS OPEN in the loop (publish anytime + one warning) — a typo must never
+  silently stall a channel. `/api/videos/publish-plan` mirrors the gate via
+  `publish_loop.next_window_open`, so board ETAs land inside windows (found in review — the ETA
+  endpoint mirrors every tick() gate). Suite: `tests/verify_publish.py` 25 → 70 checks incl. a real
+  `tick()` blocked-outside/publishes-inside pair. Accepted residuals: a window wholly inside a DST
+  spring-forward gap publishes nothing that one day (audience-peak windows don't sit at 2-3am);
+  a swapped "19:00-18:30" reads as a valid ~23.5h wrap window (degrades toward publishing).
+  Native `publishAt` scheduling remains future work.
 - **why:** publishing is drip-whenever; small channels get their best algorithmic test in the first
   hours, so publishing at audience-dead hours wastes it.
 - **approach:** per-channel allowed publish windows (ch2 ≈ 12:00 & 19:00 BRT; ch1 ≈ 9:00–12:00 ET) as

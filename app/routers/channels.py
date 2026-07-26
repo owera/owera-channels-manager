@@ -142,7 +142,27 @@ def update_channel(channel_id: int, body: ChannelUpdate, session: Session = Depe
     ch = session.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    # Refuse malformed publish windows here: the loop fails open on a bad stored
+    # spec (mistimed publishes beat a silently-stalled channel), so the API must
+    # be the place a typo actually surfaces. Empty strings clear the field.
+    if fields.get("publish_windows"):
+        from app.services.publish_loop import parse_windows
+        if parse_windows(fields["publish_windows"]) is None:
+            raise HTTPException(400, "invalid publish_windows — expected "
+                                     '"HH:MM-HH:MM" ranges separated by commas, '
+                                     'e.g. "12:00-13:30,19:00-20:30"')
+    if fields.get("publish_tz"):
+        from zoneinfo import ZoneInfo
+        try:
+            ZoneInfo(fields["publish_tz"])
+        except Exception:
+            raise HTTPException(400, f"unknown publish_tz {fields['publish_tz']!r} — "
+                                     'use an IANA name like "America/Sao_Paulo"')
+    for key in ("publish_windows", "publish_tz"):
+        if key in fields and not (fields[key] or "").strip():
+            fields[key] = None
+    for k, v in fields.items():
         setattr(ch, k, v)
     ch.updated_at = utcnow()
     session.add(ch)

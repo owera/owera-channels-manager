@@ -5,6 +5,8 @@ and drip spacing apply.
 """
 
 import json
+import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
@@ -39,6 +41,109 @@ def _first_comment_text(language_code: str | None, playlist_yt_id: str | None) -
         tail = _FIRST_COMMENT_PLAYLIST.get(lang, _FIRST_COMMENT_PLAYLIST["en"])
         text += f"\n{tail} https://www.youtube.com/playlist?list={playlist_yt_id}"
     return text
+
+
+logger = logging.getLogger("manager.publish")
+
+# Audience-peak windows (BACKLOG 12): "HH:MM-HH:MM" ranges, start inclusive /
+# end exclusive, minutes since local midnight. "22:00-01:00" wraps past midnight;
+# "12:00-00:00" means until midnight. A range with start == end is rejected
+# rather than guessed at (empty? full day?) — the API refuses to store it.
+_WINDOW_RE = re.compile(r"^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$")
+
+# Specs already warned about, so a bad value that slipped past the API (e.g. a
+# direct DB edit) logs once per (channel, spec) instead of every publish tick.
+_warned_window_specs: set[tuple[str, str]] = set()
+
+
+def parse_windows(spec: str | None) -> list[tuple[int, int]] | None:
+    """Parse a publish-windows spec into [(start_min, end_min), …].
+
+    Empty/None -> [] (no restriction). Any malformed range -> None (invalid):
+    all-or-nothing, so a typo can't silently narrow "12:00-13:00,19:0O-20:00"
+    to lunchtime-only. The PATCH route validates with this same parser."""
+    if not spec or not spec.strip():
+        return []
+    windows: list[tuple[int, int]] = []
+    for token in re.split(r"[,\s]+", spec.strip()):
+        m = _WINDOW_RE.match(token)
+        if not m:
+            return None
+        h1, m1, h2, m2 = (int(g) for g in m.groups())
+        if h1 > 23 or h2 > 23 or m1 > 59 or m2 > 59:
+            return None
+        start, end = h1 * 60 + m1, h2 * 60 + m2
+        if start == end:
+            return None
+        windows.append((start, end))
+    return windows
+
+
+def _channel_tz(channel: Channel):
+    """The tz publish windows are read in. Unknown names warn once and fall back
+    to UTC — the windows stay enforced (they still open every day), just shifted."""
+    if not channel.publish_tz:
+        return timezone.utc
+    from zoneinfo import ZoneInfo
+    try:
+        return ZoneInfo(channel.publish_tz)
+    except Exception:
+        key = (channel.slug, channel.publish_tz)
+        if key not in _warned_window_specs:
+            _warned_window_specs.add(key)
+            logger.warning("channel %s has an unknown publish_tz %r — "
+                           "reading its publish windows as UTC", channel.slug,
+                           channel.publish_tz)
+        return timezone.utc
+
+
+def _in_windows(windows: list[tuple[int, int]], minute: int) -> bool:
+    for start, end in windows:
+        if start < end:
+            if start <= minute < end:
+                return True
+        elif minute >= start or minute < end:   # wraps past midnight
+            return True
+    return False
+
+
+def _window_ok(channel: Channel, now: datetime | None = None) -> bool:
+    """True when `now` falls inside one of the channel's publish windows.
+
+    No windows configured -> always True (today's drip-whenever behavior).
+    An invalid stored spec FAILS OPEN (publish anytime, warn once): a config
+    typo must degrade to mistimed publishes, never to a channel that silently
+    stops publishing — that failure mode is this repo's whole history."""
+    windows = parse_windows(channel.publish_windows)
+    if windows is None:
+        key = (channel.slug, channel.publish_windows or "")
+        if key not in _warned_window_specs:
+            _warned_window_specs.add(key)
+            logger.warning("channel %s has an invalid publish_windows spec %r — "
+                           "ignoring it (publishing any time)", channel.slug,
+                           channel.publish_windows)
+        return True
+    if not windows:
+        return True
+    local = (now or datetime.now(timezone.utc)).astimezone(_channel_tz(channel))
+    return _in_windows(windows, local.hour * 60 + local.minute)
+
+
+def next_window_open(channel: Channel, t: datetime) -> datetime:
+    """Earliest instant >= `t` inside one of the channel's publish windows — `t`
+    itself when already inside, or when no/invalid windows are configured
+    (mirrors _window_ok's fail-open). For the publish-plan ETA simulation; the
+    advance is wall-clock arithmetic, so around a DST jump the result can be off
+    by the shift (the loop's _window_ok still governs the real publish)."""
+    windows = parse_windows(channel.publish_windows)
+    if not windows:                  # None (invalid -> fail open) or [] (no windows)
+        return t
+    local = t.astimezone(_channel_tz(channel))
+    minute = local.hour * 60 + local.minute
+    if _in_windows(windows, minute):
+        return t
+    delta = min((start - minute) % 1440 for start, _ in windows)
+    return (t + timedelta(minutes=delta)).replace(second=0, microsecond=0)
 
 
 def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
@@ -302,6 +407,8 @@ def tick() -> None:
                     cu = cu.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) < cu:
                     continue  # in cooldown after a YouTube daily cap — wait for reset
+            if not _window_ok(channel):
+                continue  # outside the channel's audience-peak publish windows
             if quota.daily_limit_hit(session, channel.id):
                 continue  # fallback: same-day cap logged but cooldown not set
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:

@@ -22,6 +22,10 @@ class ChannelUpdate(BaseModel):
     daily_publish_budget: Optional[int] = None
     default_render_profile_id: Optional[int] = None
     paused: Optional[bool] = None
+    # Audience-peak drip (see Channel.publish_windows): "HH:MM-HH:MM[,…]" in
+    # publish_tz (IANA name, e.g. "America/Sao_Paulo"). Null/"" clears.
+    publish_windows: Optional[str] = None
+    publish_tz: Optional[str] = None
 
 
 class PlaylistCreate(BaseModel):

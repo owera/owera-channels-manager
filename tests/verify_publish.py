@@ -14,7 +14,7 @@ Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds
 Exits non-zero on the first failed assertion.
 """
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -205,6 +205,171 @@ quota.log(s, kind="publish", status="error", channel_id=ch.id,
           detail="quota exceeded: [quotaExceeded] cooldown until ...")
 s.commit()
 ok(quota.daily_limit_hit(s, ch.id) is True, "a 'quota exceeded:' error trips the daily-limit guard")
+
+# --- audience-peak publish windows (BACKLOG 12) -------------------------------
+print("parse_windows: spec parsing is all-or-nothing")
+
+ok(publish_loop.parse_windows(None) == [], "None spec parses to no restriction")
+ok(publish_loop.parse_windows("  ") == [], "blank spec parses to no restriction")
+ok(publish_loop.parse_windows("12:00-13:30") == [(720, 810)], "single range parses")
+ok(publish_loop.parse_windows("12:00-13:30, 19:00-20:30") == [(720, 810), (1140, 1230)],
+   "comma+space separated ranges parse")
+ok(publish_loop.parse_windows("9:00-10:00") == [(540, 600)], "single-digit hour parses")
+ok(publish_loop.parse_windows("22:00-01:00") == [(1320, 60)], "past-midnight range parses")
+ok(publish_loop.parse_windows("9am-10am") is None, "non-HH:MM tokens are invalid")
+ok(publish_loop.parse_windows("25:00-26:00") is None, "out-of-range hours are invalid")
+ok(publish_loop.parse_windows("12:00-12:00") is None, "zero-length range is invalid")
+ok(publish_loop.parse_windows("12:00-13:00,19:0O-20:00") is None,
+   "one bad range invalidates the whole spec (no silent narrowing)")
+
+print("_window_ok: channel-local windows, wrap-around, fail-open")
+NOON_UTC = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)  # 09:00 in São Paulo
+
+s = fresh_session()
+ch = make_channel(s, publish_windows="09:00-10:00", publish_tz="America/Sao_Paulo")
+ok(publish_loop._window_ok(ch, NOON_UTC) is True,
+   "12:00 UTC is inside a 09:00-10:00 São Paulo window (local time is what counts)")
+ch.publish_windows = "12:00-13:00"
+ok(publish_loop._window_ok(ch, NOON_UTC) is False,
+   "12:00 UTC is outside a 12:00-13:00 São Paulo window")
+ch.publish_tz = None
+ok(publish_loop._window_ok(ch, NOON_UTC) is True, "unset publish_tz reads windows as UTC")
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 13, 0, tzinfo=timezone.utc)) is False,
+   "window end is exclusive")
+ch.publish_windows = "22:00-01:00"
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 23, 30, tzinfo=timezone.utc)) is True,
+   "a past-midnight window admits 23:30")
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 0, 30, tzinfo=timezone.utc)) is True,
+   "a past-midnight window admits 00:30")
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 1, 30, tzinfo=timezone.utc)) is False,
+   "a past-midnight window excludes 01:30")
+ch.publish_windows = "12:00-00:00"
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 23, 59, tzinfo=timezone.utc)) is True,
+   "an until-midnight window admits 23:59")
+ok(publish_loop._window_ok(ch, datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)) is False,
+   "an until-midnight window excludes midnight itself")
+ch.publish_windows = None
+ok(publish_loop._window_ok(ch, NOON_UTC) is True, "no windows -> publish anytime (unchanged)")
+ch.publish_windows = "not-a-window"
+ok(publish_loop._window_ok(ch, NOON_UTC) is True,
+   "an invalid stored spec FAILS OPEN — a typo must never silently stall a channel")
+ch.publish_windows = "13:00-14:00"
+ch.publish_tz = "Mars/Olympus"
+ok(publish_loop._window_ok(ch, NOON_UTC) is False,
+   "an unknown tz still enforces the windows (does not fail open)")
+ch.publish_windows = "12:00-13:00"
+ok(publish_loop._window_ok(ch, NOON_UTC) is True,
+   "an unknown tz reads the windows as UTC")
+
+print("tick: the window gate blocks a real publish outside, admits it inside")
+from contextlib import contextmanager
+
+from app.db import app_settings
+
+
+def _minute_spec(offset_start: int, offset_end: int) -> str:
+    now = datetime.now(timezone.utc)
+    m = now.hour * 60 + now.minute
+
+    def fmt(x):
+        return f"{(x // 60) % 24:02d}:{x % 60:02d}"
+
+    return f"{fmt((m + offset_start) % 1440)}-{fmt((m + offset_end) % 1440)}"
+
+
+s = fresh_session()
+app_settings(s)                       # seed the Settings row tick() reads
+ch = make_channel(s, publish_windows=_minute_spec(120, 180), publish_tz="UTC")
+topic = Topic(channel_id=ch.id, name="Windows", theme_prompt="x")
+s.add(topic); s.commit(); s.refresh(topic)   # _next_approved inner-joins Topic
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+               video_path="/tmp/x.mp4", title="T")
+
+_uploads = []
+_ORIG_SCOPE = publish_loop.session_scope
+_ORIG_GET2, _ORIG_UPLOAD2 = youtube.get_service, youtube.upload_video
+_ORIG_COMMENT2 = youtube.insert_comment
+_ORIG_CREATE2, _ORIG_ADD2 = youtube.create_playlist, youtube.add_to_playlist
+
+
+@contextmanager
+def _test_scope():
+    yield s
+    s.commit()
+
+
+publish_loop.session_scope = _test_scope
+youtube.get_service = lambda slug: object()
+youtube.upload_video = lambda *a, **k: (_uploads.append(a), "vidW")[1]
+youtube.insert_comment = lambda *a, **k: "c1"
+youtube.create_playlist = lambda service, title, description="", privacy="public": {
+    "yt_playlist_id": "PL" + "W" * 32, "title": title,
+    "description": description, "privacy": privacy}
+youtube.add_to_playlist = lambda *a, **k: "item1"
+
+publish_loop.tick()
+s.refresh(v)
+ok(_uploads == [], "outside the window, tick uploads nothing")
+ok(v.status == VideoStatus.APPROVED, "outside the window, the video stays approved")
+
+ch.publish_windows = _minute_spec(-60, 60)
+s.add(ch); s.commit()
+publish_loop.tick()
+s.refresh(v)
+ok(len(_uploads) == 1, "inside the window, tick publishes")
+ok(v.status == VideoStatus.PUBLISHED, "inside the window, the video reaches published")
+
+publish_loop.session_scope = _ORIG_SCOPE
+youtube.get_service, youtube.upload_video = _ORIG_GET2, _ORIG_UPLOAD2
+youtube.insert_comment = _ORIG_COMMENT2
+youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE2, _ORIG_ADD2
+
+print("next_window_open: ETA cursor advances to the next window opening")
+s = fresh_session()
+ch = make_channel(s, publish_windows="10:00-11:00", publish_tz="UTC")
+T = datetime(2026, 7, 1, 8, 0, 30, tzinfo=timezone.utc)
+ok(publish_loop.next_window_open(ch, T) == datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc),
+   "before today's window -> advances to its start")
+ok(publish_loop.next_window_open(ch, datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc))
+   == datetime(2026, 7, 2, 10, 0, tzinfo=timezone.utc),
+   "after today's window -> advances to tomorrow's start")
+IN_WIN = datetime(2026, 7, 1, 10, 30, 45, tzinfo=timezone.utc)
+ok(publish_loop.next_window_open(ch, IN_WIN) == IN_WIN, "inside the window -> unchanged")
+ch.publish_windows = "06:00-07:00,10:00-11:00"
+ok(publish_loop.next_window_open(ch, T) == datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc),
+   "multiple windows -> the nearest upcoming start wins")
+ch.publish_windows = "22:00-01:00"
+LATE = datetime(2026, 7, 1, 23, 30, tzinfo=timezone.utc)
+ok(publish_loop.next_window_open(ch, LATE) == LATE, "inside a past-midnight window -> unchanged")
+ch.publish_windows = "19:00-19:30"
+ch.publish_tz = "America/Sao_Paulo"
+ok(publish_loop.next_window_open(ch, NOON_UTC) == datetime(2026, 7, 1, 22, 0, tzinfo=timezone.utc),
+   "advance lands on the window start in the channel's tz (19:00 SP = 22:00 UTC)")
+ch.publish_windows, ch.publish_tz = None, None
+ok(publish_loop.next_window_open(ch, T) == T, "no windows -> unchanged")
+ch.publish_windows = "garbage"
+ok(publish_loop.next_window_open(ch, T) == T, "invalid spec -> unchanged (fail open)")
+
+print("publish-plan: board ETAs honor the windows (mirrors the tick gate)")
+from app.routers.videos import publish_plan
+
+s = fresh_session()
+app_settings(s)
+ch = make_channel(s, publish_windows="10:00-11:00", publish_tz="UTC")
+vids = [make_video(s, ch, status=VideoStatus.APPROVED, subject=f"w{i}",
+                   video_path="/tmp/x.mp4", title="T", approved_at=utcnow())
+        for i in range(4)]
+plan = publish_plan(ch.id, s)
+etas = [datetime.fromisoformat(plan[str(v.id)]) for v in vids]
+ok(len(plan) == 4, "every approved video gets an ETA")
+ok(all(publish_loop._window_ok(ch, e) for e in etas),
+   "every ETA falls inside a publish window")
+ok(all(a < b for a, b in zip(etas, etas[1:])), "ETAs stay strictly ascending")
+ok(len({e.date() for e in etas}) >= 2,
+   "a 1h window with 30min drip spills the plan across days")
+ch.publish_windows = None
+s.add(ch); s.commit()
+ok(len(publish_plan(ch.id, s)) == 4, "without windows the plan still covers every video")
 
 # --- publish_one: a stored playlist id is trusted regardless of its shape -----
 # YouTube returns more than one playlist-id format (13-char "PL…" ids are live and

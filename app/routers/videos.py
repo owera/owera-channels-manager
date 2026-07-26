@@ -11,6 +11,7 @@ from app.db import app_settings, get_session
 from app.models import Channel, Topic, Video, VideoStatus, utcnow
 from app.schemas import RejectBody, ReorderBody, VideoCreate, VideoUpdate
 from app.services import metadata, quota
+from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -97,10 +98,13 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
 
     plan: dict[str, str] = {}
     for v in approved:
+        # The loop only publishes inside the channel's audience-peak windows, so
+        # the ETA can't land outside one (re-checked after a budget jump too).
+        cursor = next_window_open(ch, cursor)
         if _pt_date(cursor) != cur_day:              # natural rollover from dripping
             cur_day, day_count = _pt_date(cursor), 0
         if day_count >= daily_limit:                 # day's budget spent → next quota day
-            cursor = _next_quota_reset(cursor)
+            cursor = next_window_open(ch, _next_quota_reset(cursor))
             cur_day, day_count = _pt_date(cursor), 0
         plan[str(v.id)] = cursor.isoformat()
         day_count += 1

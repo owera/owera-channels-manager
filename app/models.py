@@ -62,6 +62,13 @@ class Channel(SQLModel, table=True):
     # then. tz-aware UTC; reset model depends on which cap (see quota.cooldown_until_for).
     cooldown_until: Optional[datetime] = None
 
+    # Audience-peak drip: when set, the publish loop only publishes inside these
+    # channel-local windows ("HH:MM-HH:MM,HH:MM-HH:MM…", interpreted in publish_tz —
+    # IANA name, unset = UTC). A small channel's best algorithmic test is its first
+    # hours, so don't spend it at audience-dead hours. Unset/empty = publish anytime.
+    publish_windows: Optional[str] = None
+    publish_tz: Optional[str] = None
+
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
