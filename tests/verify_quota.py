@@ -229,6 +229,10 @@ add_video(s8, channel_id=CH, topic_id=1, status=VideoStatus.RENDERING, published
 add_video(s8, channel_id=OTHER, topic_id=1, status=VideoStatus.RENDERING, published_at=None)
 add_video(s8, channel_id=CH, topic_id=1, status=VideoStatus.PUBLISHED, published_at=qday)
 ok(quota.in_flight_renders(s8) == 2, "in_flight_renders counts RENDERING videos across all channels")
+ok(quota.in_flight_renders(s8, CH) == 1,
+   "in_flight_renders(channel_id) counts only that channel's RENDERING videos")
+ok(quota.in_flight_renders(s8, 999) == 0,
+   "in_flight_renders(channel_id) is 0 for a channel with nothing rendering")
 
 # --- log() ------------------------------------------------------------------
 print("\nlog() (writes a JobRun, defaults, and truncates detail to 1000 chars)")

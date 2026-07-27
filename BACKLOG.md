@@ -345,7 +345,27 @@ flag the operator step in the commit body.
 - **acceptance:** /health reports process headroom and flips to degraded at the threshold; verified
   by mocking the reading.
 
-### 15. Unify job-timestamp timezone in budget accounting — normal
+### 15. ✅ DONE (code shipped to main 2026-07-27; tz diagnosis refuted — real cause was the in-flight gate) Unify job-timestamp timezone in budget accounting — normal
+- **resolution (2026-07-27):** the symptom was real (8 rendered vs a 5/day budget on both channels
+  in the 07-26 00:00–00:27 UTC burst) but the timezone diagnosis was wrong: `JobRun.created_at`
+  rows are stored in **UTC**, not local time — verified against ground truth (video 751's render
+  JobRun reads `2026-07-27 00:06:06` and its `video.mp4` mtime is `2026-07-26 21:06:01` GMT-3,
+  the same instant; `models.utcnow()` is tz-aware UTC and SQLite stores the UTC wall time).
+  Audit of every `created_at >=` comparison in `quota.py`: all `since` values are tz-aware UTC
+  wall times, consistent with storage — no naive-vs-UTC mismatch exists anywhere. The **real
+  bug**: `render_loop._submit_new` gated on `rendered_today >= budget`, i.e. *completed* renders
+  only, so with `render_concurrency=4` it started a new render after each success while 4 were
+  still in flight — submission only stopped once 5 had COMPLETED, by which point 3 more were
+  running: budget+concurrency−1 = 8. (`_auto_produce` already subtracted in-flight work from its
+  headroom; the submit gate didn't.) Fix: `quota.in_flight_renders` takes an optional
+  `channel_id`, and the gate is now `rendered_today + in_flight_renders(channel) >= budget`.
+  The pre-ship review found `/api/videos/queue-plan` (which documents that it mirrors this
+  gate for board card labels) still computed `slots_today` from completed renders only — it
+  now subtracts in-flight too, and its budget-full reason spells out `done+rendering/budget`.
+  Suites: `tests/verify_render.py` 10 → 18 checks (incident replay pins exactly 5 renders at
+  budget 5 / concurrency 4 — was 8 before the fix; within-tick oversubmission at
+  concurrency > budget; per-channel isolation with a budget small enough to catch a
+  global-count regression; the queue-plan mirror), `tests/verify_quota.py` 37 → 39.
 - **why (observed 2026-07-26):** both channels rendered **8 videos against a 5/day render budget**
   in the 00:15–00:24 UTC burst. `JobRun.created_at` rows are written in local time (GMT-3: the
   00:15 UTC renders show as `2026-07-25 21:15`) while `quota._day_start()` returns UTC midnight

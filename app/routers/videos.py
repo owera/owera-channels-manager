@@ -140,14 +140,17 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
 
     budget = ch.daily_render_budget
     rendered = quota.rendered_today(session, channel_id)
-    slots_today = max(0, budget - rendered)
+    # Mirror _submit_new's gate: in-flight renders hold budget slots too.
+    in_flight_ch = quota.in_flight_renders(session, channel_id)
+    slots_today = max(0, budget - rendered - in_flight_ch)
     in_flight = quota.in_flight_renders(session)
     reset = _next_midnight_utc(datetime.now(timezone.utc)).isoformat()
 
+    spent = f"{rendered}+{in_flight_ch} rendering" if in_flight_ch else str(rendered)
     plan: dict[str, dict] = {}
     for i, v in enumerate(queued):
         if i >= slots_today:                              # today's render budget spent
-            plan[str(v.id)] = entry(f"render budget full ({rendered}/{budget})", reset)
+            plan[str(v.id)] = entry(f"render budget full ({spent}/{budget})", reset)
         elif i == 0 and in_flight >= cfg_row.render_concurrency:
             plan[str(v.id)] = entry("waiting for render slot")
         elif i == 0:

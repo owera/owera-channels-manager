@@ -130,10 +130,11 @@ def daily_limit_hit(session: Session, channel_id: int) -> bool:
     return n > 0
 
 
-def in_flight_renders(session: Session) -> int:
-    return session.exec(
-        select(func.count(Video.id)).where(Video.status == VideoStatus.RENDERING)
-    ).one()
+def in_flight_renders(session: Session, channel_id: int = None) -> int:
+    q = select(func.count(Video.id)).where(Video.status == VideoStatus.RENDERING)
+    if channel_id is not None:
+        q = q.where(Video.channel_id == channel_id)
+    return session.exec(q).one()
 
 
 def log(session: Session, *, kind: str, status: str, video_id=None, channel_id=None,

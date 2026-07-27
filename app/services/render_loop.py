@@ -198,7 +198,13 @@ def _submit_new(session: Session) -> None:
         channel = session.get(Channel, video.channel_id)
         if not channel or channel.paused:
             continue
-        if quota.rendered_today(session, channel.id) >= channel.daily_render_budget:
+        # In-flight renders count against the budget too: gating on completed
+        # renders alone overshoots to budget+concurrency-1, because a new render
+        # starts after each success while the rest are still in flight (2026-07-26
+        # burst: 8 rendered against a budget of 5 at concurrency 4, both channels).
+        if (quota.rendered_today(session, channel.id)
+                + quota.in_flight_renders(session, channel.id)
+                >= channel.daily_render_budget):
             continue
         topic = session.get(Topic, video.topic_id)
         # A video is starting production → make sure its topic playlist exists.
