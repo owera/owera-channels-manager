@@ -165,7 +165,7 @@ class JobRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     video_id: Optional[int] = Field(default=None, foreign_key="video.id", index=True)
     channel_id: Optional[int] = Field(default=None, foreign_key="channel.id", index=True)
-    kind: str                                     # render|publish|metadata|playlist_add|generate|oauth
+    kind: str                                     # render|publish|metadata|playlist_add|generate|oauth|delete
     status: str                                   # started|success|error
     detail: Optional[str] = None
     quota_cost: int = 0

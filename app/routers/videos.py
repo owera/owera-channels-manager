@@ -206,6 +206,12 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
 def delete_video(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if v:
+        # Deletion is the one lifecycle exit with no other trace (the row itself is
+        # the record) — log it so bulk deletes are visible in /api/runs.
+        quota.log(session, kind="delete", status="success", video_id=video_id,
+                  channel_id=v.channel_id,
+                  detail=f"deleted: status={v.status} subject={v.subject!r} "
+                         f"yt={v.yt_video_id or '-'}")
         session.delete(v)
         session.commit()
 
