@@ -1,0 +1,848 @@
+{
+  "channel": "rodrigo-recio",
+  "language_code": "pt-BR",
+  "generated_at": "2026-07-28T05:26:08.944828+00:00",
+  "entries": [
+    {
+      "video_id": 542,
+      "yt_video_id": "xpCy4qk7f3Q",
+      "views": 405,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Você comprou 32GB de RAM mas o gargalo era a VRAM 😱",
+        "description": "Encheu o PC de RAM e o jogo continua engasgando? A verdade dói: na maioria dos games quem trava não é a RAM, é a VRAM da GPU estourando. Texturas em ultra e alta resolução moram na VRAM. Quando ela enche, o excesso vai pra RAM (bem mais lenta) e vem o stutter. Antes de comprar pente novo, olha quanta VRAM sua placa tem! Segue pra mais dicas de PC.\n\n#vram #pcgamer #hardware",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "hardware",
+          "machine learning",
+          "pcgamer",
+          "vram"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Você comprou 32GB de RAM mas o gargalo era a VRAM 😱",
+        "description": "Encheu o PC de RAM e o jogo continua engasgando? A verdade dói: na maioria dos games quem trava não é a RAM, é a VRAM da GPU estourando. Texturas em ultra e alta resolução moram na VRAM. Quando ela enche, o excesso vai pra RAM (bem mais lenta) e vem o stutter. Antes de comprar pente novo, olha quanta VRAM sua placa tem! Segue pra mais dicas de PC.\n\n#vram #pcgamer #hardware\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "hardware",
+          "machine learning",
+          "pcgamer",
+          "vram"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 524,
+      "yt_video_id": "8fBOeCTTysc",
+      "views": 93,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "7B ou 13B? Um deles NÃO roda no seu PC",
+        "description": "Achou que ia rodar o 13B e ele travou antes de carregar? A real: o 7B voa na maioria das placas com 8GB de VRAM, mas o 13B exige o dobro. Placa com menos de 12GB? Fica no 7B e ganhe velocidade de verdade. Não é sobre ter o maior, é sobre ter o que roda. Salve pra não errar na hora de escolher!\n\n#IALocal #LLM #VRAM",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "LLM",
+          "VRAM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "7B ou 13B? Um deles NÃO roda no seu PC",
+        "description": "Achou que ia rodar o 13B e ele travou antes de carregar? A real: o 7B voa na maioria das placas com 8GB de VRAM, mas o 13B exige o dobro. Placa com menos de 12GB? Fica no 7B e ganhe velocidade de verdade. Não é sobre ter o maior, é sobre ter o que roda. Salve pra não errar na hora de escolher!\n\n#IALocal #LLM #VRAM\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "LLM",
+          "VRAM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 521,
+      "yt_video_id": "RGemd8nLYXw",
+      "views": 83,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Fatura de GPU na nuvem veio R$800? Veja o vilão real",
+        "description": "Ligou a GPU por \"umas horinhas\" e a fatura veio R$800 de novo? O vilão quase nunca é o preço por hora. É a máquina ligada dormindo, o disco cobrando parado e a transferência de dados que ninguém avisou que era paga. Nuvem cobra pelo que você esquece de desligar. Configure alerta de gasto, derrube a instância ao terminar e apague discos órfãos. Salve e compartilhe para não pagar aluguel de fantasma!\n\n#cloudcomputing #gpu #devops",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "devops",
+          "gpu",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Fatura de GPU na nuvem veio R$800? Veja o vilão real",
+        "description": "Ligou a GPU por \"umas horinhas\" e a fatura veio R$800 de novo? O vilão quase nunca é o preço por hora. É a máquina ligada dormindo, o disco cobrando parado e a transferência de dados que ninguém avisou que era paga. Nuvem cobra pelo que você esquece de desligar. Configure alerta de gasto, derrube a instância ao terminar e apague discos órfãos. Salve e compartilhe para não pagar aluguel de fantasma!\n\n#cloudcomputing #gpu #devops\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "devops",
+          "gpu",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 347,
+      "yt_video_id": "mDge6srmM48",
+      "views": 63,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Machine Learning NÃO é Engenharia de IA (e isso trava sua carreira)",
+        "description": "Saber treinar um modelo não é construir IA de verdade. Machine Learning é só uma parte: dados, treino, precisão. Engenharia de IA é o que faz funcionar no mundo real: produção, escala, monitoramento e integração sem quebrar com milhões de usuários. O cientista cria o cérebro, o engenheiro constrói o corpo. Domine os dois e fique imparável. Salve e siga para mais!\n\n#MachineLearning #EngenhariaDeIA #CarreiraTech",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "CarreiraTech",
+          "EngenhariaDeIA",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Machine Learning NÃO é Engenharia de IA (e isso trava sua carreira)",
+        "description": "Saber treinar um modelo não é construir IA de verdade. Machine Learning é só uma parte: dados, treino, precisão. Engenharia de IA é o que faz funcionar no mundo real: produção, escala, monitoramento e integração sem quebrar com milhões de usuários. O cientista cria o cérebro, o engenheiro constrói o corpo. Domine os dois e fique imparável. Salve e siga para mais!\n\n#MachineLearning #EngenhariaDeIA #CarreiraTech\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "CarreiraTech",
+          "EngenhariaDeIA",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 407,
+      "yt_video_id": "URt4fik4wqw",
+      "views": 52,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Pare de testar modelo no olho — meça com métrica real",
+        "description": "Você troca de modelo, sente que melhorou e segue em frente — mas não tem ideia se melhorou de verdade. Olhômetro é torcida, não avaliação. Monte 20 ou 30 casos reais, defina o que é acerto e rode toda mudança contra eles. Aí sim melhorou vira fato, não sensação. O que não tem métrica não tem melhoria, só opinião bem-vestida. Comece a medir seus modelos hoje e comente como você avalia o seu!\n\n#IA #MachineLearning #DataScience",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "IA",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Pare de testar modelo no olho — meça com métrica real",
+        "description": "Você troca de modelo, sente que melhorou e segue em frente — mas não tem ideia se melhorou de verdade. Olhômetro é torcida, não avaliação. Monte 20 ou 30 casos reais, defina o que é acerto e rode toda mudança contra eles. Aí sim melhorou vira fato, não sensação. O que não tem métrica não tem melhoria, só opinião bem-vestida. Comece a medir seus modelos hoje e comente como você avalia o seu!\n\n#IA #MachineLearning #DataScience\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "IA",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 11,
+      "yt_video_id": "k5mrIKkbo_I",
+      "views": 50,
+      "content_format": "long",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Por Que GPU Vence CPU em Treinar IA? Não é Mágica, é Paralelismo",
+        "description": "A CPU é um gênio resolvendo um cálculo por vez. A GPU? Milhares de estudantes calculando tudo ao mesmo tempo. Treinar um modelo são milhões de multiplicações de matrizes em paralelo — por isso o que levaria semanas na CPU roda em horas na GPU. Quer entender mais sobre IA? Segue o canal e comenta!\n\n#GPU #InteligenciaArtificial #MachineLearning",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "GPU",
+          "InteligenciaArtificial",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Por Que GPU Vence CPU em Treinar IA? Não é Mágica, é Paralelismo",
+        "description": "A CPU é um gênio resolvendo um cálculo por vez. A GPU? Milhares de estudantes calculando tudo ao mesmo tempo. Treinar um modelo são milhões de multiplicações de matrizes em paralelo — por isso o que levaria semanas na CPU roda em horas na GPU. Quer entender mais sobre IA? Segue o canal e comenta!\n\n#GPU #InteligenciaArtificial #MachineLearning\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOlno2NLIMuJtKgUs6qPIKXy",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "GPU",
+          "InteligenciaArtificial",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 348,
+      "yt_video_id": "eyCv-Rs65p0",
+      "views": 49,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Seu projeto de IA morre antes do deploy? Veja por quê",
+        "description": "Seu modelo funciona lindo no notebook, mas nunca chega num usuário real. A verdade dura: a maioria dos projetos de IA morre por falta de estrutura, não de algoritmo. Sem dados versionados, pipeline e monitoramento, vira só experimento bonito. Pense em produção desde o dia 1! Comenta: seu modelo já chegou ao deploy?\n\n#MachineLearning #MLOps #InteligenciaArtificial",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "InteligenciaArtificial",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Seu projeto de IA morre antes do deploy? Veja por quê",
+        "description": "Seu modelo funciona lindo no notebook, mas nunca chega num usuário real. A verdade dura: a maioria dos projetos de IA morre por falta de estrutura, não de algoritmo. Sem dados versionados, pipeline e monitoramento, vira só experimento bonito. Pense em produção desde o dia 1! Comenta: seu modelo já chegou ao deploy?\n\n#MachineLearning #MLOps #InteligenciaArtificial\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "InteligenciaArtificial",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 522,
+      "yt_video_id": "RvMUYoiwl44",
+      "views": 47,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Quanta RAM você PRECISA pra rodar modelos de IA local?",
+        "description": "Baixou aquele modelo gigante e o PC travou? A verdade: não é só quantidade de RAM, é o modelo caber inteiro na memória. Modelo 7B quantizado pede ~8GB livres. 13B? Pelo menos 16GB. Sonha com os gigantes de 70B? Sem 48GB ou uma boa GPU, nem chega perto. Regra simples: se não cabe na memória, não roda. Salva esse vídeo e comenta quantos GB você tem!\n\n#IALocal #LLM #InteligenciaArtificial",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "InteligenciaArtificial",
+          "LLM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Quanta RAM você PRECISA pra rodar modelos de IA local?",
+        "description": "Baixou aquele modelo gigante e o PC travou? A verdade: não é só quantidade de RAM, é o modelo caber inteiro na memória. Modelo 7B quantizado pede ~8GB livres. 13B? Pelo menos 16GB. Sonha com os gigantes de 70B? Sem 48GB ou uma boa GPU, nem chega perto. Regra simples: se não cabe na memória, não roda. Salva esse vídeo e comenta quantos GB você tem!\n\n#IALocal #LLM #InteligenciaArtificial\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "InteligenciaArtificial",
+          "LLM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 571,
+      "yt_video_id": "l1weTp5vlDE",
+      "views": 43,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Esqueceu a GPU ligada? R$1200 sumiram da sua conta 😱",
+        "description": "Você treinou o modelo, fechou o notebook e só lembrou da GPU quando viu R$1200 sumindo da conta. A nuvem não perdoa esquecimento: aquela máquina continua rodando enquanto você dorme. A solução não é evitar GPU, é automatizar o desligamento. Configure auto-shutdown por inatividade e alerta de billing hoje. Salva esse vídeo e comenta quanto você já perdeu esquecendo a GPU ligada!\n\n#gpu #cloudcomputing #machinelearning",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "gpu",
+          "machine learning",
+          "machinelearning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Esqueceu a GPU ligada? R$1200 sumiram da sua conta 😱",
+        "description": "Você treinou o modelo, fechou o notebook e só lembrou da GPU quando viu R$1200 sumindo da conta. A nuvem não perdoa esquecimento: aquela máquina continua rodando enquanto você dorme. A solução não é evitar GPU, é automatizar o desligamento. Configure auto-shutdown por inatividade e alerta de billing hoje. Salva esse vídeo e comenta quanto você já perdeu esquecendo a GPU ligada!\n\n#gpu #cloudcomputing #machinelearning\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "gpu",
+          "machine learning",
+          "machinelearning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 360,
+      "yt_video_id": "quoB6CcOWHs",
+      "views": 42,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Para de comprar GPU cara! Alugue cluster na nuvem 💸",
+        "description": "Vai gastar uma fortuna numa GPU que fica parada? Para! Alugar cluster na nuvem custa uma fração: você liga só pra treinar, paga pelas horas usadas e desliga. Sem manutenção, sem refrigeração, sem hardware envelhecendo na mesa. Precisa de mais potência? Escala em minutos. Terminou? Zero custo fixo. Pensa nisso antes de comprar — salva esse vídeo e compartilha com quem ia torrar grana em GPU!\n\n#cloudcomputing #machinelearning #gpu",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "gpu",
+          "machine learning",
+          "machinelearning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Para de comprar GPU cara! Alugue cluster na nuvem 💸",
+        "description": "Vai gastar uma fortuna numa GPU que fica parada? Para! Alugar cluster na nuvem custa uma fração: você liga só pra treinar, paga pelas horas usadas e desliga. Sem manutenção, sem refrigeração, sem hardware envelhecendo na mesa. Precisa de mais potência? Escala em minutos. Terminou? Zero custo fixo. Pensa nisso antes de comprar — salva esse vídeo e compartilha com quem ia torrar grana em GPU!\n\n#cloudcomputing #machinelearning #gpu\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "cloudcomputing",
+          "gpu",
+          "machine learning",
+          "machinelearning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 361,
+      "yt_video_id": "XpHZNemBEM8",
+      "views": 42,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Seus modelos não têm versão? Você vai se arrepender",
+        "description": "Treinou um modelo incrível ontem e hoje não lembra qual versão dos dados gerou aquele resultado? Sem versionamento, cada experimento vira um tiro no escuro e você não consegue reproduzir nada. A solução: versione tudo — dados, código, hiperparâmetros e pesos. Use DVC ou MLflow pra registrar cada experimento e voltar a qualquer ponto. Modelo sem versão não é projeto, é sorte. Salve esse vídeo e comece a versionar hoje!\n\n#MachineLearning #MLOps #DataScience",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Seus modelos não têm versão? Você vai se arrepender",
+        "description": "Treinou um modelo incrível ontem e hoje não lembra qual versão dos dados gerou aquele resultado? Sem versionamento, cada experimento vira um tiro no escuro e você não consegue reproduzir nada. A solução: versione tudo — dados, código, hiperparâmetros e pesos. Use DVC ou MLflow pra registrar cada experimento e voltar a qualquer ponto. Modelo sem versão não é projeto, é sorte. Salve esse vídeo e comece a versionar hoje!\n\n#MachineLearning #MLOps #DataScience\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 408,
+      "yt_video_id": "-nypYEBLOhM",
+      "views": 38,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Seu pipeline de IA não é robusto, é só sortudo",
+        "description": "Seu modelo funciona perfeito no teste, mas o dado real chega diferente e tudo desmorona. A verdade? O problema não é o modelo, é que você nunca validou a entrada. Formato muda, coluna some, nulo aparece do nada. Coloque validação de schema e checagem de qualidade ANTES de processar. Pipeline de verdade desconfia do dado. Salva e compartilha com quem vive caçando bug!\n\n#DataEngineering #MachineLearning #DataQuality",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataEngineering",
+          "DataQuality",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Seu pipeline de IA não é robusto, é só sortudo",
+        "description": "Seu modelo funciona perfeito no teste, mas o dado real chega diferente e tudo desmorona. A verdade? O problema não é o modelo, é que você nunca validou a entrada. Formato muda, coluna some, nulo aparece do nada. Coloque validação de schema e checagem de qualidade ANTES de processar. Pipeline de verdade desconfia do dado. Salva e compartilha com quem vive caçando bug!\n\n#DataEngineering #MachineLearning #DataQuality\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataEngineering",
+          "DataQuality",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 494,
+      "yt_video_id": "J8C0WkPFVVw",
+      "views": 34,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Rollback de modelo em horas? Faltou versionar isso",
+        "description": "Seu modelo quebrou em produção e você passa horas voltando pra versão que funcionava? O problema não é o rollback lento. É que ninguém versionou modelo, dados e parâmetros juntos. Cada treino precisa de registro imutável: qual código, quais dados, qual peso gerou o resultado. Aí o rollback vira um comando, não pesadelo de madrugada. Salve esse vídeo e compartilhe com seu time de ML!\n\n#MLOps #MachineLearning #DataEngineering",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataEngineering",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Rollback de modelo em horas? Faltou versionar isso",
+        "description": "Seu modelo quebrou em produção e você passa horas voltando pra versão que funcionava? O problema não é o rollback lento. É que ninguém versionou modelo, dados e parâmetros juntos. Cada treino precisa de registro imutável: qual código, quais dados, qual peso gerou o resultado. Aí o rollback vira um comando, não pesadelo de madrugada. Salve esse vídeo e compartilhe com seu time de ML!\n\n#MLOps #MachineLearning #DataEngineering\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataEngineering",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 362,
+      "yt_video_id": "wRdDOAcg5WA",
+      "views": 30,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "OpenShift ou Kubernetes para IA? Você está escolhendo errado",
+        "description": "Você passa horas comparando OpenShift e Kubernetes pra IA, mas essa é a pergunta errada. A plataforma não é seu primeiro problema: o que define o sucesso é como você gerencia dados, GPUs e pipelines de modelos. Kubernetes dá flexibilidade pura, mas exige montar tudo do zero. OpenShift entrega pronto, com segurança e MLOps integrados. A pergunta certa é: quanto da complexidade você quer construir sozinho? Comenta aí qual você escolheria!\n\n#Kubernetes #OpenShift #MLOps",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "Kubernetes",
+          "MLOps",
+          "OpenShift",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "OpenShift ou Kubernetes para IA? Você está escolhendo errado",
+        "description": "Você passa horas comparando OpenShift e Kubernetes pra IA, mas essa é a pergunta errada. A plataforma não é seu primeiro problema: o que define o sucesso é como você gerencia dados, GPUs e pipelines de modelos. Kubernetes dá flexibilidade pura, mas exige montar tudo do zero. OpenShift entrega pronto, com segurança e MLOps integrados. A pergunta certa é: quanto da complexidade você quer construir sozinho? Comenta aí qual você escolheria!\n\n#Kubernetes #OpenShift #MLOps\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "Kubernetes",
+          "MLOps",
+          "OpenShift",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 354,
+      "yt_video_id": "F9bqQoxveCE",
+      "views": 28,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Seu MacBook trava ao rodar IA local? Faça isso agora",
+        "description": "Cansado do MacBook virar secador de cabelo toda vez que roda IA local? O problema quase nunca é o seu Mac, é o tamanho do modelo. Escolha uma versão quantizada (tipo 7B em Q4), use o Ollama ou LM Studio pra aproveitar o chip da Apple, e feche aquele Chrome com 50 abas pra liberar memória. Resposta rápida, sem travar e sem churrasqueira. Salva esse vídeo e testa hoje!\n\n#MacBook #IALocal #Ollama",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "MacBook",
+          "Ollama",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Seu MacBook trava ao rodar IA local? Faça isso agora",
+        "description": "Cansado do MacBook virar secador de cabelo toda vez que roda IA local? O problema quase nunca é o seu Mac, é o tamanho do modelo. Escolha uma versão quantizada (tipo 7B em Q4), use o Ollama ou LM Studio pra aproveitar o chip da Apple, e feche aquele Chrome com 50 abas pra liberar memória. Resposta rápida, sem travar e sem churrasqueira. Salva esse vídeo e testa hoje!\n\n#MacBook #IALocal #Ollama\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "IALocal",
+          "MacBook",
+          "Ollama",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 410,
+      "yt_video_id": "IVI4DAvat_Q",
+      "views": 28,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Seu modelo em produção está apodrecendo (e você nem percebe)",
+        "description": "Passou nos testes, foi pra produção e ninguém olha mais? É aí que o estrago começa. O mundo muda, os dados mudam e o modelo degrada em silêncio: precisão cai, previsões erram e você só descobre quando o cliente reclama. Modelo não é entrega, é compromisso contínuo. Monitore drift, acompanhe métricas e retreine. Salve este vídeo e comece a monitorar hoje!\n\n#MachineLearning #MLOps #DataScience",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Seu modelo em produção está apodrecendo (e você nem percebe)",
+        "description": "Passou nos testes, foi pra produção e ninguém olha mais? É aí que o estrago começa. O mundo muda, os dados mudam e o modelo degrada em silêncio: precisão cai, previsões erram e você só descobre quando o cliente reclama. Modelo não é entrega, é compromisso contínuo. Monitore drift, acompanhe métricas e retreine. Salve este vídeo e comece a monitorar hoje!\n\n#MachineLearning #MLOps #DataScience\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "DataScience",
+          "MLOps",
+          "MachineLearning",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 497,
+      "yt_video_id": "b3cvdyVA71k",
+      "views": 27,
+      "content_format": "short",
+      "action": "regenerate",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block",
+        "en-metadata"
+      ],
+      "current": {
+        "title": "The CrewAI Token Trap Nobody Warns You About",
+        "description": "Your CrewAI bill just tripled and here's why: every agent re-reads the ENTIRE conversation history on every step. A 5-agent crew doesn't multiply your token cost — it compounds it. Every handoff drags full context along, burning tokens while you sleep. Fix it: trim agent memory, scope tasks tight, kill unneeded chatter. Multi-agent isn't free. Follow for more AI cost-saving tips!\n\n#CrewAI #AIagents #LLM",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "AIagents",
+          "CrewAI",
+          "LLM",
+          "machine learning"
+        ],
+        "defaultLanguage": "en",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "O Custo de Tokens que Ninguém te Avisa no CrewAI",
+        "description": "CrewAI custo de tokens escondido: cada agente relê todo o histórico da conversa a cada passo, então um crew de cinco agentes não multiplica seu gasto — ele o multiplica de forma composta. Aquela delegação \"inteligente\"? Cada handoff arrasta o contexto inteiro junto, queimando tokens enquanto você dorme. Corte a memória dos agentes, escope tarefas de forma enxuta e elimine conversas desnecessárias. Comente se sua conta já triplicou!\n\n#CrewAI #IA #Agentes\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOlBo6TiJeksSvGUjF7ORuep",
+        "tags": [
+          "CrewAI",
+          "IA",
+          "Agentes",
+          "AI",
+          "AI engineering",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 523,
+      "yt_video_id": "JBs_EDAHfNI",
+      "views": 25,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Fecha 5 abas e a IA ainda trava? O problema é a VRAM",
+        "description": "Fechou cinco abas, matou tudo em segundo plano e a IA ainda trava? O problema não é sua RAM, é a VRAM. Modelo local precisa caber inteiro na memória da sua placa de vídeo. Se não cabe, derrama pra RAM comum e a velocidade despenca. Olha quantos gigas de VRAM tua GPU tem e escolhe o modelo certo. Salva esse vídeo e comenta quanto de VRAM você tem!\n\n#VRAM #IALocal #GPU",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "GPU",
+          "IALocal",
+          "VRAM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Fecha 5 abas e a IA ainda trava? O problema é a VRAM",
+        "description": "Fechou cinco abas, matou tudo em segundo plano e a IA ainda trava? O problema não é sua RAM, é a VRAM. Modelo local precisa caber inteiro na memória da sua placa de vídeo. Se não cabe, derrama pra RAM comum e a velocidade despenca. Olha quantos gigas de VRAM tua GPU tem e escolhe o modelo certo. Salva esse vídeo e comenta quanto de VRAM você tem!\n\n#VRAM #IALocal #GPU\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "GPU",
+          "IALocal",
+          "VRAM",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 172,
+      "yt_video_id": "znLBAYhDZV4",
+      "views": 24,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "MacBook + eGPU pra IA: a verdade brutal que ninguém te conta",
+        "description": "Comprou um MacBook caríssimo e a IA pesada não roda? A eGPU parece salvação, mas tem um detalhe: Macs com Apple Silicon NÃO suportam eGPU. Aquela NVIDIA monstra? Não funciona. E sem CUDA, a maioria das IAs nem roda. Quer treinar modelo de verdade? Use a GPU integrada do Apple Silicon ou vá pra nuvem. Salva esse vídeo antes de gastar errado e comenta sua experiência!\n\n#MacBook #eGPU #InteligenciaArtificial",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "InteligenciaArtificial",
+          "MacBook",
+          "eGPU",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "MacBook + eGPU pra IA: a verdade brutal que ninguém te conta",
+        "description": "Comprou um MacBook caríssimo e a IA pesada não roda? A eGPU parece salvação, mas tem um detalhe: Macs com Apple Silicon NÃO suportam eGPU. Aquela NVIDIA monstra? Não funciona. E sem CUDA, a maioria das IAs nem roda. Quer treinar modelo de verdade? Use a GPU integrada do Apple Silicon ou vá pra nuvem. Salva esse vídeo antes de gastar errado e comenta sua experiência!\n\n#MacBook #eGPU #InteligenciaArtificial\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "InteligenciaArtificial",
+          "MacBook",
+          "eGPU",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    },
+    {
+      "video_id": 358,
+      "yt_video_id": "Mdntd5lz-Qs",
+      "views": 24,
+      "content_format": "short",
+      "action": "retag_only",
+      "reasons": [
+        "missing-audio-language",
+        "missing-language",
+        "no-cta-block"
+      ],
+      "current": {
+        "title": "Cientista de Dados ≠ Engenheiro de IA: entenda em 60s",
+        "description": "Confundir cientista de dados com engenheiro de IA pode custar sua próxima contratação ou seu próximo projeto. Um investiga: faz perguntas, acha padrões e cria modelos. O outro entrega: coloca o modelo no mundo real, cuida de escala e performance. Um descobre, o outro entrega para milhões. Você precisa dos dois! Salve e compartilhe com quem ainda confunde os dois.\n\n#CienciaDeDados #EngenhariaDeIA #CarreiraEmTech",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "CarreiraEmTech",
+          "CienciaDeDados",
+          "EngenhariaDeIA",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-PT",
+        "defaultAudioLanguage": null
+      },
+      "proposed": {
+        "title": "Cientista de Dados ≠ Engenheiro de IA: entenda em 60s",
+        "description": "Confundir cientista de dados com engenheiro de IA pode custar sua próxima contratação ou seu próximo projeto. Um investiga: faz perguntas, acha padrões e cria modelos. O outro entrega: coloca o modelo no mundo real, cuida de escala e performance. Um descobre, o outro entrega para milhões. Você precisa dos dois! Salve e compartilhe com quem ainda confunde os dois.\n\n#CienciaDeDados #EngenhariaDeIA #CarreiraEmTech\n\n🔔 Inscreva-se — engenharia de IA na prática, todos os dias: https://www.youtube.com/channel/UCGHkzi8k9Oma6IiMjQuDnbA?sub_confirmation=1\n▶ Série completa: https://www.youtube.com/playlist?list=PL7WztJIktLOn_f0JEBkNRwpYQ3rScOH2q",
+        "tags": [
+          "AI",
+          "AI engineering",
+          "CarreiraEmTech",
+          "CienciaDeDados",
+          "EngenhariaDeIA",
+          "machine learning"
+        ],
+        "defaultLanguage": "pt-BR",
+        "defaultAudioLanguage": "pt-BR"
+      },
+      "skip": false,
+      "applied_at": null
+    }
+  ]
+}
