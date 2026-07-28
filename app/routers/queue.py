@@ -9,6 +9,7 @@ from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendS
                         Video, VideoStatus)
 from app.services import issues, quota
 from app.services.mpt_client import mpt
+from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -28,12 +29,15 @@ def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
     now = datetime.now(timezone.utc)
     if quota.published_today(session, ch.id) >= daily_limit:
         nxt = (now + timedelta(days=1)).date()
-        return datetime.combine(nxt, time.min, tzinfo=timezone.utc).isoformat()
+        return next_window_open(
+            ch, datetime.combine(nxt, time.min, tzinfo=timezone.utc)).isoformat()
     last = quota.last_publish_at(session, ch.id)
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     drip = timedelta(minutes=cfg.publish_drip_minutes)
-    return (now if not last else max(now, last + drip)).isoformat()
+    # The loop's _window_ok gates the real publish; mirror it so the ETA is honest
+    # for a channel currently outside its audience-peak windows.
+    return next_window_open(ch, now if not last else max(now, last + drip)).isoformat()
 
 
 @router.get("/dashboard")
