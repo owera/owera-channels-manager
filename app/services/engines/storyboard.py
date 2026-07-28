@@ -688,8 +688,11 @@ def render_command(b, ctx):
 
 def _diagram_svg(nodes, edges, layout, portrait):
     """Server-computed layout — never free graph auto-layout (arrow geometry is the
-    failure mode). Nodes are laid in sequence (vertical for portrait, horizontal for
-    landscape); edges connect node box edges with an arrowhead marker."""
+    failure mode). "pipeline"/"request_response": nodes laid in sequence (vertical for
+    portrait, horizontal for landscape); edges connect node box edges with an arrowhead
+    marker. "fanout": nodes[0] is the hub, the rest its spokes; hub→spoke elbows run
+    along a side rail so no arrow ever crosses a box — model edges are used for labels
+    only, never for geometry."""
     n = len(nodes)
     centers = {}   # id -> (cx, cy, near, far)  near/far = top/bottom (portrait) or left/right
     defs = ('<defs><marker id="ar" markerWidth="12" markerHeight="12" refX="9" refY="4" '
@@ -700,6 +703,46 @@ def _diagram_svg(nodes, edges, layout, portrait):
         return ('<g class="node"><rect x="%d" y="%d" width="%d" height="%d" rx="16"/>'
                 '<text x="%d" y="%d" text-anchor="middle" dominant-baseline="middle">%s</text></g>'
                 % (x, y, w, h, x + w / 2, y + h / 2, theme.esc(label)))
+
+    if layout == "fanout" and n >= 3:
+        e_labels = {e.get("to"): e["label"] for e in (edges or [])
+                    if e.get("label") and e.get("to")}
+        e_count = 0
+        if portrait:
+            vbw, bw, bh, gap, ind = 760, 600, 120, 78, 110
+            vbh = int(n * bh + (n - 1) * gap + 20)
+            x = (vbw - bw) / 2
+            rail = x + 48                      # left of every spoke's left edge
+            node_parts.append(node_g(x, 10, bw, bh, nodes[0]["label"]))
+            for k, nd in enumerate(nodes[1:]):
+                y = 10 + (k + 1) * (bh + gap)
+                cy = y + bh / 2
+                lx = x + ind                   # spokes indented; right edges stay aligned
+                node_parts.append(node_g(lx, y, bw - ind, bh, nd["label"]))
+                edge_parts.append('<path class="edge" d="M%d,%d V%d H%d" marker-end="url(#ar)"/>'
+                                  % (rail, 10 + bh, cy, lx))
+                if e_labels.get(nd["id"]):
+                    edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="start" '
+                                      'dominant-baseline="middle">%s</text>'
+                                      % (rail + 12, cy - 14, theme.esc(e_labels[nd["id"]])))
+                e_count += 1
+        else:
+            spokes = nodes[1:]
+            bw, bh, gap, vbw = 240, 110, 64, 1000
+            vbh = max(220, int(len(spokes) * bh + (len(spokes) - 1) * gap + 20))
+            node_parts.append(node_g(60, vbh / 2 - bh / 2, bw, bh, nodes[0]["label"]))
+            for k, nd in enumerate(spokes):
+                y = 10 + k * (bh + gap)
+                cy = y + bh / 2
+                node_parts.append(node_g(700, y, bw, bh, nd["label"]))
+                edge_parts.append('<path class="edge" d="M%d,%d H%d V%d H%d" marker-end="url(#ar)"/>'
+                                  % (60 + bw, vbh / 2, 500, cy, 700))
+                if e_labels.get(nd["id"]):
+                    edge_parts.append('<text class="elabel" x="%d" y="%d" text-anchor="middle">%s</text>'
+                                      % (610, cy - 10, theme.esc(e_labels[nd["id"]])))
+                e_count += 1
+        return ('<svg viewBox="0 0 %d %d" class="dsvg">%s</svg>'
+                % (vbw, vbh, "".join([defs] + edge_parts + node_parts)), e_count)
 
     if portrait:
         # Narrow viewBox (was 1000) so the vertically-stacked diagram fills more of the
@@ -754,9 +797,12 @@ def render_diagram(b, ctx):
     bid = "#b" + str(i)
     portrait = ctx["height"] >= ctx["width"]
     svg, e_count = _diagram_svg(b["nodes"], b.get("edges") or [], b.get("layout", "pipeline"), portrait)
+    # Fanout rail paths run far longer than chain connectors; a 300 dash on them
+    # reads as a broken dashed line, so size the draw-on dash to the longest path.
+    dash = 1200 if b.get("layout") == "fanout" else 300
     tw = [
         _from(bid + " .node", s + 0.1, "opacity:0,y:18", "opacity:1,y:0", dur=0.3, ease="back.out(1.4)", stagger=0.16),
-        _from(bid + " .edge", s + 0.45, "strokeDasharray:300,strokeDashoffset:300", "strokeDashoffset:0",
+        _from(bid + " .edge", s + 0.45, "strokeDasharray:%d,strokeDashoffset:%d" % (dash, dash), "strokeDashoffset:0",
               dur=0.4, stagger=0.16),
     ]
     if e_count:
@@ -830,7 +876,7 @@ _TYPE_DOCS = {
            'promise the narrator speaks (compressed to ≤6 words), not a different invented reason.',
     "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
-    "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows.',
+    "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows. layout MUST match the real topology: "pipeline" only when each node feeds the NEXT in a chain; "fanout" when ONE hub serves/connects ALL the others ("one X for every Y") — put the hub FIRST, arrows are drawn hub→each spoke. Never draw a one-to-many idea as a chain.',
 }
 
 
