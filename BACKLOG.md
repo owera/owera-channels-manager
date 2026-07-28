@@ -319,7 +319,27 @@ flag the operator step in the commit body.
 - **caution:** normal.
 - **acceptance:** a long video's description carries valid ascending chapters; YouTube renders them.
 
-### 14. ch2 back-catalog backfill tool (SUBSCRIBER OFFENSIVE) — normal
+### 14. ✅ DONE (tool shipped to main 2026-07-28; live run = operator step) ch2 back-catalog backfill tool (SUBSCRIBER OFFENSIVE) — normal
+- **resolution (2026-07-28):** `run/backfill_ch2_metadata.py`, two-step and operator-in-the-loop
+  because it mutates live published videos. Ground truth first: **115** ch2 published videos
+  (06-14→07-11, everything before Phase 1's language fix 9c9a8f7) lack `defaultLanguage`/
+  `defaultAudioLanguage` and the localized CTA/links block — but their DB/live titles are mostly
+  already PT (MPT wrote PT even under the en-US directive), so "regenerate everything" would churn
+  proven titles. The tool therefore defaults to **retag_only** (keep live title/tags; add pt-BR
+  language tags + `finalize_description`'s CTA/links block, chapters for long-form) and proposes
+  **regenerate** (fresh PT-BR via `metadata.generate`) only when live title+description show no PT
+  signal (looks_en heuristic, ≥2-stopword threshold). Plan mode (default) is strictly READ-ONLY:
+  ranks by latest measured views, fetches LIVE snippets (`videos.list`), writes a reviewable plan
+  file (`run/agent-reports/backfill-ch2-metadata-plan.json`; edit `proposed`, set `skip:true`).
+  `--apply` replays the reviewed plan: re-fetches live, repairs records without a second update if
+  the video is already localized (crash resume), skips on title/description drift, merges onto the
+  live snippet (categoryId preserved), `videos().update` (50u), hard cap 10/quota-day counted via
+  prefixed JobRuns, DB row synced, plan stamped per entry. Suite: `tests/verify_backfill.py`
+  (48 checks: read-only plan pin, cap + negative-limit clamp, drift, repair, quota-day boundary).
+  **Operator step:** `PYTHONPATH=. uv run python run/backfill_ch2_metadata.py` → review the plan →
+  `--apply` (≤10/day, ~2 days for the top 20). Accepted residuals: description/tag caps are chars
+  not bytes (shared pre-existing mechanism, backlog 13 residual); two concurrent `--apply` runs
+  could double the cap (single-operator CLI).
 - **why:** ~20 top ch2 videos carry EN-biased metadata from the hardcoded en-US era; they're the
   channel's best assets and undiscoverable in PT.
 - **approach:** one-shot script (`run/backfill_ch2_metadata.py`): regenerate title/description in
