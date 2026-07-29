@@ -34,6 +34,7 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
+_ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
 
 
 # --------------------------------------------------------------------------- JS/string helpers
@@ -590,10 +591,15 @@ def render_list(b, ctx):
         rows.append('<div class="lst-row" id="b' + str(i) + 'r' + str(j) + '">'
                     '<span class="lst-bullet">' + bullet + "</span><span>" + theme.esc(it["text"]) + "</span></div>")
     inner = title + "".join(rows)
-    # Reveal rows across the beat window so they track the narration as it's spoken.
+    # Reveal rows across the beat window so they track the narration as it's spoken —
+    # but never slower than _ROW_STEP_MAX. A beat's span is set by cue spacing, so a list
+    # can be held far longer than the enumeration takes to say; stretching the reveal to
+    # fill it starves the card (a 3-item list on an 11s beat used to show its last item
+    # 7.3s in, long after the narrator said it). Capping the step keeps tracking on tight
+    # beats and completes the card early on long ones.
     n = len(b["items"])
     win = max(0.0, ctx["dur"] - 0.8)
-    step = (win / n) if n else 0
+    step = min(win / n, _ROW_STEP_MAX) if n else 0
     tw = []
     if b.get("title"):
         tw.append(_from(bid + " .lst-title", s, "opacity:0,y:-10", "opacity:1,y:0", dur=0.25))
