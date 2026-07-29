@@ -235,7 +235,11 @@ Every effect is visible: a committed daily report, each code change as a git com
 ## Tips & troubleshooting
 
 - **Channel shows `expired`?** OAuth apps in "Testing" expire their refresh token about
-  weekly. Click **Reconnect** in the UI to refresh it, or run the one-command loopback
+  weekly. Click **Reconnect** in the UI to refresh it — Google's return hop
+  (`…/api/channels/{id}/oauth/callback`) is deliberately exempt from
+  `MANAGER_APP_PASSWORD`, so a consent finished in a browser that never logged into the
+  dashboard completes instead of dying on a password prompt (the callback authenticates
+  itself with the single-use `state` it was issued). Or run the one-command loopback
   reconnect from the manager directory (no restart needed afterwards):
 
   ```sh

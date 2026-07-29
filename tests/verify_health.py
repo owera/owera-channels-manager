@@ -3,9 +3,10 @@
 Run: PYTHONPATH=. .venv/bin/python tests/verify_health.py
 
 Covers the aggregate health snapshot (degraded logic + aggregate-only payload) and
-that /health is reachable WITHOUT auth while the rest of the API still requires it —
-so the middleware exemption can't silently widen to leak authed routes, including
-via a Host header chosen to make the exempt path appear in `request.url`.
+that /health and the OAuth consent callback are reachable WITHOUT auth while the
+rest of the API still requires it — so the middleware exemptions can't silently
+widen to leak authed routes, including via a Host header chosen to make an exempt
+path appear in `request.url`.
 
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network, and the
 app lifespan/scheduler are never started). Exits non-zero on the first failed assertion.
@@ -141,6 +142,35 @@ ok(r2.status_code == 401, "other API routes still require auth (exemption did no
 r3 = client.get("/api/channels", auth=("x", "testpw"))
 ok(r3.status_code == 200, "an authenticated API request still passes")
 
+# --- OAuth callback exemption (BACKLOG 8) -------------------------------------
+# Google's consent redirect lands in a browser that may hold no Basic Auth session,
+# so the callback must not 401 — and a stateless hit must stay inert.
+print("OAuth callback auth exemption")
+r4 = client.get("/api/channels/1/oauth/callback?error=access_denied&state=no-such-state")
+ok(r4.status_code == 200, "OAuth callback is reachable without auth")
+ok("Connection failed" in r4.text, "a stateless callback hit renders the failure page")
+with Session(engine) as s:
+    ok(s.get(Channel, 1).oauth_status == OAuthStatus.CONNECTED,
+       "the unauthenticated stateless hit left the channel's status untouched")
+
+# the exemption is exactly one GET path shape — nothing nearby leaks
+ok(client.post("/api/channels/1/oauth/callback").status_code == 401,
+   "non-GET on the callback path still requires auth")
+ok(client.get("/api/channels/1/oauth/start").status_code == 401,
+   "the sibling oauth/start route (which mints the states) is not covered by the "
+   "exemption — GET, so the 401 comes from the path regex, not the method gate")
+ok(client.get("/api/channels/9223372036854775808/oauth/callback").status_code == 401,
+   "an id past SQLite's int64 range is not exempt (it would 500 on session.get, "
+   "handing an anonymous caller a traceback-sized log write per request)")
+ok(client.get("/api/channels/abc/oauth/callback").status_code == 401,
+   "a non-numeric channel id does not match the exemption")
+ok(client.get("/api/channels/%D9%A3/oauth/callback").status_code == 401,
+   "a Unicode digit does not match the exemption ([0-9]+, not \\d+)")
+ok(client.get("/api/channels/1/oauth/callback/extra").status_code == 401,
+   "a longer path sharing the callback prefix does not match (fullmatch, not search)")
+ok(client.get("/api/channels/1/oauth/callbackx").status_code == 401,
+   "a path merely prefixed by the callback route does not match")
+
 # --- the exemption must not be reachable through the Host header ---------------
 # Starlette rebuilds request.url as f"{scheme}://{host_header}{path}", so a Host of
 # "h/health?" makes request.url.path read "/health" while the router still serves
@@ -154,6 +184,9 @@ ok(client.get("/api/settings", headers=spoof).status_code == 401,
    "the settings payload is not reachable by Host-spoofing the exemption")
 ok(client.post("/api/channels", headers=spoof, json={}).status_code == 401,
    "a write route with a spoofed Host still requires auth")
+ok(client.get("/api/channels",
+              headers={"Host": "h/api/channels/1/oauth/callback?"}).status_code == 401,
+   "the callback exemption is not reachable by Host-spoofing either")
 with _patched_process_headroom({"count": 100, "max": 2000, "pct_used": 5.0}):
     ok(client.get("/health", headers={"Host": "h/api/channels?"}).status_code == 200,
        "the real /health still passes regardless of the Host header it carries")

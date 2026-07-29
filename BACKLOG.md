@@ -227,7 +227,25 @@ flag the operator step in the commit body.
   Still uncovered `app/services/*`: `autofill_loop`, `mpt_client`, `music_gen`,
   `render_loop`, `scheduler` (next candidates).
 
-### 8. Remove the basic-auth-on-callback smell + document reconnect — normal
+### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
+- **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
+  `GET /api/channels/{[0-9]+}/oauth/callback` (fullmatch on a compiled regex, GET only),
+  alongside the existing `/health` exemption. Safe because the callback authenticates
+  itself: it acts only when `state` matches a pending flow (unguessable, single-use,
+  30-min TTL — the 4c(a) registry), and a stateless hit renders the failure page without
+  touching tokens or status; minting flows (`POST …/oauth/start`) stays auth-guarded.
+  README's reconnect tip now says the callback hop is deliberately password-exempt.
+  Suite: `tests/verify_health.py` 25 → 36 checks (callback reachable + inert without
+  auth; POST / oauth-start / non-numeric id / Unicode digit / out-of-int64 id / longer
+  path / prefix-only path all still 401 — the exemption cannot silently widen).
+  The id pattern is `[0-9]{1,18}`, not `[0-9]+`: review found that an id past SQLite's
+  int64 range makes `session.get` raise, so an unbounded pattern would let an anonymous
+  caller turn each request into a 500 with a ~19KB traceback in the log (measured).
+- **prerequisite found while shipping this:** the middleware matched exemptions against
+  `request.url.path`, which Starlette rebuilds from the **Host header** — so any
+  exemption was bypassable with `Host: h/health?` (any route, no credentials). Fixed
+  first, in its own commit (`af0e5db`), by matching the routed `scope["path"]`; this
+  item's exemption is built on that.
 - **why:** the OAuth callback path goes through Basic Auth, which complicates browser reconnects.
 - **approach:** exempt the `/oauth/callback` path from the basic-auth middleware (safe: it validates
   `state`), and document the reconnect flow in `docs/`.
@@ -402,3 +420,21 @@ flag the operator step in the commit body.
 - **acceptance:** a render jobrun written at 00:15 UTC counts toward that UTC day's
   `rendered_today`; nightly burst never exceeds `daily_render_budget`; verify suite covers the
   midnight boundary.
+
+### 16. Contain the SPA fallback's file reads (path traversal) — HIGH
+- **why (found by the pre-ship review of item 8, 2026-07-29):** the SPA catch-all
+  `@app.get("/{full_path:path}")` in `app/main.py` does `candidate = _dist / full_path` and
+  returns `FileResponse(candidate)` for any `candidate.is_file()`, with no check that the
+  resolved path stays inside `_dist`. uvicorn percent-decodes the target before routing, so
+  `GET /%2e%2e/%2e%2e/etc/passwd` reads arbitrary files the manager's user can read —
+  `credentials/*/token.json` included. Today it sits behind Basic Auth (and item 8's exemption
+  cannot reach it — the regex only admits the callback path), so the exposure is: anyone who
+  can already authenticate, and **anyone at all when `MANAGER_APP_PASSWORD` is unset**, which
+  is the documented LAN-access configuration. Pre-existing, unrelated to item 8.
+- **approach:** resolve and contain before serving — `candidate = (_dist / full_path).resolve()`,
+  serve only if `candidate.is_relative_to(_dist.resolve())` and is a file, else fall through to
+  `index.html`. Consider `follow_symlinks=False` semantics for the dist dir too.
+- **caution:** touches `app/main.py` (HIGH) — isolated commit + regression test.
+- **acceptance:** `/%2e%2e/%2e%2e/etc/passwd` and `/../.env` return index.html (or 404), never
+  file contents; real hashed assets and deep client-side routes still serve correctly; a check
+  in `tests/verify_health.py` pins traversal attempts with auth disabled.

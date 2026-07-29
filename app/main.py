@@ -1,5 +1,6 @@
 import base64
 import logging
+import re
 import secrets
 import subprocess
 from contextlib import asynccontextmanager
@@ -67,6 +68,20 @@ def routed_path(request: Request) -> str:
     return path
 
 
+# Google's consent redirect lands in whatever browser finished the consent, which
+# need not hold a Basic Auth session (fresh browser, or credentials not replayed
+# after the cross-origin hop) — a 401 prompt there kills the reconnect at the finish
+# line. Exempting it is safe because the callback authenticates itself: it acts only
+# when `state` matches a pending flow (unguessable, single-use, 30-min TTL) and a hit
+# with no match renders the failure page without touching tokens or status. Minting
+# those flows (POST .../oauth/start) stays behind auth. The id pattern is deliberately
+# narrow, since everything it admits is served without credentials: [0-9] not \d (\d
+# also matches Unicode digits the int-typed route never serves), and bounded in length
+# because an id past SQLite's int64 range makes session.get raise, turning an anonymous
+# request into a 500 with a ~19KB traceback in the log.
+_OAUTH_CALLBACK_PATH = re.compile(r"/api/channels/[0-9]{1,18}/oauth/callback")
+
+
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
     """HTTP Basic Auth guard. Only active when MANAGER_APP_PASSWORD is set in .env."""
@@ -74,6 +89,8 @@ async def basic_auth(request: Request, call_next):
     # Liveness endpoint stays unauthenticated so external uptime monitors can reach it;
     # it exposes only aggregate counts, never channel names or tokens.
     if path == "/health":
+        return await call_next(request)
+    if request.method == "GET" and _OAUTH_CALLBACK_PATH.fullmatch(path):
         return await call_next(request)
     if not settings.app_password:
         return await call_next(request)
