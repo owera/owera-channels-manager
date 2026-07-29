@@ -46,12 +46,34 @@ app.add_middleware(
 )
 
 
+def routed_path(request: Request) -> str:
+    """The path the router will actually dispatch on.
+
+    NEVER authorize on `request.url.path` here: Starlette rebuilds that URL as
+    f"{scheme}://{host_header}{path}" and re-parses it, so a request carrying
+    `Host: h/health?` reads back as path "/health" while the router still serves
+    the real target — i.e. any auth exemption matched against it is bypassable by
+    an attacker-chosen Host header. `scope["path"]` is the routed value (root_path
+    stripped exactly as starlette.routing does), so an exemption matched here can
+    only ever admit the endpoint it names.
+    """
+    path = request.scope["path"]
+    root = request.scope.get("root_path", "")
+    if root and path.startswith(root):
+        if path == root:
+            return ""
+        if path[len(root)] == "/":
+            return path[len(root):]
+    return path
+
+
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
     """HTTP Basic Auth guard. Only active when MANAGER_APP_PASSWORD is set in .env."""
+    path = routed_path(request)
     # Liveness endpoint stays unauthenticated so external uptime monitors can reach it;
     # it exposes only aggregate counts, never channel names or tokens.
-    if request.url.path == "/health":
+    if path == "/health":
         return await call_next(request)
     if not settings.app_password:
         return await call_next(request)

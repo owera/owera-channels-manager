@@ -4,7 +4,8 @@ Run: PYTHONPATH=. .venv/bin/python tests/verify_health.py
 
 Covers the aggregate health snapshot (degraded logic + aggregate-only payload) and
 that /health is reachable WITHOUT auth while the rest of the API still requires it —
-so the middleware exemption can't silently widen to leak authed routes.
+so the middleware exemption can't silently widen to leak authed routes, including
+via a Host header chosen to make the exempt path appear in `request.url`.
 
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network, and the
 app lifespan/scheduler are never started). Exits non-zero on the first failed assertion.
@@ -139,6 +140,37 @@ ok(r2.status_code == 401, "other API routes still require auth (exemption did no
 
 r3 = client.get("/api/channels", auth=("x", "testpw"))
 ok(r3.status_code == 200, "an authenticated API request still passes")
+
+# --- the exemption must not be reachable through the Host header ---------------
+# Starlette rebuilds request.url as f"{scheme}://{host_header}{path}", so a Host of
+# "h/health?" makes request.url.path read "/health" while the router still serves
+# the real target. Authorizing on that value let any GET route be fetched without
+# credentials; the guard must read the routed path instead.
+print("auth exemption cannot be spoofed via the Host header")
+spoof = {"Host": "h/health?"}
+ok(client.get("/api/channels", headers=spoof).status_code == 401,
+   "a protected route with a Host spoofing /health still requires auth")
+ok(client.get("/api/settings", headers=spoof).status_code == 401,
+   "the settings payload is not reachable by Host-spoofing the exemption")
+ok(client.post("/api/channels", headers=spoof, json={}).status_code == 401,
+   "a write route with a spoofed Host still requires auth")
+with _patched_process_headroom({"count": 100, "max": 2000, "pct_used": 5.0}):
+    ok(client.get("/health", headers={"Host": "h/api/channels?"}).status_code == 200,
+       "the real /health still passes regardless of the Host header it carries")
+
+# unit: routed_path reports what the router dispatches on, not the Host-derived URL
+class _Req:
+    def __init__(self, scope):
+        self.scope = scope
+
+ok(main.routed_path(_Req({"path": "/api/channels", "root_path": ""})) == "/api/channels",
+   "routed_path returns the scope path when no root_path is mounted")
+ok(main.routed_path(_Req({"path": "/sub/health", "root_path": "/sub"})) == "/health",
+   "routed_path strips a mounted root_path the way starlette.routing does")
+ok(main.routed_path(_Req({"path": "/sub", "root_path": "/sub"})) == "",
+   "routed_path maps a request for the mount root itself to the empty path")
+ok(main.routed_path(_Req({"path": "/subtle/health", "root_path": "/sub"})) == "/subtle/health",
+   "routed_path only strips root_path at a segment boundary")
 
 main.app.dependency_overrides.clear()
 settings.app_password = _orig_pw
