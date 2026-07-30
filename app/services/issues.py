@@ -240,14 +240,18 @@ def detect(session: Session) -> dict:
                 "at_capacity": days >= cfg.board_horizon_days,
             })
 
-    # Pipeline starvation — the failure this digest was blind to for 5 days (07-18→07-23):
-    # nothing in the app promotes DRAFT → QUEUED (no scheduler job does it; only an
-    # explicit produce call), so once the agent stops producing, the render loop starves
-    # while `board_inventory` still reports "at capacity" (drafts count as pending).
-    # Publishing masks it until the APPROVED buffer drains — ch2 hit 0 and published
-    # nothing on 07-23. Two independent checks, both agent-fixable:
-    #   render_starved  — render capacity left today + drafts waiting + nothing in flight
-    #   publish_starved — less than one day of APPROVED inventory left to publish
+    # Pipeline starvation — the failure this digest was blind to for 5 days (07-18→07-23).
+    # Back then nothing promoted DRAFT → QUEUED, so when the agent stopped producing the
+    # render loop starved behind a full idea bench. render_loop._auto_produce now owns
+    # that transition (every tick it queues drafts from active weight>0 topics into free
+    # render capacity), so such drafts are self-healing stock, not starvation — a
+    # mid-cycle digest read must not call the pipeline starved when the next auto-produce
+    # pass will refill it (07-27→30: publish_starved fired every noon on that artifact).
+    # What still genuinely needs the agent:
+    #   render_starved  — render capacity free + drafts waiting, but auto-produce can't
+    #                     touch any of them (all on weight-0/inactive/missing topics)
+    #   publish_starved — even counting in-flight work and one render-budget-day of
+    #                     producible drafts, the APPROVED buffer misses a publish day
     pipeline_starved = []
     for ch in channels:
         if ch.paused:
@@ -264,34 +268,49 @@ def detect(session: Session) -> dict:
         ready = counts[VideoStatus.APPROVED]
         rendered_today = quota.rendered_today(session, ch.id)
         render_headroom = ch.daily_render_budget - rendered_today
+        # Drafts _auto_produce is allowed to queue — the same filter it applies
+        # (inner join: a draft whose topic row is missing is equally untouchable).
+        producible = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id, Video.status == VideoStatus.DRAFT,
+                   Topic.active == True, Topic.weight > 0)  # noqa: E712
+        ).one()
 
-        if render_headroom > 0 and drafts > 0 and active == 0:
+        if render_headroom > 0 and drafts > 0 and active == 0 and producible == 0:
             pipeline_starved.append({
                 "channel_id": ch.id, "name": ch.name, "kind": "render_starved",
-                "drafts": drafts, "queued": counts[VideoStatus.QUEUED],
+                "drafts": drafts, "producible": producible,
+                "queued": counts[VideoStatus.QUEUED],
                 "rendering": counts[VideoStatus.RENDERING],
                 "rendered_today": rendered_today,
                 "daily_render_budget": ch.daily_render_budget,
-                "detail": (f"{drafts} draft(s) waiting, nothing queued or rendering, and "
-                           f"{render_headroom} render slot(s) left today — the render loop "
-                           f"only consumes QUEUED, so production has stalled"),
-                "suggested_action": "POST /api/videos/{id}/produce on the best drafts",
+                "detail": (f"{drafts} draft(s) waiting and {render_headroom} render "
+                           f"slot(s) free, but none is on an active weight>0 topic — "
+                           f"auto-produce will never queue them, so production has stalled"),
+                "suggested_action": ("unpark a topic (PATCH weight) or generate ideas on "
+                                     "an active one, then produce"),
                 "auto": True,
             })
 
         # Only an *operating* channel can starve. A channel that has never published is
         # not running dry, it simply hasn't started — flagging it would fire forever on
-        # every newly-added channel.
-        if (ch.daily_publish_budget > 0 and ready < ch.daily_publish_budget
+        # every newly-added channel. Project the buffer forward: in-flight work plus at
+        # most one render-budget-day of producible drafts becomes APPROVED stock before
+        # the next publish day.
+        projected = ready + active + min(producible, ch.daily_render_budget)
+        if (ch.daily_publish_budget > 0 and projected < ch.daily_publish_budget
                 and counts[VideoStatus.PUBLISHED] > 0):
             pipeline_starved.append({
                 "channel_id": ch.id, "name": ch.name, "kind": "publish_starved",
-                "approved": ready, "daily_publish_budget": ch.daily_publish_budget,
+                "approved": ready, "in_flight": active, "producible": producible,
+                "projected": projected,
+                "daily_publish_budget": ch.daily_publish_budget,
                 "days_of_publish_inventory": round(ready / ch.daily_publish_budget, 1),
-                "detail": (f"only {ready} approved video(s) left against a "
-                           f"{ch.daily_publish_budget}/day publish budget — this channel "
-                           f"will miss publishes within a day"),
-                "suggested_action": "produce + render more drafts to refill the approved buffer",
+                "detail": (f"{ready} approved + {active} in flight + "
+                           f"{min(producible, ch.daily_render_budget)} producible draft(s) "
+                           f"still misses the {ch.daily_publish_budget}/day publish budget — "
+                           f"this channel will miss publishes even after auto-produce runs"),
+                "suggested_action": "generate ideas / unpark topics so the bench can refill",
                 "auto": True,
             })
 

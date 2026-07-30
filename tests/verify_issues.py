@@ -179,26 +179,52 @@ ok(d["pipeline_starved"] == [],
 
 
 # --- detect(): pipeline starvation ------------------------------------------
-# Regression guard for the 2026-07-18 -> 07-23 silent stall: nothing in the app
-# promotes DRAFT -> QUEUED, so when the agent stopped producing, the render loop
-# starved for 5 days while the digest reported clean and board_inventory still said
-# "at capacity" (drafts count toward pending). ch2's approved buffer drained to 0
-# and it published nothing on 07-23.
-print("detect (pipeline starvation: the silent 5-day render stall)")
+# The 2026-07-18 -> 07-23 silent stall (agent stopped producing; render loop starved
+# behind a full draft bench) is now owned by render_loop._auto_produce, which queues
+# active-topic drafts into free render capacity every tick. The digest must therefore
+# only call starvation on what auto-produce CANNOT heal: drafts stranded on
+# parked/inactive/missing topics, or a projected approved buffer (ready + in-flight +
+# producible capped at one render-budget-day) that still misses a publish day.
+print("detect (pipeline starvation: only what auto-produce cannot heal)")
 
-# the exact deadlock: drafts waiting, nothing queued/rendering, render slots free
+# Active-topic drafts + free render slots + a thin approved buffer: auto-produce's
+# next pass owns this. A mid-cycle digest read must NOT cry starvation — this exact
+# shape (ready 3 vs budget 5 at noon, bench full of producible drafts) fired
+# publish_starved every day 07-27→30 while the midnight refill covered it every time.
 s = fresh_session()
 ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+t_active = Topic(channel_id=ch.id, name="active", theme_prompt="x", weight=1, active=True)
+s.add(t_active)
+s.commit()
+s.refresh(t_active)
 for i in range(10):
-    make_video(s, ch, status=VideoStatus.DRAFT, position=i)
-for i in range(173):
-    make_video(s, ch, status=VideoStatus.PUBLISHED, position=100 + i)
+    make_video(s, ch, topic_id=t_active.id, status=VideoStatus.DRAFT, position=i)
+for i in range(3):
+    make_video(s, ch, topic_id=t_active.id, status=VideoStatus.APPROVED, position=50 + i)
+make_video(s, ch, topic_id=t_active.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [],
+   "producible drafts cover the publish gap (3 approved + 5 of 10 drafts >= 5/day) "
+   "-> no starvation from a mid-cycle read")
+
+# The same shape with every draft on a weight-0 topic: auto-produce skips them all
+# (same filter), so both starvation kinds fire — the parked-bench deadlock is the
+# one the agent must actually judge.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+t_parked = Topic(channel_id=ch.id, name="parked", theme_prompt="x", weight=0, active=True)
+s.add(t_parked)
+s.commit()
+s.refresh(t_parked)
+for i in range(10):
+    make_video(s, ch, topic_id=t_parked.id, status=VideoStatus.DRAFT, position=i)
+make_video(s, ch, topic_id=t_parked.id, status=VideoStatus.PUBLISHED, position=99)
 d = issues.detect(s)
 kinds = {e["kind"] for e in d["pipeline_starved"]}
 ok("render_starved" in kinds,
-   "drafts waiting + nothing queued/rendering + render budget free -> render_starved")
+   "drafts stranded on a weight-0 topic + free render slots -> render_starved")
 ok("publish_starved" in kinds,
-   "an operating channel with 0 approved against a 5/day budget -> publish_starved")
+   "no producible drafts and 0 approved against a 5/day budget -> publish_starved")
 ok(all(e["auto"] for e in d["pipeline_starved"]),
    "both starvation kinds are agent-fixable (auto), not operator escalations")
 ok(d["summary"]["clean"] is False, "a starved pipeline is NOT reported as a clean system")
@@ -207,6 +233,25 @@ ok(inv["drafts"] == 10 and inv["queued"] == 0,
    "board_inventory splits drafts vs queued so 'at_capacity' can't hide an empty render queue")
 ok(inv["at_capacity"] is True,
    "the misleading at_capacity=True still holds — which is exactly why the split is needed")
+
+# An empty bench (no drafts at all) with a thin approved buffer -> publish_starved
+# still fires (nothing can refill overnight), while render_starved stays quiet
+# (nothing to produce is autofill's problem, not a production stall).
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+t_active = Topic(channel_id=ch.id, name="active", theme_prompt="x", weight=1, active=True)
+s.add(t_active)
+s.commit()
+s.refresh(t_active)
+make_video(s, ch, topic_id=t_active.id, status=VideoStatus.APPROVED, position=0)
+make_video(s, ch, topic_id=t_active.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+kinds = {e["kind"] for e in d["pipeline_starved"]}
+ok(kinds == {"publish_starved"},
+   "empty bench + 1 approved vs 5/day -> publish_starved fires, render_starved does not")
+e = [x for x in d["pipeline_starved"] if x["kind"] == "publish_starved"][0]
+ok(e["projected"] == 1 and e["producible"] == 0,
+   "publish_starved reports the projection breakdown (approved+in_flight+producible)")
 
 # work actually queued -> the render loop has something to do -> not render_starved
 s = fresh_session()
