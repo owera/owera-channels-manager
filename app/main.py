@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 import re
 import secrets
 import subprocess
@@ -173,6 +174,42 @@ def health(session: Session = Depends(get_session)):
     return _health_snapshot(session)
 
 
+def _contained_file(root: Path, rel: str) -> Path | None:
+    """`root / rel` if it is a readable file that stays inside `root`, else None.
+
+    The SPA fallback below hands user-controlled path text to the filesystem, so
+    containment is checked by RESOLVING first and comparing — never by scanning the
+    input for "..", which would miss two of the three escape primitives:
+      * `..` segments — uvicorn percent-decodes the request target before routing,
+        so `/%2e%2e/x` (and `%2e%2e%2f`) arrive as real parent-directory hops;
+      * an ABSOLUTE `rel` — `Path("dist") / "/etc/hosts"` is `/etc/hosts`, because
+        pathlib drops the left operand, so `//etc/hosts` escapes with no ".." at all;
+      * a symlink inside dist pointing out of it — resolve() collapses those too, so
+        it is rejected rather than followed.
+    Containment is by PATH, so it cannot see a hardlink inside dist to an outside
+    file; that needs local write access to dist, which already means owning the SPA.
+    `root` must already be resolved, or the comparison fails on every path reached
+    through a symlinked ancestor (on macOS /tmp is itself a link to /private/tmp).
+    """
+    if not rel:
+        return None          # fast path for GET /; the is_file() below also refuses it
+    try:
+        candidate = (root / rel).resolve()
+        if not candidate.is_relative_to(root):
+            return None
+        if not candidate.is_file():
+            return None
+        # is_file() only stats; FileResponse opens. An unreadable file would raise
+        # from inside the response, i.e. outside this guard.
+        return candidate if os.access(candidate, os.R_OK) else None
+    except (OSError, ValueError, RuntimeError):
+        # A NUL byte, an over-long segment, or a symlink loop must fall through to
+        # index.html, not raise: every one of these is anonymous-reachable when no
+        # password is set, and an unhandled error hands the caller a 500 plus a
+        # traceback-sized write into the log for each request.
+        return None
+
+
 # Serve the built SPA (if present) with client-side-routing fallback.
 _dist = Path(settings.frontend_dist)
 if _dist.exists():
@@ -185,7 +222,15 @@ if _dist.exists():
 
     @app.get("/{full_path:path}")
     def spa(full_path: str):
-        candidate = _dist / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_dist / "index.html", headers=_NO_CACHE)
+        # Resolved per request, never pinned at import: if dist is a symlink that an
+        # atomic-swap deploy retargets, a pinned root keeps serving the OLD build's
+        # index.html while the new hashed assets fall through into it — exactly the
+        # blank screen _NO_CACHE exists to prevent, and unfixable by any header.
+        root = _dist.resolve()
+        asset = _contained_file(root, full_path)
+        if asset is not None:
+            # Serve the real file, but no index.html spelling may be cached (a
+            # case-insensitive volume accepts several, and dist can nest its own).
+            no_cache = asset.name.lower() == "index.html"
+            return FileResponse(asset, headers=_NO_CACHE if no_cache else None)
+        return FileResponse(root / "index.html", headers=_NO_CACHE)

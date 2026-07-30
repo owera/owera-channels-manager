@@ -421,7 +421,45 @@ flag the operator step in the commit body.
   `rendered_today`; nightly burst never exceeds `daily_render_budget`; verify suite covers the
   midnight boundary.
 
-### 16. Contain the SPA fallback's file reads (path traversal) — HIGH
+### 16. ✅ DONE (code shipped to main 2026-07-30) Contain the SPA fallback's file reads (path traversal) — HIGH
+- **resolution (2026-07-30):** `main._contained_file(root, rel)` is the containment
+  choke point: it resolves `root / rel` and returns it only if `is_relative_to(root)`,
+  `is_file()`, and `os.access(R_OK)`; any `OSError`/`ValueError`/`RuntimeError` returns
+  None so the SPA route falls through to index.html instead of 500ing. `spa()` resolves
+  the dist root **per request** and routes every read through it. Containment is checked
+  by RESOLVING, never by scanning the input for "..", because there were **three** escape
+  primitives, not one: (1) `..` hops (uvicorn percent-decodes the target before routing,
+  so `/%2e%2e/x` and `/%2e%2e%2fx` both arrive as real parent hops); (2) an **absolute**
+  `rel` — found while shipping, not in the original write-up — where
+  `Path("dist") / "/etc/hosts"` *is* `/etc/hosts` because pathlib drops the left operand,
+  so `//etc/hosts` escaped with no `..` at all, and the intuitive "reject any '..'" fix
+  would have left it wide open (mutation-verified: that mutant is caught only by the
+  absolute-path checks); (3) a symlink inside dist pointing out of it, which `resolve()`
+  collapses and rejects. The filesystem-error guard wraps **both** `resolve()` and
+  `is_file()` — a 5000-char segment raises `OSError` from the `stat()` inside `is_file()`,
+  which would have handed an anonymous caller a 500 plus a traceback-sized log write per
+  request (same class as item 8's out-of-int64 id finding); the new test caught that
+  during development, and each of the three guarded exception types is now provoked by a
+  different pinned check. The `/assets` StaticFiles mount was verified NOT vulnerable
+  (Starlette already contains it — 404s on every vector), so the fix stayed confined to
+  the fallback. Suite: `tests/verify_health.py` 36 → 62 checks; every check was
+  mutation-verified against 9 broken implementations, and `/nested/deep.js` is the one
+  that discriminates route wiring (without it, a `spa()` that never calls the helper —
+  a total static-file outage — passed the whole suite).
+  Measured impact on the real layout, pre-fix: both channels' `credentials/*/token.json`
+  (Google refresh tokens), both `client_secret.json`, `.env`, and the whole 5MB
+  `manager.db` were all readable through this route; post-fix all six are refused while
+  all real Vite dist files still serve and every deep client-side route still falls
+  through. Two review findings fixed pre-ship beyond the traversal itself: the dist root
+  is resolved per request rather than pinned at import (a pinned root would serve a
+  **stale** index.html while new hashed assets fell through into it if a deploy ever
+  atomic-swaps a `dist` symlink — a regression vs the old code, which followed the link),
+  and any `index.html` spelling now carries `_NO_CACHE` (resolving first widened the set
+  of spellings reaching the cacheable asset branch, contradicting the no-cache invariant
+  the surrounding comment exists for). Accepted residuals: containment is by path so a
+  **hardlink** inside dist to an outside file is still served (needs local write access to
+  dist, which already means owning the SPA); and starlette's `FileResponse` re-stats, so a
+  file deleted between the check and the send yields a 500 (pre-existing TOCTOU, unchanged).
 - **why (found by the pre-ship review of item 8, 2026-07-29):** the SPA catch-all
   `@app.get("/{full_path:path}")` in `app/main.py` does `candidate = _dist / full_path` and
   returns `FileResponse(candidate)` for any `candidate.is_file()`, with no check that the
