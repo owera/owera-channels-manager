@@ -224,8 +224,34 @@ flag the operator step in the commit body.
   zero quota), the happy path (Playlist row with the real 34-char yt id + `last_synced_at`,
   `topic.playlist_id` mapped to the new integer FK, one `playlist_add` success logging the
   50-unit `QUOTA_PLAYLIST_INSERT`), and the `theme_prompt=None -> ""` normalization.
-  Still uncovered `app/services/*`: `autofill_loop`, `mpt_client`, `music_gen`,
-  `render_loop`, `scheduler` (next candidates).
+  `mpt_client.py` + `engines/mpt.py` (previously zero direct coverage) —
+  `tests/verify_mpt_client.py` (54 checks, 2026-07-31): the render pipeline's
+  HTTP seam to MoneyPrinterTurbo, driven against a real local mock of MPT's
+  REST API (verify_reconnect's pattern). `build_video_params` merge semantics
+  (later layer wins, per-layer None-strip vs falsy-value override — `0`/
+  `False`/`""` DO override, absent `None` layers skipped, subject forced last
+  over any layer, DEFAULT_PARAMS and input layers never mutated), the pinned
+  MPT task-state constants render_loop/engines compare on, base-url
+  rstrip + `/api/v1` normalisation, and every caller-facing HTTP contract:
+  `ping`'s never-raises single-item-page liveness probe (settings page),
+  `submit`'s task_id extraction / MPTError on missing-empty-null id / HTTP
+  errors propagating to render_loop's log-and-skip, `poll`'s null-data → `{}`
+  normalisation (engines call `.get` on it), `social_metadata`'s
+  swallow-everything-to-None (dead MPT can't fail a publish; payload shape
+  pinned), `list_musics`' `[]`-fallback, `local_final_path`'s
+  `<dir>/<task>/final-<n>.mp4` shape, and MPTEngine's `content_format` strip
+  + `{state, progress, script}` poll normalisation. Every behavior
+  mutation-verified: 14 hand-built semantic mutants (None-strip removal,
+  subject-before-layers, aliased DEFAULT_PARAMS, dropped task_id guard,
+  swallowed submit errors, un-normalised poll, raising social_metadata,
+  always-True ping, `/api/v2` prefix typo, kept trailing slash, drifted state
+  constant, engine content_format leak, dropped progress coercion, wrong
+  final filename) — 14/14 killed, each by its intended discriminating check
+  (battery run with bytecode caching disabled after two same-size mutations
+  exposed stale-pyc false kills).
+  Still uncovered `app/services/*`: `music_gen`, `scheduler`, and the
+  non-budget-gate parts of `render_loop` (next candidates; `autofill_loop`
+  gained `tests/verify_autofill.py` with the 07-26 id-order fix ed719f8).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
