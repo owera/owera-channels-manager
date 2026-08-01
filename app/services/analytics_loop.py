@@ -28,6 +28,31 @@ _MIN_MATURITY_HOURS = 24
 # Quota reserved per video: core query + (for viewed videos) traffic-source queries.
 _QUOTA_PER_VIDEO = 2 * youtube.QUOTA_ANALYTICS_QUERY
 
+# Full cost of one publish: upload + thumbnail + playlist add + first comment.
+_QUOTA_PER_PUBLISH = (youtube.QUOTA_UPLOAD + youtube.QUOTA_THUMBNAIL_SET
+                      + youtube.QUOTA_PLAYLISTITEM_INSERT + youtube.QUOTA_COMMENT_INSERT)
+
+
+def _publish_reserve(session: Session, channel: Channel) -> int:
+    """Quota to hold back for the channel's remaining publishes this quota day.
+
+    The analytics pass otherwise spends up to the full daily cap. That is safe
+    for a channel whose publishes precede it (they've already billed the day),
+    but a channel whose publish window opens later (ch2: 14:00 UTC, after the
+    noon pass) loses its last upload slots to analytics — a full 5-publish day
+    costs 8750 of the 9000 cap, so an unreserved pre-window pass eats the 5th
+    publish (observed 07-28 and 07-31: 4/5 days). Paused channels reserve
+    nothing: no publish will come, so analytics may use the whole cap. The
+    budget is clamped to the publishes that can actually fit under the cap
+    (5 at 9000/1750), else a budget > 5 would hold back quota for uploads the
+    publish gate itself will refuse, starving analytics permanently."""
+    if channel.paused:
+        return 0
+    fits = settings.youtube_daily_quota_cap // _QUOTA_PER_PUBLISH
+    budget = min(channel.daily_publish_budget or 0, fits)
+    remaining = budget - quota.published_today(session, channel.id)
+    return max(0, remaining) * _QUOTA_PER_PUBLISH
+
 
 def _snapshot_due(session: Session, video_id: int) -> bool:
     """True if there's no VideoMetric for this video since UTC midnight."""
@@ -148,7 +173,7 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
         # slow-moving tail — never the fresh cohort the growth loop steers by.
         .order_by(Video.published_at.desc())
     ).all()
-    cap = settings.youtube_daily_quota_cap
+    cap = settings.youtube_daily_quota_cap - _publish_reserve(session, channel)
     recorded = 0
     for video in videos:
         if not force and not _snapshot_due(session, video.id):
