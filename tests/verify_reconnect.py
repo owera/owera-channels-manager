@@ -48,6 +48,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app import reconnect as rc
 from app.config import settings
 from app.models import Channel, OAuthStatus
+from app.services import notify, youtube
 
 _checks = 0
 
@@ -179,7 +180,10 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     token_uri = f"http://127.0.0.1:{server.server_port}/token"
 
-    rc._fetch_identity = lambda creds: {"id": "UCnew", "title": "New Title"}
+    # The identity lookup is the one live-Google call — stubbed by patching
+    # youtube.identity_for_creds, the standard seam (BACKLOG 4c-d dropped the
+    # fetch_identity_fn injection param and reconnect's _fetch_identity alias).
+    youtube.identity_for_creds = lambda creds: {"id": "UCnew", "title": "New Title"}
 
     print("== success path: consent -> verify -> save -> CONNECTED ==")
     session = fresh_session()
@@ -279,14 +283,14 @@ def main():
 
     print("== identity fetch failure -> abort, token not saved ==")
     session4 = fresh_session()
-    make_channel(session4, slug="ch4", oauth_status=OAuthStatus.EXPIRED)
+    ch4 = make_channel(session4, slug="ch4", oauth_status=OAuthStatus.EXPIRED)
     write_client_secret("ch4", token_uri)
     set_token_response()
 
     def boom(creds):
         raise RuntimeError("401 identity probe failed")
 
-    rc._fetch_identity = boom
+    youtube.identity_for_creds = boom
     result, _ = drive(session4, "ch4", port=free_port())
     ok(isinstance(result.get("error"), rc.ReconnectError)
        and "NOT saved" in str(result["error"]),
@@ -294,14 +298,14 @@ def main():
     ok(not token_file("ch4").exists(), "no token.json written when identity check fails")
 
     print("== account with no YouTube channel -> abort ==")
-    rc._fetch_identity = lambda creds: {"id": None, "title": None}
+    youtube.identity_for_creds = lambda creds: {"id": None, "title": None}
     set_token_response()
     result, _ = drive(session4, "ch4", port=free_port())
     ok(isinstance(result.get("error"), rc.ReconnectError)
        and "no YouTube channel" in str(result["error"]),
        "channel-less account raises ReconnectError")
     ok(not token_file("ch4").exists(), "no token.json written for a channel-less account")
-    rc._fetch_identity = lambda creds: {"id": "UCnew", "title": "New Title"}
+    youtube.identity_for_creds = lambda creds: {"id": "UCnew", "title": "New Title"}
 
     print("== timeout: consent never arrives -> clean abort, nothing changed ==")
     result, _ = drive(session4, "ch4", port=free_port(), hit_redirect=False, timeout=1)
@@ -321,6 +325,70 @@ def main():
        f"busy port suggests --port (got {err!r})")
     blocker.close()
 
+    print("== save failure aborts BEFORE the flip (4c-e ordering) ==")
+    set_token_response()
+    flips = {"n": 0}
+    orig_mark, orig_save = notify.mark_connected, youtube.save_token
+
+    def counting_mark(session, channel, identity):
+        flips["n"] += 1
+        return orig_mark(session, channel, identity)
+
+    def no_disk(slug, creds):
+        raise OSError(28, "No space left on device")
+
+    notify.mark_connected, youtube.save_token = counting_mark, no_disk
+    try:
+        result, _ = drive(session4, "ch4", port=free_port())
+    finally:
+        notify.mark_connected, youtube.save_token = orig_mark, orig_save
+    err = result.get("error")
+    ok(isinstance(err, rc.ReconnectError) and "existing token untouched" in str(err),
+       f"failed save says the existing token is untouched (got {err!r})")
+    ok(flips["n"] == 0, "the CONNECTED flip never ran after a failed save")
+    ok(not token_file("ch4").exists(), "and no token.json appeared")
+    session4.refresh(ch4)
+    ok(ch4.oauth_status == OAuthStatus.EXPIRED, "DB status untouched on a failed save")
+
+    print("== flip failure -> token SAVED, do-not-redo recipe (StatusFlipFailed) ==")
+    set_token_response()
+
+    def boom_mark(session, channel, identity):
+        raise RuntimeError("database is locked")
+
+    notify.mark_connected = boom_mark
+    try:
+        result, _ = drive(session4, "ch4", port=free_port())
+    finally:
+        notify.mark_connected = orig_mark
+    err = result.get("error")
+    ok(isinstance(err, rc.ReconnectError) and "token SAVED" in str(err)
+       and "do NOT redo" in str(err) and "oauth-status" in str(err),
+       f"flip failure raises the token-SAVED / do-not-redo recipe (got {err!r})")
+    ok(json.loads(token_file("ch4").read_text()).get("refresh_token") == "fake-refresh",
+       "the verified token IS on disk despite the failed flip")
+    session4.refresh(ch4)
+    ok(ch4.oauth_status == OAuthStatus.EXPIRED, "only the status flip is missing")
+
+    # Wiring pin (BACKLOG 4c-e): the CLI must finish through the shared
+    # youtube.complete_consent sequence — a hand-sequenced verify/save/flip
+    # reimplementation would reproduce every observable above except this call.
+    cc = {"n": 0}
+    orig_cc = youtube.complete_consent
+
+    def counting_cc(*a, **kw):
+        cc["n"] += 1
+        return orig_cc(*a, **kw)
+
+    youtube.complete_consent = counting_cc
+    try:
+        set_token_response()
+        result, _ = drive(session4, "ch4", port=free_port())
+    finally:
+        youtube.complete_consent = orig_cc
+    ok("channel" in result and cc["n"] == 1,
+       "the CLI finishes its consent through youtube.complete_consent (4c-e)")
+
     print("== unknown channel / missing client_secret ==")
     try:
         rc.reconnect(session4, "nope", port=free_port(), open_browser=False)
@@ -335,7 +403,6 @@ def main():
         ok("client_secret.json" in str(e), "missing client_secret names the fix")
 
     print("== save_token / disconnect / refresh-race units ==")
-    from app.services import youtube
 
     class FakeCreds:
         def __init__(self, payload):

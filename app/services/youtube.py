@@ -74,6 +74,19 @@ class GrantRejected(Exception):
         self.code = code
 
 
+class StatusFlipFailed(Exception):
+    """complete_consent verified and SAVED the token, but flipping the channel
+    CONNECTED failed — the credential on disk is good, only the DB status is
+    stale. Callers must tell the operator NOT to redo the consent (a re-consent
+    would rotate the good token into token.json.bak for nothing) and point at
+    GET /api/channels/{id}/oauth-status, the documented repair. `identity` is
+    the verified {id, title} the flip would have bound."""
+
+    def __init__(self, message: str, identity: dict):
+        super().__init__(message)
+        self.identity = identity
+
+
 class GrantCode:
     """Stable identifiers for which guard raised a GrantRejected. The raise sites
     (verify_grant, below) and the per-caller remediation-hint dicts (channels.py
@@ -232,8 +245,7 @@ def identity_for_creds(creds: Credentials) -> dict:
 def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = None,
                  expected_channel_title: Optional[str] = None,
                  label: str = "this channel",
-                 allow_partial: bool = False, allow_rebind: bool = False,
-                 fetch_identity_fn: Optional[Callable[[Credentials], dict]] = None) -> dict:
+                 allow_partial: bool = False, allow_rebind: bool = False) -> dict:
     """Verify a freshly-exchanged grant BEFORE anything touches disk or DB — the
     three checks learned from the 2026-07-05/11 reconnect incidents (rationale
     in app/reconnect.py's docstring): a refresh token was issued, every consent
@@ -255,7 +267,9 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
             "saved — re-run and click 'Select all' (\"Selecionar tudo\") on the "
             "consent screen.", code=GrantCode.PARTIAL_SCOPES)
     try:
-        identity = (fetch_identity_fn or identity_for_creds)(creds)
+        # Module-global lookup on purpose: tests stub the one live-Google call
+        # by patching youtube.identity_for_creds (the 4c-d standard seam).
+        identity = identity_for_creds(creds)
     except Exception as e:
         raise GrantRejected(
             f"token exchanged but the identity check failed: {e} — token NOT "
@@ -274,21 +288,44 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
     return identity
 
 
-def finish_flow(slug: str, flow: Flow, code: str, *,
-                expected_channel_id: Optional[str] = None,
-                expected_channel_title: Optional[str] = None) -> dict:
-    """Exchange the authorization code, verify the grant, and only then persist
-    the token; returns the verified identity. Order matters (BACKLOG 4b): the
-    pre-existing save-then-look order meant a wrong-account or partial-scope web
-    consent clobbered a working token and rotated the previous one out of
-    token.json.bak. GrantRejected propagates with nothing written."""
-    flow.fetch_token(code=code)
-    identity = verify_grant(flow.credentials,
-                            expected_channel_id=expected_channel_id,
-                            expected_channel_title=expected_channel_title,
-                            label=f"'{slug}'")
-    save_token(slug, flow.credentials)
+def complete_consent(session, channel, creds: Credentials, *,
+                     allow_partial: bool = False, allow_rebind: bool = False) -> dict:
+    """The one consent-completion sequence (BACKLOG 4c-e) — both the web
+    callback and the reconnect CLI finish a freshly-exchanged grant HERE, so
+    the 4b ordering cannot drift between them:
+
+      1. verify_grant BEFORE anything touches disk or DB (raises GrantRejected
+         with nothing written — the pre-4b save-then-look order clobbered the
+         working token and rotated the previous one out of token.json.bak);
+      2. save_token (its OSError propagates with the flip never attempted —
+         the existing credential on disk is untouched; whether a failed save
+         halts the channel is caller policy, not decided here);
+      3. flip CONNECTED through notify.mark_connected — a failure here is
+         wrapped in StatusFlipFailed because it is the one outcome where state
+         WAS changed (token saved, status stale) and callers word it that way.
+
+    Returns the verified {id, title} identity. Only the wording of failures is
+    per-caller (web page vs CLI hints); the sequence itself lives only here."""
+    from app.services import notify  # deferred: keeps this module import-light
+    identity = verify_grant(creds,
+                            expected_channel_id=channel.yt_channel_id,
+                            expected_channel_title=channel.yt_channel_title,
+                            label=f"'{channel.slug}'",
+                            allow_partial=allow_partial, allow_rebind=allow_rebind)
+    save_token(channel.slug, creds)
+    try:
+        notify.mark_connected(session, channel, identity)
+    except Exception as e:
+        raise StatusFlipFailed(str(e), identity) from e
     return identity
+
+
+def finish_flow(session, channel, flow: Flow, code: str) -> dict:
+    """Web-callback entry: exchange the authorization code, then hand the
+    credentials to complete_consent (verify -> save -> flip). Exchange failures
+    propagate raw — the callback flips those to ERROR as a real failed consent."""
+    flow.fetch_token(code=code)
+    return complete_consent(session, channel, flow.credentials)
 
 
 def fetch_identity(service) -> dict:

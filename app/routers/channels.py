@@ -246,9 +246,7 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
             _fail_consent(session, ch, error or "consent was cancelled or timed out")
         return HTMLResponse(_callback_html("Connection failed", error or "consent cancelled", False))
     try:
-        identity = youtube.finish_flow(ch.slug, flow, code,
-                                       expected_channel_id=ch.yt_channel_id,
-                                       expected_channel_title=ch.yt_channel_title)
+        identity = youtube.finish_flow(session, ch, flow, code)
     except youtube.GrantRejected as e:
         # The grant failed verification BEFORE anything was written: the
         # existing token and oauth_status still describe the last working
@@ -262,23 +260,24 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
         logger.warning("consent for channel '%s' rejected (%s): %s", ch.slug, e.code, e)
         msg = str(e)[:400] + _GRANT_HINTS.get(e.code, "")
         return HTMLResponse(_callback_html("Consent rejected", msg, False))
-    except Exception as e:
-        _fail_consent(session, ch, str(e))
-        return HTMLResponse(_callback_html("Connection failed", str(e)[:200], False))
-    _supersede_flows(channel_id)
-    display = identity.get("title") or ch.name
-    try:
-        notify.mark_connected(session, ch, identity)
-    except Exception as e:
+    except youtube.StatusFlipFailed as e:
         # Same contract the CLI prints: the token IS saved and valid, only the
         # status flip is missing — a re-consent would rotate the good token
-        # into token.json.bak for nothing.
+        # into token.json.bak for nothing. Token-wise this consent succeeded,
+        # so sibling pending starts are superseded like any success.
+        _supersede_flows(channel_id)
+        display = e.identity.get("title") or ch.name
         logger.error("channel '%s': token saved but the status update failed: %s", ch.slug, e)
         return HTMLResponse(_callback_html(
             "Token saved, status update failed",
             f"The new token for {display} is saved and working, but the dashboard status "
             "could not be updated — do NOT redo the consent. Open the dashboard (or the "
             "channel's oauth-status endpoint) to refresh it.", False))
+    except Exception as e:
+        _fail_consent(session, ch, str(e))
+        return HTMLResponse(_callback_html("Connection failed", str(e)[:200], False))
+    _supersede_flows(channel_id)
+    display = identity.get("title") or ch.name
     return HTMLResponse(_callback_html(
         "Connected", f"{display} is linked. You can close this tab.", True))
 

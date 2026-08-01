@@ -170,10 +170,22 @@ flag the operator step in the commit body.
   quota unit per call. Identity binding is best-effort — `get_service` already proved the token
   refreshes, so a `channels().list` blip logs and falls through to the plain flip rather than
   flipping a healthy channel dead. Suite: `verify_oauth_redirect.py` 54 → 64 checks.
-  (d) `verify_grant`'s `fetch_identity_fn` param exists only to preserve `reconnect.py`'s legacy
-  `_fetch_identity` test seam; standardize on patching `youtube.identity_for_creds` and drop both.
-  (e) the web/CLI consent completions still hand-sequence verify → save → flip separately; a shared
-  `complete_consent` helper would make the 4b ordering unforgeable.
+  (d) ✅ DONE (code shipped to main 2026-08-01, with (e) — the helper made the seam's only
+  consumer disappear) — `verify_grant` lost the `fetch_identity_fn` param and `reconnect.py` its
+  `_fetch_identity` alias; every suite now stubs the one live-Google call by patching
+  `youtube.identity_for_creds`, the same seam the e2e sections already used.
+  (e) ✅ DONE (code shipped to main 2026-08-01) — `youtube.complete_consent(session, channel,
+  creds, allow_partial=, allow_rebind=)` is now the ONLY consent-completion sequence: verify_grant
+  before anything touches disk (4b) → save_token → flip through notify.mark_connected, with a flip
+  failure wrapped in `StatusFlipFailed` (carrying the verified identity) because it is the one
+  outcome where state WAS changed — web callback and reconnect CLI both finish through it and only
+  word the failures differently (page vs CLI hints). `finish_flow(session, channel, flow, code)`
+  is the web entry: exchange, then complete_consent. Wiring pins in both suites (a counting wrapper
+  around complete_consent) make a hand-resequenced reimplementation fail the suite, plus ordering
+  pins: a save failure aborts BEFORE the flip (mark_connected provably never called), a flip
+  failure leaves the saved token + the do-not-redo recipe, and the flip-failure page names the
+  channel from the identity riding on the exception (distinct title, so a ch.name fallback fails).
+  Suites: `verify_oauth_redirect.py` 64 → 66, `verify_reconnect.py` 47 → 58 checks.
   (f) the "click 'Select all'" consent-screen remediation string is duplicated between
   `youtube.verify_grant` and `reconnect.SCOPE_REMINDER`.
 - **caution:** (a)/(c)/(e) touch the oauth flow (HIGH, isolated commits); (b)/(d)/(f) normal.

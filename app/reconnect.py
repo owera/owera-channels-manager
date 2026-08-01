@@ -37,7 +37,7 @@ import wsgiref.util
 from sqlmodel import Session, select
 
 from app.models import Channel
-from app.services import notify, youtube
+from app.services import youtube
 
 SCOPE_REMINDER = (
     "NOTE: on Google's consent screen the scope checkboxes are UNCHECKED by default —\n"
@@ -48,9 +48,6 @@ SCOPE_REMINDER = (
 _SUCCESS_HTML = (b"<html><body style='font-family:sans-serif;text-align:center;"
                  b"padding-top:20vh'><h3>Consent received.</h3>"
                  b"<p>You can close this tab and return to the terminal.</p></body></html>")
-
-# Test seam: the one call that needs a live Google grant.
-_fetch_identity = youtube.identity_for_creds
 
 # CLI-flavored remediation appended per GrantRejected.code — the escape hatches
 # only the terminal offers (the web callback hints Disconnect-first instead).
@@ -148,26 +145,17 @@ def reconnect(session: Session, ident: str, port: int = 8077, open_browser: bool
         # access_denied, mismatching state, token-endpoint failures, …
         raise ReconnectError(f"consent failed: {e} — nothing was changed")
 
-    # The shared verify-before-save guards (youtube.verify_grant — also the web
-    # consent path); only the flag hints are CLI-specific.
-    try:
-        identity = youtube.verify_grant(
-            creds, expected_channel_id=ch.yt_channel_id,
-            expected_channel_title=ch.yt_channel_title, label=f"'{ch.slug}'",
-            allow_partial=allow_partial, allow_rebind=force,
-            fetch_identity_fn=_fetch_identity)
-    except youtube.GrantRejected as e:
-        raise ReconnectError(str(e) + _CLI_HINTS.get(e.code, ""))
-
-    try:
-        youtube.save_token(ch.slug, creds)
-    except OSError as e:
-        raise ReconnectError(f"could not write the token: {e} — existing token untouched")
-
+    # The shared completion sequence (youtube.complete_consent — also the web
+    # consent path): verify -> save -> flip. Only the wording is CLI-specific.
     prev_status = ch.oauth_status
     try:
-        notify.mark_connected(session, ch, identity)
-    except Exception as e:
+        youtube.complete_consent(session, ch, creds,
+                                 allow_partial=allow_partial, allow_rebind=force)
+    except youtube.GrantRejected as e:
+        raise ReconnectError(str(e) + _CLI_HINTS.get(e.code, ""))
+    except OSError as e:
+        raise ReconnectError(f"could not write the token: {e} — existing token untouched")
+    except youtube.StatusFlipFailed as e:
         # The token IS on disk and valid; only the status flip is missing.
         raise ReconnectError(
             f"token SAVED but the DB update failed ({e}) — the channel may still show "

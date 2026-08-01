@@ -149,17 +149,20 @@ def rejected(creds, **kw):
 
 print("verify_grant guards (unit)")
 IDENT = {"id": "UCbound", "title": "Bound Channel"}
-ok(youtube.verify_grant(FakeCreds(), fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+# The identity lookup is stubbed by patching youtube.identity_for_creds — the
+# one standard seam since BACKLOG 4c-d dropped verify_grant's fetch_identity_fn
+# injection param (the e2e section below patches the same attribute).
+youtube.identity_for_creds = lambda creds: dict(IDENT)
+ok(youtube.verify_grant(FakeCreds()) == IDENT,
    "full grant with matching identity returns the identity")
-e = rejected(FakeCreds(refresh_token=None), fetch_identity_fn=lambda c: dict(IDENT))
+e = rejected(FakeCreds(refresh_token=None))
 ok(e and e.code == "no_refresh_token" and "refresh token" in str(e),
    "missing refresh token rejected (no_refresh_token)")
-e = rejected(FakeCreds(granted_scopes=youtube.SCOPES),
-             fetch_identity_fn=lambda c: dict(IDENT))
+e = rejected(FakeCreds(granted_scopes=youtube.SCOPES))
 ok(e and e.code == "partial_scopes" and "yt-analytics.readonly" in str(e),
    "partial grant rejected, missing scopes named (partial_scopes)")
-ok(youtube.verify_grant(FakeCreds(granted_scopes=youtube.SCOPES), allow_partial=True,
-                        fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+ok(youtube.verify_grant(FakeCreds(granted_scopes=youtube.SCOPES),
+                        allow_partial=True) == IDENT,
    "allow_partial overrides exactly the scope guard")
 
 
@@ -167,18 +170,20 @@ def _boom(creds):
     raise RuntimeError("backendError 503")
 
 
-e = rejected(FakeCreds(), fetch_identity_fn=_boom)
+youtube.identity_for_creds = _boom
+e = rejected(FakeCreds())
 ok(e and e.code == "identity_check_failed" and "identity check failed" in str(e),
    "identity lookup failure rejected (identity_check_failed)")
-e = rejected(FakeCreds(), fetch_identity_fn=lambda c: {"id": None, "title": None})
+youtube.identity_for_creds = lambda creds: {"id": None, "title": None}
+e = rejected(FakeCreds())
 ok(e and e.code == "no_channel" and "no YouTube channel" in str(e),
    "account without a channel rejected (no_channel)")
-e = rejected(FakeCreds(), expected_channel_id="UCother", expected_channel_title="Other",
-             fetch_identity_fn=lambda c: dict(IDENT))
+youtube.identity_for_creds = lambda creds: dict(IDENT)
+e = rejected(FakeCreds(), expected_channel_id="UCother", expected_channel_title="Other")
 ok(e and e.code == "channel_mismatch" and "UCother" in str(e) and "UCbound" in str(e),
    "wrong-channel identity rejected, both ids named (channel_mismatch)")
-ok(youtube.verify_grant(FakeCreds(), expected_channel_id="UCother", allow_rebind=True,
-                        fetch_identity_fn=lambda c: dict(IDENT)) == IDENT,
+ok(youtube.verify_grant(FakeCreds(), expected_channel_id="UCother",
+                        allow_rebind=True) == IDENT,
    "allow_rebind overrides exactly the identity guard")
 
 # ---- GrantCode constants / hint-dict drift (BACKLOG 4c-b) -------------------
@@ -364,7 +369,25 @@ ok(unchanged(before), "token-exchange failure wrote nothing")
 
 print("web consent: verified happy path saves and connects")
 set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
-r = consent(full_token(), {"id": "UCbound", "title": "Bound Channel Renamed"})
+# Wiring pin (BACKLOG 4c-e): the callback must finish through the shared
+# youtube.complete_consent sequence — a hand-sequenced verify/save/flip
+# reimplementation would reproduce every observable below except this call.
+_cc_calls = {"n": 0}
+_orig_cc = youtube.complete_consent
+
+
+def _counting_cc(*a, **kw):
+    _cc_calls["n"] += 1
+    return _orig_cc(*a, **kw)
+
+
+youtube.complete_consent = _counting_cc
+try:
+    r = consent(full_token(), {"id": "UCbound", "title": "Bound Channel Renamed"})
+finally:
+    youtube.complete_consent = _orig_cc
+ok(_cc_calls["n"] == 1,
+   "the callback completes the consent through youtube.complete_consent (4c-e)")
 ok("Connected" in r.text, "verified consent shows the success page")
 ok("window.close" in r.text, "success page still self-closes")
 saved = json.loads(TOKEN.read_text())
@@ -389,11 +412,15 @@ def _boom_mark_connected(session, channel, identity):
 
 notify.mark_connected = _boom_mark_connected
 try:
-    r = consent(full_token(), {"id": "UCbound", "title": "Bound Channel"})
+    r = consent(full_token(), {"id": "UCbound", "title": "Flip-Failed Title"})
 finally:
     notify.mark_connected = _orig_mark_connected
 ok("Token saved" in r.text and "do NOT redo" in r.text,
    "commit failure after save shows the do-not-redo-the-consent page")
+# The title can only come from the exception: the failed flip never wrote it
+# to the row, so a fallback to ch.name would render the stale name instead.
+ok("Flip-Failed Title" in r.text,
+   "the page names the verified channel (identity rides on StatusFlipFailed)")
 ok(json.loads(TOKEN.read_text()).get("refresh_token") == "new-refresh",
    "the verified token IS on disk despite the failed status flip")
 ok(channel_row()["status"] == OAuthStatus.EXPIRED,
