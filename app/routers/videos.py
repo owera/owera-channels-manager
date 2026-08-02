@@ -237,6 +237,12 @@ def produce(video_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "video not found")
     if v.status != VideoStatus.DRAFT:
         raise HTTPException(409, f"cannot produce from status '{v.status}'")
+    # Draft->queued from the API was the last unaudited transition (2026-08-01: an
+    # operator bulk-produce of 20 drafts was only reconstructable from the uvicorn
+    # access log) — log it so /api/runs distinguishes operator queueing from the
+    # scheduler's auto-produce rows.
+    quota.log(session, kind="produce", status="success", video_id=v.id,
+              channel_id=v.channel_id, detail="produced via API: draft queued")
     return _set_status(session, video_id, VideoStatus.QUEUED)
 
 
@@ -249,6 +255,9 @@ def produce_bulk(body: ReorderBody, session: Session = Depends(get_session)):
         if v and v.status == VideoStatus.DRAFT:
             v.status = VideoStatus.QUEUED
             session.add(v)
+            quota.log(session, kind="produce", status="success", video_id=v.id,
+                      channel_id=v.channel_id,
+                      detail="bulk-produced via API: draft queued")
             n += 1
     session.commit()
     return {"produced": n}
