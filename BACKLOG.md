@@ -261,9 +261,42 @@ flag the operator step in the commit body.
   final filename) — 14/14 killed, each by its intended discriminating check
   (battery run with bytecode caching disabled after two same-size mutations
   exposed stale-pyc false kills).
-  Still uncovered `app/services/*`: `music_gen`, `scheduler`, and the
-  non-budget-gate parts of `render_loop` (next candidates; `autofill_loop`
-  gained `tests/verify_autofill.py` with the 07-26 id-order fix ed719f8).
+  `render_loop.py` non-budget lifecycle (previously only the budget gates
+  were covered) — `tests/verify_render.py` 18 → 70 checks (2026-08-02): the
+  paths that guard auto-publish. Startup recovery
+  (`recover_orphaned_renders`: in-process orphans re-queued clean —
+  handle/progress/error reset, one JobRun each; `engine=None` counts as
+  in-process, only `mpt` survives a restart and keeps its task);
+  `_advance_in_flight` (timeout fails hung renders on tz-aware AND naive
+  `last_attempt_at` without ever polling them — the aware leg driven via an
+  in-session aware value because SQLite strips tzinfo on the round-trip; an
+  engine outage leaves the video untouched for the next tick with no error
+  JobRun; falsy polled progress keeps the previous value; transient engine
+  errors re-queue with the handle cleared at retry_count 0 AND 1 under the
+  2-retry bound — two distinct transient signatures pinned, one
+  rate-limit-only — while exhausted/non-transient errors fail immediately;
+  a failure without a message gets the per-engine default); `_finalize` as
+  the last gate before APPROVED → publish (complete-but-missing artifact
+  fails; a blank render fails but the copied artifact is kept for
+  inspection, and the blank check provably judges the COPY, not the
+  engine's source file; happy path pins the storage copy, thumbnail
+  best-effort, script/creation_config adoption, and metadata-generation
+  wiring — `language=` provably reaches the channel's real pt-BR voice
+  language, not a constant None, plus never overwriting pre-set fields and
+  the `metadata_generated` short-circuit; skip-gate matrix routes
+  REVIEW/APPROVED with `approved_at`); the `_profile_params` /
+  `_format_overrides` helpers (a corrupt profile JSON must resolve to `{}`,
+  never block rendering); and `tick()`'s scheduler_paused gate. Every new
+  behavior mutation-verified: 19 hand-built semantic mutants of
+  `render_loop.py` run from an isolated repo copy with bytecode caching
+  disabled (08-01 battery lessons applied) — 19/19 killed, each by its
+  intended discriminating check, module `__file__` pinned to the copy; 3 of
+  the 19 came from the adversarial review, which caught them SURVIVING the
+  first battery (vacuous language pin, endpoints-only retry bound,
+  aware-leg-never-ran) — checks fixed until each was killed.
+  Still uncovered `app/services/*`: `music_gen` and `scheduler` (next
+  candidates; `autofill_loop` gained `tests/verify_autofill.py` with the
+  07-26 id-order fix ed719f8).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly

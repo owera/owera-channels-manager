@@ -1,5 +1,6 @@
-"""Dependency-free regression checks for render_loop's budget policy:
-_auto_produce (DRAFT -> QUEUED promotion) and _submit_new (QUEUED -> RENDERING).
+"""Dependency-free regression checks for render_loop: the budget policy
+(_auto_produce DRAFT -> QUEUED, _submit_new QUEUED -> RENDERING) and the
+non-budget lifecycle (startup recovery, timeout/retry, finalize).
 
 This project has no pytest; run directly:
     PYTHONPATH=. .venv/bin/python tests/verify_render.py
@@ -15,6 +16,12 @@ ones — the 2026-07-26 overshoot (8 rendered vs a budget of 5, both channels) c
 from starting a new render after each success while concurrency-many were still
 in flight. The /videos/queue-plan board endpoint mirrors that gate and is pinned
 here too.
+
+The lifecycle sections pin the paths that guard auto-publish: only external
+(MPT) renders survive a restart, hung renders fail at the timeout instead of
+occupying a concurrency slot forever, transient engine errors re-queue with a
+bounded retry, and _finalize refuses missing/blank artifacts as the last gate
+before a video can reach APPROVED -> publish.
 
 Uses an in-memory SQLite DB — no network, no creds. Exits non-zero on the first
 failed assertion.
@@ -304,5 +311,434 @@ ok(all(plan[str(v.id)]["reason"].startswith("render budget full") for v in qs),
    "queue-plan: 2 done + 3 in flight = budget 5 -> queued cards labeled budget-full")
 ok("2+3 rendering/5" in plan[str(qs[0].id)]["reason"],
    "queue-plan reason spells out done + in-flight against the budget")
+
+# ══ Non-budget lifecycle: recovery, timeout/retry, finalize (backlog 7) ════════
+
+import json  # noqa: E402
+import tempfile  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.models import RenderProfile  # noqa: E402
+from app.services.engines import (  # noqa: E402
+    STATE_COMPLETE,
+    STATE_FAILED,
+    STATE_PROCESSING,
+)
+
+
+class StubEngine:
+    """Scripted engine: poll returns/raises as configured, final_path is fixed."""
+    def __init__(self, poll_result=None, poll_raises=False, final=None):
+        self.poll_result = poll_result
+        self.poll_raises = poll_raises
+        self.final = final
+        self.poll_calls = []
+
+    def submit(self, video, params):
+        return f"task-{video.id}"
+
+    def poll(self, task_id):
+        self.poll_calls.append(task_id)
+        if self.poll_raises:
+            raise RuntimeError("engine unreachable")
+        return self.poll_result
+
+    def final_path(self, task_id):
+        return self.final
+
+
+def use_engine(e):
+    render_loop.get_engine = lambda name: e
+    return e
+
+
+@contextmanager
+def _scoped(session):
+    yield session
+    session.commit()
+
+
+def use_scope(session):
+    """Point render_loop's own session_scope() (recover/tick) at the test DB."""
+    render_loop.session_scope = lambda: _scoped(session)
+
+
+def render_runs(session, status):
+    return session.exec(select(JobRun).where(JobRun.kind == "render")
+                        .where(JobRun.status == status)).all()
+
+
+NOW = datetime.now(timezone.utc)
+
+# --- pure helpers: profile params and long-form overrides ---------------------
+print("profile_params: malformed profiles resolve to empty overrides")
+s = fresh_session()
+ok(render_loop._profile_params(s, None) == {}, "no profile id -> {}")
+ok(render_loop._profile_params(s, 999) == {}, "missing profile row -> {}")
+p_good = RenderProfile(name="good", params_json='{"video_aspect": "9:16"}')
+p_bad = RenderProfile(name="bad", params_json="{not json")
+p_null = RenderProfile(name="null", params_json=None)
+s.add(p_good); s.add(p_bad); s.add(p_null)
+s.commit()
+ok(render_loop._profile_params(s, p_good.id) == {"video_aspect": "9:16"},
+   "valid params_json parsed")
+ok(render_loop._profile_params(s, p_bad.id) == {},
+   "corrupt params_json -> {} — a bad profile must not block rendering")
+ok(render_loop._profile_params(s, p_null.id) == {}, "NULL params_json -> {}")
+ok(render_loop._format_overrides("long")
+   == {"video_aspect": "16:9", "paragraph_number": 8},
+   "long-form forces landscape + longer script")
+ok(render_loop._format_overrides("short") == {},
+   "shorts keep profile-driven params untouched")
+
+# --- recover_orphaned_renders: only external (MPT) renders survive a restart --
+# HyperFrames renders run on in-process daemon threads that die with the manager,
+# so a RENDERING row from a previous process will never advance on its own.
+print("recover_orphaned_renders: in-process orphans re-queued, MPT left alone")
+s = fresh_session()
+use_scope(s)
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v_hf = make_video(s, ch, t, status=VideoStatus.RENDERING, engine="hyperframes",
+                  mpt_task_id="hf-1", render_progress=40, error="boom")
+v_legacy = make_video(s, ch, t, status=VideoStatus.RENDERING,
+                      mpt_task_id="old-1", render_progress=10)
+v_mpt = make_video(s, ch, t, status=VideoStatus.RENDERING, engine="mpt",
+                   mpt_task_id="mpt-1", render_progress=70)
+v_done = make_video(s, ch, t, status=VideoStatus.APPROVED, engine="hyperframes")
+render_loop.recover_orphaned_renders()
+v = s.get(Video, v_hf.id)
+ok(v.status == VideoStatus.QUEUED and v.mpt_task_id is None
+   and v.render_progress == 0 and v.error is None,
+   "in-process orphan re-queued clean (task id / progress / error all reset)")
+ok(s.get(Video, v_legacy.id).status == VideoStatus.QUEUED,
+   "engine=None row treated as in-process and re-queued — only 'mpt' survives")
+m = s.get(Video, v_mpt.id)
+ok(m.status == VideoStatus.RENDERING and m.mpt_task_id == "mpt-1",
+   "MPT render untouched — its external task survives the restart and is re-polled")
+ok(s.get(Video, v_done.id).status == VideoStatus.APPROVED,
+   "non-RENDERING rows untouched")
+recov = [r for r in render_runs(s, "error") if "recovered orphaned render" in (r.detail or "")]
+ok(len(recov) == 2, "one recovery JobRun per re-queued orphan")
+
+# --- _advance_in_flight: hung renders fail at the timeout ---------------------
+print("advance_in_flight: hung renders time out before any poll")
+s = fresh_session()
+eng = use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": 50}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+stale = timedelta(seconds=settings.render_timeout_seconds + 3600)
+v_aware = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="a",
+                     last_attempt_at=NOW - stale)
+v_naive = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="b",
+                     last_attempt_at=(NOW - stale).replace(tzinfo=None))
+# SQLite strips tzinfo on the round-trip, so a committed row always reads back
+# naive (review finding, 2026-08-02): to actually drive the tzinfo-present
+# branch, re-assign the aware value on the identity-mapped instance AFTER the
+# commit — _advance_in_flight's select returns this same in-session object.
+v_aware.last_attempt_at = NOW - stale
+s.add(v_aware)
+ok(v_aware.last_attempt_at.tzinfo is not None,
+   "aware-leg precondition: tzinfo intact on the in-session instance")
+render_loop._advance_in_flight(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.FAILED
+       and s.get(Video, v.id).error == "render timed out"
+       for v in (v_aware, v_naive)),
+   "tz-aware AND naive last_attempt_at both time out past render_timeout_seconds")
+ok(eng.poll_calls == [], "timed-out renders are never polled")
+ok(len(render_runs(s, "error")) == 2, "one error JobRun per timed-out render")
+
+# --- _advance_in_flight: poll dispatch ----------------------------------------
+print("advance_in_flight: poll progress, engine outages, missing handles")
+s = fresh_session()
+eng = use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": 55}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v_new = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id=None,
+                   last_attempt_at=NOW)
+v_run = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="run-1",
+                   last_attempt_at=NOW, render_progress=10)
+render_loop._advance_in_flight(s)
+s.commit()
+ok(s.get(Video, v_new.id).status == VideoStatus.RENDERING and eng.poll_calls == ["run-1"],
+   "a render without an engine handle is skipped; the handled one is polled")
+ok(s.get(Video, v_run.id).render_progress == 55, "polled progress lands on the video")
+
+s = fresh_session()
+eng = use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": None}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="k",
+               last_attempt_at=NOW, render_progress=33)
+render_loop._advance_in_flight(s)
+s.commit()
+ok(s.get(Video, v.id).render_progress == 33,
+   "falsy polled progress keeps the previous value")
+
+s = fresh_session()
+eng = use_engine(StubEngine(poll_raises=True))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="x",
+               last_attempt_at=NOW, render_progress=20)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.RENDERING and v.render_progress == 20 and v.error is None,
+   "engine unreachable -> video untouched, retried next tick")
+ok(render_runs(s, "error") == [], "an engine outage logs no error JobRun")
+
+# --- _advance_in_flight: engine-reported failures -----------------------------
+print("advance_in_flight: transient failures re-queue with a bounded retry")
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": "upstream 529 overloaded"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t1",
+               last_attempt_at=NOW, render_progress=80)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1 and v.mpt_task_id is None
+   and v.render_progress == 0 and v.error is None,
+   "transient error -> QUEUED for a clean re-render (handle/progress/error reset)")
+ok(any("transient error (retry 1/2)" in (r.detail or "") for r in render_runs(s, "error")),
+   "retry JobRun names the attempt budget")
+
+# Midpoint of the retry bound (review finding: endpoints alone let a halved
+# budget pass), with a rate-limit-only signature so classification is pinned
+# beyond one multi-matching error string.
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED,
+                                   "error": "RateLimitError: too many requests"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t1b",
+               last_attempt_at=NOW, retry_count=1)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 2,
+   "retry_count=1 still gets the second retry; a rate-limit-only signature is transient")
+ok(any("transient error (retry 2/2)" in (r.detail or "") for r in render_runs(s, "error")),
+   "second-retry JobRun says 2/2")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": "upstream 529 overloaded"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t2",
+               last_attempt_at=NOW, retry_count=2)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.FAILED and v.error == "upstream 529 overloaded",
+   "transient error with the retry budget spent -> FAILED, error kept")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": "ffmpeg exploded"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t3",
+               last_attempt_at=NOW)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.FAILED and v.error == "ffmpeg exploded" and v.retry_count == 0,
+   "non-transient error -> FAILED immediately, no retry burned")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t4",
+               engine="fake", last_attempt_at=NOW)
+render_loop._advance_in_flight(s)
+s.commit()
+ok(s.get(Video, v.id).error == "fake reported render failure",
+   "failure without an engine error message gets the per-engine default")
+
+# --- _finalize: the last gate before APPROVED -> auto-publish -----------------
+_tmp = tempfile.mkdtemp(prefix="verify-render-")
+_orig_storage = settings.storage_dir
+settings.storage_dir = _tmp
+
+frames_ok = {"value": True}
+frames_calls = []
+
+
+def _fake_frames(p):
+    frames_calls.append(Path(p))
+    return frames_ok["value"]
+
+
+thumb_ok = {"value": True}
+
+
+def _fake_thumb(src, out):
+    if thumb_ok["value"]:
+        Path(out).write_bytes(b"jpg")
+        return True
+    return False
+
+
+class MetaStub:
+    def __init__(self):
+        self.calls = []
+
+    def generate(self, subject, script, content_format="short", language=None):
+        self.calls.append((subject, script, content_format, language))
+        return {"title": "gen-title", "description": "gen-desc", "tags": ["t1", "t2"]}
+
+
+render_loop._has_visible_frames = _fake_frames
+render_loop._make_thumbnail = _fake_thumb
+meta_stub = MetaStub()
+render_loop.metadata = meta_stub
+
+_src_n = 0
+
+
+def drive_complete(s, ch, t, task=None, final=None, **video_kw):
+    """Create a RENDERING video and drive it through STATE_COMPLETE -> _finalize."""
+    global _src_n
+    if final is None:
+        _src_n += 1
+        final = Path(_tmp) / f"src-{_src_n}.mp4"
+        final.write_bytes(b"good-bytes")
+    use_engine(StubEngine(poll_result={"state": STATE_COMPLETE, **(task or {})},
+                          final=final))
+    v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="fin",
+                   engine="fake", last_attempt_at=NOW, **video_kw)
+    render_loop._advance_in_flight(s)
+    s.commit()
+    return s.get(Video, v.id)
+
+
+print("finalize: complete-but-missing artifact fails the video")
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t, final=Path(_tmp) / "nowhere" / "final.mp4")
+ok(v.status == VideoStatus.FAILED and "missing" in (v.error or ""),
+   "engine says complete but the file is gone -> FAILED, error says missing")
+ok(v.video_path is None, "no artifact path recorded for a missing render")
+ok(len(render_runs(s, "error")) == 1 and render_runs(s, "success") == [],
+   "missing artifact logs an error JobRun, never a success")
+
+print("finalize: blank frames refused at the last gate before publish")
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+frames_ok["value"] = False
+v = drive_complete(s, ch, t)
+frames_ok["value"] = True
+dest = Path(settings.storage_dir) / "videos" / str(v.id) / "video.mp4"
+ok(v.status == VideoStatus.FAILED
+   and v.error == "post-render frames blank at finalize — not publishing",
+   "blank render -> FAILED, never REVIEW/APPROVED")
+ok(dest.exists() and v.video_path == str(dest),
+   "blank artifact still copied into storage for inspection")
+ok(frames_calls[-1] == dest,
+   "the blank check judges the COPIED artifact, not the engine's source file")
+ok(render_runs(s, "success") == [], "no success JobRun for a blank render")
+
+print("finalize: happy path copies, thumbnails, generates metadata -> REVIEW")
+s = fresh_session()
+ch = make_channel(s)                                  # default_skip_gate False
+# Bind a real pt-BR voice profile: with no profile, channel_language returns
+# None, which a severed `language=` wire would also produce — the pin below
+# must distinguish the two (review finding, 2026-08-02).
+prof = RenderProfile(name="pt-voice", channel_id=ch.id,
+                     params_json='{"voice_name": "pt-BR-AntonioNeural-Male"}')
+s.add(prof)
+s.commit()
+ch.default_render_profile_id = prof.id
+s.add(ch)
+s.commit()
+t = make_topic(s, ch, content_format="long")
+v = drive_complete(s, ch, t, task={"script": "spoken words",
+                                   "creation_config": {"beat": 7}})
+dest = Path(settings.storage_dir) / "videos" / str(v.id) / "video.mp4"
+ok(v.status == VideoStatus.REVIEW and v.render_progress == 100,
+   "gated channel routes the finished render to REVIEW at 100%")
+ok(dest.read_bytes() == b"good-bytes" and v.video_path == str(dest),
+   "artifact copied to storage/videos/<id>/video.mp4")
+ok(v.script == "spoken words", "engine-reported script adopted")
+ok(v.creation_config == json.dumps({"beat": 7}), "creation_config stored as JSON")
+ok(v.thumb_path == str(dest.parent / "thumb.jpg"), "thumbnail path recorded")
+ok(v.metadata_generated and v.title == "gen-title" and v.description == "gen-desc"
+   and v.tags_json == json.dumps(["t1", "t2"]),
+   "missing metadata generated and stored")
+ok(meta_stub.calls[-1] == ("Test subject", "spoken words", "long", "Brazilian Portuguese"),
+   "metadata.generate is wired to the channel's real voice language, not a constant")
+ok(len(render_runs(s, "success")) == 1, "success JobRun logged once")
+
+print("finalize: existing fields survive; metadata_generated short-circuits")
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t, title="Keep me", script="original")
+ok(v.title == "Keep me" and v.description == "gen-desc",
+   "pre-set title kept, only the missing fields are filled")
+ok(v.script == "original", "task without a script keeps the video's own")
+n_calls = len(meta_stub.calls)
+v2 = drive_complete(s, ch, t, metadata_generated=True)
+ok(len(meta_stub.calls) == n_calls and v2.title is None,
+   "metadata_generated=True -> generate() never called again")
+
+thumb_ok["value"] = False
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t)
+thumb_ok["value"] = True
+ok(v.status == VideoStatus.REVIEW and v.thumb_path is None,
+   "thumbnail failure is best-effort — video still finishes, thumb_path unset")
+
+print("finalize: skip-gate resolution routes REVIEW vs APPROVED")
+s = fresh_session()
+ch = make_channel(s, default_skip_gate=True)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t)                          # video.skip_gate None
+ok(v.status == VideoStatus.APPROVED and v.approved_at is not None,
+   "skip_gate None inherits channel default True -> APPROVED with approved_at")
+v = drive_complete(s, ch, t, skip_gate=False)
+ok(v.status == VideoStatus.REVIEW,
+   "video skip_gate False overrides channel True -> REVIEW")
+s = fresh_session()
+ch = make_channel(s)                                  # default_skip_gate False
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t, skip_gate=True)
+ok(v.status == VideoStatus.APPROVED,
+   "video skip_gate True overrides channel False -> APPROVED")
+
+settings.storage_dir = _orig_storage
+
+# --- tick: scheduler_paused halts the whole loop ------------------------------
+print("tick: scheduler_paused gates every stage")
+s = fresh_session()
+use_scope(s)
+use_engine(StubEngine())
+cfg = app_settings(s)
+cfg.scheduler_paused = True
+s.add(cfg)
+s.commit()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+q = make_video(s, ch, t, status=VideoStatus.QUEUED)
+render_loop.tick()
+ok(s.get(Video, q.id).status == VideoStatus.QUEUED,
+   "paused: queued work is not submitted")
+cfg.scheduler_paused = False
+s.add(cfg)
+s.commit()
+render_loop.tick()
+ok(s.get(Video, q.id).status == VideoStatus.RENDERING,
+   "unpaused: the same tick submits it")
 
 print(f"\nALL {_checks} CHECKS PASSED")
