@@ -576,3 +576,18 @@ flag the operator step in the commit body.
 - **acceptance:** `/%2e%2e/%2e%2e/etc/passwd` and `/../.env` return index.html (or 404), never
   file contents; real hashed assets and deep client-side routes still serve correctly; a check
   in `tests/verify_health.py` pins traversal attempts with auth disabled.
+
+### 17. Audit JobRuns for the review-gate transitions (reject / requeue / retry / approve) — normal
+- **why:** the 2026-08-02 forensics concluded "every video lifecycle mutation writes a JobRun" —
+  that was overbroad. Produce (`4e673ae`), delete (07-27), and the loop transitions are covered,
+  but `jobrun` contains ZERO rows of kind reject/requeue/retry/approve ever (verified 2026-08-03:
+  `SELECT kind, count(*) FROM jobrun GROUP BY kind`). Reject at least leaves `rejected_reason` on
+  the video row; requeue/retry/approve leave no trail at all, so the next operator-vs-agent
+  forensic on those paths starts blind again (both fires this fortnight were unlogged manual actions).
+- **approach:** mirror `4e673ae`: in the four endpoint handlers write one JobRun per video
+  (kind = the transition, detail tagged `via API`, video/channel ids), no-op calls (refused
+  transitions) write nothing. Extend `tests/verify_produce_audit.py`'s pattern into a
+  `verify_lifecycle_audit.py` covering all four + the refusal cases.
+- **caution:** endpoint files only, no loop changes; keep the response shape unchanged.
+- **acceptance:** each of the four transitions on a real row writes exactly one JobRun with the
+  right kind/ids/tag; refused calls write none; suite green; live probe shows the row in /api/runs.

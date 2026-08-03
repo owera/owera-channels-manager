@@ -123,7 +123,8 @@ learn what works. Treat it as your standing instructions.
 - **Board inventory:** read `state.issues.board_inventory` (or `GET /api/agent/issues`).
   Note `days_of_inventory` and `at_capacity` per channel. A channel `at_capacity:true`
   means the idea bench already has `board_horizon_days` worth of render work — do NOT
-  generate more ideas or adopt new trends for it this run.
+  grow the board for it this run (the displacement exception in step 3 lets a strong
+  trend/winner in at net-zero board size).
 - **BGM pool:** read `state.bgm_pool` — note `count`, `min`, `target`, and `is_low`.
   If `is_low:true`, the music pool is below the safety threshold and rendered videos may
   get no background audio; treat it as a triage item (see step 1.5).
@@ -218,8 +219,19 @@ the highest priority is your target for step 4.
 ### 3. Act on the channels (via the REST API)
 **Board capacity gate — check before every idea/trend action:**
 Read `board_inventory` from step 1. For each channel:
-- `at_capacity:true` → **skip idea generation and trend adoption entirely** for that
-  channel this run. The pipeline already has enough work; more ideas just pile up unseen.
+- `at_capacity:true` → do not **grow** the board for that channel this run. The pipeline
+  already has enough work; more ideas just pile up unseen.
+  **Displacement exception (max 1 channel-action per channel per run):** since the
+  nightly autofill refills every bench to exactly `board_horizon_days`, `at_capacity`
+  is the permanent steady state — a blanket skip would disable the trend pipeline
+  forever (discovered 2026-08-03: trends scored 85-86 deferred repeatedly with
+  "board at_capacity" as the only reason). When a logged trend scores ≥ 75, or a
+  measured winner topic has an empty bench, you may feed it at **net-zero board
+  size**: first `reject` an equal number of the channel's lowest-value drafts
+  (lowest topic weight first, oldest first; reason `displaced by <trend/topic> —
+  subject retained`), then generate/adopt that many ideas. Never displace drafts of
+  equal-or-higher topic weight, never exceed the horizon, and quote the displaced
+  ids + the trend/analytics justification in the report.
 - `days_of_inventory < 0.5` → the bench is low; prioritize refilling by generating ideas
   or adopting a trend before anything else.
 - Only produce (DRAFT → QUEUED) if the channel has fewer queued videos than its
