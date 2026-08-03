@@ -294,9 +294,38 @@ flag the operator step in the commit body.
   the 19 came from the adversarial review, which caught them SURVIVING the
   first battery (vacuous language pin, endpoints-only retry bound,
   aware-leg-never-ran) — checks fixed until each was killed.
-  Still uncovered `app/services/*`: `music_gen` and `scheduler` (next
-  candidates; `autofill_loop` gained `tests/verify_autofill.py` with the
-  07-26 id-order fix ed719f8).
+  `scheduler.py` (previously zero direct coverage) — `tests/verify_scheduler.py`
+  (71 checks, 2026-08-03): the APScheduler heartbeat every loop depends on —
+  a regression here is a loop that silently never ticks again. `_safe`'s
+  tick-crash containment (a raising tick neither propagates nor goes
+  unlogged: one ERROR record naming the tick, traceback attached);
+  `_music_replenish_tick`'s strictly-below-min gate counted through the REAL
+  `music_gen.pool_count` (only `techno_*.wav` is pool; mp3s/foreign wavs
+  aren't; missing dir = 0); `start()` driven against a real
+  BackgroundScheduler — six jobs by id, each interval pinned to ITS settings
+  field via distinct sentinel values (a crossed wire fails), max_instances=1
+  + coalesce=True on every job, staggered first runs (metrics 30s /
+  analytics 60s / autofill 45s / music 120s after boot; render/publish wait
+  a full interval), UTC pinned honestly (TZ forced to Pacific/Kiritimati
+  before start(), so a dropped timezone="UTC" fails even on a UTC host),
+  idempotent second start(); ALL SIX job funcs driven directly, each stub
+  raising its own exception class — per-loop routing, containment (kills a
+  narrowed `except RuntimeError`), and the crash log naming the right tick;
+  shutdown() provably STOPS the scheduler (not just clears the global),
+  double-shutdown no-op, start-after-shutdown rebuilds all six. Mutation-
+  verified: 26 hand-built semantic mutants run from an isolated repo copy
+  with bytecode caching disabled, module `__file__` pinned — 26/26 killed,
+  each by its intended discriminating check. 8 of the 26 came from the
+  adversarial reviewer, which caught them SURVIVING the 52-check first cut
+  (func identity/containment was proven only for the render job; shutdown
+  never checked `sch.running`; the UTC pin was vacuous on UTC hosts) —
+  suite extended to 71 checks until each died. Accepted residual:
+  shutdown(wait=False) vs wait=True is unobservable without a mid-flight
+  job (flagged as known-uncovered, not assumed covered).
+  Still uncovered `app/services/*`: `music_gen` (next candidate — 711 lines,
+  the local numpy techno synth + pool management; `pool_count` gained
+  incidental coverage via the scheduler suite; `autofill_loop` gained
+  `tests/verify_autofill.py` with the 07-26 id-order fix ed719f8).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
