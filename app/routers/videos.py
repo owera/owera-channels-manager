@@ -263,6 +263,10 @@ def produce_bulk(body: ReorderBody, session: Session = Depends(get_session)):
     return {"produced": n}
 
 
+# The review-gate transitions below each log one JobRun (like produce/delete):
+# reject/requeue/retry/approve had zero jobrun rows ever, so both of this
+# fortnight's operator-vs-agent forensics started blind on these paths. The
+# log rides the same commit as the status flip; refused calls write nothing.
 @router.post("/{video_id}/approve")
 def approve(video_id: int, body: VideoUpdate | None = None, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
@@ -277,6 +281,9 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
         for k in ("title", "description", "privacy"):
             if k in data:
                 setattr(v, k, data[k])
+    quota.log(session, kind="approve", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"approved via API: {v.status} -> approved")
     v.status = VideoStatus.APPROVED
     v.approved_at = utcnow()
     v.rejected_reason = None
@@ -288,11 +295,23 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
 
 @router.post("/{video_id}/reject")
 def reject(video_id: int, body: RejectBody, session: Session = Depends(get_session)):
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    quota.log(session, kind="reject", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"rejected via API: {v.status} -> rejected; reason={body.reason!r}")
     return _set_status(session, video_id, VideoStatus.REJECTED, rejected_reason=body.reason)
 
 
 @router.post("/{video_id}/requeue")
 def requeue(video_id: int, session: Session = Depends(get_session)):
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    quota.log(session, kind="requeue", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"requeued via API: {v.status} -> queued (re-render)")
     return _set_status(session, video_id, VideoStatus.QUEUED, error=None, mpt_task_id=None, render_progress=0)
 
 
@@ -302,7 +321,13 @@ def retry(video_id: int, session: Session = Depends(get_session)):
     if not v:
         raise HTTPException(404, "video not found")
     if v.video_path:
+        quota.log(session, kind="retry", status="success", video_id=v.id,
+                  channel_id=v.channel_id,
+                  detail=f"retried via API: {v.status} -> approved (artifact kept, re-publish)")
         return _set_status(session, video_id, VideoStatus.APPROVED, error=None, approved_at=utcnow())
+    quota.log(session, kind="retry", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"retried via API: {v.status} -> queued (re-render)")
     return _set_status(session, video_id, VideoStatus.QUEUED, error=None, mpt_task_id=None, render_progress=0)
 
 

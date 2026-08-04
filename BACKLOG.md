@@ -577,7 +577,25 @@ flag the operator step in the commit body.
   file contents; real hashed assets and deep client-side routes still serve correctly; a check
   in `tests/verify_health.py` pins traversal attempts with auth disabled.
 
-### 17. Audit JobRuns for the review-gate transitions (reject / requeue / retry / approve) — normal
+### 17. ✅ DONE (code shipped to main 2026-08-04) Audit JobRuns for the review-gate transitions (reject / requeue / retry / approve) — normal
+- **resolution (2026-08-04):** each of the four endpoints logs one `quota.log` JobRun riding the
+  same commit as the status flip — kind = the transition, `status="success"`, video/channel ids,
+  detail tagged `via API` and carrying the PRE-transition status (`"rejected via API: review ->
+  rejected; reason='…'"`); reject embeds the reason `!r`, retry names its branch (`re-publish` on
+  the has-artifact path, `re-render` otherwise). Refused calls (404s, approve's 409) write nothing
+  — every raise precedes the log, and `get_session` never commits a dirty session. New kinds
+  verified inert everywhere: quota.py counters filter on exact kinds, issues.py only groups
+  `status=="error"` rows, the Dashboard renders `r.kind` as plain text. Response shapes unchanged
+  (pinned per endpoint). Suite: `tests/verify_lifecycle_audit.py` (60 checks) — refusal-writes-
+  nothing per endpoint, exact per-kind final counts, plus adversarial-review hardening: a second
+  channel exercises all five log sites cross-channel (a hardcoded `channel_id=1` mutant survived
+  the single-channel first cut) and both retry details pin the pre-transition status ("failed" —
+  the target-status substring was vacuously present in the template; both mutants re-run and
+  killed from an isolated copy, bytecode caching off). E2E-verified against a real scratch
+  uvicorn + scratch DB: all four transitions driven over HTTP, exactly 4 rows in `/api/runs`,
+  refusals wrote none. Accepted residual (review finding): a reject reason longer than ~950 chars
+  truncates in the JobRun detail (quota.log's 1000-char clamp); the full reason still lands on
+  `video.rejected_reason`, though approve clears it and delete's JobRun doesn't carry it.
 - **why:** the 2026-08-02 forensics concluded "every video lifecycle mutation writes a JobRun" —
   that was overbroad. Produce (`4e673ae`), delete (07-27), and the loop transitions are covered,
   but `jobrun` contains ZERO rows of kind reject/requeue/retry/approve ever (verified 2026-08-03:
