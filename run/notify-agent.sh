@@ -9,7 +9,11 @@ AGENT="${1:-agent}"
 CODE="${2:-1}"
 DETAIL="${3:-}"
 
-TITLE="Owera ${AGENT} failed"
+if [ "$CODE" = "0" ]; then
+  TITLE="Owera ${AGENT} skipped"
+else
+  TITLE="Owera ${AGENT} failed"
+fi
 MSG="exit ${CODE}"
 if [ -n "$DETAIL" ]; then
   MSG="${MSG}: ${DETAIL}"
