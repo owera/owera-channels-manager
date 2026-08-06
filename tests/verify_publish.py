@@ -460,4 +460,41 @@ youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
 youtube.insert_comment = _ORIG_COMMENT
 youtube.get_service, youtube.upload_video = _ORIG_GET, _ORIG_UPLOAD
 
+# --- daily mix: 1 long + rest shorts (the 08-03/05 ch1 5L/0S bug) -------------
+print("\n_next_approved: daily mix caps longs at 1/day when shorts remain")
+s = fresh_session()
+ch = make_channel(s)
+t_long = Topic(channel_id=ch.id, name="Longs", theme_prompt="x", content_format="long", weight=2)
+t_short = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x", content_format="short", weight=0)
+s.add(t_long); s.add(t_short); s.commit(); s.refresh(t_long); s.refresh(t_short)
+now = utcnow()
+for i in range(3):
+    make_video(s, ch, topic_id=t_long.id, subject=f"L{i}", status=VideoStatus.APPROVED,
+               approved_at=now - timedelta(hours=10 - i), video_path=f"/tmp/l{i}.mp4")
+for i in range(2):
+    make_video(s, ch, topic_id=t_short.id, subject=f"S{i}", status=VideoStatus.APPROVED,
+               approved_at=now - timedelta(hours=5 - i), video_path=f"/tmp/s{i}.mp4")
+
+v1 = publish_loop._next_approved(s, ch.id)
+ok(v1 is not None and v1.topic_id == t_long.id,
+   "slot 1 reserves a long when none published yet (even with shorts waiting)")
+v1.status = VideoStatus.PUBLISHED
+v1.published_at = utcnow()
+s.add(v1); s.commit()
+
+v2 = publish_loop._next_approved(s, ch.id)
+ok(v2 is not None and v2.topic_id == t_short.id,
+   "after a long is out, prefer w0 shorts over remaining w2 longs (no 5L/0S sweep)")
+v2.status = VideoStatus.PUBLISHED
+v2.published_at = utcnow()
+s.add(v2); s.commit()
+v3 = publish_loop._next_approved(s, ch.id)
+ok(v3 is not None and v3.topic_id == t_short.id, "second post-long slot is also a short")
+v3.status = VideoStatus.PUBLISHED
+v3.published_at = utcnow()
+s.add(v3); s.commit()
+v4 = publish_loop._next_approved(s, ch.id)
+ok(v4 is not None and v4.topic_id == t_long.id,
+   "once shorts are exhausted, remaining longs still drain (no starve)")
+
 print(f"\nALL {_checks} CHECKS PASSED")

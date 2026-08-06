@@ -156,32 +156,37 @@ def _drip_ok(session: Session, channel: Channel, drip_minutes: int) -> bool:
 
 
 def _next_approved(session: Session, channel_id: int) -> Video | None:
-    # Daily mix: until a long-form has published this quota day, give the slot to
-    # the oldest approved long-form. Plain FIFO never reaches one behind a deep
-    # short backlog (4-shorts-+-1-long directive; longs convert subscribers).
-    # Within each pool, higher-weight topics publish first (then FIFO). The weight
-    # knob already steers idea generation and rendering; without this, a strategy
-    # pivot (e.g. the ch1 wedge) sits behind weeks of earlier-approved backlog.
-    if not quota.published_long_today(session, channel_id):
-        video = session.exec(
+    # Daily mix (directive: 1 long + 4 shorts per publish day):
+    # 1. Until a long has published this quota day, reserve the slot for the
+    #    highest-weight approved long (so FIFO shorts never bury the converter).
+    # 2. Once a long is out, prefer shorts for the remaining slots — otherwise a
+    #    deep long approved pool (same or higher weight than shorts) sweeps the
+    #    whole day (observed 2026-08-03/05: ch1 5L/0S). Cap is soft: if no short
+    #    is approved, fall through so longs still drain rather than starve.
+    # Within each pool: higher-weight topics first, then FIFO by approved_at.
+    def _pick(fmt: str | None) -> Video | None:
+        q = (
             select(Video)
             .join(Topic, Topic.id == Video.topic_id)
             .where(
                 Video.channel_id == channel_id,
                 Video.status == VideoStatus.APPROVED,
-                Topic.content_format == "long",
             )
             .order_by(Topic.weight.desc(), Video.approved_at, Video.id)
-        ).first()
+        )
+        if fmt is not None:
+            q = q.where(Topic.content_format == fmt)
+        return session.exec(q).first()
+
+    if not quota.published_long_today(session, channel_id):
+        video = _pick("long")
         if video:
             return video
-    return session.exec(
-        select(Video)
-        .join(Topic, Topic.id == Video.topic_id)
-        .where(
-            Video.channel_id == channel_id, Video.status == VideoStatus.APPROVED
-        ).order_by(Topic.weight.desc(), Video.approved_at, Video.id)
-    ).first()
+    else:
+        video = _pick("short")
+        if video:
+            return video
+    return _pick(None)
 
 
 def _recover_stuck_publishing(session: Session) -> None:
