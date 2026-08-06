@@ -322,10 +322,30 @@ flag the operator step in the commit body.
   suite extended to 71 checks until each died. Accepted residual:
   shutdown(wait=False) vs wait=True is unobservable without a mid-flight
   job (flagged as known-uncovered, not assumed covered).
-  Still uncovered `app/services/*`: `music_gen` (next candidate — 711 lines,
-  the local numpy techno synth + pool management; `pool_count` gained
-  incidental coverage via the scheduler suite; `autofill_loop` gained
-  `tests/verify_autofill.py` with the 07-26 id-order fix ed719f8).
+  `music_gen.py` (previously only pool_count via the scheduler suite) —
+  `tests/verify_music_gen.py` (525 checks, 2026-08-06): the local numpy
+  techno synth + BGM pool manager that keeps the render pipeline from
+  going silent. Pure helpers (`_hz_scale` octave math, `_osc` four shapes
+  + unknown→sine fallback, `_add_at` end-of-buffer clip); sound
+  primitives (kick/hihat/clap/bass/pad/lead float32 length + energy);
+  effects (reverb/delay/filter preserve length, delay past signal is
+  dry-only, section envelope mid-section gains); TECHNO_STYLES contract
+  (exactly 31 presets — module comment still says 30 — every key present,
+  root/scale/rhythm/hh/wave resolve against the live tables, lead=True
+  implies non-empty lead_pat, unique descs); `generate_techno` (sample
+  count = duration*SR, float32, peak ≤0.80, seed reproducibility, short
+  flat-envelope path vs long sectional arc with intro energy < drop
+  energy, rhythm none/halfstep/dotted all non-silent, all 31 styles
+  synthesise clean 2s audio); `pool_count` (missing/empty → 0, only
+  techno_*.wav case-insensitive, mp3/foreign-stem/nested ignored);
+  `list_tracks` (three audio exts sorted, size_kb/created shape);
+  `_write_wav`/`generate_and_save` (mono 16-bit 44100 PCM,
+  techno_<ms>.wav under bgm_dir with mkdir -p); `replenish` (at-target
+  no-op writes nothing, deficit arithmetic, target= override, raising
+  generate_and_save logs error JobRun and continues — partial success).
+  Still lightly covered `app/services/*` loops (metrics/analytics are
+  mostly YouTube I/O — better served by live probes than unit stubs);
+  no zero-coverage service modules remain after this cycle.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
