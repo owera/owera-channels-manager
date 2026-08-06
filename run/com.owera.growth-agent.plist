@@ -2,7 +2,7 @@
 <!--
   macOS launchd timer for the Owera daily growth agent.
 
-  Runs run/growth-agent.sh once a day, which invokes headless Claude Code against
+  Runs run/growth-agent.sh once a day, which invokes headless Grok against
   this repo with run/daily-agent-playbook.md. The agent is FULLY AUTONOMOUS within
   the guardrails written into the playbook (reversible git commits, <=2 changes/day,
   no destructive ops, respects budgets). Install this only when you want that.
@@ -43,7 +43,7 @@
     <dict>
         <!-- launchd does not inherit the login shell PATH; the script also sets this. -->
         <key>PATH</key>
-        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/Users/you/.grok/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/you</string>
     </dict>

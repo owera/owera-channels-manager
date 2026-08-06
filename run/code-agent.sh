@@ -1,7 +1,7 @@
 #!/bin/sh
 # Autonomous code-agent runner — invoked by launchd (com.owera.code-agent.plist).
 #
-# Runs headless Claude Code against this repo with run/code-agent-playbook.md. Fully
+# Runs headless Grok against this repo with run/code-agent-playbook.md. Fully
 # autonomous but bounded by the guardrails in the playbook: gated, reversible commits
 # straight to main (growth-agent trust model), one change per cycle, deployed and
 # observed live, self-reverted on post-deploy failure. Draft PR only as the fallback
@@ -16,8 +16,8 @@
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO" || exit 1
 
-# launchd gives a minimal PATH; put uv, claude, node/npx, git, gh on it.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# launchd gives a minimal PATH; put grok, uv, node/npx, git, gh on it.
+export PATH="$HOME/.grok/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 # The API is guarded by HTTP Basic Auth when MANAGER_APP_PASSWORD is set (app/main.py).
 # Export it so the agent's /verify step can authenticate against :7070 if it needs to.
@@ -42,17 +42,26 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
+NOTIFY="$REPO/run/notify-agent.sh"
+alert() {
+  log "ALERT: $*"
+  [ -x "$NOTIFY" ] && "$NOTIFY" "code-agent" "${2:-1}" "$1" || true
+}
+
 # --- Preconditions --------------------------------------------------------
-if ! command -v claude >/dev/null 2>&1; then
-  log "ERROR: 'claude' CLI not found on PATH — install Claude Code or fix PATH"
+if ! command -v grok >/dev/null 2>&1; then
+  log "ERROR: 'grok' CLI not found on PATH — install Grok or fix PATH"
+  alert "grok CLI not found" 1
   exit 1
 fi
 if ! command -v gh >/dev/null 2>&1; then
   log "ERROR: 'gh' CLI not found on PATH — needed to open draft PRs"
+  alert "gh CLI not found" 1
   exit 1
 fi
 if ! gh auth status >/dev/null 2>&1; then
   log "ERROR: gh not authenticated — run 'gh auth login'"
+  alert "gh not authenticated" 1
   exit 1
 fi
 # Manager on :7070 is helpful for the /verify gate but not required for every item.
@@ -62,10 +71,18 @@ fi
 
 # --- Run ------------------------------------------------------------------
 log "starting code-agent sprint"
+# { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) code-agent run ================"
-  claude -p "$(cat "$REPO/run/code-agent-playbook.md")" \
-    --permission-mode bypassPermissions
-  echo "---------------- $(ts) run complete (exit $?) ----------------"
+  grok --prompt-file "$REPO/run/code-agent-playbook.md" \
+    --permission-mode bypassPermissions \
+    --cwd "$REPO"
+  STATUS=$?
+  # Capture STATUS before $(ts): command substitution would clobber $?.
+  echo "---------------- $(ts) run complete (exit $STATUS) ----------------"
 } >> "$LOG" 2>&1
-log "done"
+log "done (exit $STATUS)"
+if [ "$STATUS" -ne 0 ]; then
+  alert "see ~/Library/Logs/owera-code-agent.log" "$STATUS"
+fi
+exit "$STATUS"

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Daily growth-agent runner — invoked by launchd (com.owera.growth-agent.plist).
 #
-# Runs headless Claude Code against this repo with the versioned playbook, fully
+# Runs headless Grok against this repo with the versioned playbook, fully
 # autonomous but bounded by the guardrails written into the playbook itself.
 #
 # Kill switches (either stops the next run, no unload needed):
@@ -13,8 +13,8 @@
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO" || exit 1
 
-# launchd gives a minimal PATH; put uv, claude, node/npx, ffmpeg, git on it.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# launchd gives a minimal PATH; put grok, uv, node/npx, ffmpeg, git on it.
+export PATH="$HOME/.grok/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 # The API is guarded by HTTP Basic Auth when MANAGER_APP_PASSWORD is set (see
 # app/main.py basic_auth middleware). Load it from .env and export it so both the
@@ -41,22 +41,39 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
+NOTIFY="$REPO/run/notify-agent.sh"
+alert() {
+  log "ALERT: $*"
+  [ -x "$NOTIFY" ] && "$NOTIFY" "growth-agent" "${2:-1}" "$1" || true
+}
+
 # --- Preconditions --------------------------------------------------------
-if ! command -v claude >/dev/null 2>&1; then
-  log "ERROR: 'claude' CLI not found on PATH — install Claude Code or fix PATH"
+if ! command -v grok >/dev/null 2>&1; then
+  log "ERROR: 'grok' CLI not found on PATH — install Grok or fix PATH"
+  alert "grok CLI not found" 1
   exit 1
 fi
 if ! curl -sf -o /dev/null -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:7070/api/dashboard; then
   log "app not reachable / auth failed on :7070 — skipping (is the manager running? is MANAGER_APP_PASSWORD correct?)"
+  # Soft skip (manager down at 09:00 is recoverable), but still surface it.
+  alert "manager :7070 unreachable — skipped" 0
   exit 0
 fi
 
 # --- Run ------------------------------------------------------------------
 log "starting daily run"
+# { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) growth-agent run ================"
-  claude -p "$(cat "$REPO/run/daily-agent-playbook.md")" \
-    --permission-mode bypassPermissions
-  echo "---------------- $(ts) run complete (exit $?) ----------------"
+  grok --prompt-file "$REPO/run/daily-agent-playbook.md" \
+    --permission-mode bypassPermissions \
+    --cwd "$REPO"
+  STATUS=$?
+  # Capture STATUS before $(ts): command substitution would clobber $?.
+  echo "---------------- $(ts) run complete (exit $STATUS) ----------------"
 } >> "$LOG" 2>&1
-log "done"
+log "done (exit $STATUS)"
+if [ "$STATUS" -ne 0 ]; then
+  alert "see ~/Library/Logs/owera-growth-agent.log" "$STATUS"
+fi
+exit "$STATUS"

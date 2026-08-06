@@ -2,7 +2,7 @@
 <!--
   macOS launchd timer for the Owera autonomous CODE agent.
 
-  Runs run/code-agent.sh once a night, which invokes headless Claude Code against this
+  Runs run/code-agent.sh once a night, which invokes headless Grok against this
   repo with run/code-agent-playbook.md. The agent is autonomous within the guardrails
   in the playbook: gated, reversible commits straight to main (growth-agent trust
   model), one change per cycle, deployed and observed live, self-reverted on
@@ -47,7 +47,7 @@
     <dict>
         <!-- launchd does not inherit the login shell PATH; the script also sets this. -->
         <key>PATH</key>
-        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/Users/you/.grok/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/you</string>
     </dict>

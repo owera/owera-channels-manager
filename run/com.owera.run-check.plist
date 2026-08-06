@@ -3,7 +3,7 @@
   macOS launchd timer for the growth-agent daily run SUPERVISOR.
 
   Runs run/run-check.sh once a day at 10:00 local — ~1h after the 09:00 growth-agent run —
-  which invokes headless Claude Code with run/run-check-prompt.md. It only VERIFIES the run
+  which invokes headless Grok with run/run-check-prompt.md. It only VERIFIES the run
   finished cleanly (pushed, reported, app-code applied) and finishes anything left; it never
   does growth/engagement work. Install this only when you want that supervision.
 
@@ -41,7 +41,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/Users/you/.grok/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/you</string>
     </dict>
