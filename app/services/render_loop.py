@@ -183,15 +183,57 @@ def _advance_in_flight(session: Session) -> None:
                           channel_id=video.channel_id, detail=video.error)
 
 
+def _queued_candidates(session: Session) -> list[Video]:
+    """QUEUED videos in submit order.
+
+    Per channel: if the APPROVED buffer holds no long-form, surface queued longs
+    first (then remaining by position/id). `_auto_produce` already queues a long
+    when the approved long buffer is empty, but a pure FIFO submit order lets
+    earlier short ids burn the daily render budget before that long starts —
+    so the publish loop's reserved long slot finds nothing that day (observed
+    ch2 2026-08-07: 11 approved shorts / 0 longs while a long sat QUEUED behind
+    higher-id shorts that already filled rendered_today=5).
+    """
+    ordered: list[Video] = []
+    channels = session.exec(
+        select(Channel).where(Channel.paused == False).order_by(Channel.id)  # noqa: E712
+    ).all()
+    for channel in channels:
+        queued = session.exec(
+            select(Video).where(
+                Video.status == VideoStatus.QUEUED,
+                Video.channel_id == channel.id,
+            ).order_by(Video.position, Video.id)
+        ).all()
+        if not queued:
+            continue
+        approved_longs = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == channel.id,
+                   Video.status == VideoStatus.APPROVED,
+                   Topic.content_format == "long")
+        ).one()
+        if approved_longs == 0:
+            longs: list[Video] = []
+            rest: list[Video] = []
+            for v in queued:
+                topic = session.get(Topic, v.topic_id)
+                if topic and topic.content_format == "long":
+                    longs.append(v)
+                else:
+                    rest.append(v)
+            ordered.extend(longs + rest)
+        else:
+            ordered.extend(queued)
+    return ordered
+
+
 def _submit_new(session: Session) -> None:
     cfg = app_settings(session)
     in_flight = quota.in_flight_renders(session)
     if in_flight >= cfg.render_concurrency:
         return
-    candidates = session.exec(
-        select(Video).where(Video.status == VideoStatus.QUEUED)
-        .order_by(Video.channel_id, Video.position, Video.id)
-    ).all()
+    candidates = _queued_candidates(session)
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
             break

@@ -267,6 +267,43 @@ s.commit()
 ok(len(by_status(s, ch, VideoStatus.RENDERING)) == 3,
    "single tick with concurrency 8 submits only budget (3)")
 
+# Long-first when the approved long buffer is empty (2026-08-07 ch2): auto_produce
+# queues a long, but FIFO by id let earlier short ids burn the 5/day budget first,
+# so publish found 11 approved shorts / 0 longs. Prefer the queued long on submit.
+print("submit_new: prefers queued long when no approved long banked")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, daily_render_budget=1)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+# Shorts get lower ids (would win pure FIFO); long is created last on purpose.
+v_s1 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_s2 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+ok(v_s1.id < v_long.id, "precondition: shorts have lower ids than the long")
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_long.id).status == VideoStatus.RENDERING,
+   "no approved long -> queued long submits before lower-id shorts")
+ok(s.get(Video, v_s1.id).status == VideoStatus.QUEUED
+   and s.get(Video, v_s2.id).status == VideoStatus.QUEUED,
+   "shorts stay queued when budget is 1 and the long took the slot")
+
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, daily_render_budget=1)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)  # long already banked
+v_s = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_s.id).status == VideoStatus.RENDERING,
+   "approved long already banked -> FIFO / position order (short with lower id wins)")
+ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
+   "second long is not force-prioritized when one is already approved")
+
 # Per-channel isolation: one channel exhausted by successes + in-flight must not
 # block another channel's submissions. ch2's budget (2) is <= ch1's in-flight
 # count (2) on purpose: a gate that counted in-flight renders globally instead
