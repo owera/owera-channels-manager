@@ -161,6 +161,8 @@ ok(e and e.code == "no_refresh_token" and "refresh token" in str(e),
 e = rejected(FakeCreds(granted_scopes=youtube.SCOPES))
 ok(e and e.code == "partial_scopes" and "yt-analytics.readonly" in str(e),
    "partial grant rejected, missing scopes named (partial_scopes)")
+ok(youtube.SELECT_ALL_HINT in str(e),
+   "partial_scopes message carries SELECT_ALL_HINT (shared remediation phrase)")
 ok(youtube.verify_grant(FakeCreds(granted_scopes=youtube.SCOPES),
                         allow_partial=True) == IDENT,
    "allow_partial overrides exactly the scope guard")
@@ -201,6 +203,26 @@ ok(set(channels_router._GRANT_HINTS) <= youtube.GRANT_CODES,
    "_GRANT_HINTS keys are all registered GrantCodes (no drift)")
 ok(set(reconnect._CLI_HINTS) <= youtube.GRANT_CODES,
    "_CLI_HINTS keys are all registered GrantCodes (no drift)")
+
+# ---- SELECT_ALL_HINT single source (BACKLOG 4c-f) ---------------------------
+# The partial-scopes remediation and the reconnect CLI pre-consent reminder
+# must share one constant — a wording drift here is how an operator gets two
+# different "how to fix partial scopes" strings after a drive-by edit.
+ok(isinstance(youtube.SELECT_ALL_HINT, str) and "Select all" in youtube.SELECT_ALL_HINT
+   and "Selecionar tudo" in youtube.SELECT_ALL_HINT,
+   "SELECT_ALL_HINT names both the EN and PT consent-screen control")
+ok(youtube.SELECT_ALL_HINT in reconnect.SCOPE_REMINDER,
+   "reconnect.SCOPE_REMINDER embeds youtube.SELECT_ALL_HINT at runtime")
+ok(reconnect.SCOPE_REMINDER.count(youtube.SELECT_ALL_HINT) == 1,
+   "SELECT_ALL_HINT appears exactly once in SCOPE_REMINDER")
+# A local copy of the same string would still pass the runtime `in` check above
+# (identical content). Pin the SOURCE so reconnect references the constant by
+# name and carries no EN/PT consent-screen literals of its own.
+_recon_src = Path(reconnect.__file__).read_text()
+ok("SELECT_ALL_HINT" in _recon_src,
+   "reconnect.py source references SELECT_ALL_HINT by name")
+ok("Selecionar tudo" not in _recon_src and "Select all" not in _recon_src,
+   "reconnect.py has no local Select-all / Selecionar-tudo string literal")
 
 # ---- end-to-end: real /oauth/start + /oauth/callback ------------------------
 # The only stubs are Google's token endpoint (local mock HTTP server) and the

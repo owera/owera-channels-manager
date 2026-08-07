@@ -186,8 +186,12 @@ flag the operator step in the commit body.
   failure leaves the saved token + the do-not-redo recipe, and the flip-failure page names the
   channel from the identity riding on the exception (distinct title, so a ch.name fallback fails).
   Suites: `verify_oauth_redirect.py` 64 → 66, `verify_reconnect.py` 47 → 58 checks.
-  (f) the "click 'Select all'" consent-screen remediation string is duplicated between
-  `youtube.verify_grant` and `reconnect.SCOPE_REMINDER`.
+  (f) ✅ DONE (code shipped to main 2026-08-07) — `youtube.SELECT_ALL_HINT` is the
+  single shared phrase (`click 'Select all' ("Selecionar tudo")`); `verify_grant`'s
+  partial_scopes message and `reconnect.SCOPE_REMINDER` both embed it, so a wording
+  fix can't desync the two operator-facing strings. Suite: `verify_oauth_redirect.py`
+  pins the constant's EN+PT wording, its presence in the partial_scopes rejection,
+  and that SCOPE_REMINDER embeds the constant (no local copy).
 - **caution:** (a)/(c)/(e) touch the oauth flow (HIGH, isolated commits); (b)/(d)/(f) normal.
 - **acceptance:** per-item; suites stay green.
 

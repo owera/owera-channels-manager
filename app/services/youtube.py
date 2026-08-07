@@ -45,6 +45,11 @@ CONSENT_SCOPES = SCOPES + [
     "https://www.googleapis.com/auth/youtube.force-ssl",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
+# Shared remediation phrase for the partial-scopes guard (verify_grant) and the
+# reconnect CLI pre-consent reminder (app.reconnect.SCOPE_REMINDER). Google's
+# consent checkboxes are UNCHECKED by default — both sites must say the same
+# thing so a wording fix can't desync (BACKLOG 4c-f).
+SELECT_ALL_HINT = "click 'Select all' (\"Selecionar tudo\")"
 CATEGORY_SCIENCE_TECH = "28"
 
 # Estimated quota costs (units) — YouTube Data API v3.
@@ -264,7 +269,7 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
     if missing and not allow_partial:
         raise GrantRejected(
             "grant is missing scope(s): " + ", ".join(missing) + ". Token NOT "
-            "saved — re-run and click 'Select all' (\"Selecionar tudo\") on the "
+            f"saved — re-run and {SELECT_ALL_HINT} on the "
             "consent screen.", code=GrantCode.PARTIAL_SCOPES)
     try:
         # Module-global lookup on purpose: tests stub the one live-Google call

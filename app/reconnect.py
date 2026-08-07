@@ -41,7 +41,7 @@ from app.services import youtube
 
 SCOPE_REMINDER = (
     "NOTE: on Google's consent screen the scope checkboxes are UNCHECKED by default —\n"
-    "click 'Select all' (\"Selecionar tudo\") before Continue, or the grant comes back\n"
+    f"{youtube.SELECT_ALL_HINT} before Continue, or the grant comes back\n"
     "denied/partial and nothing is saved."
 )
 
