@@ -343,9 +343,24 @@ flag the operator step in the commit body.
   techno_<ms>.wav under bgm_dir with mkdir -p); `replenish` (at-target
   no-op writes nothing, deficit arithmetic, target= override, raising
   generate_and_save logs error JobRun and continues — partial success).
-  Still lightly covered `app/services/*` loops (metrics/analytics are
-  mostly YouTube I/O — better served by live probes than unit stubs);
-  no zero-coverage service modules remain after this cycle.
+  `metadata.py` (previously only `finalize_description` via growth/chapters)
+  — `tests/verify_metadata.py` (67 checks, 2026-08-07): the publish-path
+  title/description/tags choke point. `_from_meta` (title fallback + 100-char
+  clamp, caption+hashtag description, `#` strip, EXTRA_TAGS always appended,
+  None/empty/missing fields); `generate` MPT happy path (platform
+  youtube vs youtube_shorts, language name → BCP-47 via `_LANGUAGE_MPT_CODES`,
+  script=None → `""`, unknown language → en-US); MPT-None → litellm fallback
+  (short vs long prompts, HARD RULE language clause, 4000-char script cap,
+  fenced-JSON strip); both-dead → last-resort heuristic (subject[:100] title
+  so review is never blocked); MPT empty-dict is falsy → fallback (not
+  `_from_meta` of `{}`); residual `finalize_description` edges (es/unknown
+  → EN CTA, case-insensitive BCP-47 prefix, None/whitespace base,
+  channel-only/playlist-only, chapters already present not re-appended while
+  CTA still lands, chapters-before-CTA order, 5000-char clamp after append,
+  bare channel URL without `sub_confirmation=1` is NOT treated as finalized).
+  Mutation-verified: 15/15 hand-built semantic mutants killed from an
+  isolated copy (bytecode caching off). Still lightly covered: thumbnail
+  generation (HyperFrames I/O), metrics/analytics loops (YouTube I/O).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
