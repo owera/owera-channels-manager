@@ -363,8 +363,22 @@ flag the operator step in the commit body.
   CTA still lands, chapters-before-CTA order, 5000-char clamp after append,
   bare channel URL without `sub_confirmation=1` is NOT treated as finalized).
   Mutation-verified: 15/15 hand-built semantic mutants killed from an
-  isolated copy (bytecode caching off). Still lightly covered: thumbnail
-  generation (HyperFrames I/O), metrics/analytics loops (YouTube I/O).
+  isolated copy (bytecode caching off).
+  `metrics_loop.py` (previously only NeedsConnect wiring via notify) —
+  `tests/verify_metrics.py` (40 checks, 2026-08-08): the daily public-stats
+  probe and silent-death alert path during a publishing lull.
+  `_snapshot_due` (no row / today's aware+SQLite-naive / yesterday /
+  cross-channel isolation / exact-midnight boundary); `record_snapshot`
+  happy path (ChannelMetric fields, 1-unit metrics success JobRun,
+  get_service(slug)); missing/None/empty statistics → zeros;
+  NeedsConnect → EXPIRED flip + no metric (contract pin; full alert
+  semantics in verify_notify); transient skip leaves CONNECTED;
+  `tick()` CONNECTED-only + due-only filter (EXPIRED/DISCONNECTED/ERROR
+  never probed; second same-day tick is a no-op). Mutation-verified:
+  12/12 hand-built semantic mutants killed from an isolated copy
+  (bytecode caching off, module `__file__` pinned). Still lightly
+  covered: thumbnail generation (HyperFrames I/O), analytics_loop body
+  beyond `_publish_reserve` (YouTube I/O).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
