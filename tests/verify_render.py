@@ -300,9 +300,85 @@ v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)
 render_loop._submit_new(s)
 s.commit()
 ok(s.get(Video, v_s.id).status == VideoStatus.RENDERING,
-   "approved long already banked -> FIFO / position order (short with lower id wins)")
+   "approved long already banked -> short preferred over additional long")
 ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
    "second long is not force-prioritized when one is already approved")
+
+# Dual of long-first: long has LOWER id (would win pure FIFO) but short still
+# submits first when an approved long is already banked.
+print("submit_new: prefers queued short when approved long banked (even if long id is lower)")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, daily_render_budget=1)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)  # lower id
+v_s = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+ok(v_long.id < v_s.id, "precondition: long has lower id than short")
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_s.id).status == VideoStatus.RENDERING,
+   "banked long -> short submits before lower-id queued long")
+ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
+   "queued long waits when shorts need the mix slots")
+
+# Rebalance: pure-long QUEUED + short drafts + banked approved long → demote
+# excess longs to DRAFT so _auto_produce can fill shorts.
+print("rebalance_queued_mix: demotes excess longs when short drafts exist")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+queued_longs = [make_video(s, ch, t_long, status=VideoStatus.QUEUED) for _ in range(5)]
+short_drafts = [make_video(s, ch, t_short, status=VideoStatus.DRAFT) for _ in range(4)]
+render_loop._rebalance_queued_mix(s)
+s.commit()
+still_queued = [v for v in queued_longs if s.get(Video, v.id).status == VideoStatus.QUEUED]
+demoted = [v for v in queued_longs if s.get(Video, v.id).status == VideoStatus.DRAFT]
+ok(len(still_queued) == 1, "rebalance keeps exactly 1 queued long as reserve")
+ok(len(demoted) == 4, "rebalance demotes 4 excess longs to DRAFT")
+ok(all(s.get(Video, v.id).status == VideoStatus.DRAFT for v in short_drafts),
+   "short drafts untouched by rebalance itself")
+
+# No demotion when there are no short drafts to promote into the freed slots.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+ql = [make_video(s, ch, t_long, status=VideoStatus.QUEUED) for _ in range(3)]
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in ql),
+   "rebalance is a no-op when no short drafts exist")
+
+# Full tick path: rebalance + auto_produce fills shorts into freed headroom
+# when rendered_today=0 (budget free).
+print("tick path: rebalance + auto_produce restores short queue under banked long")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+for _ in range(5):
+    make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+for _ in range(4):
+    make_video(s, ch, t_short, status=VideoStatus.DRAFT)
+render_loop._rebalance_queued_mix(s)
+render_loop._auto_produce(s)
+s.commit()
+queued_now = s.exec(select(Video).where(
+    Video.channel_id == ch.id, Video.status == VideoStatus.QUEUED)).all()
+formats = []
+for v in queued_now:
+    t = s.get(Topic, v.topic_id)
+    formats.append(t.content_format if t else "?")
+ok(formats.count("long") == 1, "after rebalance+produce: exactly 1 long remains queued")
+ok(formats.count("short") == 4, "after rebalance+produce: 4 shorts fill the freed slots")
+ok(len(queued_now) == 5, "queue still fills to budget size")
 
 # Per-channel isolation: one channel exhausted by successes + in-flight must not
 # block another channel's submissions. ch2's budget (2) is <= ch1's in-flight

@@ -183,16 +183,38 @@ def _advance_in_flight(session: Session) -> None:
                           channel_id=video.channel_id, detail=video.error)
 
 
+def _split_queued_by_format(session: Session, queued: list[Video]) -> tuple[list[Video], list[Video]]:
+    """Partition QUEUED rows into (longs, shorts) preserving input order."""
+    longs: list[Video] = []
+    shorts: list[Video] = []
+    for v in queued:
+        topic = session.get(Topic, v.topic_id)
+        if topic and topic.content_format == "long":
+            longs.append(v)
+        else:
+            shorts.append(v)
+    return longs, shorts
+
+
 def _queued_candidates(session: Session) -> list[Video]:
     """QUEUED videos in submit order.
 
-    Per channel: if the APPROVED buffer holds no long-form, surface queued longs
-    first (then remaining by position/id). `_auto_produce` already queues a long
-    when the approved long buffer is empty, but a pure FIFO submit order lets
-    earlier short ids burn the daily render budget before that long starts —
-    so the publish loop's reserved long slot finds nothing that day (observed
-    ch2 2026-08-07: 11 approved shorts / 0 longs while a long sat QUEUED behind
-    higher-id shorts that already filled rendered_today=5).
+    Per channel, order tracks the 1-long + 4-shorts daily mix:
+
+    - **No approved long** → surface queued longs first (then shorts by
+      position/id). `_auto_produce` already queues a long when the approved
+      long buffer is empty, but a pure FIFO submit order lets earlier short
+      ids burn the daily render budget before that long starts — so the
+      publish loop's reserved long slot finds nothing that day (observed
+      ch2 2026-08-07: 11 approved shorts / 0 longs while a long sat QUEUED
+      behind higher-id shorts that already filled rendered_today=5).
+
+    - **Approved long already banked** → prefer shorts first (then remaining
+      longs). Dual of the case above: a pure-long FIFO queue rebuilds an
+      all-long approved pool even when short drafts exist, and the publish
+      mix can only paper over it when shorts are already approved (observed
+      ch1 2026-08-08: approved 2L+1S, QUEUED = 5× t5 longs, drafts = 5× t6
+      shorts; without this, overnight would render 5 more longs).
     """
     ordered: list[Video] = []
     channels = session.exec(
@@ -213,19 +235,68 @@ def _queued_candidates(session: Session) -> list[Video]:
                    Video.status == VideoStatus.APPROVED,
                    Topic.content_format == "long")
         ).one()
+        longs, shorts = _split_queued_by_format(session, queued)
         if approved_longs == 0:
-            longs: list[Video] = []
-            rest: list[Video] = []
-            for v in queued:
-                topic = session.get(Topic, v.topic_id)
-                if topic and topic.content_format == "long":
-                    longs.append(v)
-                else:
-                    rest.append(v)
-            ordered.extend(longs + rest)
+            ordered.extend(longs + shorts)
         else:
-            ordered.extend(queued)
+            ordered.extend(shorts + longs)
     return ordered
+
+
+def _rebalance_queued_mix(session: Session) -> None:
+    """When the approved long buffer is healthy, free queue slots for shorts.
+
+    `_auto_produce` headroom counts every QUEUED row against the budget. If the
+    queue is already full of longs, headroom is 0 and short drafts never promote
+    — even though `_auto_produce` would prefer shorts when approved_longs > 0.
+    Demote excess queued longs (beyond one reserve) back to DRAFT only when
+    promotable short drafts exist, so the next headroom fill restores the mix.
+    Lifecycle: QUEUED → DRAFT (undo of produce); re-render still starts at QUEUED.
+    """
+    for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+        approved_longs = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id,
+                   Video.status == VideoStatus.APPROVED,
+                   Topic.content_format == "long")
+        ).one()
+        if approved_longs < 1:
+            continue
+        short_drafts = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id,
+                   Video.status == VideoStatus.DRAFT,
+                   Topic.active == True,  # noqa: E712
+                   Topic.weight > 0,
+                   Topic.content_format != "long")
+        ).one()
+        if short_drafts < 1:
+            continue
+        queued = session.exec(
+            select(Video).where(
+                Video.channel_id == ch.id,
+                Video.status == VideoStatus.QUEUED,
+            ).order_by(Video.position, Video.id)
+        ).all()
+        longs, _shorts = _split_queued_by_format(session, queued)
+        # Keep one queued long as next-day buffer; demote the rest (newest first
+        # among longs so earlier-position subjects stay closer to production).
+        excess = list(reversed(longs[1:]))  # drop index 0 reserve; demote from end
+        if not excess:
+            continue
+        for v in excess:
+            v.status = VideoStatus.DRAFT
+            v.error = None
+            session.add(v)
+            quota.log(
+                session, kind="produce", status="success", video_id=v.id,
+                channel_id=ch.id,
+                detail="rebalance: demoted excess queued long → draft so shorts can fill mix",
+            )
+        logger.info(
+            "rebalance: demoted %d excess queued long(s) on channel %s (approved longs=%s, short drafts=%s)",
+            len(excess), ch.slug, approved_longs, short_drafts,
+        )
 
 
 def _submit_new(session: Session) -> None:
@@ -342,5 +413,6 @@ def tick() -> None:
         if app_settings(session).scheduler_paused:
             return
         _advance_in_flight(session)
+        _rebalance_queued_mix(session)
         _auto_produce(session)
         _submit_new(session)
