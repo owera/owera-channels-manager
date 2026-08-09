@@ -376,9 +376,25 @@ flag the operator step in the commit body.
   `tick()` CONNECTED-only + due-only filter (EXPIRED/DISCONNECTED/ERROR
   never probed; second same-day tick is a no-op). Mutation-verified:
   12/12 hand-built semantic mutants killed from an isolated copy
-  (bytecode caching off, module `__file__` pinned). Still lightly
-  covered: thumbnail generation (HyperFrames I/O), analytics_loop body
-  beyond `_publish_reserve` (YouTube I/O).
+  (bytecode caching off, module `__file__` pinned).
+  `analytics_loop.py` (previously only `_publish_reserve` + NeedsConnect
+  wiring via notify) — `tests/verify_analytics.py` (89 checks, 2026-08-09):
+  the per-video Analytics snapshot pass the growth agent steers by.
+  `_snapshot_due` (no row / today's aware+SQLite-naive / yesterday /
+  cross-video isolation / midnight boundary); `_mature` (None / young /
+  ≥24h boundary / SQLite-naive); `record_video_snapshot` happy path
+  (VideoMetric fields, 2-unit success JobRun, published_at→created_at
+  date range, traffic fetched only when views>0, empty sources leave
+  traffic_json None, traffic exception best-effort); generic failure →
+  None + error JobRun (quota_cost=0); QuotaExceeded propagates;
+  `_dead_token_error` (NeedsConnect / healthy / transient); `_snapshot_channel`
+  (immature/not-due/no-yt-id/non-PUBLISHED filters, newest-first order,
+  force bypasses due, first hard-fail aborts, mid soft-fail continues,
+  QuotaExceeded mid-pass breaks, pre-emptive quota-cap stop, dead-token
+  flip vs missing-scope skip); `tick()` CONNECTED+yt_channel_id filter
+  and scheduler_paused no-op. Mutation-verified: 15/15 hand-built
+  semantic mutants killed from an isolated copy (bytecode caching off).
+  Still lightly covered: thumbnail generation (HyperFrames I/O).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
