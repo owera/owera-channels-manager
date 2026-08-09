@@ -287,6 +287,9 @@ def video_analytics(channel_id: int, sort: str = "views",
             "subscribers_gained": m.subscribers_gained if m else 0,
             "captured_at": m.captured_at if m else None,
             "has_data": m is not None,
+            # discovery signal (directive-1): browse/suggested/search/shorts mix —
+            # CTR/impressions are unmeasurable; traffic_json is how we tell if YT is testing
+            "traffic_json": _parse_json(m.traffic_json) if m else None,
             # the "treatment" signal — how this video was made — for creative attribution
             "creation_config": _parse_json(v.creation_config),
         })
