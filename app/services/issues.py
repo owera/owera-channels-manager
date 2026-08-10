@@ -217,6 +217,21 @@ def detect(session: Session) -> dict:
     # The draft/queued split matters: `pending` (and therefore `at_capacity`) counts
     # BOTH, so a channel whose bench is all unproduced DRAFTs reads "at capacity" while
     # the render loop — which only ever consumes QUEUED — has nothing to do.
+    # Format split (long/short) on draft/queued/approved lets the agent enforce the
+    # standing 1 long + 4 shorts daily mix without a DB dive (growth agent 2026-08-10).
+    def _fmt_counts(channel_id: int, status: VideoStatus) -> dict:
+        longs = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == channel_id, Video.status == status,
+                   Topic.content_format == "long")
+        ).one()
+        shorts = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == channel_id, Video.status == status,
+                   Topic.content_format != "long")
+        ).one()
+        return {"long": int(longs or 0), "short": int(shorts or 0)}
+
     board_inventory = []
     for ch in channels:
         daily_cap = ch.daily_render_budget
@@ -238,6 +253,11 @@ def detect(session: Session) -> dict:
                 "days_of_inventory": days,
                 "board_horizon_days": cfg.board_horizon_days,
                 "at_capacity": days >= cfg.board_horizon_days,
+                "by_format": {
+                    "draft": _fmt_counts(ch.id, VideoStatus.DRAFT),
+                    "queued": _fmt_counts(ch.id, VideoStatus.QUEUED),
+                    "approved": _fmt_counts(ch.id, VideoStatus.APPROVED),
+                },
             })
 
     # Pipeline starvation — the failure this digest was blind to for 5 days (07-18→07-23).
