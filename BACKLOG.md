@@ -394,7 +394,23 @@ flag the operator step in the commit body.
   flip vs missing-scope skip); `tick()` CONNECTED+yt_channel_id filter
   and scheduler_paused no-op. Mutation-verified: 15/15 hand-built
   semantic mutants killed from an isolated copy (bytecode caching off).
-  Still lightly covered: thumbnail generation (HyperFrames I/O).
+  `thumbnail.py` (previously only palette identity via storyboard) —
+  `tests/verify_thumbnail.py` (87 checks, 2026-08-10): the publish-path
+  custom-thumbnail CTR lever (HyperFrames card → ffmpeg still → PNG).
+  Module contracts (1280x720 out, 1920x1080 render, palette IS
+  theme.PALETTE, 240s timeout); `_hook_text` (LLM happy path, quote/
+  multi-line strip order, word-count 2–8 + ≤60-char gates + inclusive
+  bounds, exception → title fallback, title-over-subject, whitespace-
+  title strips to sentinel without consulting subject, empty →
+  "Watch This", content_format short/long prompt pin, max_tokens=100);
+  `_thumbnail_html` (dimensions, accent/bg injection, HTML-escape of
+  the hook slot, gsap timeline shell); `_render`/`_extract_frame`
+  command contracts (npx hyperframes@version, quality/quiet/env pins,
+  ffmpeg scale=1280:720 + -ss 0.4, nonzero and missing-out raises);
+  `make_thumbnail_png` (happy path writes gsap+index.html, topic_id
+  palette selection + wrap, content_format forward, any failure →
+  None never raises). Mutation-verified: hand-built semantic mutants
+  killed from an isolated copy (bytecode caching off).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
