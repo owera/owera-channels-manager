@@ -411,6 +411,23 @@ flag the operator step in the commit body.
   palette selection + wrap, content_format forward, any failure →
   None never raises). Mutation-verified: hand-built semantic mutants
   killed from an isolated copy (bytecode caching off).
+  `video_gen.py` (previously only language helpers via verify_growth;
+  `generate_ideas` zero direct coverage — autofill only stubs it) —
+  `tests/verify_video_gen.py` (100 checks, 2026-08-11): the title/idea
+  choke point shared by autofill, topics API, and trends API. Module
+  contracts (pt/en/es voice tables + BCP-47 pairs); `language_from_voice`
+  / `code_from_voice` (None/empty, known voices, case-insensitive
+  prefix, unknown → None, first-segment-only); `channel_language` /
+  `channel_language_code` (None id, missing channel, unbound/missing
+  profile, corrupt JSON swallow, empty params_json, happy path for
+  pt/en/es); `generate_ideas` (short vs long prompt branches, language
+  HARD RULE — the 07-07 EN-on-PT incident fix — theme_prompt guidance,
+  existing-title avoid list last-60 window + '(none yet)', bullet/
+  number/quote strip, case-insensitive dedupe existing+within-response,
+  n cap incl. n=0 and n=-1 max(0,n) guard — the 07-26 overshoot,
+  empty/None LLM content, litellm model + drop_params pins, forbidden-
+  opener brief pins). Mutation-verified: 20/20 hand-built semantic
+  mutants killed from an isolated copy (bytecode caching off).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
