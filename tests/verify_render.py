@@ -186,6 +186,42 @@ ok(s.get(Video, v_short.id).status == VideoStatus.QUEUED,
 ok(s.get(Video, v_long.id).status == VideoStatus.DRAFT,
    "no second long queued while one is banked")
 
+# With headroom ≥ 2 and exactly one approved long (none in flight), reserve one
+# queued long for the day after publish so the bank doesn't hit 0L at noon.
+print("auto_produce: banks a next-day long reserve under thin approved long buffer")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+t_short = make_topic(s, ch, name="shorts", weight=3, content_format="short")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)  # thin bank (exactly 1)
+v_long = make_video(s, ch, t_long)
+short_ids = [make_video(s, ch, t_short).id for _ in range(5)]
+render_loop._auto_produce(s)
+s.commit()
+ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
+   "approved_longs==1 and headroom>=2 -> one long reserved in queue")
+queued_shorts = sum(
+    1 for sid in short_ids if s.get(Video, sid).status == VideoStatus.QUEUED
+)
+ok(queued_shorts == 4, "remaining 4 slots prefer shorts (1L+4S overnight mix)")
+
+# If a long is already queued, do not force a second while one is approved.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+t_short = make_topic(s, ch, name="shorts", weight=3, content_format="short")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+make_video(s, ch, t_long, status=VideoStatus.QUEUED)  # reserve already present
+v_long2 = make_video(s, ch, t_long)
+short_ids = [make_video(s, ch, t_short).id for _ in range(5)]
+# active=1 (queued long) → headroom=4
+render_loop._auto_produce(s)
+s.commit()
+ok(s.get(Video, v_long2.id).status == VideoStatus.DRAFT,
+   "in-flight long already present -> no extra long from drafts")
+ok(sum(1 for sid in short_ids if s.get(Video, sid).status == VideoStatus.QUEUED) == 4,
+   "headroom fills with shorts when long reserve already queued")
+
 # --- _submit_new: in-flight renders count against the daily budget ------------
 # 2026-07-26 incident: gating on completed renders alone let the loop start a new
 # render after each success while `render_concurrency` others were still in

@@ -362,10 +362,18 @@ def _auto_produce(session: Session) -> None:
 
     Per non-paused channel: headroom = daily_render_budget - rendered_today -
     (queued + rendering). Drafts from weight-0 or inactive topics are never touched
-    (weight 0 = operator-parked). If the APPROVED buffer holds no long-form, one
-    long draft is queued first so the publish loop's reserved daily long slot
-    (quota.published_long_today) can always be filled; remaining slots go to shorts
-    weight-first, then longs.
+    (weight 0 = operator-parked).
+
+    Long-form buffer policy (pairs with `_rebalance_queued_mix` "keep 1 queued
+    long as next-day reserve"):
+    - **No long in pipeline** (approved + queued + rendering == 0) → queue one
+      long first so the publish loop's reserved daily long slot can fill.
+    - **Exactly one approved long and none in flight**, with headroom ≥ 2 →
+      leave one slot for a queued long reserve *after* shorts take the rest.
+      Without this, a pure-short fill under a banked long leaves the queue with
+      0 longs; after that long publishes, approved_longs hits 0 until the next
+      overnight cycle (observed ch1 2026-08-11 noon: approved 0L+3S).
+    - Remaining headroom → shorts weight-first, then longs.
     """
     for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
         active = session.exec(
@@ -386,7 +394,9 @@ def _auto_produce(session: Session) -> None:
             continue
         longs = [v for v, t in rows if t.content_format == "long"]
         shorts = [v for v, t in rows if t.content_format != "long"]
-        picks = []
+        picks: list[Video] = []
+        approved_longs = 0
+        in_flight_longs = 0
         if longs:
             approved_longs = session.exec(
                 select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
@@ -394,8 +404,31 @@ def _auto_produce(session: Session) -> None:
                        Video.status == VideoStatus.APPROVED,
                        Topic.content_format == "long")
             ).one()
-            if approved_longs == 0:
+            in_flight_longs = session.exec(
+                select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+                .where(Video.channel_id == ch.id,
+                       Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)),
+                       Topic.content_format == "long")
+            ).one()
+            # Urgent: nothing long in the whole pipeline.
+            if approved_longs == 0 and in_flight_longs == 0:
                 picks.append(longs.pop(0))
+        # Next-day reserve: one approved long banked, none already queued/rendering,
+        # and enough headroom that shorts still get slots (budget=1 keeps preferring
+        # the short — see verify_render "no second long queued while one is banked").
+        need_long_reserve = (
+            bool(longs)
+            and approved_longs == 1
+            and in_flight_longs == 0
+            and headroom - len(picks) >= 2
+        )
+        # Leave one slot for the long reserve when needed; consume shorts so
+        # the fill-remainder pass cannot re-pick the same draft objects.
+        short_slots = max(0, headroom - len(picks) - (1 if need_long_reserve else 0))
+        picks.extend(shorts[:short_slots])
+        shorts = shorts[short_slots:]
+        if need_long_reserve and longs:
+            picks.append(longs.pop(0))
         picks.extend(shorts[: headroom - len(picks)])
         picks.extend(longs[: headroom - len(picks)])
         for v in picks:
