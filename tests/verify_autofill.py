@@ -103,15 +103,15 @@ def overshooting(topic_name, theme, existing, n, fmt, language=None):
     return [f"{topic_name} idea {i}" for i in range(n + 7)]
 
 
-print("case: high-weight topic claims board space before a lower-id anchor")
+print("case: high-weight short claims most board space but long keeps 1 reserved slot")
 s = fresh_session()
 ch = make_channel(s, daily_render_budget=3)  # board cap 3 with horizon 1
 anchor = make_topic(s, ch, name="anchor-long", weight=2, content_format="long")
 wedge = make_topic(s, ch, name="wedge-short", weight=3, content_format="short")
 ok(anchor.id < wedge.id, "fixture: anchor has the lower id (the old iteration winner)")
 run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
-ok(drafts_for(s, wedge.id) == 3, "w3 wedge filled the whole 3-slot board first")
-ok(drafts_for(s, anchor.id) == 0, "lower-id w2 anchor got nothing once the board was full")
+ok(drafts_for(s, wedge.id) == 2, "w3 wedge fills short-cap (board-1) first")
+ok(drafts_for(s, anchor.id) == 1, "w2 long anchor claims the reserved long slot")
 
 print("case: remaining board space flows down to the next topic by weight")
 s = fresh_session()
@@ -146,5 +146,31 @@ heavy = make_topic(s, ch, name="heavy", weight=2, content_format="short")
 run_tick(s, _Cfg(target=2, horizon=1), well_behaved)
 ok(drafts_for(s, heavy.id) == 4, "w2 topic refilled first (2x2)")
 ok(drafts_for(s, nullw.id) == 1, "NULL-weight topic treated as w1, got the remainder")
+
+print("case: board full of shorts still seeds one long draft (overshoot reserve)")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=3)  # board cap 3
+anchor = make_topic(s, ch, name="anchor-long", weight=2, content_format="long")
+wedge = make_topic(s, ch, name="wedge-short", weight=4, content_format="short")
+# Pre-fill board with 3 short drafts so channel_pending == board_cap and long=0.
+for i in range(3):
+    s.add(Video(channel_id=ch.id, topic_id=wedge.id, subject=f"pre-short {i}",
+                status=VideoStatus.DRAFT, position=i + 1))
+s.commit()
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, wedge.id) == 3, "shorts stay at the pre-filled board cap")
+ok(drafts_for(s, anchor.id) == 1, "empty long bench gets exactly one reserved seed (+1 overshoot)")
+
+print("case: long reserve does not apply when a long draft already exists")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=3)
+anchor = make_topic(s, ch, name="anchor-long", weight=1, content_format="long")
+wedge = make_topic(s, ch, name="wedge-short", weight=4, content_format="short")
+s.add(Video(channel_id=ch.id, topic_id=anchor.id, subject="existing long",
+            status=VideoStatus.DRAFT, position=1))
+s.commit()
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, anchor.id) == 1, "existing long draft counts — no extra long forced")
+ok(drafts_for(s, wedge.id) == 2, "shorts fill remaining board slots (cap 3 − 1 long)")
 
 print(f"all {_checks} checks passed")
