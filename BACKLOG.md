@@ -428,6 +428,21 @@ flag the operator step in the commit body.
   empty/None LLM content, litellm model + drop_params pins, forbidden-
   opener brief pins). Mutation-verified: 20/20 hand-built semantic
   mutants killed from an isolated copy (bytecode caching off).
+  `engines/hyperframes.py` (previously zero direct coverage; only MPT's
+  engine adapter was covered) — `tests/verify_hyperframes.py` (66 checks,
+  2026-08-12): the local HTML/CSS→MP4 render adapter render_loop polls.
+  Module contracts (name, STATE_* identity with base, final_path shape,
+  get_engine registry wiring); `_job_dir`/`_status_path` under
+  `settings.hyperframes_storage_dir`; `write_status` create/merge-preserve/
+  corrupt-JSON recovery/explicit None clear; `poll` missing+corrupt →
+  PROCESSING/0 (never failed), happy-path field forwarding including
+  error+creation_config, progress int coercion + null/missing→0, missing
+  state→PROCESSING, STATE_FAILED error string; `submit` 32-char hex handle,
+  job dir + initial status, daemon thread args (handle/job_dir/subject/
+  params COPY by identity), unique handles, pre-mux final.mp4 absent;
+  write_status→poll round-trip. Mutation-verified: 17/17 hand-built
+  semantic mutants killed from an isolated copy (bytecode caching off,
+  module `__file__` pinned).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
