@@ -428,6 +428,26 @@ flag the operator step in the commit body.
   empty/None LLM content, litellm model + drop_params pins, forbidden-
   opener brief pins). Mutation-verified: 20/20 hand-built semantic
   mutants killed from an isolated copy (bytecode caching off).
+  `engines/worker.py` (previously only `_has_visible_frames` / `_looks_valid`
+  / `_creation_config` via storyboard) — `tests/verify_worker.py` (198
+  checks, 2026-08-13): the HyperFrames render pipeline run_job executes
+  on a daemon thread. Module contracts (aspects, accent==theme.PALETTE,
+  `_esc is theme.esc`, five templates, 1800s timeout, bundled gsap);
+  `_word_count_bounds` short band vs long floor/cap; `_generate_script`
+  with `_llm` stubbed (short vs long prompts, R7 spoken-CTA, 07-07 HARD
+  RULE language, quote-strip, out-of-band retry / empty-retry keeps
+  original); `_pick_template` subject-hash; `_clips_from_json` unwrap +
+  clamps; `_validate_clips` overlap/bounds; `_assemble_composition` +
+  every template `_looks_valid` (HTML-escape, w=1/2/3 styles); fallback
+  / `_key_lines`; `_voice` gender-suffix; `_creation_config` never-raises
+  + volume-0 pin; `_pick_bgm` explicit-off / techno-prefer / named /
+  handle-hash; `_probe_duration` / `_has_visible_frames` subprocess-
+  stubbed (dea9405 blank class); `_render` / `_mux` command contracts;
+  `_generate_composition` storyboard vs legacy vs exception→"";
+  `run_job` happy / unknown-aspect / invalid-HTML fallback / render-
+  raise rebuild / blank-frame rebuild / STATE_FAILED. Mutation-verified:
+  hand-built semantic mutants killed from an isolated copy (bytecode
+  caching off, module `__file__` pinned).
   `engines/hyperframes.py` (previously zero direct coverage; only MPT's
   engine adapter was covered) — `tests/verify_hyperframes.py` (66 checks,
   2026-08-12): the local HTML/CSS→MP4 render adapter render_loop polls.
