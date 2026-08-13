@@ -120,7 +120,7 @@ anchor = make_topic(s, ch, name="anchor-long", weight=2, content_format="long")
 wedge = make_topic(s, ch, name="wedge-short", weight=3, content_format="short")
 run_tick(s, _Cfg(target=1, horizon=1), well_behaved)  # ceiling = weight * 1
 ok(drafts_for(s, wedge.id) == 3, "wedge topped up to its own ceiling (1x3)")
-ok(drafts_for(s, anchor.id) == 2, "anchor got the remainder (1x2) within the board")
+ok(drafts_for(s, anchor.id) == 1, "long mix-cap is 1/horizon-day (not the leftover 2)")
 
 print("case: an overshooting generator cannot push a topic past its ask")
 s = fresh_session()
@@ -160,6 +160,30 @@ s.commit()
 run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
 ok(drafts_for(s, wedge.id) == 3, "shorts stay at the pre-filled board cap")
 ok(drafts_for(s, anchor.id) == 1, "empty long bench gets exactly one reserved seed (+1 overshoot)")
+
+print("case: equal-weight long walking first seeds 1, not the whole open board")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)  # board cap 5
+anchor = make_topic(s, ch, name="anchor-long", weight=4, content_format="long")
+wedge = make_topic(s, ch, name="wedge-short", weight=4, content_format="short")
+ok(anchor.id < wedge.id, "fixture: long has the lower id (walks first at equal weight)")
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, anchor.id) == 1, "empty long bench seeds exactly 1 while shorts are hungry")
+ok(drafts_for(s, wedge.id) == 4, "shorts claim the remaining open board slots")
+
+print("case: 08-13 shape — 5 queued shorts, 0 long, horizon 2, equal w4 — longs cap at 2")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)  # board cap 10
+anchor = make_topic(s, ch, name="anchor-long", weight=4, content_format="long")
+wedge = make_topic(s, ch, name="wedge-short", weight=4, content_format="short")
+ok(anchor.id < wedge.id, "fixture: long walks first at equal weight")
+for i in range(5):
+    s.add(Video(channel_id=ch.id, topic_id=wedge.id, subject=f"queued-short {i}",
+                status=VideoStatus.QUEUED, position=i + 1))
+s.commit()
+run_tick(s, _Cfg(target=5, horizon=2), well_behaved)
+ok(drafts_for(s, anchor.id) == 2, "long mix-cap = horizon_days (2), not the 5 open slots")
+ok(drafts_for(s, wedge.id) == 0, "queued shorts already at trigger — no extra short drafts")
 
 print("case: long reserve does not apply when a long draft already exists")
 s = fresh_session()

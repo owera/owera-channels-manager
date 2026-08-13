@@ -15,6 +15,11 @@ Long-draft reserve: when a channel has zero long pending (draft+queued) but stil
 has an active long topic (weight > 0), keep one board slot for that long so
 high-weight shorts cannot permanently starve the 1L+4S daily mix (observed ch2
 2026-08-12: draft 0 long while t4/t27 filled the horizon).
+
+Format mix cap: when a live short topic exists, longs occupy at most
+`board_horizon_days` pending seats (1 long per publish-day in the horizon).
+A high-weight long that walks first otherwise consumes the whole remainder —
+observed ch1/ch2 2026-08-13: t2/t5 filled 5/5 leftover slots, leaving draft 0 short.
 """
 
 import logging
@@ -102,12 +107,18 @@ def tick() -> None:
         # while the w3 short topics sat at 0 pending).
         topics.sort(key=lambda t: (-(t.weight if t.weight is not None else 1), t.id))
 
-        # Active long topics per channel (weight > 0) — drives the long-draft reserve.
+        # Active long/short topics per channel (weight > 0) — drives the long-draft
+        # reserve and the 1L+4S mix cap.
         has_live_long: dict[int, bool] = {}
+        has_live_short: dict[int, bool] = {}
         for t in topics:
             w = t.weight if t.weight is not None else 1
-            if t.content_format == "long" and w > 0:
+            if w <= 0:
+                continue
+            if t.content_format == "long":
                 has_live_long[t.channel_id] = True
+            elif t.content_format == "short":
+                has_live_short[t.channel_id] = True
 
         # Running totals per channel so multiple topics in one tick can't collectively
         # overshoot the board cap (updated after each successful refill).
@@ -133,9 +144,9 @@ def tick() -> None:
             # every seat and starve tomorrow's 1L publish (ch2 2026-08-12).
             ch = channels.get(cid)
             board_cap = -1
+            need_long_slot = long_pending[cid] == 0 and has_live_long.get(cid, False)
             if ch and cfg.board_horizon_days > 0:
                 board_cap = ch.daily_render_budget * cfg.board_horizon_days
-                need_long_slot = long_pending[cid] == 0 and has_live_long.get(cid, False)
 
                 if is_long and need_long_slot and channel_pending[cid] >= board_cap:
                     # Board already full of shorts: allow exactly one long overshoot
@@ -172,6 +183,12 @@ def tick() -> None:
             # the remaining channel board space so we never overshoot the horizon
             # (except the deliberate +1 long seed when the long bench is empty).
             need = min(target * mult - pending, settings.autofill_batch * mult, board_space)
+            # 1L+4S mix: longs get at most one pending seat per horizon day when a
+            # live short topic exists. Without this, a high-weight long that walks
+            # first drains every leftover slot (2026-08-13: t2/t5 filled 5/5).
+            if is_long and has_live_short.get(cid, False) and board_cap > 0:
+                long_share_cap = max(1, cfg.board_horizon_days)
+                need = min(need, max(0, long_share_cap - long_pending[cid]))
             if need <= 0:
                 continue
             n = _refill_topic(session, topic, need)
