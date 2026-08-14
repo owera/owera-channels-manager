@@ -463,6 +463,28 @@ flag the operator step in the commit body.
   write_status→poll round-trip. Mutation-verified: 17/17 hand-built
   semantic mutants killed from an isolated copy (bytecode caching off,
   module `__file__` pinned).
+  `engines/storyboard.py` (previously only parse/align/validate smoke +
+  palette identity + all-types HTML scrape — 40 checks against 1031 lines)
+  — `tests/verify_storyboard.py` 40 → 207 checks (2026-08-14): the typed-
+  beat composition engine HyperFrames renders. Module contracts (4..14
+  beats, 0.12 gap, 0.5 min-dur, 2.0/1.8 tail/mid floors, 1.1s row-step,
+  5.5s drift, `_RENDERERS` == `_BEAT_SPECS`); clip helpers including the
+  07-09 `_code_line_clip` indent pin; `_coerce_beat` every type +
+  salvage/None (w-clamp, highlight ints-only, diagram layout fallback,
+  cta default "Subscribe", 5-item list cap); parse fenced/prose unwrap +
+  `_MAX_BEATS` clamp; `theme.fold` PT diacritics + `_find_subseq` empty-
+  needle; align tail/mid floor (07-16 bunched-close) + interpolation +
+  tiny-clip infeasible floors; `_wrap` R4 drift + last-beat no-fade;
+  `render_list` 07-29 step cap (last row at 2.45s not 7.24s); numeric
+  vs non-numeric `render_stat`; rendered code indent + `hl` class;
+  `_diagram_svg` fanout `<path>` vs pipeline `<line>` + portrait viewBox
+  760; `_follow_verb` EN/PT/ES; `_variety_ok` ≥2-rich floor; prompts
+  (rule 2b only when Phase-B allowed, PACING 8s DRAG, spoken-ask
+  ending); `compose()` stubbed-llm (CTA force, language, unparseable
+  exactly-2-calls, variety retry, default allowlist drops code,
+  validate-fail even-space fallback). Mutation-verified: 20/20 + 4/4
+  review-derived semantic mutants killed from an isolated copy
+  (bytecode caching off, module `__file__` pinned).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
