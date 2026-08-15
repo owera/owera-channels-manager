@@ -18,10 +18,11 @@ in flight. The /videos/queue-plan board endpoint mirrors that gate and is pinned
 here too.
 
 The lifecycle sections pin the paths that guard auto-publish: only external
-(MPT) renders survive a restart, hung renders fail at the timeout instead of
-occupying a concurrency slot forever, transient engine errors re-queue with a
-bounded retry, and _finalize refuses missing/blank artifacts as the last gate
-before a video can reach APPROVED -> publish.
+(MPT) renders survive a restart, hung renders re-queue at the timeout (and
+fail only once the retry budget is spent) instead of occupying a concurrency
+slot forever, transient engine errors re-queue with a bounded retry, and
+_finalize refuses missing/blank artifacts as the last gate before a video
+can reach APPROVED -> publish.
 
 Uses an in-memory SQLite DB — no network, no creds. Exits non-zero on the first
 failed assertion.
@@ -471,6 +472,7 @@ from pathlib import Path  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.models import RenderProfile  # noqa: E402
+from app.services import issues  # noqa: E402
 from app.services.engines import (  # noqa: E402
     STATE_COMPLETE,
     STATE_FAILED,
@@ -573,17 +575,18 @@ ok(s.get(Video, v_done.id).status == VideoStatus.APPROVED,
 recov = [r for r in render_runs(s, "error") if "recovered orphaned render" in (r.detail or "")]
 ok(len(recov) == 2, "one recovery JobRun per re-queued orphan")
 
-# --- _advance_in_flight: hung renders fail at the timeout ---------------------
-print("advance_in_flight: hung renders time out before any poll")
+# --- _advance_in_flight: hung renders retry at the timeout --------------------
+print("advance_in_flight: hung renders time out after a last poll")
 s = fresh_session()
 eng = use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": 50}))
 ch = make_channel(s)
 t = make_topic(s, ch, content_format="short")
 stale = timedelta(seconds=settings.render_timeout_seconds + 3600)
 v_aware = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="a",
-                     last_attempt_at=NOW - stale)
+                     last_attempt_at=NOW - stale, render_progress=5)
 v_naive = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="b",
-                     last_attempt_at=(NOW - stale).replace(tzinfo=None))
+                     last_attempt_at=(NOW - stale).replace(tzinfo=None),
+                     render_progress=25)
 # SQLite strips tzinfo on the round-trip, so a committed row always reads back
 # naive (review finding, 2026-08-02): to actually drive the tzinfo-present
 # branch, re-assign the aware value on the identity-mapped instance AFTER the
@@ -594,12 +597,104 @@ ok(v_aware.last_attempt_at.tzinfo is not None,
    "aware-leg precondition: tzinfo intact on the in-session instance")
 render_loop._advance_in_flight(s)
 s.commit()
-ok(all(s.get(Video, v.id).status == VideoStatus.FAILED
-       and s.get(Video, v.id).error == "render timed out"
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED
+       and s.get(Video, v.id).retry_count == 1
+       and s.get(Video, v.id).mpt_task_id is None
+       and s.get(Video, v.id).render_progress == 0
+       and s.get(Video, v.id).error is None
        for v in (v_aware, v_naive)),
-   "tz-aware AND naive last_attempt_at both time out past render_timeout_seconds")
-ok(eng.poll_calls == [], "timed-out renders are never polled")
+   "tz-aware AND naive last_attempt_at re-queue at the timeout (08-14 majority)")
+ok(sorted(eng.poll_calls) == ["a", "b"],
+   "timed-out still-PROCESSING renders are polled before the hang retry")
 ok(len(render_runs(s, "error")) == 2, "one error JobRun per timed-out render")
+ok(all("transient error (retry 1/2): render timed out" in (r.detail or "")
+       for r in render_runs(s, "error")),
+   "timeout JobRun uses the transient-retry detail, not a terminal error")
+
+# Poll-first: a just-finished COMPLETE/FAILED is not abandoned as a hang.
+s = fresh_session()
+eng = use_engine(StubEngine(
+    poll_result={"state": STATE_COMPLETE, "progress": 100},
+    final=Path("/nonexistent/verify-render-missing.mp4"),
+))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="done",
+               last_attempt_at=NOW - stale)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.FAILED and "missing" in (v.error or ""),
+   "timeout + COMPLETE is finalized (missing artifact), not re-queued as a hang")
+ok(eng.poll_calls == ["done"], "COMPLETE-at-timeout was polled")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": "ffmpeg exploded"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="ff",
+               last_attempt_at=NOW - stale)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.FAILED and v.error == "ffmpeg exploded" and v.retry_count == 0,
+   "timeout + terminal engine error fails immediately, not as a hang retry")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": "upstream 529 overloaded"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="ov",
+               last_attempt_at=NOW - stale)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1,
+   "timeout + transient engine error uses the engine signature, not 'render timed out'")
+ok(any("529" in (r.detail or "") for r in render_runs(s, "error")),
+   "timeout + 529 JobRun names the engine error")
+
+# Midpoint + exhausted budget on the wall-clock path (same bound as engine
+# transients). The retry_count=0 case above is QUEUED; these two legs kill
+# always-retry and always-FAILED mutants.
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": 50}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v_mid = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="mid",
+                   last_attempt_at=NOW - stale, retry_count=1, render_progress=40)
+v_spent = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="spent",
+                     last_attempt_at=NOW - stale, retry_count=2)
+render_loop._advance_in_flight(s)
+s.commit()
+m = s.get(Video, v_mid.id)
+ok(m.status == VideoStatus.QUEUED and m.retry_count == 2
+   and m.mpt_task_id is None and m.render_progress == 0 and m.error is None,
+   "timeout at retry_count=1 still gets the second retry (handle/progress cleared)")
+ok(s.get(Video, v_spent.id).status == VideoStatus.FAILED
+   and s.get(Video, v_spent.id).error == "render timed out"
+   and s.get(Video, v_spent.id).retry_count == 2,
+   "timeout with the retry budget spent -> FAILED, error kept")
+
+# The retry is not a status-only flip: _submit_new must pick the row back up
+# (review mutant: skip retry_count>0 would leave it QUEUED forever).
+s = fresh_session()
+use_scope(s)
+set_concurrency(s, 1)
+eng = use_engine(StubEngine(poll_result={"state": STATE_PROCESSING, "progress": 5}))
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="old-h",
+               last_attempt_at=NOW - stale, render_progress=5)
+render_loop._advance_in_flight(s)
+s.commit()
+ok(s.get(Video, v.id).status == VideoStatus.QUEUED, "precondition: timeout re-queued")
+render_loop._submit_new(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.RENDERING and v.mpt_task_id == f"task-{v.id}"
+   and v.retry_count == 1 and v.last_attempt_at is not None,
+   "timeout retry is resubmitted with a fresh handle (not a status-only flip)")
 
 # --- _advance_in_flight: poll dispatch ----------------------------------------
 print("advance_in_flight: poll progress, engine outages, missing handles")
@@ -699,6 +794,80 @@ s.commit()
 v = s.get(Video, v.id)
 ok(v.status == VideoStatus.FAILED and v.error == "ffmpeg exploded" and v.retry_count == 0,
    "non-transient error -> FAILED immediately, no retry burned")
+ok(set(issues.TRANSIENT_SIGNATURES) == set(render_loop._TRANSIENT),
+   "issues.TRANSIENT_SIGNATURES stays in lockstep with render_loop._TRANSIENT")
+
+# 2026-08-13 overnight: litellm 600s / Anthropic disconnect were treated as
+# terminal. Same retry path as 529. Real error strings from v956 / v962.
+s = fresh_session()
+use_engine(StubEngine(poll_result={
+    "state": STATE_FAILED,
+    "error": "Timeout: litellm.Timeout: AnthropicException - "
+             "litellm.Timeout: Connection timed out after 600.0 seconds.",
+}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t-llm-to",
+               last_attempt_at=NOW, render_progress=5)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1 and v.mpt_task_id is None
+   and v.render_progress == 0 and v.error is None,
+   "litellm/Anthropic Timeout -> QUEUED transient retry (08-13 v956 shape)")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={
+    "state": STATE_FAILED,
+    "error": "InternalServerError: litellm.InternalServerError: AnthropicException - "
+             "Server disconnected without sending a response.. "
+             "Handle with `litellm.InternalServerError`.",
+}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="t-llm-dc",
+               last_attempt_at=NOW, render_progress=5)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1 and v.mpt_task_id is None,
+   "Anthropic Server disconnected / InternalServerError -> QUEUED (08-13 v962 shape)")
+
+# Isolated signatures: a _TRANSIENT list that dropped one new token would
+# still pass the multi-matching v956/v962 strings (08-02 endpoints-only lesson).
+# Bare "timed out" is deliberately NOT a token — CLI TimeoutExpired must fail.
+for _sig, _label in (
+    ("litellm.Timeout", "litellm.Timeout alone"),
+    ("Connection timed out after 600.0 seconds.", "Connection timed out alone"),
+    ("InternalServerError", "InternalServerError alone"),
+    ("Server disconnected", "Server disconnected alone"),
+):
+    s = fresh_session()
+    use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": _sig}))
+    ch = make_channel(s)
+    t = make_topic(s, ch, content_format="short")
+    v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="iso",
+                   last_attempt_at=NOW)
+    render_loop._advance_in_flight(s)
+    s.commit()
+    ok(s.get(Video, v.id).status == VideoStatus.QUEUED,
+       f"{_label} is classified transient")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={
+    "state": STATE_FAILED,
+    "error": "TimeoutExpired: Command '['npx', 'hyperframes']' timed out after 1800 seconds",
+}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="cli-to",
+               last_attempt_at=NOW)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.FAILED and v.retry_count == 0
+   and "timed out after 1800" in (v.error or ""),
+   "CLI/npx TimeoutExpired is terminal (bare 'timed out' is not a transient token)")
 
 s = fresh_session()
 use_engine(StubEngine(poll_result={"state": STATE_FAILED}))

@@ -24,9 +24,15 @@ from app.models import (Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus)
 from app.services import quota
 
 # Same signatures render_loop treats as transient (retryable) render failures. Kept here
-# as the single source the agent reasons over; mirror render_loop._advance_* if changed.
-TRANSIENT_SIGNATURES = ("overloaded_error", "rate_limit_error", "RateLimitError",
-                        "overloaded", "529", "503")
+# as the single source the agent reasons over; mirror render_loop._TRANSIENT if changed
+# (pinned by verify_render). 2026-08-15: litellm 600s / Anthropic disconnect. Do not
+# add a bare "timed out" — that would retry CLI TimeoutExpired (30 min npx).
+TRANSIENT_SIGNATURES = (
+    "overloaded_error", "rate_limit_error", "RateLimitError",
+    "overloaded", "529", "503",
+    "litellm.Timeout", "Connection timed out",
+    "InternalServerError", "Server disconnected",
+)
 
 # Tunable thresholds (could move to the Settings table later).
 REVIEW_STALE_HOURS = 48          # a video sitting in Review longer than this is a gate backlog

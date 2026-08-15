@@ -736,6 +736,34 @@ flag the operator step in the commit body.
   file contents; real hashed assets and deep client-side routes still serve correctly; a check
   in `tests/verify_health.py` pins traversal attempts with auth disabled.
 
+### 18. ✅ DONE (code shipped to main 2026-08-15) Overnight render deaths retry instead of dying — normal
+- **resolution (2026-08-15):** `_retry_or_fail` is the single re-queue/fail choke
+  point for both the loop wall-clock timeout and engine-reported failures.
+  A hang past `render_timeout_seconds` now re-queues (same `retry_count < 2`
+  budget as a 529) instead of writing terminal `FAILED` / `"render timed out"`.
+  `_TRANSIENT` also matches the 08-13 shapes that slipped through: `litellm.Timeout`,
+  `timed out`, `InternalServerError`, `Server disconnected`. Ground truth from
+  `manager.db` (read-only): 16 of 18 failed videos since 08-12 were the wall-clock
+  path at retry_count=0; the other two were v956 (litellm 600s) and v962 (Anthropic
+  disconnect), both at 5% script-gen. Suite: `tests/verify_render.py` — timeout
+  now pins QUEUED + midpoint + spent-budget FAILED; v956/v962 shapes plus four
+  isolated-signature pins (a dropped token cannot hide behind the multi-match
+  strings). `issues.TRANSIENT_SIGNATURES` updated in lockstep (its own comment
+  requires the mirror) so the digest flags the new shapes as `transient`.
+  Suite 89 → 107 checks. Review fixes: poll-before-timeout so a just-finished
+  COMPLETE/FAILED is not abandoned as a hang; bare `"timed out"` dropped so
+  CLI TimeoutExpired stays terminal; `_submit_new` pin so retry is not a
+  status-only flip.
+- **why (observed 2026-08-12..14):** overnight HyperFrames renders died permanently
+  on LLM/provider blips and on the 40-min loop cap, burning the next day's bench.
+  The existing transient list only caught 529/503/rate-limit.
+- **caution:** normal (render_loop, not the money-path files). Isolated commit +
+  regression tests. Did **not** raise `render_timeout_seconds` — retrying a hang
+  is the fix; a longer cap is a separate policy change.
+- **acceptance:** a timed-out render with retry_count<2 returns to QUEUED (handle
+  / progress / error cleared); retry_count=2 still FAILs with `"render timed out"`;
+  v956/v962 error strings re-queue; ffmpeg-class errors still fail immediately.
+
 ### 17. ✅ DONE (code shipped to main 2026-08-04) Audit JobRuns for the review-gate transitions (reject / requeue / retry / approve) — normal
 - **resolution (2026-08-04):** each of the four endpoints logs one `quota.log` JobRun riding the
   same commit as the status flip — kind = the transition, `status="success"`, video/channel ids,

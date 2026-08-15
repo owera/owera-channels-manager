@@ -24,6 +24,40 @@ from app.services.topic_playlist import ensure_topic_playlist
 
 logger = logging.getLogger("manager.render")
 
+# Engine-reported errors that did not produce an artifact. Same class as the
+# loop wall-clock timeout: the work never finished, so a bounded re-queue is
+# cheaper than a permanent FAILED (observed 2026-08-12..14: 16× "render timed
+# out" + litellm 600s / Anthropic disconnect overnight, all retry_count=0).
+_TRANSIENT = (
+    "overloaded_error", "rate_limit_error", "RateLimitError",
+    "overloaded", "529", "503",
+    "litellm.Timeout", "Connection timed out",
+    "InternalServerError", "Server disconnected",
+)
+
+
+def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool) -> None:
+    """Re-queue a failed-to-finish render, or mark FAILED once the budget is spent.
+
+    QUEUED (not APPROVED): _submit_new picks it up again. APPROVED would skip
+    rendering and hand a file-less video to the publish loop. The handle and
+    progress are cleared so the retry is a clean start.
+    """
+    if transient and video.retry_count < 2:
+        video.status = VideoStatus.QUEUED
+        video.retry_count += 1
+        video.mpt_task_id = None
+        video.render_progress = 0
+        video.error = None
+        quota.log(session, kind="render", status="error", video_id=video.id,
+                  channel_id=video.channel_id,
+                  detail=f"transient error (retry {video.retry_count}/2): {err[:200]}")
+    else:
+        video.status = VideoStatus.FAILED
+        video.error = err
+        quota.log(session, kind="render", status="error", video_id=video.id,
+                  channel_id=video.channel_id, detail=video.error)
+
 
 def recover_orphaned_renders() -> None:
     """Re-queue renders left in 'rendering' by a previous process. HyperFrames runs
@@ -137,50 +171,46 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     quota.log(session, kind="render", status="success", video_id=video.id, channel_id=channel.id)
 
 
+def _past_timeout(video: Video) -> bool:
+    if not video.last_attempt_at:
+        return False
+    started = video.last_attempt_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds() > settings.render_timeout_seconds
+
+
 def _advance_in_flight(session: Session) -> None:
     for video in session.exec(select(Video).where(Video.status == VideoStatus.RENDERING)).all():
         channel = session.get(Channel, video.channel_id)
-        if video.last_attempt_at:
-            started = video.last_attempt_at
-            if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - started).total_seconds() > settings.render_timeout_seconds:
-                video.status = VideoStatus.FAILED
-                video.error = "render timed out"
-                quota.log(session, kind="render", status="error", video_id=video.id,
-                          channel_id=video.channel_id, detail=video.error)
-                continue
+        timed_out = _past_timeout(video)
         if not video.mpt_task_id:
+            # No handle to poll. A wall-clock miss is a hang; otherwise wait.
+            if timed_out:
+                _retry_or_fail(session, video, "render timed out", transient=True)
             continue
         engine = get_engine(video.engine)
         try:
             task = engine.poll(video.mpt_task_id)
         except Exception:
-            continue  # engine unreachable — retry next tick
+            # Engine unreachable: if the wall clock already expired, treat it
+            # as a hang (the previous skip-poll path never observed COMPLETE
+            # either). Otherwise leave the row for the next tick.
+            if timed_out:
+                _retry_or_fail(session, video, "render timed out", transient=True)
+            continue
         video.render_progress = int(task.get("progress") or video.render_progress)
         if task.get("state") == STATE_COMPLETE:
             _finalize(session, video, channel, engine, task)
         elif task.get("state") == STATE_FAILED:
             err = task.get("error") or f"{video.engine or 'mpt'} reported render failure"
-            _TRANSIENT = ("overloaded_error", "rate_limit_error", "RateLimitError",
-                          "overloaded", "529", "503")
-            if any(sig in err for sig in _TRANSIENT) and video.retry_count < 2:
-                # Re-render: go back to QUEUED so _submit_new picks it up again.
-                # (APPROVED would skip rendering and hand a file-less video to the
-                # publish loop.) Clear the engine handle + progress for a clean retry.
-                video.status = VideoStatus.QUEUED
-                video.retry_count += 1
-                video.mpt_task_id = None
-                video.render_progress = 0
-                video.error = None
-                quota.log(session, kind="render", status="error", video_id=video.id,
-                          channel_id=video.channel_id,
-                          detail=f"transient error (retry {video.retry_count}/2): {err[:200]}")
-            else:
-                video.status = VideoStatus.FAILED
-                video.error = err
-                quota.log(session, kind="render", status="error", video_id=video.id,
-                          channel_id=video.channel_id, detail=video.error)
+            _retry_or_fail(session, video, err,
+                           transient=any(sig in err for sig in _TRANSIENT))
+        elif timed_out:
+            # Still PROCESSING past the cap — no artifact, bounded re-queue.
+            # A just-finished COMPLETE/FAILED is handled above (poll first),
+            # so a 40-min mux that already wrote status.json is not retried.
+            _retry_or_fail(session, video, "render timed out", transient=True)
 
 
 def _split_queued_by_format(session: Session, queued: list[Video]) -> tuple[list[Video], list[Video]]:
