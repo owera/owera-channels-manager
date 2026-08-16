@@ -485,6 +485,36 @@ flag the operator step in the commit body.
   validate-fail even-space fallback). Mutation-verified: 20/20 + 4/4
   review-derived semantic mutants killed from an isolated copy
   (bytecode caching off, module `__file__` pinned).
+  `autofill_loop.py` (previously only the 07-26 / 08-12 / 08-13 incident
+  pins — 21 checks against 205 lines) — `tests/verify_autofill.py`
+  21 → 93 checks (2026-08-16): the helpers tick() trusts
+  (`_pending_count` DRAFT+QUEUED / `_channel_pending_count` isolation /
+  `_long_pending_count` format filter); autogen-off; threshold floor
+  (`min_pending=0` still refills) and target floor; exact-threshold
+  skip (`>=` not `>`) plus one-below top-up; QUEUED counts as pending;
+  terminal/in-flight statuses do not; weight-4 multiplier cap; solo
+  weight-0 is not missing/1 (the two-topic pin was vacuous — the live
+  topic filled the board first); horizon=0 no-cap still refills;
+  generate_ideas exception/empty/None write nothing; JobRun + kwarg
+  forwarding (format/language/theme/existing/n); position continues
+  after channel max; inactive topics excluded; parked long does not
+  arm the short-side reserve; short-only / long-only (no phantom
+  reserve, no mix-cap); two live longs share the mix-cap via the
+  running `long_pending` increment; per-channel isolation (language
+  not swapped); second tick is a no-op; one topic's exception does
+  not block the next. Adversarial review (SHIP WITH FIXES) added
+  four missing discriminators: `threshold * mult` (not bare
+  threshold) at weight=3, two-long mix-cap at horizon=2 (`+= n`
+  not `+= 1`), existing subjects = exact topic set (published
+  included, other topic excluded), channel-max position (sibling
+  pos 7, not topic-max or a foreign 99), and `autofill_batch` /
+  horizon=0 `* 4` as binding `min()` terms. Mutation-verified:
+  29/29 hand-built semantic mutants killed from an isolated copy
+  (bytecode caching off, module `__file__` pinned), each by its
+  intended check (22 first-cut + 7 review-derived). Accepted
+  residual: the explicit `weight <= 0: continue` is
+  observationally equivalent to `mult=0` causing an immediate
+  threshold skip.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
