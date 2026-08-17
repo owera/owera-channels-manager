@@ -515,6 +515,42 @@ flag the operator step in the commit body.
   residual: the explicit `weight <= 0: continue` is
   observationally equivalent to `mult=0` causing an immediate
   threshold skip.
+  `youtube.py` (previously only consent/token via oauth/reconnect +
+  caller stubs in publish/analytics/metrics) — `tests/verify_youtube.py`
+  (204 checks, 2026-08-17): the money-path classifiers and request
+  wrappers those callers trust. `_error_reason` (JSON lowercase,
+  JSON-wins-over-token-in-another-field, body-scan fallback per
+  daily-cap token + case-insensitive, missing-reason fallthrough);
+  `_classify` (uploadLimitExceeded @400 AND @403, quotaExceeded,
+  dailyLimitExceeded → QuotaExceeded with lowercased .reason;
+  rateLimitExceeded / userRateLimitExceeded / uploadRateLimitExceeded
+  + invalidVideoMetadata / videoNotFound stay HttpError — the
+  documented "brief backoff, not a day cooldown" exclusion);
+  `is_playlist_missing` (reason @403, bare 404, 404-with-other-reason,
+  non-HttpError / QuotaExceeded / UploadStalled negatives);
+  `_upload_body` (clamps 100/5000/30, None→empty, language both
+  fields, empty language_code omitted, made-for-kids False);
+  path helpers + get_service / get_analytics_service NeedsConnect
+  against a temp credentials_dir (never the live tree);
+  `upload_video` (id + progress percent, language forwarded,
+  daily-cap classify, OSError/HttpLib2Error → UploadStalled);
+  comment 9000 clamp; playlist create/add/list pagination;
+  `fetch_channel` int-coercion + branding map;
+  `update_branding` None-keeps-current / ""-dropped;
+  `resolve_channel_id` UC-from-URL (no API) vs @handle forHandle;
+  subscriptions post-page max_items gate (50+50 not 60);
+  `fetch_video_analytics` normalisation + 07-09 impressions-not-
+  requested pin; `fetch_traffic_sources` YT_SEARCH-gated search
+  terms + swallow-never-raise. Adversarial review (DO NOT SHIP)
+  forced six extra discriminators: 3-page max_items gate + call
+  count, pageToken forwarded (not a pop-queue), forHandle keeps
+  the dot, subscribe insert body, upload_video == _upload_body +
+  part=snippet,status, exact analytics metrics string. Plus
+  has_token True, list_subscribers classify, dimensions/dates.
+  Mutation-verified: 30/30 hand-built semantic mutants killed
+  from an isolated copy (bytecode caching off, module `__file__`
+  pinned), including 8 review-derived HIGHs each by its intended
+  check.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
