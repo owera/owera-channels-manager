@@ -551,6 +551,31 @@ flag the operator step in the commit body.
   from an isolated copy (bytecode caching off, module `__file__`
   pinned), including 8 review-derived HIGHs each by its intended
   check.
+  `engines/__init__.py` (previously only `get_engine("hyperframes")`
+  via verify_hyperframes) — `tests/verify_engines.py` (44 checks,
+  2026-08-18): the render-loop engine-selection choke point.
+  Module contracts (DEFAULT_ENGINE, STATE_* identity with base,
+  engine_names exactly `[mpt, hyperframes]` in insertion order);
+  `get_engine` (named adapters are registry singletons, None/"" →
+  default singleton, unknown / wrong-case / near-miss typo fall
+  back to the SAME mpt singleton — a KeyError would crash
+  `_submit_new` / chapters); `resolve_engine` precedence video >
+  topic > channel > DEFAULT with all three layers populated;
+  empty-engine and missing-profile rows skip to the NEXT layer
+  (not straight to default); topic=None / channel=None do not
+  AttributeError; pid=0 is treated as unbound (`if not pid`,
+  discriminating `if pid is None` against a real id=0 profile
+  row); typo engine strings returned as-is (get_engine is the
+  fallback, not resolve_engine); per-channel isolation + the
+  channel argument used as given; render_loop import-identity
+  wiring. Mutation-verified: 17/18 hand-built semantic mutants
+  killed from an isolated copy (bytecode caching off); the
+  survivor is the accepted residual `_ENGINES.get(None, fallback)`
+  ≡ `name or DEFAULT` for None/"". Adversarial review (SHIP WITH
+  FIXES) found one HIGH vacuous pin (`topic=None` + unbound video
+  expected `"mpt"` == DEFAULT, so skipping the channel layer when
+  topic is None survived) plus the same class on the isolation
+  `ch_b` default; both now assert distinct non-default names.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
