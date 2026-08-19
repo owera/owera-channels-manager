@@ -576,6 +576,50 @@ flag the operator step in the commit body.
   expected `"mpt"` == DEFAULT, so skipping the channel layer when
   topic is None survived) plus the same class on the isolation
   `ch_b` default; both now assert distinct non-default names.
+  `engines/theme.py` (previously only fold/esc/resolve smoke via
+  verify_storyboard) — `tests/verify_theme.py` (100 checks,
+  2026-08-19): the leaf visual-token module worker, storyboard,
+  and thumbnail all import. Module contracts (PALETTE's eight
+  exact pairs + unique accents, BG_VARIANTS five named looks in
+  order, MONO_STACK / _SANS_STACK, resolve-dict key set +
+  fixed bg_base/fg/fg_dim); `_subject_hash` SHA-1 of
+  subject-or-empty (None ≡ "", case-sensitive, no fold — a
+  md5/builtin-hash mutant dies on the pinned hello hex);
+  `resolve` palette keyed by topic_id (topic 1 + hello lands
+  teal not hello's cyan, wrap 8→[0] / 9→[1], last slot 7,
+  negative ids via Python modulo); 0/None/""/"0"/False/non-int
+  / "1.5" / ["1"] (TypeError) fall back to subject-hash (hello is pal 5, so a
+  `if tid is None` mutant that treated 0 as palette[0] —
+  thumbnail's own indexing — dies); bg_variant ALWAYS from
+  subject even when topic_id is set (same subject under
+  topics 1 and 7 share 'dots'; hello vs alpha under topic 1
+  differ; five fixture subjects cover every named look);
+  `esc` &-first (`<` is `&lt;` not `&amp;lt;`), quotes NOT
+  escaped, None/int stringify, already-escaped re-escaped;
+  `fold` NFKD + strip combining + lower (PT/ES diacritics,
+  decomposed e+acute, ß is NOT casefolded to ss); consumer
+  wiring identity pins (worker._esc IS theme.esc,
+  thumbnail._THUMB_PALETTE IS theme.PALETTE, storyboard.theme
+  IS the theme module). Mutation-verified: 19/20 first-cut
+  + 5/5 review-derived semantic mutants killed from an
+  isolated copy (bytecode caching off, module `__file__`
+  pinned), each by its intended check. Adversarial review
+  (SHIP WITH FIXES) found four half-tested gates: else-branch
+  `bg_deep` unpinned, `bg_variant` never observed when tid
+  is missing, ValueError/`esc(None)` raise paths printed
+  traceback not FAIL, resolve never given a mixed-case
+  subject. All four fixtures added; 5/5 review mutants
+  now die on their intended checks. Survivor is the
+  accepted residual `int(topic_id) if topic_id is not None
+  else 0` ≡ `if topic_id else 0` because `int("")` is
+  ValueError → tid=0 (same class as the 08-18
+  `_ENGINES.get(None)` residual). Discovered follow-up
+  (not bundled):
+  thumbnail.make_thumbnail_png indexes `_THUMB_PALETTE[topic_id
+  % 8]` so topic_id=0 (the function default) is palette[0],
+  while theme.resolve(0, subject) treats 0 as missing and
+  uses the subject hash — unbound videos can ship a thumbnail
+  accent that does not match the in-video composition.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
@@ -887,3 +931,20 @@ flag the operator step in the commit body.
 - **caution:** endpoint files only, no loop changes; keep the response shape unchanged.
 - **acceptance:** each of the four transitions on a real row writes exactly one JobRun with the
   right kind/ids/tag; refused calls write none; suite green; live probe shows the row in /api/runs.
+
+### 19. Thumbnail topic_id=0 uses palette[0]; theme.resolve(0) uses subject-hash — normal
+- **why (found 2026-08-19 shipping theme coverage):** `thumbnail.make_thumbnail_png`
+  defaults `topic_id=0` and indexes `_THUMB_PALETTE[topic_id % 8]`, so an unbound
+  video's card is always blue (`#5b8cff`). `theme.resolve` treats 0/None as missing
+  and keys the in-video accent off the subject hash — the documented "motion accent
+  matches its thumbnail" contract is false for unbound videos (and for any caller
+  that omits topic_id). Positive topic ids already agree.
+- **approach:** route the thumbnail through `theme.resolve(topic_id, subject)` so
+  both surfaces share the zero-is-missing gate; keep the default as `None` not `0`.
+  Extend `tests/verify_thumbnail.py` (and the new `verify_theme.py` wiring pin) so
+  topic_id=0/None + a subject that does not hash to palette[0] is the discriminator.
+- **caution:** normal (thumbnail.py only; theme.resolve is already the source of
+  truth). Isolated commit + regression test. Do not change PALETTE order.
+- **acceptance:** `make_thumbnail_png(..., topic_id=0, subject="hello")` embeds
+  hello's cyan (`#2ec4b6`), not palette[0] blue; topic_id=1 still teal; suite
+  kills a `% 8` fallback.
