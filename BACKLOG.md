@@ -932,7 +932,18 @@ flag the operator step in the commit body.
 - **acceptance:** each of the four transitions on a real row writes exactly one JobRun with the
   right kind/ids/tag; refused calls write none; suite green; live probe shows the row in /api/runs.
 
-### 19. Thumbnail topic_id=0 uses palette[0]; theme.resolve(0) uses subject-hash — normal
+### 19. ✅ DONE (code shipped to main 2026-08-20) Thumbnail topic_id=0 uses palette[0]; theme.resolve(0) uses subject-hash — normal
+- **resolution (2026-08-20):** `make_thumbnail_png` now takes `topic_id: int | None = None`
+  and pulls accent/bg_deep from `theme.resolve(topic_id, subject)` — the same
+  zero-is-missing gate the in-video composition uses — so an unbound video's
+  card matches its motion accent (hello → cyan `#2ec4b6`) instead of pinning
+  palette[0] blue. Positive ids and wrap (`8 → [0]`) unchanged. `_THUMB_PALETTE`
+  stays as the PALETTE identity alias (storyboard/theme wiring pins). Did **not**
+  touch `publish_loop.py` (HIGH): it still passes `video.topic_id or 0`, which
+  is now the correct missing-signal into resolve. Suites: `verify_thumbnail.py`
+  87 → 97, `verify_theme.py` 100 → 101 (`thumbnail.resolve is theme.resolve`).
+  Mutation-verified: 4/4 isolated-copy mutants killed (pre-fix `% 8`+default 0,
+  `if topic_id is None else % 8`, always-hash, default stays 0).
 - **why (found 2026-08-19 shipping theme coverage):** `thumbnail.make_thumbnail_png`
   defaults `topic_id=0` and indexes `_THUMB_PALETTE[topic_id % 8]`, so an unbound
   video's card is always blue (`#5b8cff`). `theme.resolve` treats 0/None as missing

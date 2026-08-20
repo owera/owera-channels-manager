@@ -25,7 +25,9 @@ Covers, dependency-free (no network, no HyperFrames, no ffmpeg):
   - fold: NFKD + strip combining + lower; PT/ES diacritics; ß is NOT
     casefolded to ss; empty/None → ""
   - consumer wiring: worker._esc IS theme.esc, thumbnail._THUMB_PALETTE IS
-    theme.PALETTE, storyboard.theme IS the theme module
+    theme.PALETTE, thumbnail.resolve IS theme.resolve (zero-is-missing
+    gate is shared, not a private % 8 index), storyboard.theme IS the
+    theme module
 
 Every non-trivial behavior is mutation-verified (hand-built semantic mutants
 run from an isolated copy with bytecode caching disabled). Exits non-zero on
@@ -397,6 +399,8 @@ ok(worker._esc is theme.esc,
    "worker._esc IS theme.esc (single HTML-escape, no private copy)")
 ok(thumbnail._THUMB_PALETTE is theme.PALETTE,
    "thumbnail._THUMB_PALETTE IS theme.PALETTE (single brand list)")
+ok(thumbnail.resolve is theme.resolve,
+   "thumbnail.resolve IS theme.resolve (shared zero-is-missing gate, not a private % 8 index)")
 ok(worker._ACCENTS == [p[0] for p in theme.PALETTE],
    "worker._ACCENTS is the PALETTE accents in the same order")
 ok(storyboard.theme is theme,

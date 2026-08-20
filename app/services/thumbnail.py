@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import settings
-from app.services.engines.theme import PALETTE
+from app.services.engines.theme import PALETTE, resolve
 from app.services.engines.worker import _ASSETS, _esc, _llm
 
 logger = logging.getLogger("manager.thumbnail")
@@ -29,8 +29,9 @@ _OUT_W, _OUT_H = 1280, 720
 _RENDER_TIMEOUT = 240            # a static card renders fast; never stall a publish
 
 # Accent palette keyed by topic_id (same topic = same brand color). Canonical home is
-# theme.PALETTE — the in-video composition resolves the SAME list by topic_id so a
-# video's motion accent matches its thumbnail.
+# theme.PALETTE — make_thumbnail_png routes through theme.resolve so a video's motion
+# accent matches its thumbnail, including the zero-is-missing gate (topic_id 0/None
+# hashes the subject instead of pinning palette[0] blue).
 _THUMB_PALETTE = PALETTE
 
 
@@ -138,14 +139,15 @@ def _extract_frame(mp4: Path, out_png: Path) -> None:
 
 
 def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
-                       topic_id: int = 0,
+                       topic_id: int | None = None,
                        content_format: str = "short") -> Path | None:
     """Build a custom thumbnail PNG at `out_png`. Returns the path, or None on any
     failure (caller treats thumbnails as best-effort)."""
     out_png = Path(out_png)
-    accent, bg_deep = _THUMB_PALETTE[topic_id % len(_THUMB_PALETTE)]
     work = out_png.parent / ".thumb_work"
     try:
+        tokens = resolve(topic_id, subject)
+        accent, bg_deep = tokens["accent"], tokens["bg_deep"]
         work.mkdir(parents=True, exist_ok=True)
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
         hook = _hook_text(subject, title, content_format=content_format)

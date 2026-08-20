@@ -22,8 +22,10 @@ Covers, dependency-free (no network, no HyperFrames, no ffmpeg, no live YouTube)
   - ``_render`` / ``_extract_frame``: command shape + env pins, nonzero
     returncode raises, missing output raises even on returncode 0
   - ``make_thumbnail_png``: happy path writes gsap + index.html and returns the
-    PNG path; topic_id palette selection (incl. wrap); content_format
-    forwarded; any failure → None (never raises)
+    PNG path; topic_id palette selection (incl. wrap); topic_id 0/None/omitted
+    share theme.resolve's zero-is-missing gate (hello → cyan, not palette[0]
+    blue — kills a leftover ``% 8`` index); content_format forwarded; any
+    failure → None (never raises)
 
 Every non-trivial behavior is mutation-verified (hand-built semantic mutants
 run from an isolated copy with bytecode caching disabled). Exits non-zero on
@@ -31,6 +33,7 @@ the first failed assertion.
 """
 from __future__ import annotations
 
+import inspect
 import sys
 import tempfile
 from pathlib import Path
@@ -66,6 +69,10 @@ ok(thumbnail._THUMB_PALETTE is theme.PALETTE,
    "thumbnail palette IS theme.PALETTE (single source — no private copy)")
 ok(len(thumbnail._THUMB_PALETTE) == 8,
    f"palette has 8 brand pairs (got {len(thumbnail._THUMB_PALETTE)})")
+ok(thumbnail.resolve is theme.resolve,
+   "thumbnail.resolve IS theme.resolve (shared zero-is-missing gate, not a private % 8 index)")
+ok(inspect.signature(thumbnail.make_thumbnail_png).parameters["topic_id"].default is None,
+   "topic_id default is None (missing), not 0")
 ok(thumbnail._RENDER_TIMEOUT == 240,
    "render timeout is 240s (static card must never stall a publish)")
 
@@ -368,7 +375,7 @@ with tempfile.TemporaryDirectory() as td:
 # ---------------------------------------------------------------------------
 # make_thumbnail_png — the outer best-effort wrapper
 # ---------------------------------------------------------------------------
-print("make_thumbnail_png: happy path, palette by topic_id, never-raises")
+print("make_thumbnail_png: happy path, palette by topic_id / zero-is-missing, never-raises")
 
 
 def _fake_render_write(job_dir: Path, out_mp4: Path) -> None:
@@ -383,13 +390,25 @@ def _fake_extract_write(mp4: Path, out_png: Path) -> None:
     out_png.write_bytes(b"\x89PNG\r\nfake")
 
 
+# "hello" hashes to palette[5] cyan — NOT palette[0] blue. Reserved as the
+# discriminator against a leftover `_THUMB_PALETTE[topic_id % 8]` (always
+# blue at topic_id=0) and against `if topic_id is None` (0 still indexes [0]).
+# Do NOT substitute "cache": that subject hashes TO palette[0] and is vacuous.
+HELLO = "hello"
+CYAN, CYAN_BG = theme.PALETTE[5]
+BLUE, BLUE_BG = theme.PALETTE[0]
+TEAL, TEAL_BG = theme.PALETTE[1]
+ok(theme.resolve(0, HELLO)["accent"] == CYAN and CYAN == "#2ec4b6",
+   "fixture: hello + topic_id=0 hashes to cyan #2ec4b6 (not palette[0] blue)")
+ok(CYAN != BLUE, "discriminator is non-vacuous: hello's cyan ≠ palette[0] blue")
+
 with tempfile.TemporaryDirectory() as td:
     out_png = Path(td) / "thumb.png"
     with patch.object(thumbnail, "_hook_text", return_value="Hook Words Here"), \
          patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
          patch.object(thumbnail, "_extract_frame", side_effect=_fake_extract_write):
         result = thumbnail.make_thumbnail_png(
-            "subject about caches", "Title About Caches", out_png,
+            HELLO, "Title About Caches", out_png,
             topic_id=0, content_format="short",
         )
     ok(result == out_png, "happy path returns the out_png path")
@@ -399,13 +418,14 @@ with tempfile.TemporaryDirectory() as td:
        "work dir gets a copy of gsap.min.js (HyperFrames requires it)")
     ok("Hook Words Here" in _captured["index_html"],
        "index.html embeds the hook from _hook_text")
-    accent0, bg0 = theme.PALETTE[0]
-    ok(accent0 in _captured["index_html"] and bg0 in _captured["index_html"],
-       f"topic_id=0 → palette[0] accent/bg ({accent0}/{bg0})")
+    ok(CYAN in _captured["index_html"] and CYAN_BG in _captured["index_html"],
+       f"topic_id=0 + hello → subject-hash cyan/bg ({CYAN}/{CYAN_BG}), not palette[0]")
+    ok(BLUE not in _captured["index_html"] and BLUE_BG not in _captured["index_html"],
+       "topic_id=0 + hello does NOT embed palette[0] blue (kills % 8 fallback)")
     ok(_captured["job_dir"].name == ".thumb_work",
        "work dir is a .thumb_work sibling of out_png")
 
-# topic_id palette selection + wrap
+# topic_id palette selection + wrap (positive ids, including wrap-to-[0])
 for tid, label in [(1, "topic_id=1 → palette[1]"),
                    (7, "topic_id=7 → palette[7] (last)"),
                    (8, "topic_id=8 → palette[0] (wrap)"),
@@ -420,6 +440,37 @@ for tid, label in [(1, "topic_id=1 → palette[1]"),
         accent, bg = theme.PALETTE[tid % len(theme.PALETTE)]
         ok(accent in _captured["index_html"] and bg in _captured["index_html"],
            f"{label} → {accent}/{bg}")
+
+# zero-is-missing: None and omitted default share the hash gate with explicit 0.
+# topic_id=1 + hello still teal (bound id wins — kills an always-hash mutant).
+
+
+def _thumb_html(subject, **kw):
+    with tempfile.TemporaryDirectory() as td:
+        out_png = Path(td) / "t.png"
+        with patch.object(thumbnail, "_hook_text", return_value="H"), \
+             patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
+             patch.object(thumbnail, "_extract_frame",
+                          side_effect=_fake_extract_write):
+            thumbnail.make_thumbnail_png(subject, "t", out_png, **kw)
+        return _captured["index_html"]
+
+
+html_none = _thumb_html(HELLO, topic_id=None)
+ok(CYAN in html_none and CYAN_BG in html_none,
+   f"topic_id=None + hello → subject-hash cyan ({CYAN})")
+ok(BLUE not in html_none,
+   "topic_id=None + hello does NOT embed palette[0] blue")
+
+html_omit = _thumb_html(HELLO)
+ok(CYAN in html_omit and BLUE not in html_omit,
+   "omitted topic_id + hello → subject-hash cyan (default is missing, not 0-as-blue)")
+
+html_bound = _thumb_html(HELLO, topic_id=1)
+ok(TEAL in html_bound and TEAL_BG in html_bound,
+   f"topic_id=1 + hello → palette[1] teal ({TEAL}), not hello's cyan")
+ok(CYAN not in html_bound,
+   "topic_id=1 + hello does NOT embed hello's cyan (kills always-hash)")
 
 # content_format is forwarded to _hook_text
 _hook_args: list[tuple] = []
