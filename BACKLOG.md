@@ -959,3 +959,28 @@ flag the operator step in the commit body.
 - **acceptance:** `make_thumbnail_png(..., topic_id=0, subject="hello")` embeds
   hello's cyan (`#2ec4b6`), not palette[0] blue; topic_id=1 still teal; suite
   kills a `% 8` fallback.
+
+### 20. ✅ DONE (code shipped to main 2026-08-21) Long-form thumbnails used the short-form hook prompt — HIGH
+- **resolution (2026-08-21):** `_set_custom_thumbnail` now takes `content_format`
+  from `Topic.content_format` (same `== "long"` gate as chapters and
+  `render_loop._submit_new`) instead of `video.overrides_json`. That blob is
+  the operator per-video override and is almost always empty — render never
+  writes the topic format back into it — so every long-form publish asked the
+  thumbnail LLM for a "short-form vertical video" hook. Invalid JSON in
+  overrides no longer skips generation (it used to fall into the except path).
+  Best-effort contract unchanged (gen/upload failure never fails a publish).
+  Suite: `tests/verify_publish.py` 74 → 109. Isolated HIGH-caution commit;
+  `publish_loop.py` change is the one helper, nothing else. Adversarial
+  review added two pins the first cut missed: non-canonical `"LONG"`/`""`
+  is short (`== "long"` not a raw forward), and `_publish_one` still
+  lands PUBLISHED when gen returns None or set_thumbnail 403s.
+- **why (found 2026-08-21 auditing remaining `_publish_one` branches):**
+  `content_format=_params.get("content_format", "short")` after
+  `json.loads(video.overrides_json or "{}")`. The live source of format is
+  `Topic.content_format`; `overrides_json` is a different field.
+- **caution:** HIGH (`publish_loop.py`) — isolated commit + new regression
+  tests. Do not bundle other publish_loop work.
+- **acceptance:** a long-topic video with empty or poisoned
+  `overrides_json={"content_format":"short"}` calls `make_thumbnail_png` with
+  `content_format="long"`; a short topic stays `"short"`; `_publish_one`
+  wiring pin; gen/set_thumbnail failure leaves the video published.

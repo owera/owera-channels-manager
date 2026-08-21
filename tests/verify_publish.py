@@ -9,6 +9,8 @@ regress:
   - a revoked OAuth token flips the channel to EXPIRED and returns the video to
     'approved' — never stranded in 'publishing' (the 362691a fix)
   - upload-stall retry-then-fail, quota-exceeded cooldown, and drip spacing
+  - custom thumbnail: content_format from Topic (not overrides_json), and a
+    generation/upload failure never fails the publish
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -16,8 +18,9 @@ Exits non-zero on the first failed assertion.
 import sys
 from datetime import datetime, timedelta, timezone
 
+from pathlib import Path
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 # Importing app.models defines every table=True model, registering them all on
 # SQLModel.metadata so create_all() below builds the full schema.
@@ -496,5 +499,246 @@ s.add(v3); s.commit()
 v4 = publish_loop._next_approved(s, ch.id)
 ok(v4 is not None and v4.topic_id == t_long.id,
    "once shorts are exhausted, remaining longs still drain (no starve)")
+
+# --- custom thumbnail: format from Topic, never fail a publish (BACKLOG 20) ---
+# Defect: _set_custom_thumbnail read content_format from video.overrides_json,
+# which is the operator per-video override blob — almost always empty, and
+# render_loop never writes the topic format back into it. Long-form videos
+# therefore always got the "short-form vertical video" hook prompt. Source of
+# truth is Topic.content_format (same gate chapters and render_loop use).
+print("\n_set_custom_thumbnail: content_format from topic, never fails publish")
+
+_thumb_calls = []
+_set_thumb_calls = []
+_ORIG_MAKE_THUMB = publish_loop.thumbnail.make_thumbnail_png
+_ORIG_SET_THUMB = youtube.set_thumbnail
+
+
+def _record_make_thumb(subject, title, out_png, **kw):
+    _thumb_calls.append({"subject": subject, "title": title,
+                         "out_png": str(out_png), **kw})
+    return Path(out_png)
+
+
+def _none_make_thumb(subject, title, out_png, **kw):
+    _thumb_calls.append({"subject": subject, "title": title,
+                         "out_png": str(out_png), **kw})
+    return None
+
+
+def _record_set_thumb(service, video_id, png_path):
+    _set_thumb_calls.append((video_id, png_path))
+
+
+def _raise_set_thumb(service, video_id, png_path):
+    raise RuntimeError("403 channel not verified")
+
+
+def _setup_thumb_case(fmt="short", overrides=None, topic_exists=True,
+                      video_path="/tmp/x.mp4"):
+    s = fresh_session()
+    ch = make_channel(s)
+    if topic_exists:
+        t = Topic(channel_id=ch.id, name="Fmt", theme_prompt="x",
+                  content_format=fmt)
+        s.add(t)
+        s.commit()
+        s.refresh(t)
+        tid = t.id
+    else:
+        tid = 999
+    kw = dict(status=VideoStatus.APPROVED, topic_id=tid, video_path=video_path,
+              title="The Title", subject="the subject")
+    if overrides is not None:
+        kw["overrides_json"] = overrides
+    v = make_video(s, ch, **kw)
+    return s, ch, v
+
+
+publish_loop.thumbnail.make_thumbnail_png = _record_make_thumb
+youtube.set_thumbnail = _record_set_thumb
+
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytLONG")
+ok(len(_thumb_calls) == 1, "long topic generates a thumbnail")
+ok(_thumb_calls[0].get("content_format") == "long",
+   "long topic forwards content_format=long (not the short default)")
+ok(_thumb_calls[0].get("topic_id") == v.topic_id,
+   "bound video's real topic_id is forwarded (not coerced to 0)")
+ok(_thumb_calls[0]["subject"] == "the subject"
+   and _thumb_calls[0]["title"] == "The Title",
+   "hook inputs are the video's subject and title")
+ok(_set_thumb_calls == [("ytLONG", "/tmp/thumb_custom.png")],
+   "successful generation uploads the PNG as the YouTube thumbnail")
+ok(v.thumb_path == "/tmp/thumb_custom.png",
+   "video.thumb_path records the custom PNG")
+thumb_rows = list(s.exec(select(JobRun).where(JobRun.kind == "thumbnail")))
+ok(len(thumb_rows) == 1 and thumb_rows[0].status == "success",
+   "success JobRun logged")
+ok(thumb_rows[0].video_id == v.id and thumb_rows[0].channel_id == ch.id,
+   "JobRun attributed to this video+channel")
+ok(thumb_rows[0].quota_cost == youtube.QUOTA_THUMBNAIL_SET,
+   "success logs the thumbnail-set quota cost")
+
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("short")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytS")
+ok(_thumb_calls[0].get("content_format") == "short",
+   "short topic forwards content_format=short")
+
+# THE BUG: overrides_json is the operator blob; render_loop never writes the
+# topic format into it. A long topic with a leftover/empty/poisoned override
+# must still get a long-form hook prompt.
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long", overrides='{"content_format": "short"}')
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytP")
+ok(_thumb_calls[0].get("content_format") == "long",
+   "overrides_json content_format does NOT win — topic is the source of truth")
+
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("short", overrides='{"content_format": "long"}')
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytR")
+ok(_thumb_calls[0].get("content_format") == "short",
+   "a short topic stays short even if overrides_json claims long")
+
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long", overrides="not-json")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytJ")
+ok(len(_thumb_calls) == 1 and _thumb_calls[0].get("content_format") == "long",
+   "garbage overrides_json is ignored (must not skip generation)")
+
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long", topic_exists=False)
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytM")
+ok(_thumb_calls[0].get("content_format") == "short",
+   "missing topic falls back to short (same gate as render_loop)")
+
+# The == "long" gate (not a raw forward of topic.content_format): PATCH can
+# store "LONG"/"" because update_topic does not clamp. A raw-forward helper
+# would send those strings into make_thumbnail_png; render/chapters would
+# still treat the topic as short.
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("LONG")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytCASE")
+ok(_thumb_calls[0].get("content_format") == "short",
+   "non-canonical 'LONG' is short (same == 'long' gate as render_loop)")
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytEMPTY")
+ok(_thumb_calls[0].get("content_format") == "short",
+   "empty topic content_format is short, not forwarded raw")
+
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long")
+v.video_path = None
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytN")
+ok(_thumb_calls == [] and _set_thumb_calls == [],
+   "no video_path skips generation entirely")
+
+publish_loop.thumbnail.make_thumbnail_png = _none_make_thumb
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("long")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytF")
+ok(_set_thumb_calls == [], "generation failure does not call set_thumbnail")
+ok(v.thumb_path is None, "generation failure leaves thumb_path unset")
+ok(v.status == VideoStatus.APPROVED,
+   "generation failure does not flip the video status")
+fail_rows = list(s.exec(select(JobRun).where(JobRun.kind == "thumbnail")))
+ok(len(fail_rows) == 1 and fail_rows[0].status == "error",
+   "generation failure logs a thumbnail error")
+ok("generation failed" in (fail_rows[0].detail or ""),
+   "error detail names generation failed")
+
+publish_loop.thumbnail.make_thumbnail_png = _record_make_thumb
+youtube.set_thumbnail = _raise_set_thumb
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("short")
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "yt403")
+ok(v.status == VideoStatus.APPROVED,
+   "set_thumbnail 403 does not change video status")
+ok(v.thumb_path is None, "failed upload leaves thumb_path unset")
+err_rows = list(s.exec(select(JobRun).where(JobRun.kind == "thumbnail")))
+ok(len(err_rows) == 1 and err_rows[0].status == "error",
+   "set_thumbnail failure logs a thumbnail error")
+ok("403" in (err_rows[0].detail or ""),
+   "error detail carries the upload exception")
+
+# Wiring: _publish_one actually calls the helper with the long-form topic.
+# A helper that is never invoked would pass every unit check above.
+publish_loop.thumbnail.make_thumbnail_png = _record_make_thumb
+youtube.set_thumbnail = _record_set_thumb
+youtube.get_service = _dummy_service
+youtube.upload_video = _dummy_upload
+youtube.insert_comment = lambda *a, **k: "c1"
+youtube.create_playlist = _record_create
+youtube.add_to_playlist = lambda *a, **k: "item1"
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Longs", theme_prompt="x", content_format="long")
+s.add(t)
+s.commit()
+s.refresh(t)
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T", subject="long subj")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED,
+   "thumbnail work never fails the publish itself")
+ok(len(_thumb_calls) == 1,
+   "_publish_one actually calls make_thumbnail_png (wiring)")
+ok(_thumb_calls[0].get("content_format") == "long",
+   "_publish_one long-form video gets a long-form thumbnail hook prompt")
+ok(_set_thumb_calls and _set_thumb_calls[0][0] == "vid123",
+   "uploaded thumbnail is attached to the new YouTube id")
+
+# Failure through _publish_one (helper-level 403/gen-fail pins start APPROVED
+# and never observe a PUBLISHED video). A mutant that FAILs the video when
+# thumb_path is unset would survive those.
+publish_loop.thumbnail.make_thumbnail_png = _none_make_thumb
+youtube.set_thumbnail = _record_set_thumb
+_thumb_calls.clear()
+_set_thumb_calls.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Longs", theme_prompt="x", content_format="long")
+s.add(t)
+s.commit()
+s.refresh(t)
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T", subject="long subj")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED,
+   "_publish_one still PUBLISHED when thumbnail generation returns None")
+ok(_set_thumb_calls == [],
+   "failed generation does not call set_thumbnail on the publish path")
+ok(v.yt_video_id == "vid123", "upload id is kept after a thumbnail miss")
+
+publish_loop.thumbnail.make_thumbnail_png = _record_make_thumb
+youtube.set_thumbnail = _raise_set_thumb
+_thumb_calls.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Longs", theme_prompt="x", content_format="long")
+s.add(t)
+s.commit()
+s.refresh(t)
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T", subject="long subj")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED,
+   "_publish_one still PUBLISHED when set_thumbnail 403s")
+ok(v.yt_video_id == "vid123", "upload id is kept after a thumbnail 403")
+
+publish_loop.thumbnail.make_thumbnail_png = _ORIG_MAKE_THUMB
+youtube.set_thumbnail = _ORIG_SET_THUMB
+youtube.get_service, youtube.upload_video = _ORIG_GET, _ORIG_UPLOAD
+youtube.insert_comment = _ORIG_COMMENT
+youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
 
 print(f"\nALL {_checks} CHECKS PASSED")
