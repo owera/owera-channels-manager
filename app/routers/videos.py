@@ -61,10 +61,33 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
     cfg_row = app_settings(session)
     approved = session.exec(
         select(Video).where(Video.channel_id == channel_id, Video.status == VideoStatus.APPROVED)
-        .order_by(Video.approved_at, Video.id)
     ).all()
     if not approved:
         return {}
+    # Same drain order as publish_loop._next_approved (long-first until one is
+    # out on the quota day, then weight-desc shorts). FIFO-by-approved_at lied:
+    # leftover low-weight shorts and buried longs got the earliest ETAs.
+    topics = {
+        t.id: t
+        for t in session.exec(select(Topic).where(Topic.channel_id == channel_id)).all()
+    }
+
+    def _pick(remaining: list[Video], want: str | None) -> Video | None:
+        scored: list[tuple] = []
+        for v in remaining:
+            t = topics.get(v.topic_id)
+            fmt = t.content_format if t else None
+            if want is not None and fmt != want:
+                continue
+            w = t.weight if t is not None and t.weight is not None else 1
+            at = v.approved_at or datetime.min.replace(tzinfo=timezone.utc)
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=timezone.utc)
+            scored.append((-w, at, v.id, v))
+        if not scored:
+            return None
+        scored.sort()
+        return scored[0][3]
 
     drip = timedelta(minutes=cfg_row.publish_drip_minutes)
     daily_limit = min(ch.daily_publish_budget, cfg.youtube_daily_quota_cap // QUOTA_UPLOAD)
@@ -97,15 +120,32 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
     day_count = quota.published_today(session, channel_id) if cur_day == _pt_date(now) else 0
 
     plan: dict[str, str] = {}
-    for v in approved:
+    remaining = list(approved)
+    # Mix state starts from live publishes on the current quota day; future
+    # simulated days start with no long out (reset on every cur_day change).
+    long_out = (
+        cur_day == _pt_date(now)
+        and quota.published_long_today(session, channel_id) > 0
+    )
+    while remaining:
         # The loop only publishes inside the channel's audience-peak windows, so
         # the ETA can't land outside one (re-checked after a budget jump too).
         cursor = next_window_open(ch, cursor)
         if _pt_date(cursor) != cur_day:              # natural rollover from dripping
             cur_day, day_count = _pt_date(cursor), 0
+            long_out = False
         if day_count >= daily_limit:                 # day's budget spent → next quota day
             cursor = next_window_open(ch, _next_quota_reset(cursor))
             cur_day, day_count = _pt_date(cursor), 0
+            long_out = False
+        if not long_out:
+            v = _pick(remaining, "long") or _pick(remaining, None)
+        else:
+            v = _pick(remaining, "short") or _pick(remaining, None)
+        remaining.remove(v)
+        t = topics.get(v.topic_id)
+        if t is not None and t.content_format == "long":
+            long_out = True
         plan[str(v.id)] = cursor.isoformat()
         day_count += 1
         cursor = cursor + drip

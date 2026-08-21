@@ -374,6 +374,75 @@ ch.publish_windows = None
 s.add(ch); s.commit()
 ok(len(publish_plan(ch.id, s)) == 4, "without windows the plan still covers every video")
 
+print("publish-plan: ETAs follow _next_approved mix (long-first, then weight-desc shorts)")
+# The 08-21 noon lie: FIFO-by-approved_at scheduled leftover t10 / t27 ahead of
+# the long and the w4 shorts. Plan order must match the live picker.
+s = fresh_session()
+app_settings(s)
+ch = make_channel(s, daily_publish_budget=5, slug="plan-mix")
+t_long = Topic(channel_id=ch.id, name="Longs", theme_prompt="x",
+               content_format="long", weight=2)
+t_hi = Topic(channel_id=ch.id, name="Winner", theme_prompt="x",
+             content_format="short", weight=4)
+t_lo = Topic(channel_id=ch.id, name="Leftover", theme_prompt="x",
+             content_format="short", weight=1)
+s.add(t_long); s.add(t_hi); s.add(t_lo); s.commit()
+s.refresh(t_long); s.refresh(t_hi); s.refresh(t_lo)
+now = utcnow()
+# Oldest approved is the leftover short — FIFO would put it first.
+v_lo = make_video(s, ch, topic_id=t_lo.id, subject="old leftover",
+                  status=VideoStatus.APPROVED, video_path="/tmp/lo.mp4",
+                  approved_at=now - timedelta(days=20))
+v_hi1 = make_video(s, ch, topic_id=t_hi.id, subject="winner 1",
+                   status=VideoStatus.APPROVED, video_path="/tmp/hi1.mp4",
+                   approved_at=now - timedelta(hours=2))
+v_hi2 = make_video(s, ch, topic_id=t_hi.id, subject="winner 2",
+                   status=VideoStatus.APPROVED, video_path="/tmp/hi2.mp4",
+                   approved_at=now - timedelta(hours=1))
+v_long = make_video(s, ch, topic_id=t_long.id, subject="the long",
+                    status=VideoStatus.APPROVED, video_path="/tmp/lg.mp4",
+                    approved_at=now - timedelta(hours=3))
+plan = publish_plan(ch.id, s)
+order = sorted(plan, key=lambda vid: plan[vid])
+ok(order[0] == str(v_long.id),
+   "first ETA is the long (not the oldest leftover short)")
+ok(order[1] == str(v_hi1.id) and order[2] == str(v_hi2.id),
+   "slots 2-3 are the w4 shorts (weight-desc, then FIFO among them)")
+ok(order[3] == str(v_lo.id),
+   "leftover w1 short is last, even though it was approved first")
+
+print("publish-plan: after a long is already out today, remaining ETAs prefer shorts")
+s = fresh_session()
+app_settings(s)
+ch = make_channel(s, daily_publish_budget=5, slug="plan-after-long")
+t_long = Topic(channel_id=ch.id, name="Longs", theme_prompt="x",
+               content_format="long", weight=2)
+t_short = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x",
+                content_format="short", weight=1)
+s.add(t_long); s.add(t_short); s.commit()
+s.refresh(t_long); s.refresh(t_short)
+now = utcnow()
+# One long already published this quota day — the picker must not reserve again.
+pub_long = make_video(s, ch, topic_id=t_long.id, subject="already out",
+                      status=VideoStatus.PUBLISHED, video_path="/tmp/pl.mp4",
+                      published_at=now)
+from app.models import JobRun
+s.add(JobRun(kind="publish", status="success", channel_id=ch.id,
+             video_id=pub_long.id, quota_cost=0, created_at=now))
+s.commit()
+v_long2 = make_video(s, ch, topic_id=t_long.id, subject="banked long",
+                     status=VideoStatus.APPROVED, video_path="/tmp/l2.mp4",
+                     approved_at=now - timedelta(hours=1))
+v_s1 = make_video(s, ch, topic_id=t_short.id, subject="short 1",
+                  status=VideoStatus.APPROVED, video_path="/tmp/s1.mp4",
+                  approved_at=now - timedelta(hours=2))
+plan = publish_plan(ch.id, s)
+order = sorted(plan, key=lambda vid: plan[vid])
+ok(order[0] == str(v_s1.id),
+   "with a long already out today, first remaining ETA is the short")
+ok(order[1] == str(v_long2.id),
+   "banked long drains after shorts (no second long reserved today)")
+
 # --- publish_one: a stored playlist id is trusted regardless of its shape -----
 # YouTube returns more than one playlist-id format (13-char "PL…" ids are live and
 # accept inserts — verified on the real channels 2026-07-24). Pre-judging ids by
