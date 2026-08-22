@@ -620,6 +620,29 @@ flag the operator step in the commit body.
   while theme.resolve(0, subject) treats 0 as missing and
   uses the subject hash — unbound videos can ship a thumbnail
   accent that does not match the in-video composition.
+  `chapters.py` (previously only the 07-25 golden composition +
+  YouTube-rule smoke — 30 checks against 150 lines) —
+  `tests/verify_chapters.py` 30 → 73 checks (2026-08-22): the
+  headline fallbacks the golden skipped so a broken extractor
+  still passed. Labeled numeric stat uses the label (not the
+  count-up "0"); unlabeled numeric + unit is still not a
+  chapter; unlabeled non-numeric keeps value+unit; titled
+  compare/list prefer the title over h3-vs / first-item;
+  fanout diagram still joins nodes with →; 60-char clamp;
+  slice-then-strip when the window ends on a space; `_stamp`
+  M:SS vs H:MM:SS boundaries; `_text` unescape-AFTER-strip
+  so encoded brackets survive as ‹ ›; displayed-seconds
+  flooring (0.9s → 0:00, 1.0s first → None); exclusive 10s
+  spacing/tail (`<` not `<=`); malformed/unknown beats
+  skipped without killing the list; whitespace-only opener
+  is not a fake 0:00; `chapter_lines_for_video` swallows
+  get_engine raises, missing attrs, and a falsy handle
+  (no get_engine). Mutation-verified: 18/18 hand-built
+  semantic mutants killed from an isolated copy (bytecode
+  caching off, module `__file__` pinned). Four died first
+  on an earlier golden/constant pin (stat-zero-is-title,
+  diagram hyphen-join, min-chapters-2, max-headline-80);
+  the rest died on the new check that named the behavior.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
