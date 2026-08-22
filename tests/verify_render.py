@@ -417,6 +417,75 @@ ok(formats.count("long") == 1, "after rebalance+produce: exactly 1 long remains 
 ok(formats.count("short") == 4, "after rebalance+produce: 4 shorts fill the freed slots")
 ok(len(queued_now) == 5, "queue still fills to budget size")
 
+# Dual of excess-long demote: 0 approved longs, queue full of shorts, a long
+# draft waiting. Observed ch2 2026-08-22: after today's long publishes, queued
+# 5 t4 shorts + t2 long draft; midnight headroom=0 so auto_produce never picks
+# the long and the next day ships 0L+5S. Demote one short, then produce.
+print("rebalance_queued_mix: demotes one short when 0L and queue is full of shorts")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+queued_shorts = [make_video(s, ch, t_short, status=VideoStatus.QUEUED) for _ in range(5)]
+v_long = make_video(s, ch, t_long, status=VideoStatus.DRAFT)
+render_loop._rebalance_queued_mix(s)
+s.commit()
+still_queued = [v for v in queued_shorts if s.get(Video, v.id).status == VideoStatus.QUEUED]
+demoted = [v for v in queued_shorts if s.get(Video, v.id).status == VideoStatus.DRAFT]
+ok(len(still_queued) == 4, "rebalance frees exactly 1 short slot")
+ok(len(demoted) == 1, "one queued short returns to DRAFT")
+ok(demoted[0].id == queued_shorts[-1].id, "newest queued short is the one demoted")
+ok(s.get(Video, v_long.id).status == VideoStatus.DRAFT,
+   "long draft untouched by rebalance itself")
+
+# Same-tick produce then fills the freed slot with the long (midnight shape:
+# rendered_today=0, headroom=1 after the demote).
+render_loop._auto_produce(s)
+s.commit()
+ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
+   "auto_produce queues the long into the freed slot")
+ok(sum(1 for v in queued_shorts if s.get(Video, v.id).status == VideoStatus.QUEUED) == 4,
+   "four shorts stay queued (1L+4S)")
+
+# No-op: a long is already queued — don't demote a short.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+qs = [make_video(s, ch, t_short, status=VideoStatus.QUEUED) for _ in range(4)]
+make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+make_video(s, ch, t_long, status=VideoStatus.DRAFT)
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in qs),
+   "rebalance is a no-op when a long is already in flight")
+
+# No-op: no long draft to promote into the freed slot.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+qs = [make_video(s, ch, t_short, status=VideoStatus.QUEUED) for _ in range(5)]
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in qs),
+   "rebalance is a no-op when no long draft exists")
+
+# No-op: headroom > 0 so auto_produce can pick the long without demoting.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+qs = [make_video(s, ch, t_short, status=VideoStatus.QUEUED) for _ in range(3)]
+v_long = make_video(s, ch, t_long, status=VideoStatus.DRAFT)
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in qs),
+   "rebalance does not demote when headroom already exists")
+render_loop._auto_produce(s)
+s.commit()
+ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
+   "auto_produce still picks the long first when headroom > 0")
+
 # Per-channel isolation: one channel exhausted by successes + in-flight must not
 # block another channel's submissions. ch2's budget (2) is <= ch1's in-flight
 # count (2) on purpose: a gate that counted in-flight renders globally instead

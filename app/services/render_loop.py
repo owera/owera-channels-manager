@@ -274,13 +274,20 @@ def _queued_candidates(session: Session) -> list[Video]:
 
 
 def _rebalance_queued_mix(session: Session) -> None:
-    """When the approved long buffer is healthy, free queue slots for shorts.
+    """Keep the queued mix able to feed 1 long + 4 shorts.
 
-    `_auto_produce` headroom counts every QUEUED row against the budget. If the
-    queue is already full of longs, headroom is 0 and short drafts never promote
-    — even though `_auto_produce` would prefer shorts when approved_longs > 0.
-    Demote excess queued longs (beyond one reserve) back to DRAFT only when
-    promotable short drafts exist, so the next headroom fill restores the mix.
+    Two duals — `_auto_produce` headroom counts every QUEUED row, so a full
+    queue of the wrong format starves the other side forever:
+
+    - **Approved long buffer healthy** + queue full of longs + short drafts
+      exist → demote excess queued longs (keep one reserve) so shorts can fill.
+      Observed ch1 2026-08-08: 5× t5 longs queued, short drafts waiting.
+    - **No approved long** + no long in flight + queue full of shorts + a
+      promotable long draft exists → demote one queued short so `_auto_produce`
+      can pick the long. Observed ch2 2026-08-22 noon: approved 1 long (about
+      to publish), queued 5 t4 shorts, t2 long draft waiting; after the long
+      publishes, midnight headroom stays 0 and the next day ships 0L+5S.
+
     Lifecycle: QUEUED → DRAFT (undo of produce); re-render still starts at QUEUED.
     """
     for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
@@ -290,42 +297,88 @@ def _rebalance_queued_mix(session: Session) -> None:
                    Video.status == VideoStatus.APPROVED,
                    Topic.content_format == "long")
         ).one()
-        if approved_longs < 1:
-            continue
-        short_drafts = session.exec(
-            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
-            .where(Video.channel_id == ch.id,
-                   Video.status == VideoStatus.DRAFT,
-                   Topic.active == True,  # noqa: E712
-                   Topic.weight > 0,
-                   Topic.content_format != "long")
-        ).one()
-        if short_drafts < 1:
-            continue
         queued = session.exec(
             select(Video).where(
                 Video.channel_id == ch.id,
                 Video.status == VideoStatus.QUEUED,
             ).order_by(Video.position, Video.id)
         ).all()
-        longs, _shorts = _split_queued_by_format(session, queued)
-        # Keep one queued long as next-day buffer; demote the rest (newest first
-        # among longs so earlier-position subjects stay closer to production).
-        excess = list(reversed(longs[1:]))  # drop index 0 reserve; demote from end
-        if not excess:
-            continue
-        for v in excess:
-            v.status = VideoStatus.DRAFT
-            v.error = None
-            session.add(v)
-            quota.log(
-                session, kind="produce", status="success", video_id=v.id,
-                channel_id=ch.id,
-                detail="rebalance: demoted excess queued long → draft so shorts can fill mix",
+        longs, shorts = _split_queued_by_format(session, queued)
+
+        if approved_longs >= 1:
+            short_drafts = session.exec(
+                select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+                .where(Video.channel_id == ch.id,
+                       Video.status == VideoStatus.DRAFT,
+                       Topic.active == True,  # noqa: E712
+                       Topic.weight > 0,
+                       Topic.content_format != "long")
+            ).one()
+            if short_drafts < 1:
+                continue
+            # Keep one queued long as next-day buffer; demote the rest (newest first
+            # among longs so earlier-position subjects stay closer to production).
+            excess = list(reversed(longs[1:]))  # drop index 0 reserve; demote from end
+            if not excess:
+                continue
+            for v in excess:
+                v.status = VideoStatus.DRAFT
+                v.error = None
+                session.add(v)
+                quota.log(
+                    session, kind="produce", status="success", video_id=v.id,
+                    channel_id=ch.id,
+                    detail="rebalance: demoted excess queued long → draft so shorts can fill mix",
+                )
+            logger.info(
+                "rebalance: demoted %d excess queued long(s) on channel %s (approved longs=%s, short drafts=%s)",
+                len(excess), ch.slug, approved_longs, short_drafts,
             )
+            continue
+
+        # Dual: approved_longs == 0. If a long is already queued/rendering, submit
+        # will prefer it. If headroom > 0, auto_produce already picks a long first.
+        # The stuck shape is a *full short queue* (headroom ≤ 0) with a long draft
+        # waiting — demote one short so the next produce tick can queue the long.
+        in_flight_longs = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id,
+                   Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)),
+                   Topic.content_format == "long")
+        ).one()
+        if in_flight_longs > 0 or not shorts:
+            continue
+        long_drafts = session.exec(
+            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
+            .where(Video.channel_id == ch.id,
+                   Video.status == VideoStatus.DRAFT,
+                   Topic.active == True,  # noqa: E712
+                   Topic.weight > 0,
+                   Topic.content_format == "long")
+        ).one()
+        if long_drafts < 1:
+            continue
+        rendering = session.exec(
+            select(func.count(Video.id)).where(
+                Video.channel_id == ch.id,
+                Video.status == VideoStatus.RENDERING,
+            )
+        ).one()
+        headroom = ch.daily_render_budget - quota.rendered_today(session, ch.id) - len(queued) - rendering
+        if headroom > 0:
+            continue
+        v = shorts[-1]  # newest (queued is position, id)
+        v.status = VideoStatus.DRAFT
+        v.error = None
+        session.add(v)
+        quota.log(
+            session, kind="produce", status="success", video_id=v.id,
+            channel_id=ch.id,
+            detail="rebalance: demoted queued short → draft so a long can fill the 1L mix",
+        )
         logger.info(
-            "rebalance: demoted %d excess queued long(s) on channel %s (approved longs=%s, short drafts=%s)",
-            len(excess), ch.slug, approved_longs, short_drafts,
+            "rebalance: demoted queued short %s on channel %s (approved longs=0, long drafts=%s)",
+            v.id, ch.slug, long_drafts,
         )
 
 
