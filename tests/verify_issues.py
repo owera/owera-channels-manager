@@ -17,6 +17,13 @@ Covers, dependency-free (in-memory SQLite, no network/creds):
   - detect(): each issue bucket populated, the auto vs needs-operator split,
     the recurring-error-signature grouping, board overflow/inventory, and the
     summary (total_issues / needs_operator / clean).
+  - remaining detect() branches the 07-19 first cut skipped (backlog #7,
+    2026-08-23): board_inventory.by_format (the growth-agent 1L+4S mix
+    signal shipped 08-10 with zero pins), overflow weight-4 cap / inactive
+    skip / exact-ceiling, daily_render_budget<=0 inventory skip, pipeline
+    remaining (inactive/missing-topic render_starved, publish-budget 0,
+    in-flight projection, producible cap at one render-budget-day),
+    stuck-rendering updated_at fallback, daily_limit_hit quota wall.
 Exits non-zero on the first failed assertion.
 """
 import sys
@@ -75,6 +82,15 @@ def make_video(session, channel, **kw):
     session.commit()
     session.refresh(v)
     return v
+
+
+def make_topic(session, channel, **kw):
+    t = Topic(channel_id=channel.id, name=kw.pop("name", "T"),
+              theme_prompt=kw.pop("theme_prompt", "x"), **kw)
+    session.add(t)
+    session.commit()
+    session.refresh(t)
+    return t
 
 
 # --- pure helpers -----------------------------------------------------------
@@ -424,6 +440,262 @@ ok(inv[0]["days_of_inventory"] == round(7 / 6, 1),
 # board_inventory is informational — it must NOT inflate the issue total
 ok(d["summary"]["total_issues"] == len(d["board_overflow"]),
    "board_inventory is excluded from total_issues (only board_overflow counts here)")
+
+
+# --- detect(): remaining branches (by_format mix + overflow/pipeline/stuck/quota)
+# The 08-10 by_format split is the growth agent's 1L+4S mix signal (quoted every
+# run from GET /api/agent/issues). It shipped with zero pins: a swapped
+# long/short predicate, a dropped status filter, or a cross-channel leak would
+# silently poison every mix decision. Same pass covers the overflow/pipeline
+# gates the 07-19 cut named but did not discriminate.
+print("detect (board_inventory.by_format — growth-agent mix signal)")
+
+s = fresh_session()
+ch = make_channel(s, slug="mix-a", name="MixA", daily_render_budget=20)
+sib = make_channel(s, slug="mix-b", name="MixB", daily_render_budget=20)
+t_long = make_topic(s, ch, name="long-a", content_format="long")
+t_short = make_topic(s, ch, name="short-a", content_format="short")
+t_empty = make_topic(s, ch, name="empty-a", content_format="")
+t_case = make_topic(s, ch, name="case-a", content_format="LONG")
+t_sib_long = make_topic(s, sib, name="long-b", content_format="long")
+t_sib_short = make_topic(s, sib, name="short-b", content_format="short")
+# ch mix: draft 2L+3S(+1 empty as S)(+1 LONG as S), queued 1L+4S, approved 1L+2S
+# + 1 draft whose topic row is missing (inner join drops it from by_format).
+for i in range(2):
+    make_video(s, ch, topic_id=t_long.id, status=VideoStatus.DRAFT, position=i)
+for i in range(3):
+    make_video(s, ch, topic_id=t_short.id, status=VideoStatus.DRAFT, position=10 + i)
+make_video(s, ch, topic_id=t_empty.id, status=VideoStatus.DRAFT, position=20)
+make_video(s, ch, topic_id=t_case.id, status=VideoStatus.DRAFT, position=21)
+make_video(s, ch, topic_id=999, status=VideoStatus.DRAFT, position=22)  # no Topic row
+make_video(s, ch, topic_id=t_long.id, status=VideoStatus.QUEUED, position=30)
+for i in range(4):
+    make_video(s, ch, topic_id=t_short.id, status=VideoStatus.QUEUED, position=40 + i)
+make_video(s, ch, topic_id=t_long.id, status=VideoStatus.APPROVED, position=50)
+for i in range(2):
+    make_video(s, ch, topic_id=t_short.id, status=VideoStatus.APPROVED, position=60 + i)
+# sibling inverted mix: draft 5L+0S, queued 0L+1S, approved 0 — a dropped
+# channel_id filter mutant leaks these into MixA or MixA into MixB.
+for i in range(5):
+    make_video(s, sib, topic_id=t_sib_long.id, status=VideoStatus.DRAFT, position=i)
+make_video(s, sib, topic_id=t_sib_short.id, status=VideoStatus.QUEUED, position=10)
+d = issues.detect(s)
+inv_by_id = {row["channel_id"]: row for row in d["board_inventory"]}
+ok(set(inv_by_id) == {ch.id, sib.id},
+   "board_inventory has one row per channel with daily_render_budget > 0")
+a = inv_by_id[ch.id]
+ok(set(a["by_format"]) == {"draft", "queued", "approved"},
+   "by_format keys are exactly draft/queued/approved")
+ok(a["by_format"]["draft"] == {"long": 2, "short": 5},
+   "draft split: 2 long + 3 short + empty-format + LONG-case as short "
+   "(!= 'long', not == 'short'); missing-topic draft is NOT in the split")
+ok(a["by_format"]["queued"] == {"long": 1, "short": 4},
+   "queued split is 1 long + 4 short (status filter is per-bucket, not pending)")
+ok(a["by_format"]["approved"] == {"long": 1, "short": 2},
+   "approved split is 1 long + 2 short — the mix-buffer the agent quotes")
+ok(a["drafts"] == 8 and a["queued"] == 5,
+   "drafts/queued totals still count the missing-topic row (join is by_format-only)")
+ok(a["by_format"]["draft"]["long"] + a["by_format"]["draft"]["short"] == 7,
+   "by_format.draft longs+shorts is 7 against drafts=8 — inner join drops unbound")
+ok(a["at_capacity"] is False,
+   "pending 13 / budget 20 = 0.7d < horizon 2 → not at_capacity")
+b = inv_by_id[sib.id]
+ok(b["by_format"]["draft"] == {"long": 5, "short": 0},
+   "sibling draft is 5 long / 0 short — MixA's shorts did not leak")
+ok(b["by_format"]["queued"] == {"long": 0, "short": 1},
+   "sibling queued is the one short, not MixA's 1L+4S")
+ok(b["by_format"]["approved"] == {"long": 0, "short": 0},
+   "sibling approved stays zero (MixA's 1L+2S did not leak)")
+
+# daily_render_budget <= 0 skips the inventory row entirely (no /0, no phantom).
+s = fresh_session()
+zero = make_channel(s, slug="zero", name="Zero", daily_render_budget=0)
+live = make_channel(s, slug="live", name="Live", daily_render_budget=5)
+t_zero = make_topic(s, zero, name="z")
+t_live = make_topic(s, live, name="l")
+make_video(s, zero, topic_id=t_zero.id, status=VideoStatus.DRAFT)
+make_video(s, live, topic_id=t_live.id, status=VideoStatus.DRAFT)
+d = issues.detect(s)
+ok(len(d["board_inventory"]) == 1 and d["board_inventory"][0]["channel_id"] == live.id,
+   "daily_render_budget=0 emits no inventory row; budget>0 sibling still does")
+ok(d["board_inventory"][0]["by_format"]["draft"] == {"long": 0, "short": 1},
+   "the surviving row's by_format is the live channel's, not the zero-budget one")
+
+# empty board still carries the zero split (agent can quote without a KeyError)
+s = fresh_session()
+make_channel(s, daily_render_budget=6)
+d = issues.detect(s)
+bf = d["board_inventory"][0]["by_format"]
+ok(bf == {"draft": {"long": 0, "short": 0},
+          "queued": {"long": 0, "short": 0},
+          "approved": {"long": 0, "short": 0}},
+   "a channel with no videos still exposes by_format zeros, not a missing key")
+
+
+print("detect (overflow remaining: inactive skip, weight-4 cap, exact ceiling)")
+
+# inactive topics are excluded from overflow even with a huge pending pile
+s = fresh_session()
+ch = make_channel(s)
+t_off = make_topic(s, ch, name="off", active=False, weight=4)
+for i in range(30):
+    make_video(s, ch, topic_id=t_off.id, status=VideoStatus.DRAFT, position=i)
+d = issues.detect(s)
+ok(d["board_overflow"] == [],
+   "an inactive topic never overflows (overflow iterates active==True only)")
+
+# weight-4 cap: weight=5 still multiplies by 4, not 5. ceiling_base=6 → 24.
+# 24 pending is NOT overflow (`>` not `>=`); 25 is.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=40)
+t_w5 = make_topic(s, ch, name="w5", weight=5, active=True)
+for i in range(24):
+    make_video(s, ch, topic_id=t_w5.id, status=VideoStatus.DRAFT, position=i)
+d = issues.detect(s)
+ok(d["board_overflow"] == [],
+   "weight=5 ceiling is 6*4=24, not 6*5; pending==ceiling is not overflow")
+make_video(s, ch, topic_id=t_w5.id, status=VideoStatus.DRAFT, position=24)
+d = issues.detect(s)
+ok(len(d["board_overflow"]) == 1 and d["board_overflow"][0]["ceiling"] == 24
+   and d["board_overflow"][0]["pending"] == 25,
+   "the 25th pending on a weight-5 topic overflows at the weight-4-capped ceiling")
+ok(d["board_overflow"][0]["auto"] is True, "board overflow is agent-fixable (auto)")
+
+# parked weight=0 uses `t.weight or 1` so ceiling is 1×, not 0 (would overflow
+# everything). Pin current behaviour; a follow-up if parked overflow bites.
+s = fresh_session()
+ch = make_channel(s)
+t_park = make_topic(s, ch, name="parked", weight=0, active=True)
+for i in range(7):
+    make_video(s, ch, topic_id=t_park.id, status=VideoStatus.DRAFT, position=i)
+d = issues.detect(s)
+ok(len(d["board_overflow"]) == 1 and d["board_overflow"][0]["ceiling"] == 6,
+   "weight=0 is treated as 1 for the overflow ceiling (`t.weight or 1`), not 0")
+
+# exact ceiling on a weight-1 topic (the existing 7-pending case is one-over)
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, name="exact", weight=1, active=True)
+for i in range(6):
+    make_video(s, ch, topic_id=t.id, status=VideoStatus.DRAFT, position=i)
+d = issues.detect(s)
+ok(d["board_overflow"] == [],
+   "pending == ceiling (6) is not overflow; the gate is `>` not `>=`")
+
+
+print("detect (pipeline remaining: inactive/missing topic, budget 0, projection)")
+
+# drafts on an inactive (not parked) topic: auto-produce's active==True filter
+# skips them → render_starved. Distinct from the weight-0 case already pinned.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+t_inact = make_topic(s, ch, name="inact", weight=1, active=False)
+for i in range(4):
+    make_video(s, ch, topic_id=t_inact.id, status=VideoStatus.DRAFT, position=i)
+make_video(s, ch, topic_id=t_inact.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+kinds = {e["kind"] for e in d["pipeline_starved"]}
+ok("render_starved" in kinds,
+   "drafts on an inactive topic + free render slots → render_starved")
+ok("publish_starved" in kinds,
+   "producible=0 (inactive filter) + 0 approved vs 5/day → publish_starved")
+
+# missing topic row (inner join): same starvation, even with weight/active
+# defaults the video can't see.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+make_video(s, ch, topic_id=999, status=VideoStatus.DRAFT)
+make_video(s, ch, topic_id=999, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok("render_starved" in {e["kind"] for e in d["pipeline_starved"]},
+   "a draft whose topic row is missing is not producible → render_starved")
+
+# daily_publish_budget=0: never publish_starved (the channel isn't trying to)
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=0)
+t = make_topic(s, ch, name="live", weight=1, active=True)
+make_video(s, ch, topic_id=t.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [],
+   "daily_publish_budget=0 never flags publish_starved, even with 0 approved")
+
+# in-flight RENDERING counts toward projected and blocks publish_starved
+# (1 approved + 4 rendering + 0 producible = 5 == budget).
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5, daily_publish_budget=5)
+t = make_topic(s, ch, name="live", weight=1, active=True)
+make_video(s, ch, topic_id=t.id, status=VideoStatus.APPROVED, position=0)
+for i in range(4):
+    make_video(s, ch, topic_id=t.id, status=VideoStatus.RENDERING, position=10 + i)
+make_video(s, ch, topic_id=t.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+ok(d["pipeline_starved"] == [],
+   "1 approved + 4 rendering projects to the 5/day budget → not publish_starved")
+
+# producible cap: 10 producible drafts, render budget 2, 0 approved/in-flight.
+# projected = min(10, 2) = 2 < publish budget 5 → publish_starved.
+# A dropped min() (projected = 10) would miss the day-budget cap and stay quiet.
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=2, daily_publish_budget=5)
+t = make_topic(s, ch, name="live", weight=1, active=True)
+for i in range(10):
+    make_video(s, ch, topic_id=t.id, status=VideoStatus.DRAFT, position=i)
+make_video(s, ch, topic_id=t.id, status=VideoStatus.PUBLISHED, position=99)
+d = issues.detect(s)
+kinds = {e["kind"] for e in d["pipeline_starved"]}
+ok(kinds == {"publish_starved"},
+   "10 producible drafts but only 2 render slots still miss a 5/day publish budget")
+e = d["pipeline_starved"][0]
+ok(e["producible"] == 10 and e["projected"] == 2,
+   "publish_starved.projected caps producible at daily_render_budget (min(10, 2))")
+
+
+print("detect (stuck rendering falls back to updated_at; quota daily_limit_hit)")
+
+s = fresh_session()
+ch = make_channel(s)
+old = utcnow() - timedelta(seconds=settings.render_timeout_seconds + 60)
+make_video(s, ch, status=VideoStatus.RENDERING, last_attempt_at=None, updated_at=old)
+d = issues.detect(s)
+ok(len(d["stuck_rendering"]) == 1,
+   "RENDERING with last_attempt_at=None is still stuck via updated_at")
+
+# daily_limit_hit is a quota wall even with zero spend (the existing pin only
+# covers the near-cap spend fraction). Prefix must match `quota exceeded:%`.
+s = fresh_session()
+ch = make_channel(s)
+from app.services import quota
+quota.log(s, kind="publish", status="error", channel_id=ch.id, quota_cost=0,
+          detail="quota exceeded: [quotaExceeded] cooldown until 2026-08-24")
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1 and d["quota"][0]["daily_limit_hit"] is True
+   and d["quota"][0]["quota_spent_today"] == 0,
+   "daily_limit_hit (quota exceeded: prefix) is a quota wall at zero spend")
+ok(d["quota"][0]["auto"] is False, "a daily-limit-hit wall is not auto")
+
+# auto-only issues inflate total but not needs_operator
+s = fresh_session()
+ch = make_channel(s)
+make_video(s, ch, status=VideoStatus.FAILED, error="ValueError",
+           video_path=None, retry_count=0)
+d = issues.detect(s)
+ok(d["summary"]["total_issues"] >= 1 and d["summary"]["needs_operator"] == 0,
+   "an auto-retryable FAILED video counts in total_issues, not needs_operator")
+
+# last_detail of a signature group is the newest row (order_by created_at.desc)
+s = fresh_session()
+ch = make_channel(s)
+s.add(JobRun(kind="render", status="error", channel_id=ch.id,
+             detail="boom at attempt 1",
+             created_at=utcnow() - timedelta(hours=2)))
+s.add(JobRun(kind="render", status="error", channel_id=ch.id,
+             detail="boom at attempt 2",
+             created_at=utcnow() - timedelta(hours=1)))
+s.commit()
+groups = issues.detect(s)["error_runs_24h"]
+ok(len(groups) == 1 and groups[0]["last_detail"] == "boom at attempt 2",
+   "error_runs_24h.last_detail is the most recent row of the group, not the oldest")
 
 
 # --- detect(): BGM pool health (filesystem-backed, controlled temp dir) ------

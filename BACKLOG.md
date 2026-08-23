@@ -643,6 +643,34 @@ flag the operator step in the commit body.
   on an earlier golden/constant pin (stat-zero-is-title,
   diagram hyphen-join, min-chapters-2, max-headline-80);
   the rest died on the new check that named the behavior.
+  `issues.py` remaining detect() branches (previously 77
+  checks against 366 lines; 08-10 `by_format` had zero pins)
+  — `tests/verify_issues.py` 77 → 109 checks (2026-08-23):
+  board_inventory.by_format long/short per draft/queued/
+  approved (empty-format and `LONG` count as short via
+  `!= "long"` not `== "short"`; missing-topic INNER JOIN
+  drops from the split but not from drafts/pending;
+  per-channel isolation; budget=0 skips the row; empty
+  board still exposes zero splits); overflow inactive skip,
+  weight-4 cap (weight=5 ceiling is 6*4 not 6*5), exact
+  ceiling is not overflow (`>` not `>=`); pipeline
+  remaining (inactive/missing-topic render_starved,
+  publish-budget 0, in-flight projection, producible cap
+  at one render-budget-day); stuck-rendering updated_at
+  fallback; daily_limit_hit quota wall at zero spend;
+  auto-only issues do not inflate needs_operator;
+  error_runs last_detail is newest. Mutation-verified:
+  16/16 hand-built semantic mutants killed from an
+  isolated copy (bytecode caching off); 15 died on their
+  intended check. The `daily_cap >= 0` mutant died first
+  on ZeroDivisionError (`pending / 0`) before the
+  row-count pin. An extra in-flight-not-in-`active`
+  mutant was also killed by its intended check.
+  Accepted residual: `daily_publish_budget > 0` is
+  observationally equivalent to `projected < 0` never
+  firing. Discovered follow-up (not bundled): parked
+  weight=0 topics still overflow as weight=1 because
+  the ceiling uses `t.weight or 1`.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
