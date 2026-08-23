@@ -486,6 +486,35 @@ s.commit()
 ok(s.get(Video, v_long.id).status == VideoStatus.QUEUED,
    "auto_produce still picks the long first when headroom > 0")
 
+# No-op: render budget already spent (14:00 post-publish). Demoting cannot
+# create a produce slot until midnight resets rendered_today; doing it anyway
+# drains the short queue one tick at a time (observed ch2 2026-08-22: 5
+# demotes in ~75s after the long published, JobRuns 19621-19629).
+print("rebalance_queued_mix: does not demote when render budget is spent")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+qs = [make_video(s, ch, t_short, status=VideoStatus.QUEUED) for _ in range(5)]
+v_long = make_video(s, ch, t_long, status=VideoStatus.DRAFT)
+for _ in range(5):
+    s.add(JobRun(kind="render", status="success", channel_id=ch.id))
+s.commit()
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in qs),
+   "first tick: no demote while rendered_today == budget")
+render_loop._rebalance_queued_mix(s)
+s.commit()
+ok(all(s.get(Video, v.id).status == VideoStatus.QUEUED for v in qs),
+   "second tick: still no demote (does not drain the queue)")
+ok(s.get(Video, v_long.id).status == VideoStatus.DRAFT,
+   "long draft waits until midnight headroom")
+render_loop._auto_produce(s)
+s.commit()
+ok(s.get(Video, v_long.id).status == VideoStatus.DRAFT,
+   "auto_produce also a no-op while budget is spent")
+
 # Per-channel isolation: one channel exhausted by successes + in-flight must not
 # block another channel's submissions. ch2's budget (2) is <= ch1's in-flight
 # count (2) on purpose: a gate that counted in-flight renders globally instead

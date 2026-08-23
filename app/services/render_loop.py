@@ -283,10 +283,11 @@ def _rebalance_queued_mix(session: Session) -> None:
       exist → demote excess queued longs (keep one reserve) so shorts can fill.
       Observed ch1 2026-08-08: 5× t5 longs queued, short drafts waiting.
     - **No approved long** + no long in flight + queue full of shorts + a
-      promotable long draft exists → demote one queued short so `_auto_produce`
-      can pick the long. Observed ch2 2026-08-22 noon: approved 1 long (about
-      to publish), queued 5 t4 shorts, t2 long draft waiting; after the long
-      publishes, midnight headroom stays 0 and the next day ships 0L+5S.
+      promotable long draft exists + **headroom == 0** (midnight, budget
+      reset, queue still full) → demote one queued short so `_auto_produce`
+      can pick the long. Does NOT fire when headroom < 0 (render budget
+      already spent, typical 14:00 after the day's long publishes) — that
+      drained the whole short queue one tick at a time on ch2 2026-08-22.
 
     Lifecycle: QUEUED → DRAFT (undo of produce); re-render still starts at QUEUED.
     """
@@ -365,7 +366,16 @@ def _rebalance_queued_mix(session: Session) -> None:
             )
         ).one()
         headroom = ch.daily_render_budget - quota.rendered_today(session, ch.id) - len(queued) - rendering
-        if headroom > 0:
+        # Demoting one short only helps auto_produce when it creates a slot
+        # *this tick* (headroom 0 → 1). headroom > 0: auto_produce can already
+        # pick the long. headroom < 0: the render budget is already spent (the
+        # 14:00 post-publish shape: approved_longs just hit 0, rendered_today
+        # == budget, shorts sitting until midnight). Demoting then drains the
+        # whole short queue one tick at a time and auto_produce cannot fill
+        # until the UTC-day reset. Observed ch2 2026-08-22 14:00: five demotes
+        # (1037, 1036, 1035, 1034, 1029) while rendered_today=5. Midnight
+        # recovered 1L+4S, but the afternoon queue was emptied for nothing.
+        if headroom != 0:
             continue
         v = shorts[-1]  # newest (queued is position, id)
         v.status = VideoStatus.DRAFT
