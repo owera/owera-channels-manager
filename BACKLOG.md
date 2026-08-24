@@ -668,9 +668,7 @@ flag the operator step in the commit body.
   mutant was also killed by its intended check.
   Accepted residual: `daily_publish_budget > 0` is
   observationally equivalent to `projected < 0` never
-  firing. Discovered follow-up (not bundled): parked
-  weight=0 topics still overflow as weight=1 because
-  the ceiling uses `t.weight or 1`.
+  firing. Parked-overflow follow-up shipped as #21.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
@@ -1035,3 +1033,20 @@ flag the operator step in the commit body.
   `overrides_json={"content_format":"short"}` calls `make_thumbnail_png` with
   `content_format="long"`; a short topic stays `"short"`; `_publish_one`
   wiring pin; gen/set_thumbnail failure leaves the video published.
+
+### 21. ✅ DONE (code shipped to main 2026-08-24) Parked weight=0 topics no longer fire board_overflow — normal
+- **resolution (2026-08-24):** `issues.detect` overflow now skips `weight<=0`
+  topics with the same gate autofill/auto-produce already use (`weight is
+  None -> 1`, then `<=0 continue`). A `t.weight or 1` ceiling treated parked
+  as weight-1 and would page the growth agent with auto=True "produce or
+  trim drafts" — undoing a park. Sibling live topics still overflow.
+  Suite: `tests/verify_issues.py` 109 → 111 (parked isolation + negative
+  weight). Residual: `POST /api/topics/{id}/generate` still uses
+  `t.weight or 1` so a parked topic can be hand-filled up to the 1×
+  ceiling (operator-gated, not bundled).
+- **why (found 2026-08-23 shipping issues coverage):** overflow iterated
+  `active==True` only and scaled `min(t.weight or 1, 4)`, so weight=0
+  (the growth-agent soft-pause) overflowed at the weight-1 ceiling.
+- **caution:** normal (`issues.py` digest only; no money-path files).
+- **acceptance:** 7 pending on a weight=0 topic do not overflow; a sibling
+  weight=1 topic with 7 pending still does; weight=-1 is also skipped.

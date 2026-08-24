@@ -20,7 +20,7 @@ Covers, dependency-free (in-memory SQLite, no network/creds):
   - remaining detect() branches the 07-19 first cut skipped (backlog #7,
     2026-08-23): board_inventory.by_format (the growth-agent 1L+4S mix
     signal shipped 08-10 with zero pins), overflow weight-4 cap / inactive
-    skip / exact-ceiling, daily_render_budget<=0 inventory skip, pipeline
+    skip / parked weight<=0 skip / exact-ceiling, daily_render_budget<=0 inventory skip, pipeline
     remaining (inactive/missing-topic render_starved, publish-budget 0,
     in-flight projection, producible cap at one render-budget-day),
     stuck-rendering updated_at fallback, daily_limit_hit quota wall.
@@ -532,7 +532,7 @@ ok(bf == {"draft": {"long": 0, "short": 0},
    "a channel with no videos still exposes by_format zeros, not a missing key")
 
 
-print("detect (overflow remaining: inactive skip, weight-4 cap, exact ceiling)")
+print("detect (overflow remaining: inactive skip, weight-4 cap, parked skip, exact ceiling)")
 
 # inactive topics are excluded from overflow even with a huge pending pile
 s = fresh_session()
@@ -561,16 +561,33 @@ ok(len(d["board_overflow"]) == 1 and d["board_overflow"][0]["ceiling"] == 24
    "the 25th pending on a weight-5 topic overflows at the weight-4-capped ceiling")
 ok(d["board_overflow"][0]["auto"] is True, "board overflow is agent-fixable (auto)")
 
-# parked weight=0 uses `t.weight or 1` so ceiling is 1×, not 0 (would overflow
-# everything). Pin current behaviour; a follow-up if parked overflow bites.
+# parked weight=0 is skipped (same gate as autofill/auto-produce). A `t.weight
+# or 1` ceiling would treat 0 as 1 and fire overflow with auto=True "produce
+# or trim drafts" — undoing the growth agent's park. Skip, don't re-scale.
 s = fresh_session()
 ch = make_channel(s)
 t_park = make_topic(s, ch, name="parked", weight=0, active=True)
+t_live = make_topic(s, ch, name="live", weight=1, active=True)
 for i in range(7):
     make_video(s, ch, topic_id=t_park.id, status=VideoStatus.DRAFT, position=i)
+    make_video(s, ch, topic_id=t_live.id, status=VideoStatus.DRAFT, position=i)
 d = issues.detect(s)
-ok(len(d["board_overflow"]) == 1 and d["board_overflow"][0]["ceiling"] == 6,
-   "weight=0 is treated as 1 for the overflow ceiling (`t.weight or 1`), not 0")
+ok(len(d["board_overflow"]) == 1 and d["board_overflow"][0]["name"] == "live",
+   "a parked weight=0 topic never overflows, even with pending > the weight-1 ceiling")
+ok(d["board_overflow"][0]["pending"] == 7 and d["board_overflow"][0]["ceiling"] == 6,
+   "the sibling live topic still overflows at the weight-1 ceiling (isolation)")
+
+# Negative weight is also parked (autofill `weight <= 0`). Distinguishes
+# `if not t.weight` (0-only, because NOT NULL) from `<= 0`. Schema forbids
+# NULL so a None-defaults-to-1 pin would be vacuous.
+s = fresh_session()
+ch = make_channel(s)
+t_neg = make_topic(s, ch, name="neg", weight=-1, active=True)
+for i in range(7):
+    make_video(s, ch, topic_id=t_neg.id, status=VideoStatus.DRAFT, position=i)
+d = issues.detect(s)
+ok(d["board_overflow"] == [],
+   "weight=-1 is parked (weight<=0), not overflowing at a 1× ceiling")
 
 # exact ceiling on a weight-1 topic (the existing 7-pending case is one-over)
 s = fresh_session()

@@ -181,15 +181,21 @@ def detect(session: Session) -> dict:
     error_runs_24h = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
 
     # Idea-board overflow — topics over the autogen ceiling (ties to the autofill cap).
+    # Parked (weight<=0) topics are skipped, same gate as autofill/auto-produce: a
+    # `t.weight or 1` ceiling would treat 0 as 1 and page the growth agent to
+    # "produce or trim drafts" on a topic it just parked.
     ceiling_base = max(cfg.topic_autogen_min_pending, cfg.topic_autogen_target)
     board_overflow = []
     for t in session.exec(select(Topic).where(Topic.active == True)).all():  # noqa: E712
+        weight = t.weight if t.weight is not None else 1
+        if weight <= 0:
+            continue
         pending = session.exec(
             select(func.count(Video.id)).where(
                 Video.topic_id == t.id,
                 Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED]))
         ).one()
-        ceiling = ceiling_base * min(t.weight or 1, 4)
+        ceiling = ceiling_base * min(weight, 4)
         if pending > ceiling:
             board_overflow.append({
                 "topic_id": t.id, "channel_id": t.channel_id, "name": t.name,
