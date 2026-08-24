@@ -560,6 +560,56 @@ ok(all(plan[str(v.id)]["reason"].startswith("render budget full") for v in qs),
 ok("2+3 rendering/5" in plan[str(qs[0].id)]["reason"],
    "queue-plan reason spells out done + in-flight against the budget")
 
+# Mix order, not FIFO-by-id: the board's "next to render" must match _submit_new.
+# Observed lie: shorts with lower ids sat first in queue-plan while the long
+# (queued last) was the video _submit_new would actually pick (2026-08-07 ch2).
+print("queue-plan: mix order matches _submit_new (long-first / short-first)")
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+v_s1 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_s2 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+ok(v_s1.id < v_long.id, "precondition: shorts have lower ids than the long")
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_long.id)]["reason"] == "next to render",
+   "no approved long -> queued long is labeled next to render, not the lower-id short")
+ok(plan[str(v_s1.id)]["reason"] == "queued · renders today"
+   and plan[str(v_s2.id)]["reason"] == "queued · renders today",
+   "shorts behind the long still labeled as rendering today (budget 5, 3 queued)")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=1)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+v_s1 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_s2 = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_long.id)]["reason"] == "next to render",
+   "budget 1 + no approved long -> long takes the only slot")
+ok(plan[str(v_s1.id)]["reason"].startswith("render budget full")
+   and plan[str(v_s2.id)]["reason"].startswith("render budget full"),
+   "FIFO would have labeled s1 next and the long budget-full; mix order flips it")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t_short = make_topic(s, ch, name="shorts", weight=4, content_format="short")
+t_long = make_topic(s, ch, name="anchor", weight=2, content_format="long")
+make_video(s, ch, t_long, status=VideoStatus.APPROVED)
+v_long = make_video(s, ch, t_long, status=VideoStatus.QUEUED)  # lower id
+v_s = make_video(s, ch, t_short, status=VideoStatus.QUEUED)
+ok(v_long.id < v_s.id, "precondition: queued long has lower id than short")
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_s.id)]["reason"] == "next to render",
+   "approved long banked -> short is next to render even if the long id is lower")
+ok(plan[str(v_long.id)]["reason"] == "queued · renders today",
+   "extra queued long is not labeled next when shorts need the mix slots")
+
 # ══ Non-budget lifecycle: recovery, timeout/retry, finalize (backlog 7) ════════
 
 import json  # noqa: E402

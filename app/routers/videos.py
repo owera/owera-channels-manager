@@ -12,6 +12,7 @@ from app.models import Channel, Topic, Video, VideoStatus, utcnow
 from app.schemas import RejectBody, ReorderBody, VideoCreate, VideoUpdate
 from app.services import metadata, quota
 from app.services.publish_loop import next_window_open
+from app.services.render_loop import _queued_candidates
 from app.services.youtube import QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -187,8 +188,15 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
     reset = _next_midnight_utc(datetime.now(timezone.utc)).isoformat()
 
     spent = f"{rendered}+{in_flight_ch} rendering" if in_flight_ch else str(rendered)
+    # Same drain order as render_loop._submit_new / _queued_candidates (long-first
+    # when no approved long, shorts-first when a long is already banked). FIFO-by
+    # position/id lied: a queued long behind lower-id shorts was labeled "budget
+    # full" while it was actually next to render (the 2026-08-07 ch2 shape).
+    ordered = [v for v in _queued_candidates(session) if v.channel_id == channel_id]
+    if not ordered:
+        ordered = queued
     plan: dict[str, dict] = {}
-    for i, v in enumerate(queued):
+    for i, v in enumerate(ordered):
         if i >= slots_today:                              # today's render budget spent
             plan[str(v.id)] = entry(f"render budget full ({spent}/{budget})", reset)
         elif i == 0 and in_flight >= cfg_row.render_concurrency:
