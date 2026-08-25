@@ -1041,12 +1041,26 @@ flag the operator step in the commit body.
   as weight-1 and would page the growth agent with auto=True "produce or
   trim drafts" — undoing a park. Sibling live topics still overflow.
   Suite: `tests/verify_issues.py` 109 → 111 (parked isolation + negative
-  weight). Residual: `POST /api/topics/{id}/generate` still uses
-  `t.weight or 1` so a parked topic can be hand-filled up to the 1×
-  ceiling (operator-gated, not bundled).
+  weight). Residual closed as #22.
 - **why (found 2026-08-23 shipping issues coverage):** overflow iterated
   `active==True` only and scaled `min(t.weight or 1, 4)`, so weight=0
   (the growth-agent soft-pause) overflowed at the weight-1 ceiling.
 - **caution:** normal (`issues.py` digest only; no money-path files).
 - **acceptance:** 7 pending on a weight=0 topic do not overflow; a sibling
   weight=1 topic with 7 pending still does; weight=-1 is also skipped.
+
+### 22. ✅ DONE (code shipped to main 2026-08-25) Parked weight<=0 topics refuse generate — normal
+- **resolution (2026-08-25):** `POST /api/topics/{id}/generate` now uses the
+  same `weight is None -> 1`, then `<= 0` continue as autofill / overflow.
+  A parked topic returns `{"generated": 0, "reason": "topic is parked
+  (weight <= 0)"}` without calling the LLM or writing drafts/JobRuns.
+  Live topics still clamp to `target × min(weight, 4)`. `t.weight or 1`
+  had treated 0 as 1, so a dashboard click or the growth agent's
+  Feed-winners POST refilled a parked topic to the 1× ceiling.
+  Suite: `tests/verify_topics.py` (40 checks).
+- **why (found 2026-08-24 shipping overflow skip):** generate was the last
+  `t.weight or 1` site; overflow/autofill already skipped parked topics.
+- **caution:** normal (`topics.py` router only; no money-path files).
+- **acceptance:** weight=0 and weight=-1 generate nothing and name the
+  park; a sibling weight=1 still generates up to the 1× ceiling; weight=2
+  uses the 2× ceiling.

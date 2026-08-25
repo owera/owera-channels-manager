@@ -99,10 +99,14 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     t = session.get(Topic, topic_id)
     if not t:
         raise HTTPException(404, "topic not found")
+    # weight 0 is a soft-pause (same gate as autofill/overflow); do not treat 0 as 1.
+    weight = t.weight if t.weight is not None else 1
+    if weight <= 0:
+        return {"generated": 0, "reason": "topic is parked (weight <= 0)"}
     # Bound the IDEAS column: don't let a single click push this topic's draft count
     # past the same ceiling autofill respects (target × weight multiplier).
     cfg = app_settings(session)
-    ceiling = max(cfg.topic_autogen_min_pending, cfg.topic_autogen_target) * min(t.weight or 1, 4)
+    ceiling = max(cfg.topic_autogen_min_pending, cfg.topic_autogen_target) * min(weight, 4)
     current_drafts = session.exec(
         select(func.count(Video.id)).where(
             Video.topic_id == topic_id, Video.status == VideoStatus.DRAFT)).one()
