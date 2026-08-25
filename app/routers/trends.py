@@ -6,7 +6,7 @@ topic, seeds ideas, and auto-produces a few so it starts rendering immediately."
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
-from app.db import get_session
+from app.db import app_settings, get_session
 from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoStatus,
                         utcnow)
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
@@ -115,6 +115,28 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     fmt = "long" if fmt == "long" else "short"
     theme = body.theme_prompt or t.description or f"Trending topic: {t.term}"
 
+    # Same board-horizon guard as POST /topics/{id}/generate and autofill.
+    # 2026-08-25: 10 watching trends were adopted in 21s against an already-full
+    # ch2 bench (10 pending → 90) because adopt created a new topic + 8 ideas
+    # with no cap. Refuse when the bench is full so the caller must displace
+    # first (playbook net-zero rule); clamp idea_count to remaining seats otherwise.
+    idea_count = max(1, body.idea_count)
+    cfg = app_settings(session)
+    if cfg.board_horizon_days > 0:
+        pending = session.exec(
+            select(func.count(Video.id)).where(
+                Video.channel_id == ch.id,
+                Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED]),
+            )
+        ).one()
+        board_cap = ch.daily_render_budget * cfg.board_horizon_days
+        board_space = max(0, board_cap - int(pending or 0))
+        if board_space == 0:
+            raise HTTPException(
+                409, "board at capacity (horizon reached) — displace drafts first")
+        idea_count = min(idea_count, board_space)
+    produce_count = min(max(0, body.produce_count), idea_count)
+
     # 1. Topic (same construction as topics.create_topic).
     mx_pos = session.exec(
         select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
@@ -127,7 +149,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     # 2. Seed ideas; auto-produce the first `produce_count` (QUEUED), rest as DRAFT.
     try:
         ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
-                                         max(1, body.idea_count), fmt,
+                                         idea_count, fmt,
                                          language=video_gen.channel_language(session, ch.id))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
@@ -135,7 +157,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
         select(func.max(Video.position)).where(Video.channel_id == ch.id)).one() or 0
     produced = 0
     for i, subject in enumerate(ideas):
-        status = VideoStatus.QUEUED if i < max(0, body.produce_count) else VideoStatus.DRAFT
+        status = VideoStatus.QUEUED if i < produce_count else VideoStatus.DRAFT
         session.add(Video(channel_id=ch.id, topic_id=topic.id, subject=subject,
                           status=status, position=mx_v + 1 + i))
         produced += status == VideoStatus.QUEUED
