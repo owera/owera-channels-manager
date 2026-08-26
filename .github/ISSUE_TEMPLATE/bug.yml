@@ -1,0 +1,27 @@
+name: Bug
+description: Something is broken and you can show it
+body:
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      description: Exact steps. What you ran, what you clicked, versions if they matter.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead. Paste the error if there is one.
+    validations:
+      required: true

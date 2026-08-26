@@ -1,0 +1,10 @@
+name: Small fix / docs
+description: A typo, a wrong install step, a tiny obvious patch
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What's wrong or missing, and the fix if you already have one.
+    validations:
+      required: true
