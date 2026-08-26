@@ -11,6 +11,11 @@ regress:
   - upload-stall retry-then-fail, quota-exceeded cooldown, and drip spacing
   - custom thumbnail: content_format from Topic (not overrides_json), and a
     generation/upload failure never fails the publish
+  - first-comment engagement seed (language + playlist series pointer) is
+    best-effort and never fails a publish
+  - tick() skip gates: scheduler_paused, paused/dead channels, cooldown,
+    daily budget, quota-cap headroom, in-flight, drip — each proven at the
+    tick() call, not only at the helper
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -106,6 +111,12 @@ publish_loop._recover_stuck_publishing(s)
 s.refresh(v)
 ok(v.status == VideoStatus.PUBLISHING, "an in-flight upload inside the timeout is left alone")
 ok(v.retry_count == 0, "in-flight upload's retry_count is not bumped")
+
+# Keep every _publish_one / tick() hermetic. make_thumbnail_png otherwise
+# calls the live LLM whenever MANAGER_ANTHROPIC_API_KEY is set (pydantic
+# loads .env) and the suite hangs on the first un-stubbed publish.
+_REAL_MAKE_THUMB = publish_loop.thumbnail.make_thumbnail_png
+publish_loop.thumbnail.make_thumbnail_png = lambda *a, **k: None
 
 # --- publish_one: revoked OAuth token (the 362691a fix) ----------------------
 print("publish_one: revoked OAuth token")
@@ -809,5 +820,485 @@ youtube.set_thumbnail = _ORIG_SET_THUMB
 youtube.get_service, youtube.upload_video = _ORIG_GET, _ORIG_UPLOAD
 youtube.insert_comment = _ORIG_COMMENT
 youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
+
+# --- first comment: language + playlist series pointer, never fails publish ---
+# The author first-comment is the engagement seed (_publish_one posts it after
+# a successful upload). Helpers and tick() skips had coverage; this path had
+# none — a dropped insert_comment, a hardcoded EN phrase, or a comment 403
+# flipping the video FAILED would all have shipped.
+print("\n_first_comment_text: language prefix + playlist series pointer")
+EN = "What would you change here? I read every comment."
+PT = "O que você mudaria nesse setup? Leio todos os comentários."
+EN_SERIES = "▶ Full series:"
+PT_SERIES = "▶ Série completa:"
+PL_ID = "PLLdeDcM9G5vY"
+
+ok(publish_loop._first_comment_text(None, None) == EN,
+   "None language -> English (the fallback)")
+ok(publish_loop._first_comment_text("", None) == EN,
+   "empty language -> English")
+ok(publish_loop._first_comment_text("en", None) == EN, "en -> English")
+ok(publish_loop._first_comment_text("en-US", None) == EN,
+   "en-US uses the BCP-47 prefix, not the whole tag")
+ok(publish_loop._first_comment_text("pt", None) == PT, "pt -> Portuguese")
+ok(publish_loop._first_comment_text("pt-BR", None) == PT,
+   "pt-BR uses the prefix (the live ch2 voice tag)")
+ok(publish_loop._first_comment_text("PT-BR", None) == PT,
+   "language match is case-insensitive")
+ok(publish_loop._first_comment_text("es", None) == EN,
+   "unknown language (es) falls back to English, not empty/raise")
+
+text_pl = publish_loop._first_comment_text("en", PL_ID)
+ok(text_pl.startswith(EN + "\n"), "playlist pointer is appended after the ask")
+ok(EN_SERIES in text_pl, "English series cue is used for en")
+ok(f"https://www.youtube.com/playlist?list={PL_ID}" in text_pl,
+   "series pointer is the playlist URL (list=), not a watch URL")
+ok(PT_SERIES not in text_pl, "English comment does not carry the PT series cue")
+
+text_pt_pl = publish_loop._first_comment_text("pt-BR", PL_ID)
+ok(text_pt_pl.startswith(PT + "\n"), "pt-BR + playlist keeps the PT ask")
+ok(PT_SERIES in text_pt_pl, "pt-BR uses the PT series cue, not the EN one")
+ok(f"list={PL_ID}" in text_pt_pl, "pt-BR series pointer still carries the yt id")
+
+ok(publish_loop._first_comment_text("en", None) == EN,
+   "no playlist id -> no series line")
+ok(publish_loop._first_comment_text("en", "") == EN,
+   "empty playlist id is falsy -> no series line")
+
+print("_publish_one: first comment is posted, best-effort, never fails the publish")
+_comments = []
+_ORIG_LANG = publish_loop.video_gen.channel_language_code
+_ORIG_MAKE_THUMB_C = publish_loop.thumbnail.make_thumbnail_png
+
+
+def _record_comment(service, video_id, text):
+    _comments.append((video_id, text))
+    return "cmt1"
+
+
+def _raise_comment(service, video_id, text):
+    _comments.append((video_id, text))
+    raise RuntimeError("commentsDisabled")
+
+
+publish_loop.thumbnail.make_thumbnail_png = lambda *a, **k: None
+youtube.get_service = _dummy_service
+youtube.upload_video = _dummy_upload
+# Raise so ensure_topic_playlist cannot mint a playlist — this case pins
+# the no-series comment. (A succeeding create would append the series URL
+# and the EN-only pin would be vacuously false.)
+def _no_playlist(*a, **k):
+    raise RuntimeError("no playlist")
+
+
+youtube.create_playlist = _no_playlist
+youtube.add_to_playlist = lambda *a, **k: "item1"
+youtube.insert_comment = _record_comment
+publish_loop.video_gen.channel_language_code = lambda *a, **k: None
+
+_comments.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x")
+s.add(t); s.commit(); s.refresh(t)
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED, "comment path still publishes")
+ok(len(_comments) == 1, "_publish_one actually calls insert_comment (wiring)")
+ok(_comments[0][0] == "vid123", "comment is posted on the new YouTube id")
+ok(_comments[0][1] == EN, "no language profile + no playlist -> English ask, no series line")
+cmt_rows = list(s.exec(select(JobRun).where(JobRun.kind == "comment")))
+ok(len(cmt_rows) == 1 and cmt_rows[0].status == "success",
+   "success JobRun logged for the comment")
+ok(cmt_rows[0].video_id == v.id and cmt_rows[0].channel_id == ch.id,
+   "comment JobRun attributed to this video+channel")
+ok(cmt_rows[0].quota_cost == youtube.QUOTA_COMMENT_INSERT,
+   "success logs the comment-insert quota cost")
+
+# pt-BR + stored playlist: the series pointer must ride the same comment.
+publish_loop.video_gen.channel_language_code = lambda *a, **k: "pt-BR"
+_comments.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Série", theme_prompt="x")
+s.add(t); s.commit(); s.refresh(t)
+pl = Playlist(channel_id=ch.id, yt_playlist_id=PL_ID, title="Série")
+s.add(pl); s.commit(); s.refresh(pl)
+t.playlist_id = pl.id
+s.add(t); s.commit()
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED, "pt-BR + playlist still publishes")
+ok(len(_comments) == 1, "one comment posted")
+ok(_comments[0][1] == publish_loop._first_comment_text("pt-BR", PL_ID),
+   "comment text is _first_comment_text(pt-BR, stored playlist id)")
+ok(PT in _comments[0][1] and PT_SERIES in _comments[0][1],
+   "live ch2 shape: PT ask + PT series cue")
+ok(f"list={PL_ID}" in _comments[0][1],
+   "stored 13-char playlist id is the series pointer (not a newly minted one)")
+
+# A comment 403 (commentsDisabled, quota, …) must not FAIL the video — same
+# best-effort contract as thumbnails.
+youtube.insert_comment = _raise_comment
+publish_loop.video_gen.channel_language_code = lambda *a, **k: "en"
+_comments.clear()
+s = fresh_session()
+ch = make_channel(s)
+t = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x")
+s.add(t); s.commit(); s.refresh(t)
+v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.PUBLISHED,
+   "_publish_one still PUBLISHED when insert_comment raises")
+ok(v.yt_video_id == "vid123", "upload id is kept after a comment failure")
+err_cmt = list(s.exec(select(JobRun).where(JobRun.kind == "comment")))
+ok(len(err_cmt) == 1 and err_cmt[0].status == "error",
+   "comment failure logs a comment error JobRun")
+ok("commentsDisabled" in (err_cmt[0].detail or ""),
+   "error detail carries the insert exception")
+
+youtube.insert_comment = _ORIG_COMMENT
+publish_loop.video_gen.channel_language_code = _ORIG_LANG
+publish_loop.thumbnail.make_thumbnail_png = _ORIG_MAKE_THUMB_C
+youtube.get_service, youtube.upload_video = _ORIG_GET, _ORIG_UPLOAD
+youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE, _ORIG_ADD
+
+# --- tick() remaining skip gates (helpers were tested; tick wiring was not) ---
+# The 07-26 hung-upload pile-up, a paused scheduler that still recovered
+# stalled publishes, and a paused channel that still dripped were all
+# tick()-level bugs that helper-only checks cannot catch.
+print("\ntick: remaining skip gates (paused / oauth / cooldown / budget / cap / in-flight / drip)")
+
+_tick_services = []
+_tick_uploads = []
+_ORIG_SCOPE_T = publish_loop.session_scope
+_ORIG_GET_T, _ORIG_UPLOAD_T = youtube.get_service, youtube.upload_video
+_ORIG_COMMENT_T = youtube.insert_comment
+_ORIG_CREATE_T, _ORIG_ADD_T = youtube.create_playlist, youtube.add_to_playlist
+_ORIG_MAKE_THUMB_T = publish_loop.thumbnail.make_thumbnail_png
+_CAP = settings.youtube_daily_quota_cap
+_COST = (youtube.QUOTA_UPLOAD + youtube.QUOTA_THUMBNAIL_SET
+         + youtube.QUOTA_COMMENT_INSERT)
+
+
+def _arm_tick():
+    _tick_services.clear()
+    _tick_uploads.clear()
+    youtube.get_service = lambda slug: (_tick_services.append(slug) or object())
+    youtube.upload_video = lambda *a, **k: (_tick_uploads.append(a[2] if len(a) > 2 else k.get("title")) or "vidT")
+    youtube.insert_comment = lambda *a, **k: "c1"
+    youtube.create_playlist = lambda *a, **k: {
+        "yt_playlist_id": "PL" + "T" * 32, "title": "t",
+        "description": "", "privacy": "public"}
+    youtube.add_to_playlist = lambda *a, **k: "item1"
+    publish_loop.thumbnail.make_thumbnail_png = lambda *a, **k: None
+
+
+def _disarm_tick():
+    publish_loop.session_scope = _ORIG_SCOPE_T
+    youtube.get_service, youtube.upload_video = _ORIG_GET_T, _ORIG_UPLOAD_T
+    youtube.insert_comment = _ORIG_COMMENT_T
+    youtube.create_playlist, youtube.add_to_playlist = _ORIG_CREATE_T, _ORIG_ADD_T
+    publish_loop.thumbnail.make_thumbnail_png = _ORIG_MAKE_THUMB_T
+
+
+def _ready(session, title="ready", **ch_kw):
+    app_settings(session)
+    ch = make_channel(session, oauth_status=ch_kw.pop("oauth_status", OAuthStatus.CONNECTED),
+                      **ch_kw)
+    topic = Topic(channel_id=ch.id, name="Tick", theme_prompt="x")
+    session.add(topic)
+    session.commit()
+    session.refresh(topic)
+    v = make_video(session, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+                   video_path="/tmp/x.mp4", title=title)
+    return ch, v
+
+
+try:
+    _arm_tick()
+
+    # scheduler_paused returns BEFORE recovery — a stuck upload must stay put.
+    s = fresh_session()
+    cfg = app_settings(s)
+    cfg.scheduler_paused = True
+    s.add(cfg)
+    s.commit()
+    ch, v = _ready(s, title="paused-sched")
+    stuck = make_video(s, ch, status=VideoStatus.PUBLISHING, topic_id=v.topic_id,
+                       video_path="/tmp/x.mp4", title="stuck",
+                       retry_count=0,
+                       last_attempt_at=utcnow() - timedelta(seconds=TIMEOUT + 60))
+
+    @contextmanager
+    def _scope_paused():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_paused
+    publish_loop.tick()
+    s.refresh(v)
+    s.refresh(stuck)
+    # Recovery pin FIRST: a `pass` instead of `return` recovers the stuck
+    # row AND then publishes (get_service fires too). Checking services
+    # first would hide the early-return claim behind the skip-publish pin.
+    ok(stuck.status == VideoStatus.PUBLISHING,
+       "scheduler_paused: returns before recover_stuck_publishing")
+    ok(_tick_services == [] and _tick_uploads == [],
+       "scheduler_paused: tick opens no YouTube service")
+    ok(v.status == VideoStatus.APPROVED,
+       "scheduler_paused: approved work is not published")
+
+    cfg.scheduler_paused = False
+    s.add(cfg)
+    s.commit()
+    _tick_services.clear()
+    _tick_uploads.clear()
+    publish_loop.tick()
+    s.refresh(v)
+    s.refresh(stuck)
+    ok(stuck.status == VideoStatus.APPROVED,
+       "unpaused: the stuck upload is recovered (proves the pause pin was the early return)")
+    ok("paused-sched" in _tick_uploads or "stuck" in _tick_uploads,
+       "unpaused: tick publishes (recovery + approved pool)")
+
+    # Channel.paused: skip this channel, sibling still publishes.
+    _tick_services.clear()
+    _tick_uploads.clear()
+    s = fresh_session()
+    app_settings(s)
+    ch_p, v_p = _ready(s, title="is-paused", slug="paused-ch", paused=True)
+    ch_l, v_l = _ready(s, title="is-live", slug="live-ch")
+
+    @contextmanager
+    def _scope_chpause():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_chpause
+    publish_loop.tick()
+    s.refresh(v_p)
+    s.refresh(v_l)
+    ok(v_p.status == VideoStatus.APPROVED, "paused channel is not published")
+    ok(v_l.status == VideoStatus.PUBLISHED, "unpaused sibling still publishes")
+    ok("paused-ch" not in _tick_services,
+       "paused channel never even opens get_service")
+    ok("live-ch" in _tick_services,
+       "unpaused sibling does open get_service (sibling isolation)")
+
+    # Dead oauth_status values skip; CONNECTED publishes. Per-status so a
+    # mutant that only special-cases EXPIRED still dies.
+    for dead in (OAuthStatus.EXPIRED, OAuthStatus.DISCONNECTED, OAuthStatus.ERROR):
+        _tick_services.clear()
+        _tick_uploads.clear()
+        s = fresh_session()
+        app_settings(s)
+        ch_d, v_d = _ready(s, title="dead", slug=f"dead-{dead}", oauth_status=dead)
+        ch_ok, v_ok = _ready(s, title="ok", slug=f"ok-{dead}")
+
+        @contextmanager
+        def _scope_oauth(_s=s):
+            yield _s
+            _s.commit()
+
+        publish_loop.session_scope = _scope_oauth
+        publish_loop.tick()
+        s.refresh(v_d)
+        s.refresh(v_ok)
+        ok(v_d.status == VideoStatus.APPROVED,
+           f"{dead} channel is not published")
+        ok(v_ok.status == VideoStatus.PUBLISHED,
+           f"CONNECTED sibling still publishes next to {dead}")
+        ok(f"dead-{dead}" not in _tick_services,
+           f"{dead} never opens get_service")
+        ok(f"ok-{dead}" in _tick_services,
+           f"CONNECTED sibling next to {dead} does open get_service")
+
+    # Cooldown: future until skips; SQLite stores naive so the tzinfo-is-None
+    # branch actually runs (the 08-02 aware-leg lesson).
+    _tick_services.clear()
+    _tick_uploads.clear()
+    s = fresh_session()
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    ch, v = _ready(s, title="cooling", slug="cool-ch", cooldown_until=future)
+    s.refresh(ch)
+    ok(ch.cooldown_until is not None and ch.cooldown_until.tzinfo is None,
+       "sqlite stored cooldown_until naive (the tick() naive branch is the one that runs)")
+
+    @contextmanager
+    def _scope_cd():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_cd
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.APPROVED, "future cooldown: tick does not publish")
+    ok(_tick_services == [], "future cooldown: get_service not opened")
+
+    ch.cooldown_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    s.add(ch)
+    s.commit()
+    _tick_services.clear()
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.PUBLISHED, "expired cooldown: tick publishes")
+
+    # daily_limit_hit is checked at tick, not only via the helper.
+    _tick_services.clear()
+    s = fresh_session()
+    ch, v = _ready(s, title="capped", slug="cap-ch")
+    quota.log(s, kind="publish", status="error", channel_id=ch.id,
+              detail="quota exceeded: [quotaExceeded] cooldown until ...")
+    s.commit()
+
+    @contextmanager
+    def _scope_lim():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_lim
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.APPROVED,
+       "daily_limit_hit at tick skips the publish (helper-only pin would miss a dropped call)")
+    ok(_tick_services == [], "daily_limit_hit: get_service not opened")
+
+    # Daily budget: published_today >= budget. quota_cost=0 so the quota-cap
+    # gate cannot be the one that fires.
+    _tick_services.clear()
+    s = fresh_session()
+    ch, v = _ready(s, title="budgeted", slug="bud-ch", daily_publish_budget=1)
+    # Older than the drip window so a dropped budget check cannot hide behind drip.
+    s.add(JobRun(kind="publish", status="success", channel_id=ch.id, quota_cost=0,
+                 created_at=utcnow() - timedelta(minutes=40)))
+    s.commit()
+    ok(quota.published_today(s, ch.id) >= 1, "precondition: budget is spent")
+    ok(publish_loop._drip_ok(s, ch, app_settings(s).publish_drip_minutes) is True,
+       "precondition: drip is open (budget must be the gate that fires)")
+
+    @contextmanager
+    def _scope_bud():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_bud
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.APPROVED, "spent daily_publish_budget: tick skips")
+    ok(_tick_services == [], "spent budget: get_service not opened")
+
+    # Quota-cap headroom uses `>` not `>=`: spent + per-publish cost == cap
+    # must still publish; one unit over must skip.
+    _tick_services.clear()
+    s = fresh_session()
+    ch, v = _ready(s, title="at-cap", slug="eq-ch")
+    s.add(JobRun(kind="publish", status="success", channel_id=ch.id,
+                 quota_cost=_CAP - _COST,
+                 created_at=utcnow() - timedelta(minutes=40)))
+    s.commit()
+    ok(quota.quota_spent_today(s, ch.id) + _COST == _CAP,
+       "precondition: spent + this publish == cap (the `>` boundary)")
+    ok(publish_loop._drip_ok(s, ch, app_settings(s).publish_drip_minutes) is True,
+       "precondition: drip is open (cap equality must be the observed gate)")
+
+    @contextmanager
+    def _scope_eq():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_eq
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.PUBLISHED,
+       "spent + cost == cap still publishes (`>` not `>=`)")
+
+    _tick_services.clear()
+    s = fresh_session()
+    ch, v = _ready(s, title="over-cap", slug="gt-ch")
+    s.add(JobRun(kind="publish", status="success", channel_id=ch.id,
+                 quota_cost=_CAP - _COST + 1,
+                 created_at=utcnow() - timedelta(minutes=40)))
+    s.commit()
+    ok(publish_loop._drip_ok(s, ch, app_settings(s).publish_drip_minutes) is True,
+       "precondition: drip is open (quota-cap must be the gate that fires)")
+
+    @contextmanager
+    def _scope_gt():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_gt
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.APPROVED,
+       "spent + cost > cap: tick skips")
+    ok(_tick_services == [], "over-cap: get_service not opened")
+
+    # In-flight guard: a PUBLISHING video inside the timeout blocks the
+    # channel (the hung-upload pile-up). Must be recent so recovery doesn't
+    # flip it first. Sibling channel still publishes.
+    _tick_services.clear()
+    _tick_uploads.clear()
+    s = fresh_session()
+    app_settings(s)
+    ch_a, v_a = _ready(s, title="waiting", slug="inflight-a")
+    inflight = make_video(s, ch_a, status=VideoStatus.PUBLISHING,
+                          topic_id=v_a.topic_id, video_path="/tmp/x.mp4",
+                          title="flying", retry_count=0,
+                          last_attempt_at=utcnow() - timedelta(seconds=5))
+    ch_b, v_b = _ready(s, title="other", slug="inflight-b")
+
+    @contextmanager
+    def _scope_if():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_if
+    publish_loop.tick()
+    s.refresh(v_a)
+    s.refresh(inflight)
+    s.refresh(v_b)
+    ok(inflight.status == VideoStatus.PUBLISHING,
+       "in-flight inside timeout is not recovered")
+    ok(v_a.status == VideoStatus.APPROVED,
+       "in-flight channel does not start a second upload")
+    ok("inflight-a" not in _tick_services,
+       "in-flight channel never opens get_service")
+    ok("inflight-b" in _tick_services,
+       "in-flight skip is per-channel (global count would also skip the sibling)")
+    ok(v_b.status == VideoStatus.PUBLISHED,
+       "sibling channel is not blocked by the other channel's in-flight")
+
+    # Drip at tick(), not only _drip_ok: a recent publish JobRun blocks.
+    _tick_services.clear()
+    s = fresh_session()
+    ch, v = _ready(s, title="dripped", slug="drip-ch")
+    s.add(JobRun(kind="publish", status="success", channel_id=ch.id, quota_cost=0,
+                 created_at=utcnow()))
+    # Budget default is 6, so published_today=1 must not be the budget gate.
+    ch.daily_publish_budget = 6
+    s.add(ch)
+    s.commit()
+    ok(publish_loop._drip_ok(s, ch, app_settings(s).publish_drip_minutes) is False,
+       "precondition: drip window is closed")
+
+    @contextmanager
+    def _scope_drip():
+        yield s
+        s.commit()
+
+    publish_loop.session_scope = _scope_drip
+    publish_loop.tick()
+    s.refresh(v)
+    ok(v.status == VideoStatus.APPROVED,
+       "closed drip window at tick skips (a dropped _drip_ok call would publish)")
+    ok(_tick_services == [], "drip skip: get_service not opened")
+
+finally:
+    _disarm_tick()
 
 print(f"\nALL {_checks} CHECKS PASSED")

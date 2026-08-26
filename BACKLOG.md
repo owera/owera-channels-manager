@@ -669,6 +669,25 @@ flag the operator step in the commit body.
   Accepted residual: `daily_publish_budget > 0` is
   observationally equivalent to `projected < 0` never
   firing. Parked-overflow follow-up shipped as #21.
+  `publish_loop.py` remaining branches (first-comment +
+  tick() skip gates that helpers alone could not catch)
+  — `tests/verify_publish.py` 109 → 192 checks
+  (2026-08-26): `_first_comment_text` language prefix /
+  unknown-fallback / playlist series pointer (EN+PT);
+  `_publish_one` wiring (insert_comment on the new yt id,
+  pt-BR + stored playlist text, comment 403 still
+  PUBLISHED + error JobRun); `tick()` skip gates proven
+  at the tick() call (scheduler_paused returns before
+  recover_stuck_publishing, Channel.paused / EXPIRED /
+  DISCONNECTED / ERROR isolation, naive SQLite
+  cooldown_until, daily_limit_hit, spent budget with
+  drip held open, quota-cap `>` not `>=` boundary,
+  in-flight per-channel, drip wiring). Suite now stubs
+  `make_thumbnail_png` so an un-stubbed `_publish_one`
+  cannot hang on the live LLM. Discovered follow-up
+  (not bundled): `_next_approved` prefers shorts via
+  `content_format == "short"` while render/issues treat
+  empty/`LONG` as short via `!= "long"`.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
@@ -1064,3 +1083,21 @@ flag the operator step in the commit body.
 - **acceptance:** weight=0 and weight=-1 generate nothing and name the
   park; a sibling weight=1 still generates up to the 1× ceiling; weight=2
   uses the 2× ceiling.
+
+### 23. `_next_approved` prefers shorts via `== "short"`; render/issues use `!= "long"` — HIGH
+- **why (found 2026-08-26 shipping publish_loop tick/comment coverage):** after
+  the day's long is out, `_pick("short")` is `Topic.content_format == "short"`.
+  Render, chapters, thumbnails, and `issues.detect` all treat empty-format and
+  `"LONG"` as short via `!= "long"` / `== "long"`. A PATCH leftover of `""` or
+  `"LONG"` would not fill remaining slots as shorts, so higher-weight longs
+  could sweep the rest of the day (same class as the 08-03/05 5L/0S bug).
+  Live topics default to `"short"`, so this is latent until a bad PATCH.
+- **approach:** `_pick` shorts with `Topic.content_format != "long"` (or share
+  the same `== "long"` gate as `_set_custom_thumbnail`). Pin empty/`LONG` as
+  short after a long is out, and that a real `"long"` still counts as the
+  daily long. Isolated HIGH commit + `verify_publish.py` checks.
+- **caution:** HIGH (`publish_loop.py`) — isolated commit + new regression
+  tests. Do not bundle other publish_loop work.
+- **acceptance:** after one long is published today, an approved empty-format
+  or `"LONG"` topic is picked before remaining longs; `"long"` still reserves
+  slot 1.
