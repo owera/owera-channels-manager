@@ -702,9 +702,31 @@ ok(storyboard._variety_ok([
 sys_code = storyboard._system_prompt(["hook", "cta", "code", "stat"])
 ok("2b." in sys_code and "`code` or `command`" in sys_code,
    "system prompt includes rule 2b when a Phase-B type is allowed")
+ok("MUST include exactly one" in sys_code,
+   "rule 2b is a MUST (08-26: prompt-level 'include at least' was dropped 2/4)")
+ok('"type":"code"' in sys_code,
+   "few-shot example includes a code beat when Phase-B types are allowed")
 sys_a = storyboard._system_prompt(["hook", "statement", "cta"])
 ok("2b." not in sys_a,
    "system prompt omits rule 2b when code/command/diagram are not allowed")
+ok('"type":"code"' not in sys_a,
+   "Phase-A few-shot example does not show a code beat")
+ok(storyboard._code_ok(
+    [{"type": "hook"}, {"type": "stat"}, {"type": "cta"}],
+    ["hook", "stat", "cta"]),
+   "_code_ok is vacuous True when code/command are not allowed")
+ok(not storyboard._code_ok(
+    [{"type": "hook"}, {"type": "stat"}, {"type": "list"}, {"type": "cta"}],
+    ["hook", "stat", "list", "code", "cta"]),
+   "_code_ok fails when code is allowed but absent (08-26 ch2-code shape)")
+ok(storyboard._code_ok(
+    [{"type": "hook"}, {"type": "code"}, {"type": "cta"}],
+    ["hook", "code", "cta"]),
+   "_code_ok passes with a code beat")
+ok(storyboard._code_ok(
+    [{"type": "hook"}, {"type": "command"}, {"type": "cta"}],
+    ["hook", "code", "command", "cta"]),
+   "_code_ok passes with a command beat")
 ok("8+ seconds is a DRAG" in sys_a,
    "PACING rule still names the 8s drag line")
 ok("FIRST words of that closing ask" in sys_a,
@@ -860,6 +882,47 @@ ok("beat code" not in dropped and "beat stmt" in dropped,
    "default allowlist does not include code — the beat is salvaged as a statement")
 kept = _compose(code_board_llm, allowed_types=PHASE_A + ["code"])
 ok("beat code" in kept, "allowing code keeps the code beat (and its renderer)")
+
+# R2 code retry (08-26): when code is allowed but the first draft has none, push once.
+code_seq = [
+    _board(),  # varied but no snippet (the 08-26 ch2-code failure)
+    json.dumps({"beats": [
+        {"type": "hook", "cue": "alpha", "text": "H"},
+        {"type": "stat", "cue": "bravo", "value": "1"},
+        {"type": "code", "cue": "charlie", "lines": ["@mcp.tool()", "def run(q):", "  return db(q)"]},
+        {"type": "cta", "cue": "delta", "text": "X", "sub": "next"},
+    ]}),
+]
+n_code = [0]
+
+
+def missing_code_llm(*a, **k):
+    out = code_seq[min(n_code[0], len(code_seq) - 1)]
+    n_code[0] += 1
+    return out
+
+
+code_html = _compose(missing_code_llm, allowed_types=PHASE_A + ["code"])
+ok(n_code[0] == 2, "code-less draft with code allowed triggers exactly one R2 retry")
+ok("beat code" in code_html, "compose keeps the retry that added a code beat")
+ok("def run(q):" in code_html, "retry code snippet lands in the HTML")
+
+n_has = [0]
+
+
+def already_has_code_llm(*a, **k):
+    n_has[0] += 1
+    return json.dumps({"beats": [
+        {"type": "hook", "cue": "alpha", "text": "H"},
+        {"type": "code", "cue": "bravo", "lines": ["x = 1"]},
+        {"type": "stat", "cue": "charlie", "value": "1"},
+        {"type": "cta", "cue": "delta", "text": "X", "sub": "next"},
+    ]})
+
+
+ok(_compose(already_has_code_llm, allowed_types=PHASE_A + ["code"]) is not None
+   and n_has[0] == 1,
+   "draft that already has a code beat does not retry")
 
 # validate-fail → even-space rescue, then success
 _real_val = storyboard.validate_storyboard

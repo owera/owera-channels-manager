@@ -902,10 +902,11 @@ def _system_prompt(allowed: list[str]) -> str:
         "reasons become a `list`; a key term becomes a `term_define`" +
         ("; code or a command becomes `code`/`command`; a flow/pipeline becomes a `diagram`" if has_bc else "") +
         ".\n" +
-        ("2b. If the video is ABOUT a tool, API, protocol, or coding technique, include at least "
-         "one `code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars per "
-         "line) demonstrating the narration's claim — even when the narration never reads code "
-         "aloud. SHOW the thing the words only describe.\n" if has_bc else "") +
+        ("2b. MUST include exactly one `code` or `command` beat with a minimal realistic snippet "
+         "(<=5 lines, <=30 chars per line) that demonstrates the narration's claim — even when "
+         "the narration never reads code aloud. A technical explainer with no snippet on screen "
+         "is WRONG: SHOW the thing the words only describe. Prefer replacing a `statement` over "
+         "dropping the snippet.\n" if has_bc else "") +
         "3. Use `statement` SPARINGLY — at MOST 2 in the whole video. A storyboard that is mostly "
         "`statement` is WRONG: it just re-displays the spoken words. Convert those into the richer "
         "types (" + rich + ") instead.\n"
@@ -926,14 +927,17 @@ def _system_prompt(allowed: list[str]) -> str:
         "flashes for under 2 seconds is a wasted beat. NEVER anchor two beats inside the same "
         "short sentence.\n\n"
         "Allowed beat types:\n" + types + "\n\n"
-        "Example for narration about RAG chunking (notice the VARIED types and verbatim cues):\n"
+        "Example for narration about RAG chunking (notice the VARIED types and verbatim cues"
+        + (" — and the required code beat" if has_bc else "") + "):\n"
         '{"beats":[\n'
         ' {"type":"hook","cue":"keeps pulling the wrong chunks","text":"Your RAG pulls junk","emoji":"🗑️"},\n'
         ' {"type":"term_define","cue":"chunking by character count","term":"Fixed-size chunking","definition":"splitting text every N characters"},\n'
         ' {"type":"stat","cue":"five hundred characters","value":"500","unit":"chars","label":"cut mid-idea"},\n'
         ' {"type":"compare","cue":"chunk by meaning instead","left":{"title":"By characters","items":["splits ideas","loses context"]},"right":{"title":"By meaning","items":["whole thoughts","keeps context"]}},\n'
-        ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n'
-        ' {"type":"cta","cue":"cut it into thoughts","text":"Follow","sub":"New RAG fix tomorrow"}\n]}'
+        + (' {"type":"code","cue":"split on sections paragraphs","lang":"python","lines":["split(text,","  by=\\"section\\",","  overlap=50)"],"highlight":[0]},\n'
+           if has_bc else
+           ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n')
+        + ' {"type":"cta","cue":"cut it into thoughts","text":"Follow","sub":"New RAG fix tomorrow"}\n]}'
     )
 
 
@@ -958,6 +962,16 @@ def _variety_ok(beats) -> bool:
     least two distinct explanatory beat types (the whole point of the redesign)."""
     mid = [b["type"] for b in beats if b["type"] not in ("hook", "cta")]
     return bool(mid) and mid.count("statement") <= 2 and len(_rich_types(beats)) >= 2
+
+
+def _code_ok(beats, allowed) -> bool:
+    """When code/command is an allowed type, the storyboard must carry at least one.
+    Prompt-level rule 2b is violated ~half the time (08-26 baseline: 2/4 golden
+    subjects, including an MCP explainer, had zero snippets) — same class as the
+    R7 follow-verb force. Vacuous True when those types are not allowed."""
+    if not any(t in allowed for t in ("code", "command")):
+        return True
+    return any(b.get("type") in ("code", "command") for b in beats)
 
 
 # The CTA's ask is the follow verb — R7's core signal is subscribers_gained, so the
@@ -1013,6 +1027,19 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             system=system, max_tokens=1500).strip()
         rb = parse_storyboard(retry, allowed)
         if rb and (_variety_ok(rb) or len(_rich_types(rb)) > len(_rich_types(beats))):
+            beats = rb
+
+    # R2: if code/command is allowed but the draft has neither, push once for a snippet.
+    # Keep the retry only when it actually adds one (otherwise keep the varied original).
+    if not _code_ok(beats, allowed):
+        retry = llm(
+            user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
+            "cta-last, keep variety (at most two statement beats), and include EXACTLY one "
+            "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
+            "that shows the thing the narration only describes.",
+            system=system, max_tokens=1500).strip()
+        rb = parse_storyboard(retry, allowed)
+        if rb and _code_ok(rb, allowed):
             beats = rb
 
     # R7: force the CTA's ask to the follow verb in the narration language — whatever the
