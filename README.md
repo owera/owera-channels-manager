@@ -261,3 +261,9 @@ Every effect is visible: a committed daily report, each code change as a git com
   render more per day, or wait for the next reset.
 - **Background music:** defaults to a random track from your own library. Don't point it at
   unlicensed music — YouTube's Content ID will catch it.
+
+## Contribute
+
+This repo is MIT. If you run a self-hosted YouTube fleet (or want to), the useful help is
+a small, real problem: a broken install step, a quota edge case, a render failure you can
+reproduce. Open an issue, then a small PR. See [CONTRIBUTING.md](CONTRIBUTING.md).
