@@ -34,6 +34,8 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
+_MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard max-hold
+_TAIL_MAX = 8.0  # last-beat absorber cap — CTA may hold through the spoken ask
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
 
 
@@ -345,6 +347,31 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
     for i in range(1, n):  # safety: pathological clips must still validate
         if starts[i] < starts[i - 1] + _MIN_DUR:
             starts[i] = starts[i - 1] + _MIN_DUR
+
+    # Max-hold (forward): a single cue span the LLM will not split freezes a card
+    # for 8-10s (R4 DRAG). Prompt-level "split the span" is exhausted (07-13);
+    # this is the deterministic counterpart of the min floor. Pull the NEXT start
+    # earlier so beat i's visual hold is <= _MID_MAX, but never dump enough into
+    # the successor that *it* exceeds its cap (mid → _MID_MAX, last → _TAIL_MAX
+    # so the CTA can still cover the spoken ask). Last beat itself is not
+    # shortened — a follow card holding through the ask is intentional.
+    for i in range(n - 1):
+        wanted = starts[i] + _MID_MAX + _GAP
+        if starts[i + 1] <= wanted + 1e-9:
+            continue
+        if i + 1 == n - 1:
+            succ_end = duration
+            succ_cap = _TAIL_MAX
+        else:
+            succ_end = starts[i + 2] - _GAP
+            succ_cap = _MID_MAX
+        new_next = max(wanted, succ_end - succ_cap)
+        if new_next < starts[i + 1] - 1e-9:
+            starts[i + 1] = new_next
+    for i in range(1, n):
+        if starts[i] < starts[i - 1] + _MIN_DUR:
+            starts[i] = starts[i - 1] + _MIN_DUR
+
     for i, b in enumerate(beats):
         b["start"] = round(max(0.0, starts[i]), 3)
         end = duration if i == n - 1 else max(starts[i] + _MIN_DUR, starts[i + 1] - _GAP)

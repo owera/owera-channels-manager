@@ -199,6 +199,8 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
    "inter-beat gap 0.12s + min duration 0.5s (matches worker clip tolerance)")
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
+ok(storyboard._MID_MAX == 7.5 and storyboard._TAIL_MAX == 8.0,
+   "align max-hold: mid-body 7.5s, last-beat absorber 8.0s (R4 DRAG cap)")
 ok(storyboard._ROW_STEP_MAX == 1.1,
    "list row-step cap is 1.1s (ce46b43: last item must not land 7s in)")
 ok(storyboard._DRIFT_MIN == 5.5,
@@ -513,6 +515,79 @@ storyboard.align_storyboard(tiny, tiny_words, 4.0)
 ok(tiny[0]["start"] == 0.0, "tiny-clip hook still at 0")
 ok(storyboard.validate_storyboard(tiny, 4.0),
    "infeasible floors degrade to MIN_DUR spacing that still validates")
+
+# Max-hold: 08-27 baseline ch2-concept list sat ~9s then a 5.5s cmp (R4 DRAG).
+# Word-sync would keep the 9s span; the cap must pull the successor earlier.
+DRAG43 = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "term", "start": 4.3, "dur": 0.4},
+     {"text": "stat", "start": 8.2, "dur": 0.3},
+     {"text": "list", "start": 10.5, "dur": 0.3},
+     {"text": "cmp", "start": 19.5, "dur": 0.3},
+     {"text": "code", "start": 25.0, "dur": 0.3},
+     {"text": "follow", "start": 36.8, "dur": 0.3},
+     {"text": "now", "start": 37.1, "dur": 0.3}]
+)
+draggy = [
+    {"type": "hook", "cue": "open", "text": "H"},
+    {"type": "term_define", "cue": "term", "term": "T", "definition": "d"},
+    {"type": "stat", "cue": "stat", "value": "1"},
+    {"type": "list", "cue": "list", "items": [{"text": "a"}]},
+    {"type": "compare", "cue": "cmp",
+     "left": {"title": "L", "items": ["x"]}, "right": {"title": "R", "items": ["y"]}},
+    {"type": "code", "cue": "code", "lang": "python", "lines": ["x=1"]},
+    {"type": "cta", "cue": "follow now", "text": "C"},
+]
+storyboard.align_storyboard(draggy, DRAG43, 43.3)
+ok(draggy[0]["start"] == 0.0, "max-hold still pins hook at 0")
+ok(draggy[3]["dur"] <= storyboard._MID_MAX + 1e-6,
+   "9s list is capped at _MID_MAX (was ~9s on word-sync)")
+ok(draggy[4]["dur"] <= storyboard._MID_MAX + 1e-6,
+   "successor cmp absorbs the surplus without itself exceeding _MID_MAX")
+ok(draggy[3]["start"] < draggy[4]["start"],
+   "capped list still precedes the cmp (monotonic)")
+ok(storyboard.validate_storyboard(draggy, 43.3),
+   "max-hold layout still validates")
+# Word-sync would have put cmp at 19.5; the cap must pull it earlier.
+ok(draggy[4]["start"] < 19.5 - 0.01,
+   "cmp start is pulled EARLIER than its cue so the list stops dragging")
+
+# Successor already at the cap: only shorten as far as the successor can absorb.
+tight_succ_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "list", "start": 2.0, "dur": 0.3},
+     {"text": "cmp", "start": 12.0, "dur": 0.3},
+     {"text": "follow", "start": 19.4, "dur": 0.3}]
+)
+tight_succ = [
+    {"type": "hook", "cue": "open", "text": "H"},
+    {"type": "list", "cue": "list", "items": [{"text": "a"}]},
+    {"type": "compare", "cue": "cmp",
+     "left": {"title": "L", "items": ["x"]}, "right": {"title": "R", "items": ["y"]}},
+    {"type": "cta", "cue": "follow", "text": "C"},
+]
+storyboard.align_storyboard(tight_succ, tight_succ_words, 22.0)
+ok(tight_succ[2]["dur"] <= storyboard._MID_MAX + 1e-6,
+   "already-capped successor is not pushed over _MID_MAX")
+ok(storyboard.validate_storyboard(tight_succ, 22.0),
+   "partial max-hold (successor at cap) still validates")
+
+# Last beat (CTA) is NOT shortened — the follow card holds through the ask.
+cta_long_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "mid", "start": 5.0, "dur": 0.3},
+     {"text": "follow", "start": 12.0, "dur": 0.3}]
+)
+cta_long = [
+    {"type": "hook", "cue": "open", "text": "H"},
+    {"type": "statement", "cue": "mid", "text": "S"},
+    {"type": "cta", "cue": "follow", "text": "C"},
+]
+storyboard.align_storyboard(cta_long, cta_long_words, 20.2)
+ok(cta_long[-1]["dur"] > storyboard._MID_MAX,
+   "CTA longer than _MID_MAX is kept (spoken-ask hold is intentional)")
+ok(storyboard.validate_storyboard(cta_long, 20.2),
+   "uncapped CTA still validates")
 
 even = [{"type": "x"}, {"type": "y"}, {"type": "z"}]
 storyboard._even_space(even, 10.0)
