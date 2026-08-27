@@ -685,9 +685,7 @@ flag the operator step in the commit body.
   in-flight per-channel, drip wiring). Suite now stubs
   `make_thumbnail_png` so an un-stubbed `_publish_one`
   cannot hang on the live LLM. Discovered follow-up
-  (not bundled): `_next_approved` prefers shorts via
-  `content_format == "short"` while render/issues treat
-  empty/`LONG` as short via `!= "long"`.
+  shipped as #23.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
@@ -1084,7 +1082,19 @@ flag the operator step in the commit body.
   park; a sibling weight=1 still generates up to the 1× ceiling; weight=2
   uses the 2× ceiling.
 
-### 23. `_next_approved` prefers shorts via `== "short"`; render/issues use `!= "long"` — HIGH
+### 23. ✅ DONE (code shipped to main 2026-08-27) `_next_approved` prefers shorts via `== "short"`; render/issues use `!= "long"` — HIGH
+- **resolution (2026-08-27):** `_next_approved._pick("short")` now uses
+  `Topic.content_format != "long"` (same gate as render/issues/thumbnails).
+  Empty-format, `"LONG"`, and any other non-canonical leftover fill remaining
+  slots as shorts after the day's long is out; slot 1 still requires
+  canonical `"long"`. `GET /api/videos/publish-plan`'s duplicated picker
+  used the same exact-match (`fmt != want`); locked to the same
+  `== "long"` / else-short split so board ETAs match the live picker
+  (08-21 lockstep class, found in pre-ship review). Suite:
+  `tests/verify_publish.py` 192 → 200. Leftover shorts in the fixture are
+  weight 0 against remaining weight-4 longs so a `_pick(None)` fallthrough
+  cannot hide the old gate. Live topics are all canonical `short`/`long`
+  (latent until a bad PATCH).
 - **why (found 2026-08-26 shipping publish_loop tick/comment coverage):** after
   the day's long is out, `_pick("short")` is `Topic.content_format == "short"`.
   Render, chapters, thumbnails, and `issues.detect` all treat empty-format and

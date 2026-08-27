@@ -174,8 +174,11 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
             )
             .order_by(Topic.weight.desc(), Video.approved_at, Video.id)
         )
-        if fmt is not None:
-            q = q.where(Topic.content_format == fmt)
+        if fmt == "long":
+            q = q.where(Topic.content_format == "long")
+        elif fmt == "short":
+            # Same != "long" gate as render_loop / issues — empty/"LONG" are shorts.
+            q = q.where(Topic.content_format != "long")
         return session.exec(q).first()
 
     if not quota.published_long_today(session, channel_id):

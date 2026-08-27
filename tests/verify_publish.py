@@ -16,6 +16,8 @@ regress:
   - tick() skip gates: scheduler_paused, paused/dead channels, cooldown,
     daily budget, quota-cap headroom, in-flight, drip — each proven at the
     tick() call, not only at the helper
+  - daily mix: empty/"LONG" topic formats count as short after the day's
+    long is out (same != "long" gate as render/issues), not == "short"
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -579,6 +581,120 @@ s.add(v3); s.commit()
 v4 = publish_loop._next_approved(s, ch.id)
 ok(v4 is not None and v4.topic_id == t_long.id,
    "once shorts are exhausted, remaining longs still drain (no starve)")
+
+# Defect: after the day's long is out, _pick("short") used Topic.content_format
+# == "short". Render, chapters, thumbnails, and issues.detect all treat empty
+# and "LONG" as short via != "long" / == "long". A PATCH leftover of those
+# values (update_topic does not clamp) would not fill remaining slots, so
+# higher-weight longs could sweep the rest of the day — same class as the
+# 08-03/05 5L/0S bug. Discriminator: leftover shorts MUST be lower-weight
+# than remaining longs; a _pick(None) fallthrough would then pick the long
+# (the first cut of this fixture had leftover weight 4 and passed on the
+# unfixed code). Slot 1 still requires the canonical "long".
+print("\n_next_approved: empty/'LONG' count as short after the daily long (BACKLOG 23)")
+s = fresh_session()
+app_settings(s)
+ch = make_channel(s, slug="slot1")
+t_long = Topic(channel_id=ch.id, name="Longs", theme_prompt="x",
+               content_format="long", weight=1)
+t_empty = Topic(channel_id=ch.id, name="Empty", theme_prompt="x",
+                content_format="", weight=4)
+t_case = Topic(channel_id=ch.id, name="LONG", theme_prompt="x",
+               content_format="LONG", weight=4)
+s.add(t_long); s.add(t_empty); s.add(t_case)
+s.commit(); s.refresh(t_long); s.refresh(t_empty); s.refresh(t_case)
+now = utcnow()
+v_long = make_video(s, ch, topic_id=t_long.id, subject="L-slot1",
+                    status=VideoStatus.APPROVED,
+                    approved_at=now - timedelta(hours=4),
+                    video_path="/tmp/l-slot1.mp4")
+make_video(s, ch, topic_id=t_empty.id, subject="E-slot1",
+           status=VideoStatus.APPROVED,
+           approved_at=now - timedelta(hours=2),
+           video_path="/tmp/e-slot1.mp4")
+make_video(s, ch, topic_id=t_case.id, subject="C-slot1",
+           status=VideoStatus.APPROVED,
+           approved_at=now - timedelta(hours=1),
+           video_path="/tmp/c-slot1.mp4")
+v1 = publish_loop._next_approved(s, ch.id)
+ok(v1 is not None and v1.id == v_long.id,
+   "slot 1 still reserves canonical long (empty/'LONG' at weight 4 do not steal it)")
+plan = publish_plan(ch.id, s)
+order = sorted(plan, key=lambda vid: plan[vid])
+ok(order[0] == str(v_long.id),
+   "publish-plan slot 1 is the canonical long (leftover formats do not steal the ETA)")
+
+s = fresh_session()
+app_settings(s)
+ch = make_channel(s, slug="post-long")
+t_long = Topic(channel_id=ch.id, name="Longs", theme_prompt="x",
+               content_format="long", weight=4)
+t_empty = Topic(channel_id=ch.id, name="Empty", theme_prompt="x",
+                content_format="", weight=0)
+t_case = Topic(channel_id=ch.id, name="LONG", theme_prompt="x",
+               content_format="LONG", weight=0)
+t_other = Topic(channel_id=ch.id, name="Medium", theme_prompt="x",
+                content_format="medium", weight=0)
+s.add(t_long); s.add(t_empty); s.add(t_case); s.add(t_other)
+s.commit(); s.refresh(t_long); s.refresh(t_empty); s.refresh(t_case); s.refresh(t_other)
+now = utcnow()
+v_long_a = make_video(s, ch, topic_id=t_long.id, subject="L-a",
+                      status=VideoStatus.APPROVED,
+                      approved_at=now - timedelta(hours=4),
+                      video_path="/tmp/la.mp4")
+v_long_b = make_video(s, ch, topic_id=t_long.id, subject="L-b",
+                      status=VideoStatus.APPROVED,
+                      approved_at=now - timedelta(hours=3),
+                      video_path="/tmp/lb.mp4")
+v_empty = make_video(s, ch, topic_id=t_empty.id, subject="E",
+                     status=VideoStatus.APPROVED,
+                     approved_at=now - timedelta(hours=2),
+                     video_path="/tmp/e.mp4")
+v_case = make_video(s, ch, topic_id=t_case.id, subject="C",
+                    status=VideoStatus.APPROVED,
+                    approved_at=now - timedelta(hours=1),
+                    video_path="/tmp/c.mp4")
+v_other = make_video(s, ch, topic_id=t_other.id, subject="M",
+                     status=VideoStatus.APPROVED,
+                     approved_at=now - timedelta(minutes=30),
+                     video_path="/tmp/m.mp4")
+
+v1 = publish_loop._next_approved(s, ch.id)
+ok(v1 is not None and v1.id == v_long_a.id,
+   "post-long fixture: slot 1 is still the canonical long")
+v1.status = VideoStatus.PUBLISHED
+v1.published_at = utcnow()
+s.add(v1); s.commit()
+
+plan = publish_plan(ch.id, s)
+order = sorted(plan, key=lambda vid: plan[vid])
+ok(order == [str(v_empty.id), str(v_case.id), str(v_other.id), str(v_long_b.id)],
+   "publish-plan remaining ETAs match leftover-short then remaining-long order")
+
+v2 = publish_loop._next_approved(s, ch.id)
+ok(v2 is not None and v2.id == v_empty.id,
+   "after a long is out, w0 empty-format is picked before remaining w4 longs")
+v2.status = VideoStatus.PUBLISHED
+v2.published_at = utcnow()
+s.add(v2); s.commit()
+
+v3 = publish_loop._next_approved(s, ch.id)
+ok(v3 is not None and v3.id == v_case.id,
+   "after a long is out, w0 non-canonical 'LONG' is picked before remaining w4 longs")
+v3.status = VideoStatus.PUBLISHED
+v3.published_at = utcnow()
+s.add(v3); s.commit()
+
+v4 = publish_loop._next_approved(s, ch.id)
+ok(v4 is not None and v4.id == v_other.id,
+   "after a long is out, any non-long leftover (not an empty/'LONG' allowlist) is short")
+v4.status = VideoStatus.PUBLISHED
+v4.published_at = utcnow()
+s.add(v4); s.commit()
+
+v5 = publish_loop._next_approved(s, ch.id)
+ok(v5 is not None and v5.id == v_long_b.id,
+   "once leftover shorts are exhausted, remaining longs still drain")
 
 # --- custom thumbnail: format from Topic, never fail a publish (BACKLOG 20) ---
 # Defect: _set_custom_thumbnail read content_format from video.overrides_json,

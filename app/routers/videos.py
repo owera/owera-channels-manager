@@ -78,7 +78,10 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
         for v in remaining:
             t = topics.get(v.topic_id)
             fmt = t.content_format if t else None
-            if want is not None and fmt != want:
+            # Same == "long" / else-short split as _next_approved (empty/"LONG" are shorts).
+            if want == "long" and fmt != "long":
+                continue
+            if want == "short" and fmt == "long":
                 continue
             w = t.weight if t is not None and t.weight is not None else 1
             at = v.approved_at or datetime.min.replace(tzinfo=timezone.utc)
