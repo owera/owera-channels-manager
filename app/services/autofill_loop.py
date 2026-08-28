@@ -117,7 +117,10 @@ def tick() -> None:
                 continue
             if t.content_format == "long":
                 has_live_long[t.channel_id] = True
-            elif t.content_format == "short":
+            else:
+                # Same != "long" gate as render/issues/publish: empty/"LONG"/other
+                # leftovers count as shorts. `== "short"` left those topics invisible
+                # to the mix-cap, so a high-weight long drained the board (08-13 class).
                 has_live_short[t.channel_id] = True
 
         # Running totals per channel so multiple topics in one tick can't collectively

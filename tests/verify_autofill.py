@@ -10,8 +10,9 @@ winners were reached (t2/t5 filled both boards while the w3 short topics sat at
 _refill_topic added them all, overshooting board space (t2: asked 8, got 15).
 
 Plus the 08-12 long-draft reserve (high-weight shorts cannot starve the 1L
-publish) and the 08-13 long mix-cap (a high-weight long walking first cannot
-consume every leftover seat).
+publish), the 08-13 long mix-cap (a high-weight long walking first cannot
+consume every leftover seat), and the 08-28 leftover-format mix-cap
+(`has_live_short` is any non-long live topic, not `== "short"`).
 
 This cycle extends that incident suite with the remaining tick / helper
 branches: autogen off, threshold/target floors, weight-4 multiplier cap,
@@ -558,6 +559,58 @@ long_t = make_topic(s, ch, name="solo-long", weight=4, content_format="long")
 run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
 ok(drafts_for(s, long_t.id) == 5,
    "no live short → mix-cap does not apply; long fills all 5 seats")
+
+# Defect: has_live_short used content_format == "short". Empty-format and
+# "LONG" leftovers (treated as shorts by render/issues/publish) did not arm
+# the mix-cap, so a high-weight long walking first drained the board — the
+# 08-13 5L/0S class, latent until a bad PATCH. Leftover weight is 1 against
+# the long's 4 so a fallthrough that skipped the leftover still fails the
+# long==1 pin (the leftover filling 4 is the dual).
+print("case: empty-format leftover arms has_live_short (same != long gate)")
+s = fresh_session()
+ch = make_channel(s, slug="empty-fmt", daily_render_budget=5)
+long_t = make_topic(s, ch, name="empty-long", weight=4, content_format="long")
+empty = make_topic(s, ch, name="empty-fmt", weight=1, content_format="")
+ok(long_t.id < empty.id, "fixture: long walks first at higher weight")
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, long_t.id) == 1,
+   "empty-format live topic still mix-caps the long to 1 seat")
+ok(drafts_for(s, empty.id) == 4,
+   "empty-format leftover fills remaining 4 as a short")
+
+print("case: LONG leftover arms has_live_short")
+s = fresh_session()
+ch = make_channel(s, slug="case-long", daily_render_budget=5)
+long_t = make_topic(s, ch, name="case-canon-long", weight=4, content_format="long")
+cased = make_topic(s, ch, name="case-LONG", weight=1, content_format="LONG")
+ok(long_t.id < cased.id, "fixture: canonical long walks first")
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, long_t.id) == 1,
+   "'LONG' leftover still mix-caps the long to 1 seat")
+ok(drafts_for(s, cased.id) == 4,
+   "'LONG' leftover fills remaining 4 as a short")
+
+print("case: non-canonical leftover (medium) arms has_live_short")
+s = fresh_session()
+ch = make_channel(s, slug="medium-fmt", daily_render_budget=5)
+long_t = make_topic(s, ch, name="medium-long", weight=4, content_format="long")
+med = make_topic(s, ch, name="medium-fmt", weight=1, content_format="medium")
+ok(long_t.id < med.id, "fixture: long walks first")
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, long_t.id) == 1,
+   "'medium' leftover still mix-caps the long to 1 seat")
+ok(drafts_for(s, med.id) == 4,
+   "'medium' leftover fills remaining 4 as a short")
+
+print("case: parked empty-format does not arm the mix-cap")
+s = fresh_session()
+ch = make_channel(s, slug="parked-empty", daily_render_budget=5)
+long_t = make_topic(s, ch, name="parked-empty-long", weight=4, content_format="long")
+parked = make_topic(s, ch, name="parked-empty-fmt", weight=0, content_format="")
+run_tick(s, _Cfg(target=5, horizon=1), well_behaved)
+ok(drafts_for(s, parked.id) == 0, "weight-0 empty-format still parked")
+ok(drafts_for(s, long_t.id) == 5,
+   "parked leftover is not a live short → mix-cap does not apply")
 
 print("case: two live longs share the mix-cap (running long_pending increments)")
 s = fresh_session()

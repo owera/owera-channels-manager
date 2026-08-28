@@ -1111,3 +1111,35 @@ flag the operator step in the commit body.
 - **acceptance:** after one long is published today, an approved empty-format
   or `"LONG"` topic is picked before remaining longs; `"long"` still reserves
   slot 1.
+
+### 24. ✅ DONE (code shipped to main 2026-08-28) Autofill `has_live_short` used `== "short"`; leftover formats skipped the mix-cap — normal
+- **resolution (2026-08-28):** `autofill_loop.tick` arms `has_live_short` for any
+  non-long live topic (`else` after `== "long"`), the same `!= "long"` gate
+  render/issues/publish use. Empty-format and `"LONG"` leftovers now mix-cap a
+  high-weight long to 1 pending seat per horizon day instead of letting it
+  drain the board. Parked (`weight<=0`) leftovers still do not arm the cap.
+  Suite: `tests/verify_autofill.py` 93 → 104. Discovered follow-up (not bundled):
+  `youtube_admin._compute_monetization` still uses `== "short"` for shorts_views.
+- **why (found 2026-08-28 ranking remaining `== "short"` after #23):** the 1L+4S
+  mix-cap (`if is_long and has_live_short`) only fired for canonical `"short"`.
+  A PATCH leftover of `""` or `"LONG"` made the channel look long-only, so a
+  high-weight long walking first filled every leftover slot (08-13 5L/0S class).
+  Live topics are all canonical (latent until a bad PATCH).
+- **caution:** normal (`autofill_loop.py` only; no money-path files). Isolated
+  commit + regression tests.
+- **acceptance:** empty-format, `"LONG"`, and `"medium"` live leftovers mix-cap
+  the long to 1 and fill the remaining 4; a parked empty leftover does not arm
+  the cap (long fills 5); canonical short-only / long-only unchanged.
+
+### 25. `youtube_admin._compute_monetization` shorts_views uses `== "short"` — normal
+- **why (found 2026-08-28 shipping #24, not bundled):** YPP shorts_views sums
+  metrics only for topics with `content_format == "short"`. Empty-format /
+  `"LONG"` published videos are omitted from the short-views milestone while
+  render/issues/publish treat them as shorts. Dashboard-only (stored snapshots,
+  no live API); live topics are canonical so this is latent.
+- **approach:** same `!= "long"` gate; pin empty/`LONG` published views into
+  `shorts_views` and that a real `"long"` is excluded. New `tests/verify_youtube_admin.py`
+  or extend an existing suite.
+- **caution:** normal (router helper; not a money-path file).
+- **acceptance:** empty/`LONG` published views count toward shorts_views; a
+  long topic's views do not; no-metric / missing-channel 404 unchanged.
