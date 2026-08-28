@@ -35,7 +35,10 @@ _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
 _MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard max-hold
-_TAIL_MAX = 8.0  # last-beat absorber cap — CTA may hold through the spoken ask
+# Last beat (CTA) is an *uncapped* absorber: dump a penultimate 8s+ card into it
+# so the follow card holds through the spoken ask. A finite _TAIL_MAX (8.0, 08-27)
+# blocked that dump whenever the CTA was already at 8s (08-28 residual: ch2-code
+# list 8.72s / CTA 8.00s).
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
 
 
@@ -352,20 +355,18 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
     # for 8-10s (R4 DRAG). Prompt-level "split the span" is exhausted (07-13);
     # this is the deterministic counterpart of the min floor. Pull the NEXT start
     # earlier so beat i's visual hold is <= _MID_MAX, but never dump enough into
-    # the successor that *it* exceeds its cap (mid → _MID_MAX, last → _TAIL_MAX
-    # so the CTA can still cover the spoken ask). Last beat itself is not
-    # shortened — a follow card holding through the ask is intentional.
+    # a *mid-body* successor that *it* exceeds _MID_MAX. The last beat (CTA) is
+    # the uncapped absorber — a follow card holding through the ask is
+    # intentional, and a finite tail cap blocked the penultimate dump (08-28).
     for i in range(n - 1):
         wanted = starts[i] + _MID_MAX + _GAP
         if starts[i + 1] <= wanted + 1e-9:
             continue
         if i + 1 == n - 1:
-            succ_end = duration
-            succ_cap = _TAIL_MAX
+            new_next = wanted  # dump into CTA freely; last beat is not capped
         else:
             succ_end = starts[i + 2] - _GAP
-            succ_cap = _MID_MAX
-        new_next = max(wanted, succ_end - succ_cap)
+            new_next = max(wanted, succ_end - _MID_MAX)
         if new_next < starts[i + 1] - 1e-9:
             starts[i + 1] = new_next
     for i in range(1, n):

@@ -199,8 +199,10 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
    "inter-beat gap 0.12s + min duration 0.5s (matches worker clip tolerance)")
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
-ok(storyboard._MID_MAX == 7.5 and storyboard._TAIL_MAX == 8.0,
-   "align max-hold: mid-body 7.5s, last-beat absorber 8.0s (R4 DRAG cap)")
+ok(storyboard._MID_MAX == 7.5,
+   "align max-hold: mid-body 7.5s (last-beat CTA absorber is uncapped)")
+ok(not hasattr(storyboard, "_TAIL_MAX"),
+   "finite last-beat tail cap is gone (08-28 residual: 8s CTA blocked the dump)")
 ok(storyboard._ROW_STEP_MAX == 1.1,
    "list row-step cap is 1.1s (ce46b43: last item must not land 7s in)")
 ok(storyboard._DRIFT_MIN == 5.5,
@@ -588,6 +590,28 @@ ok(cta_long[-1]["dur"] > storyboard._MID_MAX,
    "CTA longer than _MID_MAX is kept (spoken-ask hold is intentional)")
 ok(storyboard.validate_storyboard(cta_long, 20.2),
    "uncapped CTA still validates")
+
+# 08-28 residual: penultimate list 8.72s cannot dump into a CTA already at 8s
+# when the last-beat absorber is capped at 8.0. Uncap it so the list hits
+# _MID_MAX and the CTA grows (the spoken-ask hold is the point of uncap).
+penult_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "list", "start": 2.0, "dur": 0.3},
+     {"text": "follow", "start": 10.72, "dur": 0.3}]
+)
+penult = [
+    {"type": "hook", "cue": "open", "text": "H"},
+    {"type": "list", "cue": "list", "items": [{"text": "a"}]},
+    {"type": "cta", "cue": "follow", "text": "C"},
+]
+storyboard.align_storyboard(penult, penult_words, 18.72)
+ok(penult[1]["dur"] <= storyboard._MID_MAX + 1e-6,
+   "penultimate 8.72s list is capped at _MID_MAX by dumping into the CTA")
+ok(penult[2]["dur"] > 8.0,
+   "CTA grows past 8s to absorb the penultimate surplus (spoken-ask hold)")
+ok(penult[0]["start"] == 0.0, "uncapped-CTA dump still pins hook at 0")
+ok(storyboard.validate_storyboard(penult, 18.72),
+   "uncapped last-beat absorber still validates")
 
 even = [{"type": "x"}, {"type": "y"}, {"type": "z"}]
 storyboard._even_space(even, 10.0)
