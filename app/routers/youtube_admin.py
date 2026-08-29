@@ -209,7 +209,8 @@ def _compute_monetization(session: Session, channel_id: int) -> dict:
     total_watch_hours = sum(m.watch_time_minutes for m in latest_metrics.values()) / 60
 
     topics = _topics_map(session, channel_id)
-    short_topic_ids = {tid for tid, t in topics.items() if t.content_format == "short"}
+    # Same != "long" gate as render/issues/publish/autofill — empty/"LONG" are shorts.
+    short_topic_ids = {tid for tid, t in topics.items() if t.content_format != "long"}
     video_topic_map = {v.id: v.topic_id for v in _published_videos(session, channel_id)}
     shorts_views = sum(
         m.views for vid_id, m in latest_metrics.items()

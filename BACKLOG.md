@@ -1131,7 +1131,13 @@ flag the operator step in the commit body.
   the long to 1 and fill the remaining 4; a parked empty leftover does not arm
   the cap (long fills 5); canonical short-only / long-only unchanged.
 
-### 25. `youtube_admin._compute_monetization` shorts_views uses `== "short"` — normal
+### 25. ✅ DONE (code shipped to main 2026-08-29) `youtube_admin._compute_monetization` shorts_views uses `== "short"` — normal
+- **resolution (2026-08-29):** `_compute_monetization` now sums shorts_views for
+  any topic with `content_format != "long"` (same gate as render/issues/publish/
+  autofill). Empty-format, `"LONG"`, and `"medium"` leftovers count toward the
+  YPP short-views milestone; a canonical `"long"` is excluded. Dashboard-only
+  (stored snapshots, no live API). Suite: `tests/verify_youtube_admin.py`
+  (23 checks). Live topics remain canonical (latent until a bad PATCH).
 - **why (found 2026-08-28 shipping #24, not bundled):** YPP shorts_views sums
   metrics only for topics with `content_format == "short"`. Empty-format /
   `"LONG"` published videos are omitted from the short-views milestone while
