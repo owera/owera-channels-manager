@@ -15,8 +15,10 @@ Covers, dependency-free (no network, no HyperFrames, no ffmpeg, no live YouTube)
     is theme.PALETTE (single source), render timeout pin
   - ``_hook_text``: LLM happy path, quote/multi-line strip, word-count + length
     gates that force the title fallback, LLM exception fallback, empty →
-    "Watch This", title-over-subject, content_format short vs long prompt pin,
-    max_tokens=100
+    "Watch This", title-over-subject, content_format short vs long prompt pin
+    (empty/"LONG"/"medium"/None leftovers use the short-form hint — same
+    != "long" gate as render/issues/publish/autofill; the old == "short"
+    treated leftovers as long-form), max_tokens=100
   - ``_thumbnail_html``: dimensions, accent/bg injection, HTML-escape of the
     hook (XSS), gsap timeline shell so HyperFrames has a seekable clip
   - ``_render`` / ``_extract_frame``: command shape + env pins, nonzero
@@ -113,6 +115,46 @@ ok("long-form YouTube video" in _llm_calls[0]["prompt"],
    "content_format=long → long-form hint in prompt")
 ok("short-form" not in _llm_calls[0]["prompt"],
    "long-form path does not mention short-form")
+
+# Defect: _hook_text used content_format == "short" for the short-form hint,
+# so empty/"LONG"/"medium"/None leftovers (treated as shorts by render /
+# issues / publish / autofill) asked the LLM for a long-form hook. Same
+# class as BACKLOG 23–25. publish_loop now normalizes before calling, but
+# rubric_review and any direct caller still pass the raw format through.
+print("_hook_text: leftover formats use the short-form hint (!= long)")
+
+
+def _fmt_hint(content_format):
+    _llm_calls.clear()
+    thumbnail._hook_text("s", "T", content_format=content_format)
+    prompt = _llm_calls[0]["prompt"]
+    short = "short-form vertical video" in prompt
+    long_ = "long-form YouTube video" in prompt
+    return short, long_
+
+
+with patch.object(thumbnail, "_llm", side_effect=_llm_ok):
+    short, long_ = _fmt_hint("")
+    ok(short and not long_,
+       "empty-format leftover → short-form hint "
+       "(== 'short' would pick long-form)")
+    short, long_ = _fmt_hint("LONG")
+    ok(short and not long_,
+       "'LONG' leftover → short-form hint (case-sensitive == 'long' only)")
+    short, long_ = _fmt_hint("medium")
+    ok(short and not long_,
+       "'medium' leftover → short-form hint "
+       "(allowlist short+empty+LONG would still miss this)")
+    short, long_ = _fmt_hint(None)
+    ok(short and not long_,
+       "content_format=None → short-form hint "
+       "(== 'short' treated None as long-form)")
+    short, long_ = _fmt_hint("short")
+    ok(short and not long_,
+       "canonical short still short-form after leftover pins")
+    short, long_ = _fmt_hint("long")
+    ok(long_ and not short,
+       "canonical long still long-form (leftover gate does not invert longs)")
 
 # quote strip is whole-string (re ^…$ before splitlines), then first line only
 with patch.object(thumbnail, "_llm", return_value='"Quoted Hook Words"'):

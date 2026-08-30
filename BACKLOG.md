@@ -1149,3 +1149,24 @@ flag the operator step in the commit body.
 - **caution:** normal (router helper; not a money-path file).
 - **acceptance:** empty/`LONG` published views count toward shorts_views; a
   long topic's views do not; no-metric / missing-channel 404 unchanged.
+
+### 26. ✅ DONE (code shipped to main 2026-08-30) thumbnail `_hook_text` leftover formats used the long-form hint — normal
+- **resolution (2026-08-30):** `_hook_text` now picks the long-form LLM hint
+  only when `content_format == "long"` (else short-form), the same split
+  render/issues/publish/autofill/youtube_admin use. Empty-format, `"LONG"`,
+  `"medium"`, and `None` leftovers ask for a short-form hook; canonical
+  `"long"` still gets the long-form hint. `publish_loop` already normalizes
+  before calling `make_thumbnail_png`, so the live publish path was
+  defended; `rubric_review` and any direct `_hook_text` caller still pass
+  the raw format. Suite: `tests/verify_thumbnail.py` 97 → 103. Adversarial
+  review (SHIP): `Channels.tsx` `f === "short"` is a closed `["short","long"]`
+  enum label, not leftover chips (chips already use `=== "long"`).
+- **why (found 2026-08-30 ranking remaining `== "short"` after #25):** the
+  hook prompt used `content_format == "short"` so empty/`"LONG"` leftovers
+  got `"long-form YouTube video"` while the rest of the pipeline treats
+  them as shorts. Live topics are canonical (latent until a bad PATCH or a
+  raw-format caller).
+- **caution:** normal (`thumbnail.py` only; not a money-path file). Isolated
+  commit + regression tests.
+- **acceptance:** empty/`LONG`/`medium`/`None` embed the short-form hint;
+  canonical long still long-form; canonical short unchanged.

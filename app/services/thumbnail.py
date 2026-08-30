@@ -40,8 +40,10 @@ def _hook_text(subject: str, title: str | None,
     """A punchy 3–6 word thumbnail hook. LLM with a deterministic fallback."""
     base = (title or subject or "").strip()
     try:
-        fmt_hint = ("short-form vertical video" if content_format == "short"
-                    else "long-form YouTube video")
+        # Same == "long" / else-short split as render/issues/publish/autofill.
+        # `== "short"` asked the LLM for a long-form hook on empty/"LONG"/None leftovers.
+        fmt_hint = ("long-form YouTube video" if content_format == "long"
+                    else "short-form vertical video")
         system = (
             "You write YouTube thumbnail hooks. The hook is shown NEXT TO the title, so "
             "repeating the title wastes the slot — the hook must open a curiosity GAP the "
