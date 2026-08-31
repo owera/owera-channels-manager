@@ -28,12 +28,16 @@ logger = logging.getLogger("manager.render")
 # loop wall-clock timeout: the work never finished, so a bounded re-queue is
 # cheaper than a permanent FAILED (observed 2026-08-12..14: 16× "render timed
 # out" + litellm 600s / Anthropic disconnect overnight, all retry_count=0).
+# 2026-08-31: edge-tts NoAudioReceived on ch1 v1213 (t5 long) went FAILED at
+# retry_count=0 overnight → 0L+5S publish mix. TTS flakes produce no artifact
+# and rendered_today only counts success, so a bounded re-queue is free.
 _TRANSIENT = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
     "litellm.Timeout", "Connection timed out",
     "InternalServerError", "Server disconnected",
     "grok.Timeout",
+    "NoAudioReceived",
 )
 
 

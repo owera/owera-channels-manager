@@ -113,6 +113,10 @@ ok(issues._is_transient("anthropic overloaded_error: retry") is True,
    "_is_transient matches a known transient signature")
 ok(issues._is_transient("grok.Timeout: grok -p timed out after 300s") is True,
    "_is_transient matches grok.Timeout (CLI adapter, not npx TimeoutExpired)")
+ok(issues._is_transient(
+       "NoAudioReceived: No audio was received. Please verify that your parameters are correct.")
+   is True,
+   "_is_transient matches NoAudioReceived (edge-tts empty stream, 08-31 v1213)")
 ok(issues._is_transient("boom 503 upstream") is True, "_is_transient matches a bare 503")
 ok(issues._is_transient("ValueError: bad script") is False,
    "_is_transient is False for a non-transient error")

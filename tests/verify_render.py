@@ -990,6 +990,8 @@ for _sig, _label in (
     ("InternalServerError", "InternalServerError alone"),
     ("Server disconnected", "Server disconnected alone"),
     ("grok.Timeout", "grok.Timeout alone"),
+    ("NoAudioReceived: No audio was received. Please verify that your parameters are correct.",
+     "NoAudioReceived (edge-tts empty stream, 08-31 v1213)"),
 ):
     s = fresh_session()
     use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": _sig}))

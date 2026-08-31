@@ -28,12 +28,14 @@ from app.services import quota
 # (pinned by verify_render). 2026-08-15: litellm 600s / Anthropic disconnect. 2026-08-31:
 # grok -p subprocess timeout (distinct from npx TimeoutExpired). Do not
 # add a bare "timed out" — that would retry CLI TimeoutExpired (30 min npx).
+# 2026-08-31: edge-tts NoAudioReceived (v1213) — no artifact, retryable.
 TRANSIENT_SIGNATURES = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
     "litellm.Timeout", "Connection timed out",
     "InternalServerError", "Server disconnected",
     "grok.Timeout",
+    "NoAudioReceived",
 )
 
 # Tunable thresholds (could move to the Settings table later).
