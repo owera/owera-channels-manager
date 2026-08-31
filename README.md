@@ -12,7 +12,7 @@ scripts, renders the videos, optionally holds them for your approval, and upload
 one into the right playlist on a schedule that respects YouTube's limits.
 
 It's self-hosted and lightweight — one Python process, a single SQLite file, and a web
-UI. You bring the Google accounts and an Anthropic API key; it handles the pipeline.
+UI. You bring the Google accounts and a logged-in Grok CLI; it handles the pipeline.
 
 ![The Control Room — every channel, its pipeline, and today's numbers at a glance](docs/screenshots/dashboard.png)
 
@@ -60,7 +60,9 @@ it. Turn on a channel's *skip gate* and rendered videos jump straight to **appro
 - **Python 3.11–3.12** and [**uv**](https://docs.astral.sh/uv/) (manages the virtualenv for you)
 - **Node 18+** (builds the web UI; also runs the HyperFrames renderer via `npx`)
 - **ffmpeg** (used to grab video thumbnails)
-- An **Anthropic API key** (powers script, title, and idea generation)
+- The **Grok CLI** (`grok`), logged in once with `grok login` (OAuth). Manager LLM calls
+  (ideas, scripts, HyperFrames motion, metadata fallback, thumbnail hooks) run
+  `grok -p` against that login. **No `XAI_API_KEY`, no Anthropic key, no LiteLLM proxy.**
 - For **each channel**: a Google Cloud project with the **YouTube Data API v3** enabled
   and an **OAuth Desktop client**. Use a separate project per channel so they don't share
   quota. You upload each `client_secret.json` from the UI — no config files to edit.
@@ -68,8 +70,10 @@ it. Turn on a channel's *skip gate* and rendered videos jump straight to **appro
 ## Quick start
 
 ```sh
-# 1. Add your Anthropic API key (kept local; .env is gitignored)
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
+# 1. Log the Grok CLI in as the user that will run the manager (OAuth, once)
+#    grok login
+#    Confirm: grok -p "ping"   → a short reply, no API key prompt
+#    Optional override if `grok` is not on PATH: MANAGER_GROK_BIN=/path/to/grok
 
 # 2. Build the web UI
 cd frontend && npm install && npm run build && cd ..
@@ -150,6 +154,22 @@ launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager   # restart (afte
 launchctl bootout  gui/$(id -u)/com.owera.channels-manager   # stop / disable
 tail -f ~/Library/Logs/owera-channels-manager.log            # logs
 ```
+
+**LLM under launchd.** The manager calls `grok -p` (Grok Build CLI headless). launchd's PATH is
+the one in the plist, not your login shell. The template puts `$HOME/.grok/bin` first — the
+same path `run/growth-agent.sh` already uses. After installing / updating the plist:
+
+```sh
+# grok must resolve as the launchd user; HOME must be set (plist already does)
+launchctl print gui/$(id -u)/com.owera.channels-manager | grep -A2 PATH
+which grok    # typically ~/.grok/bin/grok
+grok -p "ping"
+```
+
+If `grok` lives somewhere else, either add that directory to the plist's `PATH` or set
+`MANAGER_GROK_BIN=/absolute/path/to/grok` in `.env`. Auth is the existing `grok login`
+OAuth cache under `~/.grok`. **Do not set `XAI_API_KEY`.** The child process strips it
+even if it is in the environment.
 
 Once it's a launchd service, restart with `kickstart -k` rather than killing uvicorn —
 launchd owns port 7070 and will immediately respawn a killed process.

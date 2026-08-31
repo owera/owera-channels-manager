@@ -55,9 +55,12 @@ class Settings(BaseSettings):
     storage_dir: str = str(MANAGER_DIR / "storage")
     frontend_dist: str = str(MANAGER_DIR / "frontend" / "dist")
 
-    # LLM (script/metadata fallback) — reuse the same key the rest of the repo uses
-    anthropic_api_key: str = ""
-    litellm_model: str = "anthropic/claude-opus-4-8"
+    # LLM: Grok Build CLI headless (`grok -p`). Uses the machine's `grok login`
+    # OAuth cache (~/.grok). No Anthropic key, no LiteLLM proxy, no XAI_API_KEY.
+    # launchd must put the binary on PATH (typically $HOME/.grok/bin) or set
+    # MANAGER_GROK_BIN to an absolute path. See run/com.owera.channels-manager.plist.
+    grok_bin: str = "grok"                    # env: MANAGER_GROK_BIN
+    grok_timeout_seconds: int = 300           # env: MANAGER_GROK_TIMEOUT_SECONDS
 
     # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
     hf_token: str = ""
@@ -103,14 +106,19 @@ settings = Settings()
 def ensure_dirs() -> None:
     for p in (settings.credentials_dir, settings.storage_dir,
               str(Path(settings.storage_dir) / "videos"),
+              str(Path(settings.storage_dir) / "grok-scratch"),
               settings.hyperframes_storage_dir):
         Path(p).mkdir(parents=True, exist_ok=True)
 
 
 def load_dotenv_into_env() -> None:
-    """Mirror produce.py's loader: ~/.bashrc guards exports behind an interactive
-    check, so a non-interactive service won't inherit ANTHROPIC_API_KEY. Load
-    manager/.env (and fall back to channel/.env) into os.environ for litellm."""
+    """Load manager/.env (and fall back to channel/.env) into os.environ.
+
+    Manager LLM calls go through `grok -p` (OAuth via ~/.grok), not LiteLLM /
+    Anthropic / XAI_API_KEY. This loader is for the rest of the process env
+    (MANAGER_APP_PASSWORD, etc.). A non-interactive launchd service does not
+    inherit a login shell, so .env is the source of those values.
+    """
     import os
 
     for env_path in (MANAGER_DIR / ".env", REPO_DIR / "channel" / ".env"):
@@ -122,9 +130,3 @@ def load_dotenv_into_env() -> None:
                 continue
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip().strip("'\""))
-
-    # Bridge the manager setting (MANAGER_ANTHROPIC_API_KEY) to the bare name
-    # litellm reads. Without this, a key set via the manager's own MANAGER_*
-    # convention is loaded into settings but never reaches the LLM call.
-    if settings.anthropic_api_key:
-        os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)

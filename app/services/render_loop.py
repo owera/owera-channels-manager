@@ -33,6 +33,7 @@ _TRANSIENT = (
     "overloaded", "529", "503",
     "litellm.Timeout", "Connection timed out",
     "InternalServerError", "Server disconnected",
+    "grok.Timeout",
 )
 
 

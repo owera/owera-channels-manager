@@ -1,8 +1,8 @@
-"""Generate video subject ideas from a topic theme (via litellm)."""
+"""Generate video subject ideas from a topic theme (via grok -p)."""
 
 import re
 
-from app.config import settings
+from app.services.llm import complete
 
 # The channel's spoken language lives implicitly in its render-profile voice id
 # (e.g. "pt-BR-AntonioNeural"). Idea/script prompts must state it explicitly:
@@ -78,7 +78,6 @@ def channel_language_code(session, channel_id: int | None) -> str | None:
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
                    n: int = 8, content_format: str = "short",
                    language: str | None = None) -> list[str]:
-    import litellm
 
     avoid = "\n".join(f"- {s}" for s in existing[-60:])
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
@@ -129,12 +128,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             f"{avoid or '(none yet)'}\n\n"
             "Return ONLY the titles, one per line, no numbering, no bullets, no commentary."
         )
-    resp = litellm.completion(
-        model=settings.litellm_model,
-        messages=[{"role": "user", "content": prompt}],
-        drop_params=True,
-    )
-    text = resp.choices[0].message.content or ""
+    text = complete(prompt) or ""
 
     seen = {s.lower() for s in existing}
     out: list[str] = []

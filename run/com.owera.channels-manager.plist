@@ -5,6 +5,9 @@
   This is a TEMPLATE — replace the placeholder paths before installing:
     /Users/you            -> your home dir   (echo $HOME)
     /Users/you/.local/bin -> where uv lives  (dirname "$(which uv)")
+    /Users/you/.grok/bin  -> where grok lives (dirname "$(which grok)") — required
+                            for manager LLM calls (`grok -p`, OAuth via ~/.grok).
+                            No XAI_API_KEY. Run `grok login` once as this user.
     /opt/homebrew/bin     -> Homebrew bin     (Apple Silicon: /opt/homebrew/bin,
                                                Intel: /usr/local/bin) — needs node/npx + ffmpeg
     .../src/owera-channels-manager -> your checkout
@@ -36,9 +39,11 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- launchd does not inherit the login shell PATH; uv + node/npx + ffmpeg live here -->
+        <!-- launchd does not inherit the login shell PATH. grok (LLM), uv, node/npx, ffmpeg live here.
+             Without ~/.grok/bin, `grok -p` is FileNotFound and every idea/script/render LLM step fails.
+             HOME must stay set so grok finds ~/.grok (OAuth). Do not add XAI_API_KEY. -->
         <key>PATH</key>
-        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/Users/you/.grok/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/you</string>
     </dict>

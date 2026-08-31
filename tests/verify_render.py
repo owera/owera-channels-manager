@@ -989,6 +989,7 @@ for _sig, _label in (
     ("Connection timed out after 600.0 seconds.", "Connection timed out alone"),
     ("InternalServerError", "InternalServerError alone"),
     ("Server disconnected", "Server disconnected alone"),
+    ("grok.Timeout", "grok.Timeout alone"),
 ):
     s = fresh_session()
     use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": _sig}))

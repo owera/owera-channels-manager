@@ -117,8 +117,8 @@ ok(v.status == VideoStatus.PUBLISHING, "an in-flight upload inside the timeout i
 ok(v.retry_count == 0, "in-flight upload's retry_count is not bumped")
 
 # Keep every _publish_one / tick() hermetic. make_thumbnail_png otherwise
-# calls the live LLM whenever MANAGER_ANTHROPIC_API_KEY is set (pydantic
-# loads .env) and the suite hangs on the first un-stubbed publish.
+# calls the live LLM (grok -p) unless stubbed and the suite hangs on the first
+# un-stubbed publish.
 _REAL_MAKE_THUMB = publish_loop.thumbnail.make_thumbnail_png
 publish_loop.thumbnail.make_thumbnail_png = lambda *a, **k: None
 
