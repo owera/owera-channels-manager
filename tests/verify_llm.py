@@ -147,7 +147,7 @@ settings.grok_timeout_seconds = _orig_timeout
 settings.storage_dir = _orig_storage
 
 
-def _run_empty(**kw):
+def _run_empty(cmd, **kw):
     return SimpleNamespace(returncode=0, stdout=None, stderr="")
 
 
