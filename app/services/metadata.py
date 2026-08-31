@@ -16,7 +16,7 @@ retries never double-append.
 import json
 import re
 
-from app.services.llm import complete
+from app.services.llm import GrokCLIError, complete
 from app.services.mpt_client import mpt
 
 EXTRA_TAGS = ["AI", "AI engineering", "machine learning"]
@@ -112,8 +112,12 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
         text = re.sub(r"^```[a-zA-Z0-9]*\s*|\s*```$", "", text.strip())
         data = json.loads(text)
         return _from_meta(subject, data)
+    except GrokCLIError:
+        # OIDC expiry / grok -p failure: do not paper over with heuristic titles
+        # and do not fall back to Anthropic/LiteLLM/XAI_API_KEY.
+        raise
     except Exception:
-        # Last-resort heuristic so the topic still reaches review.
+        # Last-resort heuristic so unparseable model JSON still reaches review.
         return {
             "title": subject[:100],
             "description": subject,

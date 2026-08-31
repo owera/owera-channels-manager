@@ -74,16 +74,16 @@ ok(llm.build_prompt("user", system=None) == "user", "None system is ignored")
 
 cmd = llm.build_cmd("Write a title")
 ok(cmd[0] == settings.grok_bin, "argv0 is settings.grok_bin")
-ok("-p" in cmd, "headless flag -p is present")
-ok(cmd[cmd.index("-p") + 1] == "Write a title", "-p is followed by the prompt")
-ok("--no-auto-update" in cmd, "--no-auto-update for launchd/scripts")
-ok("--permission-mode" in cmd and "bypassPermissions" in cmd,
-   "--permission-mode bypassPermissions so the agent CLI never hangs on a TUI")
+ok(cmd == [settings.grok_bin, "-p", "Write a title"],
+   "headless invocation is exactly grok -p <prompt> (no extra flags)")
+ok("--single" not in cmd, "-p is the flag; --single is the same switch, not passed twice")
 ok("max_tokens" not in " ".join(cmd) and "--max-tokens" not in cmd,
    "max_tokens is not a grok CLI flag (accepted by complete, ignored)")
+ok("--no-auto-update" not in cmd and "--permission-mode" not in cmd,
+   "do not invent flags beyond grok 1.0.5 -p / --single")
 
 cmd_sys = llm.build_cmd("user bit", system="system bit")
-ok(cmd_sys[-2:] == ["-p", "system bit\n\nuser bit"],
+ok(cmd_sys == [settings.grok_bin, "-p", "system bit\n\nuser bit"],
    "system+user flattened into the single -p argument")
 
 
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory() as td:
     ok("GROK_API_KEY" not in env, "GROK_API_KEY stripped from grok child env")
     ok("ANTHROPIC_API_KEY" not in env, "ANTHROPIC_API_KEY stripped from grok child env")
     ok(env.get("HOME") == "/Users/claw0",
-       "HOME is kept so grok finds ~/.grok OAuth cache")
+       "HOME is kept so grok finds ~/.grok OIDC cache")
     ok(env.get("UNRELATED") == "keep-me", "unrelated env is inherited")
 settings.grok_bin = _orig_bin
 settings.grok_timeout_seconds = _orig_timeout
@@ -167,6 +167,8 @@ except llm.GrokCLIError as e:
     raised = True
     ok("exited 2" in str(e) and "not logged in" in str(e),
        "nonzero grok → GrokCLIError with stderr tail")
+    ok("grok login" in str(e) and "XAI_API_KEY" in str(e),
+       "nonzero grok tells operator to refresh OIDC, no API-key fallback")
 ok(raised, "nonzero grok raises (does not swallow)")
 
 
@@ -182,8 +184,10 @@ except llm.GrokCLIError as e:
     raised = True
     msg = str(e)
     ok("not found" in msg.lower(), "missing binary names the grok CLI")
-    ok("XAI_API_KEY" in msg and "MANAGER_GROK_BIN" in msg,
-       "missing-binary hint says no XAI_API_KEY and points at MANAGER_GROK_BIN")
+    ok("~/.local/bin" in msg and "MANAGER_GROK_BIN" in msg,
+       "missing-binary hint names ~/.local/bin (live PATH) and MANAGER_GROK_BIN")
+    ok("grok login" in msg and "XAI_API_KEY" in msg,
+       "missing-binary hint says refresh OIDC, no XAI_API_KEY fallback")
 ok(raised, "FileNotFoundError → GrokCLIError")
 
 

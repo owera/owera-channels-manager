@@ -55,10 +55,9 @@ class Settings(BaseSettings):
     storage_dir: str = str(MANAGER_DIR / "storage")
     frontend_dist: str = str(MANAGER_DIR / "frontend" / "dist")
 
-    # LLM: Grok Build CLI headless (`grok -p`). Uses the machine's `grok login`
-    # OAuth cache (~/.grok). No Anthropic key, no LiteLLM proxy, no XAI_API_KEY.
-    # launchd must put the binary on PATH (typically $HOME/.grok/bin) or set
-    # MANAGER_GROK_BIN to an absolute path. See run/com.owera.channels-manager.plist.
+    # LLM: Grok Build CLI headless (`grok -p` / `--single`). Live claw0:
+    # ~/.local/bin/grok → ~/.grok/bin/grok (1.0.5). launchd PATH already has
+    # ~/.local/bin; OIDC via `grok login`. No Anthropic / LiteLLM / XAI_API_KEY.
     grok_bin: str = "grok"                    # env: MANAGER_GROK_BIN
     grok_timeout_seconds: int = 300           # env: MANAGER_GROK_TIMEOUT_SECONDS
 
@@ -114,7 +113,7 @@ def ensure_dirs() -> None:
 def load_dotenv_into_env() -> None:
     """Load manager/.env (and fall back to channel/.env) into os.environ.
 
-    Manager LLM calls go through `grok -p` (OAuth via ~/.grok), not LiteLLM /
+    Manager LLM calls go through `grok -p` (OIDC via `grok login`), not LiteLLM /
     Anthropic / XAI_API_KEY. This loader is for the rest of the process env
     (MANAGER_APP_PASSWORD, etc.). A non-interactive launchd service does not
     inherit a login shell, so .env is the source of those values.

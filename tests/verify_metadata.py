@@ -15,7 +15,8 @@ Covers, dependency-free (no network, no DB, no live YouTube):
     hashtag ``#`` strip, EXTRA_TAGS always appended, empty/missing fields
   - ``generate``: MPT happy path (platform + language code mapping pinned),
     MPT-None → grok-cli fallback (short vs long prompts, language rule),
-    both-dead → last-resort heuristic so review is never blocked; script=None
+    grok CLI / OIDC failure re-raises (no Anthropic/LiteLLM/heuristic hide);
+    unparseable model JSON → last-resort heuristic; script=None
     normalised; subject never mutated by callers' layers
   - ``finalize_description`` residual edges: es/unknown lang → EN CTA,
     case-insensitive BCP-47 prefix, None/whitespace base, channel-only and
@@ -218,26 +219,26 @@ ok(out_f["title"] == "Fenced",
    "markdown-fenced JSON from the LLM is stripped and parsed")
 
 
-# ----------------------------------------------- generate (last-resort heuristic)
-print("generate: MPT + LLM both dead → last-resort heuristic")
+print("generate: grok -p / OIDC failure is not papered over")
 
 
 def _boom_complete(*a, **k):
-    raise RuntimeError("llm down")
+    raise metadata.GrokCLIError("grok -p exited 1: oidc expired")
 
 
-with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.object(metadata, "complete", side_effect=_boom_complete):
-    out_h = metadata.generate("Heuristic Subject That Is Quite Long " + "Z" * 120,
-                              "script", content_format="short")
-ok(out_h["title"] == ("Heuristic Subject That Is Quite Long " + "Z" * 120)[:100],
-   "heuristic title is subject[:100] (publish never blocked)")
-ok(out_h["description"] == "Heuristic Subject That Is Quite Long " + "Z" * 120,
-   "heuristic description is the full subject (not clamped — finalize does that)")
-ok(out_h["tags"] == list(metadata.EXTRA_TAGS),
-   "heuristic tags are EXTRA_TAGS only")
+raised = False
+try:
+    with patch.object(metadata.mpt, "social_metadata", return_value=None), \
+         patch.object(metadata, "complete", side_effect=_boom_complete):
+        metadata.generate("Heuristic Subject That Is Quite Long " + "Z" * 120,
+                          "script", content_format="short")
+except metadata.GrokCLIError as e:
+    raised = True
+    ok("oidc expired" in str(e), "GrokCLIError message is preserved")
+ok(raised, "GrokCLIError from grok -p is re-raised (no heuristic, no Anthropic)")
 
-# LLM returns unparseable content → same heuristic
+# LLM returns unparseable content → last-resort heuristic (model JSON, not CLI fail)
+print("generate: unparseable LLM body → last-resort heuristic")
 def _garbage_complete(*a, **k):
     return "not json at all"
 

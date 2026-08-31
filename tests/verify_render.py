@@ -1184,6 +1184,43 @@ v = drive_complete(s, ch, t, skip_gate=True)
 ok(v.status == VideoStatus.APPROVED,
    "video skip_gate True overrides channel False -> APPROVED")
 
+print("finalize: grok -p / OIDC failure at metadata fails clearly (no API fallback)")
+from app.services.llm import GrokCLIError  # noqa: E402
+
+_prev_meta = render_loop.metadata
+
+
+class _OidcBoom:
+    def generate(self, *a, **k):
+        raise GrokCLIError("grok -p exited 1: oidc expired. Refresh the Grok CLI OIDC session")
+
+
+render_loop.metadata = _OidcBoom()
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t)
+ok(v.status == VideoStatus.FAILED and v.retry_count == 0,
+   "OIDC grok failure is terminal (not a transient retry)")
+ok("GrokCLIError" in (v.error or "") and "oidc expired" in (v.error or ""),
+   "FAILED error names GrokCLIError + OIDC so the operator can grok login")
+ok(not v.metadata_generated, "metadata_generated stays false so a retry regenerates")
+
+
+class _GrokTimeout:
+    def generate(self, *a, **k):
+        raise GrokCLIError("grok.Timeout: grok -p timed out after 300s")
+
+
+render_loop.metadata = _GrokTimeout()
+s = fresh_session()
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = drive_complete(s, ch, t)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1,
+   "grok.Timeout at metadata is a transient retry (same as litellm.Timeout)")
+render_loop.metadata = _prev_meta
+
 settings.storage_dir = _orig_storage
 
 # --- tick: scheduler_paused halts the whole loop ------------------------------
