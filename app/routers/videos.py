@@ -95,7 +95,12 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
 
     drip = timedelta(minutes=cfg_row.publish_drip_minutes)
     daily_limit = min(ch.daily_publish_budget, cfg.youtube_daily_quota_cap // QUOTA_UPLOAD)
-    daily_limit = max(1, daily_limit)
+    # tick() skips when published_today >= daily_publish_budget, so 0 (and
+    # negative) never publish. max(1, ...) lied — the board got ETAs for a
+    # channel that isn't publishing. Without this return the plan still
+    # drains (one video per future quota day) instead of staying empty.
+    if daily_limit <= 0:
+        return {}
     now = datetime.now(timezone.utc)
     last = quota.last_publish_at(session, channel_id)
     if last and last.tzinfo is None:

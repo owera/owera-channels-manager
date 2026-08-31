@@ -1170,3 +1170,23 @@ flag the operator step in the commit body.
   commit + regression tests.
 - **acceptance:** empty/`LONG`/`medium`/`None` embed the short-form hint;
   canonical long still long-form; canonical short unchanged.
+
+### 27. ✅ DONE (code shipped to main 2026-08-31) publish-plan / dashboard ETA clamped a 0 publish budget to 1 — normal
+- **resolution (2026-08-31):** `publish_plan` and dashboard `_next_publish_eta`
+  dropped the `max(1, min(budget, cap))` clamp. `daily_limit <= 0` now
+  returns `{}` / `None` — the same "channel isn't publishing" reading
+  `issues.detect` already uses for `daily_publish_budget=0`. Without the
+  early return the plan still drains one video per future quota day (not
+  a hang). `tick()` was already correct (`published_today >= budget`).
+  Suite: `tests/verify_publish.py` 200 → 209. Isolated commit;
+  `publish_loop.py` untouched. Discovered follow-up (not bundled): the
+  dashboard only labels a missing ETA as "paused"; budget=0 with approved
+  work shows neither a next time nor a paused chip.
+- **why (found 2026-08-31 ranking remaining coverage after #26):** both ETA
+  surfaces forced at least one slot per quota day. A channel with
+  `daily_publish_budget=0` (or negative) never publishes, but the board
+  and the growth agent's `/dashboard` still showed a next-publish time.
+- **caution:** normal (router ETA mirrors; not a money-path file). Isolated
+  commit + regression tests.
+- **acceptance:** budget=0 and budget=-1 produce an empty plan and a null
+  dashboard ETA; a sibling budget=1 still gets ETAs.

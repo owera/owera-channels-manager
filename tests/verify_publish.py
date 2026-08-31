@@ -18,6 +18,8 @@ regress:
     tick() call, not only at the helper
   - daily mix: empty/"LONG" topic formats count as short after the day's
     long is out (same != "long" gate as render/issues), not == "short"
+  - daily_publish_budget<=0: tick never publishes, so publish-plan is empty
+    and the dashboard next_publish_eta is None (the max(1,) clamp lied)
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -1416,5 +1418,53 @@ try:
 
 finally:
     _disarm_tick()
+
+# Defect: publish_plan and dashboard _next_publish_eta clamped daily_limit
+# with max(1, min(budget, cap//upload)). tick() uses
+# published_today >= daily_publish_budget, so budget 0 (and negative) skip
+# every tick — issues.py already treats 0 as "the channel isn't trying to
+# publish". The clamp still handed the board / growth agent an ETA. Without
+# the early return the plan still drains one video per future quota day
+# (not a hang) and the dashboard emits tomorrow's window.
+print("publish-plan / dashboard ETA: daily_publish_budget<=0 means no ETAs")
+from app.routers.queue import _next_publish_eta  # noqa: E402
+from app.routers import queue as queue_router, videos as videos_router  # noqa: E402
+
+ok(Path(videos_router.__file__).resolve().parents[2] == Path(__file__).resolve().parents[1],
+   "videos module loaded from this tree")
+ok(Path(queue_router.__file__).resolve().parents[2] == Path(__file__).resolve().parents[1],
+   "queue module loaded from this tree")
+
+s = fresh_session()
+cfg = app_settings(s)
+parked = make_channel(s, slug="parked-pub", daily_publish_budget=0)
+live = make_channel(s, slug="live-pub", daily_publish_budget=1)
+neg = make_channel(s, slug="neg-pub", daily_publish_budget=-1)
+v_parked = make_video(s, parked, subject="parked approved",
+                      status=VideoStatus.APPROVED, video_path="/tmp/p.mp4",
+                      title="P", approved_at=utcnow())
+v_live = make_video(s, live, subject="live approved",
+                    status=VideoStatus.APPROVED, video_path="/tmp/l.mp4",
+                    title="L", approved_at=utcnow())
+make_video(s, neg, subject="neg approved",
+           status=VideoStatus.APPROVED, video_path="/tmp/n.mp4",
+           title="N", approved_at=utcnow())
+
+ok(publish_plan(parked.id, s) == {},
+   "budget=0 publish-plan is empty (max(1,) would still ETA; tick never publishes)")
+ok(_next_publish_eta(s, parked, cfg) is None,
+   "budget=0 dashboard ETA is None (max(1,) would claim a slot)")
+ok(publish_plan(neg.id, s) == {},
+   "budget=-1 publish-plan is empty (`if not budget` would miss negatives)")
+ok(_next_publish_eta(s, neg, cfg) is None,
+   "budget=-1 dashboard ETA is None")
+plan_live = publish_plan(live.id, s)
+ok(plan_live == {str(v_live.id): plan_live.get(str(v_live.id))}
+   and plan_live.get(str(v_live.id)),
+   "sibling budget=1 still gets an ETA (a global empty-plan short-circuit dies here)")
+ok(_next_publish_eta(s, live, cfg) is not None,
+   "sibling budget=1 dashboard ETA is set")
+ok(str(v_parked.id) not in plan_live,
+   "parked channel's video is absent from the sibling's plan")
 
 print(f"\nALL {_checks} CHECKS PASSED")

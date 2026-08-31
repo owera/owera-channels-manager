@@ -25,7 +25,11 @@ def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
         Video.channel_id == ch.id, Video.status == VideoStatus.APPROVED)).one()
     if not n or ch.paused or ch.oauth_status != OAuthStatus.CONNECTED:
         return None
-    daily_limit = max(1, min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD))
+    daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
+    # Same gate as publish_plan / tick(): budget<=0 means the channel isn't
+    # publishing. max(1, ...) claimed a slot the loop will never take.
+    if daily_limit <= 0:
+        return None
     now = datetime.now(timezone.utc)
     if quota.published_today(session, ch.id) >= daily_limit:
         nxt = (now + timedelta(days=1)).date()
