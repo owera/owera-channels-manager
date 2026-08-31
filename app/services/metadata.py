@@ -1,7 +1,7 @@
 """Generate YouTube metadata (title/description/tags) for a rendered topic.
 
 Reuses MPT's /social-metadata endpoint (platform youtube_shorts), falling back to
-litellm. Mapping mirrors channel/produce.py exactly.
+the local Grok CLI (`grok -p`). Mapping mirrors channel/produce.py exactly.
 
 Language: callers pass the channel's spoken language (from its render-profile voice,
 `video_gen.channel_language`) so a PT-BR channel gets native PT-BR titles/descriptions/
@@ -16,7 +16,7 @@ retries never double-append.
 import json
 import re
 
-from app.config import settings
+from app.services.llm import GrokCLIError, complete
 from app.services.mpt_client import mpt
 
 EXTRA_TAGS = ["AI", "AI engineering", "machine learning"]
@@ -83,14 +83,12 @@ def finalize_description(description: str, language_code: str | None,
     return out[:5000]
 
 
-def _litellm_fallback(subject: str, script: str, content_format: str = "short",
-                      language: str | None = None) -> dict:
+def _llm_fallback(subject: str, script: str, content_format: str = "short",
+                  language: str | None = None) -> dict:
     """Direct LLM call if the MPT endpoint is unavailable."""
     lang_rule = (f" HARD RULE: write the title, caption, and hashtags in {language}."
                  if language else "")
     try:
-        import litellm
-
         if content_format == "long":
             prompt = (
                 "You are a YouTube copywriter for in-depth long-form videos. For the video "
@@ -110,17 +108,16 @@ def _litellm_fallback(subject: str, script: str, content_format: str = "short",
                 f"(array of 3 strings each starting with #). No commentary.{lang_rule}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
-        resp = litellm.completion(
-            model=settings.litellm_model,
-            messages=[{"role": "user", "content": prompt}],
-            drop_params=True,
-        )
-        text = resp.choices[0].message.content or ""
+        text = complete(prompt) or ""
         text = re.sub(r"^```[a-zA-Z0-9]*\s*|\s*```$", "", text.strip())
         data = json.loads(text)
         return _from_meta(subject, data)
+    except GrokCLIError:
+        # OIDC expiry / grok -p failure: do not paper over with heuristic titles
+        # and do not fall back to Anthropic/LiteLLM/XAI_API_KEY.
+        raise
     except Exception:
-        # Last-resort heuristic so the topic still reaches review.
+        # Last-resort heuristic so unparseable model JSON still reaches review.
         return {
             "title": subject[:100],
             "description": subject,
@@ -137,4 +134,4 @@ def generate(subject: str, script: str, content_format: str = "short",
     meta = mpt.social_metadata(subject, script or "", platform=platform, language=mpt_language)
     if meta:
         return _from_meta(subject, meta)
-    return _litellm_fallback(subject, script or "", content_format, language)
+    return _llm_fallback(subject, script or "", content_format, language)

@@ -23,7 +23,7 @@ Covers, dependency-free (no network, no live LLM):
     theme_prompt guidance, existing-title avoid list (last-60 window),
     bullet/number/quote stripping, case-insensitive dedupe (existing +
     within response), ``n`` cap (incl. n=0), empty/None LLM content,
-    litellm model + drop_params pins
+    grok-cli ``complete`` seam (prompt-only; no LiteLLM model/drop_params)
 
 Every non-trivial behavior is mutation-verified (hand-built semantic mutants
 run from an isolated copy with bytecode caching disabled). Exits non-zero on
@@ -33,13 +33,11 @@ from __future__ import annotations
 
 import json
 import sys
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.config import settings
 from app.models import Channel, RenderProfile
 from app.services import video_gen
 
@@ -287,21 +285,19 @@ print("generate_ideas: short/long prompts, language rule, parsing, n-cap")
 _llm_calls: list[dict] = []
 
 
-def _completion_factory(text: str):
-    def _completion(*, model, messages, drop_params=True, **kw):
+def _complete_factory(text: str):
+    def _complete(prompt, system=None, max_tokens=None):
         _llm_calls.append({
-            "model": model,
-            "messages": messages,
-            "drop_params": drop_params,
-            **kw,
+            "prompt": prompt,
+            "system": system,
+            "max_tokens": max_tokens,
         })
-        return SimpleNamespace(choices=[SimpleNamespace(
-            message=SimpleNamespace(content=text))])
-    return _completion
+        return text
+    return _complete
 
 
 def _run_ideas(**kwargs):
-    """Call generate_ideas with a stub litellm; kwargs go to generate_ideas."""
+    """Call generate_ideas with a stub llm.complete; kwargs go to generate_ideas."""
     text = kwargs.pop("_text", "A solid hook title about caches\n"
                                "Why Your X Keeps Failing in Prod")
     # Defaults that most tests want.
@@ -311,9 +307,7 @@ def _run_ideas(**kwargs):
     kwargs.setdefault("n", 8)
     kwargs.setdefault("content_format", "short")
     kwargs.setdefault("language", None)
-    with patch.dict("sys.modules", {
-        "litellm": SimpleNamespace(completion=_completion_factory(text)),
-    }):
+    with patch.object(video_gen, "complete", side_effect=_complete_factory(text)):
         return video_gen.generate_ideas(**kwargs)
 
 
@@ -328,14 +322,9 @@ out = _run_ideas(
 ok(out == ["Why Your Agent Forgets Everything",
            "Stop Chaining Models Blindly"],
    "short form: two clean lines become two titles")
-ok(len(_llm_calls) == 1, "exactly one litellm.completion call")
-ok(_llm_calls[0]["model"] == settings.litellm_model,
-   f"uses settings.litellm_model ({settings.litellm_model!r})")
-ok(_llm_calls[0]["drop_params"] is True, "drop_params=True (provider-compat)")
-ok(len(_llm_calls[0]["messages"]) == 1
-   and _llm_calls[0]["messages"][0]["role"] == "user",
-   "single user message (no system role)")
-prompt = _llm_calls[0]["messages"][0]["content"]
+ok(len(_llm_calls) == 1, "exactly one llm.complete call")
+ok(_llm_calls[0]["system"] is None, "generate_ideas is a single user prompt (no system)")
+prompt = _llm_calls[0]["prompt"]
 ok("short-video ideas" in prompt or "YouTube Shorts" in prompt,
    "short form prompt names Shorts / short-video")
 ok("AI Agents" in prompt, "topic_name is embedded in the prompt")
@@ -360,7 +349,7 @@ _run_ideas(
     content_format="long",
     n=5,
 )
-prompt_long = _llm_calls[0]["messages"][0]["content"]
+prompt_long = _llm_calls[0]["prompt"]
 ok("in-depth long-form" in prompt_long or "long-form YouTube" in prompt_long,
    "long form prompt names long-form / in-depth")
 ok("6-15 words" in prompt_long,
@@ -380,7 +369,7 @@ _run_ideas(
     topic_name="Agentes de IA",  # PT topic — still must state HARD RULE
     content_format="short",
 )
-prompt_pt = _llm_calls[0]["messages"][0]["content"]
+prompt_pt = _llm_calls[0]["prompt"]
 ok("HARD RULE" in prompt_pt and "Brazilian Portuguese" in prompt_pt,
    "language set → HARD RULE names the channel language")
 ok("exclusively in Brazilian Portuguese" in prompt_pt,
@@ -394,7 +383,7 @@ _run_ideas(
     theme_prompt="focus on production failures, not tutorials",
     topic_name="Observability",
 )
-prompt_g = _llm_calls[0]["messages"][0]["content"]
+prompt_g = _llm_calls[0]["prompt"]
 ok("Extra guidance for this theme: focus on production failures, not tutorials"
    in prompt_g,
    "theme_prompt is injected as 'Extra guidance for this theme: …'")
@@ -404,7 +393,7 @@ ok("Extra guidance for this theme: focus on production failures, not tutorials"
 _llm_calls.clear()
 existing = [f"Old Title {i}" for i in range(70)]  # 70 > 60 window
 _run_ideas(_text="Brand New Hook Title", existing=existing, n=3)
-prompt_av = _llm_calls[0]["messages"][0]["content"]
+prompt_av = _llm_calls[0]["prompt"]
 ok("Old Title 69" in prompt_av and "Old Title 10" in prompt_av,
    "recent existing titles appear in the avoid list")
 ok("Old Title 0" not in prompt_av and "Old Title 9" not in prompt_av,
@@ -416,7 +405,7 @@ ok("- Old Title 69" in prompt_av,
 # --- empty existing → '(none yet)' ---
 _llm_calls.clear()
 _run_ideas(_text="Only Title", existing=[], n=1)
-prompt_none = _llm_calls[0]["messages"][0]["content"]
+prompt_none = _llm_calls[0]["prompt"]
 ok("(none yet)" in prompt_none,
    "empty existing → avoid list shows '(none yet)'")
 
@@ -483,7 +472,7 @@ ok(out_cap == [f"Title Number {i}" for i in range(5)],
    "n cap keeps the first n titles in order")
 
 # n is also embedded in the prompt so the model is asked for the right count
-ok("Generate 5 distinct" in _llm_calls[0]["messages"][0]["content"],
+ok("Generate 5 distinct" in _llm_calls[0]["prompt"],
    "n reaches the prompt as 'Generate {n} distinct…'")
 
 
@@ -492,7 +481,7 @@ _llm_calls.clear()
 out_zero = _run_ideas(_text="Should Not Appear\nNor This", n=0, existing=[])
 ok(out_zero == [], "n=0 → empty list (max(0, n) slice)")
 ok(len(_llm_calls) == 1,
-   "n=0 still invokes litellm (slice is post-parse; not a short-circuit)")
+   "n=0 still invokes complete (slice is post-parse; not a short-circuit)")
 
 
 # --- n<0 → [] via max(0, n); bare out[:n] would reverse-slice ---
@@ -512,16 +501,13 @@ out_empty = _run_ideas(_text="", n=8)
 ok(out_empty == [], "empty LLM content → []")
 
 
-def _none_content(*, model, messages, drop_params=True, **kw):
-    _llm_calls.append({"model": model})
-    return SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content=None))])
+def _none_content(prompt, system=None, max_tokens=None):
+    _llm_calls.append({"prompt": prompt})
+    return None
 
 
 _llm_calls.clear()
-with patch.dict("sys.modules", {
-    "litellm": SimpleNamespace(completion=_none_content),
-}):
+with patch.object(video_gen, "complete", side_effect=_none_content):
     out_none = video_gen.generate_ideas("T", None, [], n=4)
 ok(out_none == [], "None LLM content (or \"\") → [] via `or \"\"`")
 
@@ -540,14 +526,14 @@ ok(out_all_known == [],
 # --- short form embeds n too ---
 _llm_calls.clear()
 _run_ideas(_text="X", n=3, content_format="short")
-ok("Generate 3 distinct" in _llm_calls[0]["messages"][0]["content"],
+ok("Generate 3 distinct" in _llm_calls[0]["prompt"],
    "short form also embeds n in 'Generate {n} distinct…'")
 
 
 # --- forbidden openers stay in the short-form brief (growth control) ---
 _llm_calls.clear()
 _run_ideas(_text="X", content_format="short")
-sp = _llm_calls[0]["messages"][0]["content"]
+sp = _llm_calls[0]["prompt"]
 for banned in ("Mastering", "Deep Dive", "Optimize"):
     ok(banned in sp,
        f"short-form brief still names forbidden opener {banned!r}")
@@ -555,7 +541,7 @@ for banned in ("Mastering", "Deep Dive", "Optimize"):
 
 _llm_calls.clear()
 _run_ideas(_text="X", content_format="long")
-lp = _llm_calls[0]["messages"][0]["content"]
+lp = _llm_calls[0]["prompt"]
 for banned in ("Mastering", "Deep Dive", "Complete Guide", "Introduction to"):
     ok(banned in lp,
        f"long-form brief still names forbidden opener {banned!r}")

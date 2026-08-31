@@ -396,15 +396,9 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
 # --------------------------------------------------------------------------- LLM steps
 
 def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
-    import litellm
+    from app.services.llm import complete
 
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    resp = litellm.completion(model=settings.litellm_model, messages=messages,
-                              max_tokens=max_tokens, drop_params=True)
-    return resp.choices[0].message.content or ""
+    return complete(prompt, system=system, max_tokens=max_tokens)
 
 
 def _word_count_bounds(params: dict) -> tuple[int, int]:

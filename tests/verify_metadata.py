@@ -3,7 +3,7 @@
 This project has no pytest; run directly:
     PYTHONPATH=. .venv/bin/python tests/verify_metadata.py
 
-``metadata.generate`` + ``_from_meta`` turn MPT (or litellm) social-metadata into
+``metadata.generate`` + ``_from_meta`` turn MPT (or grok -p) social-metadata into
 the title/description/tags that land on every published video; a silent break
 ships EN titles on a PT channel, drops tags, or leaves a dead MPT blocking
 publish. ``finalize_description`` is already partially covered by
@@ -14,8 +14,9 @@ Covers, dependency-free (no network, no DB, no live YouTube):
   - ``_from_meta``: title fallback/truncation, caption+hashtag description,
     hashtag ``#`` strip, EXTRA_TAGS always appended, empty/missing fields
   - ``generate``: MPT happy path (platform + language code mapping pinned),
-    MPT-None → litellm fallback (short vs long prompts, language rule),
-    both-dead → last-resort heuristic so review is never blocked; script=None
+    MPT-None → grok-cli fallback (short vs long prompts, language rule),
+    grok CLI / OIDC failure re-raises (no Anthropic/LiteLLM/heuristic hide);
+    unparseable model JSON → last-resort heuristic; script=None
     normalised; subject never mutated by callers' layers
   - ``finalize_description`` residual edges: es/unknown lang → EN CTA,
     case-insensitive BCP-47 prefix, None/whitespace base, channel-only and
@@ -30,7 +31,6 @@ from __future__ import annotations
 
 import json
 import sys
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import metadata
@@ -48,7 +48,7 @@ def ok(cond, msg):
 
 
 # ----------------------------------------------------------------- _from_meta
-print("_from_meta: MPT/litellm payload → title/description/tags")
+print("_from_meta: MPT/LLM payload → title/description/tags")
 
 m = metadata._from_meta("Subject fallback", {
     "title": "A real title",
@@ -151,53 +151,47 @@ ok(metadata._LANGUAGE_MPT_CODES == {
 }, "_LANGUAGE_MPT_CODES pin (voice-language names from video_gen.channel_language)")
 
 
-# --------------------------------------------------- generate (litellm fallback)
-print("generate: MPT dead → litellm fallback")
+# --------------------------------------------------- generate (grok-cli fallback)
+print("generate: MPT dead → grok-cli fallback")
 
 _llm_calls: list[dict] = []
 
 
-def _fake_completion(*, model, messages, drop_params=True, **kw):
-    _llm_calls.append({"model": model, "messages": messages,
-                       "drop_params": drop_params, **kw})
-    # Return a well-formed minified JSON body the fallback parser expects.
-    body = json.dumps({
+def _fake_complete(prompt, system=None, max_tokens=None):
+    _llm_calls.append({"prompt": prompt, "system": system,
+                       "max_tokens": max_tokens})
+    return json.dumps({
         "title": "LLM Title",
         "caption": "LLM caption about the topic.",
         "hashtags": ["#llm", "#ai", "#code"],
     })
-    return SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content=body))])
 
 
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_fake_completion)}):
-    # Force a re-import-safe call path: _litellm_fallback does `import litellm`
-    # inside the function, so patching sys.modules is the right seam.
+     patch.object(metadata, "complete", side_effect=_fake_complete):
     out = metadata.generate("Subj", "script text", content_format="short",
                             language="Brazilian Portuguese")
-ok(out["title"] == "LLM Title", "litellm title used when MPT returns None")
-ok(out["tags"][:3] == ["llm", "ai", "code"], "litellm hashtags stripped + kept")
-ok(metadata.EXTRA_TAGS[0] in out["tags"], "EXTRA_TAGS still appended on litellm path")
-ok(len(_llm_calls) == 1, "exactly one litellm call on the fallback path")
-prompt = _llm_calls[0]["messages"][0]["content"]
+ok(out["title"] == "LLM Title", "LLM title used when MPT returns None")
+ok(out["tags"][:3] == ["llm", "ai", "code"], "LLM hashtags stripped + kept")
+ok(metadata.EXTRA_TAGS[0] in out["tags"], "EXTRA_TAGS still appended on LLM path")
+ok(len(_llm_calls) == 1, "exactly one llm.complete call on the fallback path")
+prompt = _llm_calls[0]["prompt"]
 ok("HARD RULE" in prompt and "Brazilian Portuguese" in prompt,
-   "language rule present in the litellm prompt when language is set")
+   "language rule present in the LLM prompt when language is set")
 ok("Shorts" in prompt or "short" in prompt.lower(),
    "short format uses the Shorts copywriter prompt")
 ok("Subject: Subj" in prompt and "script text" in prompt,
-   "subject + script reach the litellm prompt")
-ok(_llm_calls[0]["drop_params"] is True, "drop_params=True (provider-compat)")
+   "subject + script reach the LLM prompt")
 
 # long-form prompt branch + no-language (no HARD RULE)
 _llm_calls.clear()
 long_script = "long script word " * 400  # ~6800 chars — past the 4000 cap
 ok(len(long_script) > 4000, "fixture script is long enough to hit the 4000 cap")
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_fake_completion)}):
+     patch.object(metadata, "complete", side_effect=_fake_complete):
     metadata.generate("LongSub", long_script, content_format="long",
                       language=None)
-prompt_long = _llm_calls[0]["messages"][0]["content"]
+prompt_long = _llm_calls[0]["prompt"]
 ok("long-form" in prompt_long.lower() or "in-depth" in prompt_long.lower(),
    "long format uses the long-form copywriter prompt")
 ok("HARD RULE" not in prompt_long,
@@ -212,74 +206,70 @@ ok(long_script not in prompt_long,
    "full uncapped script is absent from the prompt")
 
 # fenced JSON response is stripped before parse
-def _fenced_completion(*, model, messages, drop_params=True, **kw):
-    body = "```json\n" + json.dumps({
+def _fenced_complete(prompt, system=None, max_tokens=None):
+    return "```json\n" + json.dumps({
         "title": "Fenced", "caption": "c", "hashtags": ["#x"],
     }) + "\n```"
-    return SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content=body))])
 
 
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_fenced_completion)}):
+     patch.object(metadata, "complete", side_effect=_fenced_complete):
     out_f = metadata.generate("S", "x")
 ok(out_f["title"] == "Fenced",
    "markdown-fenced JSON from the LLM is stripped and parsed")
 
 
-# ----------------------------------------------- generate (last-resort heuristic)
-print("generate: MPT + litellm both dead → last-resort heuristic")
+print("generate: grok -p / OIDC failure is not papered over")
 
 
-def _boom_completion(**kw):
-    raise RuntimeError("llm down")
+def _boom_complete(*a, **k):
+    raise metadata.GrokCLIError("grok -p exited 1: oidc expired")
+
+
+raised = False
+try:
+    with patch.object(metadata.mpt, "social_metadata", return_value=None), \
+         patch.object(metadata, "complete", side_effect=_boom_complete):
+        metadata.generate("Heuristic Subject That Is Quite Long " + "Z" * 120,
+                          "script", content_format="short")
+except metadata.GrokCLIError as e:
+    raised = True
+    ok("oidc expired" in str(e), "GrokCLIError message is preserved")
+ok(raised, "GrokCLIError from grok -p is re-raised (no heuristic, no Anthropic)")
+
+# LLM returns unparseable content → last-resort heuristic (model JSON, not CLI fail)
+print("generate: unparseable LLM body → last-resort heuristic")
+def _garbage_complete(*a, **k):
+    return "not json at all"
 
 
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_boom_completion)}):
-    out_h = metadata.generate("Heuristic Subject That Is Quite Long " + "Z" * 120,
-                              "script", content_format="short")
-ok(out_h["title"] == ("Heuristic Subject That Is Quite Long " + "Z" * 120)[:100],
-   "heuristic title is subject[:100] (publish never blocked)")
-ok(out_h["description"] == "Heuristic Subject That Is Quite Long " + "Z" * 120,
-   "heuristic description is the full subject (not clamped — finalize does that)")
-ok(out_h["tags"] == list(metadata.EXTRA_TAGS),
-   "heuristic tags are EXTRA_TAGS only")
-
-# litellm returns unparseable content → same heuristic
-def _garbage_completion(**kw):
-    return SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content="not json at all"))])
-
-
-with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_garbage_completion)}):
+     patch.object(metadata, "complete", side_effect=_garbage_complete):
     out_g = metadata.generate("S", "x")
 ok(out_g == {"title": "S", "description": "S", "tags": list(metadata.EXTRA_TAGS)},
    "unparseable LLM body → same last-resort heuristic")
 
-# empty content from litellm
-def _empty_completion(**kw):
-    return SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content=None))])
+# empty content from LLM
+def _empty_complete(*a, **k):
+    return None
 
 
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_empty_completion)}):
+     patch.object(metadata, "complete", side_effect=_empty_complete):
     out_e = metadata.generate("S", "x")
 ok(out_e["title"] == "S", "None LLM content → heuristic (no AttributeError)")
 
 
 # MPT returns empty dict / falsy → also falls through (if meta is falsy)
 with patch.object(metadata.mpt, "social_metadata", return_value={}), \
-     patch.dict("sys.modules", {"litellm": SimpleNamespace(completion=_fake_completion)}):
+     patch.object(metadata, "complete", side_effect=_fake_complete):
     # {} is falsy in Python → fallback. Pin that so a `if meta is not None`
     # rewrite (which would _from_meta an empty dict → title=subject, no tags
     # from LLM) fails this suite.
     _llm_calls.clear()
     out_empty = metadata.generate("S", "x")
 ok(out_empty["title"] == "LLM Title",
-   "MPT empty-dict is falsy → litellm fallback (not _from_meta of {})")
+   "MPT empty-dict is falsy → LLM fallback (not _from_meta of {})")
 
 
 # --------------------------------- finalize_description residual edges
@@ -359,7 +349,7 @@ ok(metadata._SUB_CONFIRM_MARKER == "sub_confirmation=1",
 print("module wiring: public surface")
 ok(callable(metadata.generate) and callable(metadata.finalize_description),
    "generate + finalize_description are the public entry points")
-ok(callable(metadata._from_meta) and callable(metadata._litellm_fallback),
+ok(callable(metadata._from_meta) and callable(metadata._llm_fallback),
    "helpers are importable (suites + backfill reach them)")
 
 

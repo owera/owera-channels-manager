@@ -25,13 +25,15 @@ from app.services import quota
 
 # Same signatures render_loop treats as transient (retryable) render failures. Kept here
 # as the single source the agent reasons over; mirror render_loop._TRANSIENT if changed
-# (pinned by verify_render). 2026-08-15: litellm 600s / Anthropic disconnect. Do not
+# (pinned by verify_render). 2026-08-15: litellm 600s / Anthropic disconnect. 2026-08-31:
+# grok -p subprocess timeout (distinct from npx TimeoutExpired). Do not
 # add a bare "timed out" — that would retry CLI TimeoutExpired (30 min npx).
 TRANSIENT_SIGNATURES = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
     "litellm.Timeout", "Connection timed out",
     "InternalServerError", "Server disconnected",
+    "grok.Timeout",
 )
 
 # Tunable thresholds (could move to the Settings table later).

@@ -33,6 +33,7 @@ _TRANSIENT = (
     "overloaded", "529", "503",
     "litellm.Timeout", "Connection timed out",
     "InternalServerError", "Server disconnected",
+    "grok.Timeout",
 )
 
 
@@ -155,8 +156,14 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         from app.services import video_gen
         topic = session.get(Topic, video.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
-        meta = metadata.generate(video.subject, video.script or "", fmt,
-                                 language=video_gen.channel_language(session, video.channel_id))
+        try:
+            meta = metadata.generate(video.subject, video.script or "", fmt,
+                                     language=video_gen.channel_language(session, video.channel_id))
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            _retry_or_fail(session, video, err,
+                           transient=any(sig in err for sig in _TRANSIENT))
+            return
         video.title = video.title or meta["title"]
         video.description = video.description or meta["description"]
         video.tags_json = video.tags_json or json.dumps(meta["tags"])
