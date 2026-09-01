@@ -1197,4 +1197,22 @@ flag the operator step in the commit body.
 - **caution:** normal (dashboard payload + SPA; not a money-path file).
 - **acceptance:** budget=0 and budget=-1 with approved work chip
   `budget 0` / hold=`budget`; paused wins over budget=0; a sibling
-  budget=1 still gets an ETA and no hold.
+  budget=1 still gets an ETA and no hold. Discovered follow-up
+  shipped as #29 (board oauth copy).
+
+### 29. ✅ DONE (code shipped to main 2026-09-01) board approved copy honors oauth-dead — normal
+- **resolution (2026-09-01):** Board `oauthHold` is
+  `channel.oauth_status !== "connected"` (same gate as
+  `_publish_hold`). Banner + approved-card copy (`held — reconnect`)
+  win over publish-plan's ETA, which still schedules oauth-dead
+  channels. Paused and budget=0 still win. Suite:
+  `tests/verify_publish.py` 226 → 232 (plan-still-ETAs pin + Board.tsx
+  source pins). Isolated commit; `publish_loop.py` untouched.
+- **why (found reviewing #28):** dashboard chips `reconnect` via
+  `publish_hold=oauth`, but Board never consulted `oauth_status`, so
+  an EXPIRED channel with approved work still said "publishes in …"
+  or "queued to publish".
+- **caution:** normal (SPA only; not a money-path file).
+- **acceptance:** Board.tsx consults `oauth_status !== "connected"`;
+  approved-card copy names reconnect; publish-plan may still ETA an
+  expired channel (board must not show that time).

@@ -22,6 +22,8 @@ regress:
     and the dashboard next_publish_eta is None (the max(1,) clamp lied)
   - dashboard publish_hold: budget<=0 with approved work is labeled "budget"
     (the UI used to chip only paused, so budget-0 showed neither ETA nor why)
+  - board oauth hold: approved copy must not trust publish-plan's ETA on an
+    oauth-dead channel (plan does not check oauth; Board.tsx must)
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -1531,5 +1533,32 @@ ok(by_id[oauth_dead.id]["publish_hold"] == "oauth",
    "dashboard payload: expired + approved carries publish_hold=oauth")
 ok("publish_hold" in by_id[live.id],
    "dashboard payload always includes publish_hold (frontend must not re-derive)")
+
+# Defect (found reviewing #28): dashboard chips reconnect via publish_hold=oauth
+# but Board never consults oauth_status. publish_plan also does not check
+# oauth, so an EXPIRED channel with approved work still gets an ETA and the
+# card says "publishes in …" / "queued to publish". Same class as budget=0.
+print("board oauth hold: approved copy must not trust publish-plan ETA")
+s = fresh_session()
+cfg = app_settings(s)
+ch_ox = make_channel(s, slug="board-oauth", daily_publish_budget=5,
+                     oauth_status=OAuthStatus.EXPIRED)
+v_ox = make_video(s, ch_ox, subject="approved expired",
+                  status=VideoStatus.APPROVED, video_path="/tmp/e.mp4",
+                  title="E", approved_at=utcnow())
+plan_ox = publish_plan(ch_ox.id, s)
+ok(bool(plan_ox.get(str(v_ox.id))),
+   "publish-plan still ETAs an expired channel (board must not show that ETA)")
+ok(_next_publish_eta(s, ch_ox, cfg) is None,
+   "dashboard ETA is None for expired (the honest signal)")
+ok(_publish_hold(ch_ox, 1) == "oauth",
+   "hold=oauth is the reason board should show, not the plan ETA")
+board_src = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Board.tsx").read_text()
+ok("oauth_status" in board_src,
+   "Board.tsx consults oauth_status (pre-fix only paused/budgetZero)")
+ok('!== "connected"' in board_src,
+   "board oauthHold is != connected (same gate as _publish_hold)")
+ok("held — reconnect" in board_src,
+   "approved-card copy names reconnect (not queued-to-publish / plan ETA)")
 
 print(f"\nALL {_checks} CHECKS PASSED")
