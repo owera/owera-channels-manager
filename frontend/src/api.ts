@@ -134,6 +134,7 @@ export interface DashboardRow {
   quota_spent_today: number;
   quota_cap: number;
   next_publish_eta: string | null;
+  publish_hold: "paused" | "budget" | "oauth" | null;
   active: DashboardActive[];
 }
 

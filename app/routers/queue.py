@@ -19,6 +19,26 @@ _STATUSES = [VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING, Video
              VideoStatus.PUBLISHED, VideoStatus.FAILED, VideoStatus.REJECTED]
 
 
+def _publish_hold(ch: Channel, approved: int) -> str | None:
+    """Why next_publish_eta is missing when approved work exists.
+
+    None means either there's nothing approved (no hold to explain) or an
+    ETA will be produced (window/drip/cooldown still yield a time). Matches
+    the early returns in `_next_publish_eta` so the dashboard/growth agent
+    don't have to re-derive "paused vs budget 0 vs oauth" from a bare null.
+    """
+    if not approved:
+        return None
+    if ch.paused:
+        return "paused"
+    if ch.oauth_status != OAuthStatus.CONNECTED:
+        return "oauth"
+    daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
+    if daily_limit <= 0:
+        return "budget"
+    return None
+
+
 def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
     """ISO time the next approved video should publish (rank-1 estimate)."""
     n = session.exec(select(func.count(Video.id)).where(
@@ -68,6 +88,7 @@ def dashboard(session: Session = Depends(get_session)):
             "quota_spent_today": quota.quota_spent_today(session, ch.id),
             "quota_cap": settings.youtube_daily_quota_cap,
             "next_publish_eta": _next_publish_eta(session, ch, cfg),
+            "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0)),
             "active": [{"id": v.id, "subject": v.subject, "status": v.status,
                         "render_progress": v.render_progress} for v in active],
         })

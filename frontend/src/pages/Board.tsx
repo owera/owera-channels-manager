@@ -19,7 +19,7 @@ function relTime(iso: string): string {
   return `~${d}d ${h % 24}h`;
 }
 
-function VideoCard({ v, onOpen, eta, qinfo, format, paused }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; format?: "short" | "long"; paused?: boolean }) {
+function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; format?: "short" | "long"; paused?: boolean; budgetZero?: boolean }) {
   const m = useMut();
   const progressing = v.status === "rendering" || v.status === "publishing";
   return (
@@ -41,9 +41,9 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused }: { v: Video; onOpen
 
       {v.status === "approved" && (
         <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
-          style={{ color: paused ? "#f5a524" : STATUS_META.approved.hex }}>
+          style={{ color: (paused || budgetZero) ? "#f5a524" : STATUS_META.approved.hex }}>
           <span>◷</span>
-          {paused ? "publishes when unpaused" : eta ? `publishes in ${relTime(eta)}` : "queued to publish"}
+          {paused ? "publishes when unpaused" : budgetZero ? "held — publish budget 0" : eta ? `publishes in ${relTime(eta)}` : "queued to publish"}
         </div>
       )}
 
@@ -83,7 +83,7 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused }: { v: Video; onOpen
   );
 }
 
-function Column({ status, videos, onOpen, onProduceAll, onApproveAll, onDeleteAll, plan, queuePlan, formats, paused }: any) {
+function Column({ status, videos, onOpen, onProduceAll, onApproveAll, onDeleteAll, plan, queuePlan, formats, paused, budgetZero }: any) {
   const meta = STATUS_META[status as keyof typeof STATUS_META];
   const items = videos.filter((v: Video) => v.status === status);
   return (
@@ -107,7 +107,7 @@ function Column({ status, videos, onOpen, onProduceAll, onApproveAll, onDeleteAl
         </div>
       </div>
       <div className="flex-1 space-y-2.5 min-h-[60px] rounded-md p-1 overflow-y-auto">
-        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} format={formats?.[v.topic_id]} paused={paused} />)}
+        {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} format={formats?.[v.topic_id]} paused={paused} budgetZero={budgetZero} />)}
       </div>
     </div>
   );
@@ -223,6 +223,7 @@ export default function Board() {
   // Format lives on the topic; videos inherit it. Map topic_id -> format for the cards.
   const formats: Record<number, "short" | "long"> = {};
   (topics ?? []).forEach((t) => { formats[t.id] = t.content_format; });
+  const budgetZero = (channel?.daily_publish_budget ?? 1) <= 0;
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col">
@@ -251,6 +252,10 @@ export default function Board() {
         <div className="panel px-4 py-2 mb-4 font-mono text-xs text-amber">
           ⏸ channel paused — nothing renders or publishes. Unpause in <Link to="/channels" className="text-signal underline">Channels</Link>.
         </div>
+      ) : budgetZero ? (
+        <div className="panel px-4 py-2 mb-4 font-mono text-xs text-amber">
+          publish budget is 0 — approved videos will not drip. Raise it in <Link to="/channels" className="text-signal underline">Channels</Link>.
+        </div>
       ) : (
         <div className="panel px-4 py-2 mb-4 font-mono text-xs text-fog-300">
           ▶ active — produced videos render automatically; {channel?.default_skip_gate ? "auto-approved" : "held in Review for approval"} before publishing.
@@ -262,9 +267,9 @@ export default function Board() {
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">
-            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} />)}
+            {BOARD_COLUMNS.map((s) => <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} budgetZero={budgetZero} />)}
             {TERMINAL_COLUMNS.map((s) => shown.some((v) => v.status === s) ?
-              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} /> : null)}
+              <Column key={s} status={s} videos={shown} onOpen={setEditing} onProduceAll={produceAll} onApproveAll={approveAll} onDeleteAll={() => deleteAll(s)} plan={plan} queuePlan={queuePlan} formats={formats} paused={channel?.paused} budgetZero={budgetZero} /> : null)}
           </div>
         </div>
       )}

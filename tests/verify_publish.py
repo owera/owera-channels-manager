@@ -20,6 +20,8 @@ regress:
     long is out (same != "long" gate as render/issues), not == "short"
   - daily_publish_budget<=0: tick never publishes, so publish-plan is empty
     and the dashboard next_publish_eta is None (the max(1,) clamp lied)
+  - dashboard publish_hold: budget<=0 with approved work is labeled "budget"
+    (the UI used to chip only paused, so budget-0 showed neither ETA nor why)
 
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
@@ -1466,5 +1468,68 @@ ok(_next_publish_eta(s, live, cfg) is not None,
    "sibling budget=1 dashboard ETA is set")
 ok(str(v_parked.id) not in plan_live,
    "parked channel's video is absent from the sibling's plan")
+
+# Defect (found shipping #27, not bundled): dashboard chipped a missing ETA
+# only when Channel.paused. budget<=0 (and oauth-dead) also yield no ETA
+# with approved work sitting there, so the card showed 0/0 and silence.
+# _publish_hold is the reason the UI (and the growth agent) should read;
+# dashboard() must actually put it on the payload (a helper nobody calls
+# would leave the frontend guessing from paused again).
+print("dashboard publish_hold: budget<=0 with approved work is labeled")
+from app.routers.queue import _publish_hold, dashboard as dashboard_endpoint  # noqa: E402
+
+ok(_publish_hold(parked, 1) == "budget",
+   "budget=0 + approved → hold=budget (pre-fix UI only chipped paused)")
+ok(_publish_hold(neg, 1) == "budget",
+   "budget=-1 + approved → hold=budget (`== 0` would miss negatives)")
+ok(_publish_hold(live, 1) is None,
+   "sibling budget=1 + approved → no hold (ETA is the signal)")
+ok(_publish_hold(parked, 0) is None,
+   "budget=0 with nothing approved → no hold (nothing to explain)")
+
+paused_hold = make_channel(s, slug="paused-hold", daily_publish_budget=0, paused=True)
+ok(_publish_hold(paused_hold, 1) == "paused",
+   "paused wins over budget=0 (operator pause is the reason)")
+paused_live = make_channel(s, slug="paused-live", daily_publish_budget=5, paused=True)
+ok(_publish_hold(paused_live, 1) == "paused",
+   "paused + live budget → hold=paused (existing chip)")
+oauth_dead = make_channel(s, slug="oauth-hold", daily_publish_budget=5,
+                          oauth_status=OAuthStatus.EXPIRED)
+ok(_publish_hold(oauth_dead, 1) == "oauth",
+   "expired token + approved → hold=oauth (same missing-ETA hole)")
+ok(_publish_hold(oauth_dead, 0) is None,
+   "expired token with nothing approved → no hold")
+oauth_disc = make_channel(s, slug="oauth-disc", daily_publish_budget=5,
+                          oauth_status=OAuthStatus.DISCONNECTED)
+ok(_publish_hold(oauth_disc, 1) == "oauth",
+   "disconnected + approved → hold=oauth (not only EXPIRED)")
+make_video(s, paused_hold, subject="paused-budget approved",
+           status=VideoStatus.APPROVED, video_path="/tmp/pb.mp4",
+           title="PB", approved_at=utcnow())
+
+rows = dashboard_endpoint(s)
+by_id = {r["channel"].id: r for r in rows}
+ok(by_id[parked.id]["publish_hold"] == "budget",
+   "dashboard payload: budget=0 channel carries publish_hold=budget")
+ok(by_id[parked.id]["next_publish_eta"] is None,
+   "dashboard payload: budget=0 next_publish_eta stays None")
+ok(by_id[neg.id]["publish_hold"] == "budget",
+   "dashboard payload: budget=-1 carries publish_hold=budget")
+ok(by_id[live.id]["publish_hold"] is None
+   and by_id[live.id]["next_publish_eta"] is not None,
+   "dashboard payload: budget=1 sibling has no hold and still has an ETA")
+ok(by_id[paused_hold.id]["publish_hold"] == "paused",
+   "dashboard payload: paused+budget=0 carries paused (not budget)")
+ok(by_id[oauth_dead.id]["publish_hold"] is None,
+   "dashboard payload: expired with no approved work has no hold")
+make_video(s, oauth_dead, subject="oauth approved",
+           status=VideoStatus.APPROVED, video_path="/tmp/o.mp4",
+           title="O", approved_at=utcnow())
+rows = dashboard_endpoint(s)
+by_id = {r["channel"].id: r for r in rows}
+ok(by_id[oauth_dead.id]["publish_hold"] == "oauth",
+   "dashboard payload: expired + approved carries publish_hold=oauth")
+ok("publish_hold" in by_id[live.id],
+   "dashboard payload always includes publish_hold (frontend must not re-derive)")
 
 print(f"\nALL {_checks} CHECKS PASSED")

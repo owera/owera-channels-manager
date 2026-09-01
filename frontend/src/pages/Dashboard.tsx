@@ -20,6 +20,11 @@ const FUNNEL_LABEL: Record<string, string> = {
   draft: "ideas", queued: "queued", rendering: "rendering",
   review: "review", approved: "approved", published: "live",
 };
+const HOLD_LABEL: Record<string, string> = {
+  paused: "paused",
+  budget: "budget 0",
+  oauth: "reconnect",
+};
 
 function Kpi({ value, label, accent }: { value: React.ReactNode; label: string; accent?: string }) {
   return (
@@ -98,7 +103,9 @@ function ChannelCard({ row, i }: { row: DashboardRow; i: number }) {
           <span>published today</span>
           <span className="text-fog-200">{row.published_today}/{c.daily_publish_budget}
             {row.next_publish_eta && <span className="text-fog-400"> · next {relTime(row.next_publish_eta)}</span>}
-            {!row.next_publish_eta && (counts.approved || 0) > 0 && c.paused && <span className="text-amber"> · paused</span>}
+            {!row.next_publish_eta && row.publish_hold && (
+              <span className="text-amber"> · {HOLD_LABEL[row.publish_hold] ?? row.publish_hold}</span>
+            )}
           </span>
         </div>
         <div className="h-1.5 bg-ink-500 rounded-full overflow-hidden">

@@ -1179,14 +1179,22 @@ flag the operator step in the commit body.
   early return the plan still drains one video per future quota day (not
   a hang). `tick()` was already correct (`published_today >= budget`).
   Suite: `tests/verify_publish.py` 200 → 209. Isolated commit;
-  `publish_loop.py` untouched. Discovered follow-up (not bundled): the
-  dashboard only labels a missing ETA as "paused"; budget=0 with approved
-  work shows neither a next time nor a paused chip.
-- **why (found 2026-08-31 ranking remaining coverage after #26):** both ETA
-  surfaces forced at least one slot per quota day. A channel with
-  `daily_publish_budget=0` (or negative) never publishes, but the board
-  and the growth agent's `/dashboard` still showed a next-publish time.
-- **caution:** normal (router ETA mirrors; not a money-path file). Isolated
-  commit + regression tests.
-- **acceptance:** budget=0 and budget=-1 produce an empty plan and a null
-  dashboard ETA; a sibling budget=1 still gets ETAs.
+  `publish_loop.py` untouched. Discovered follow-up shipped as #28.
+
+### 28. ✅ DONE (code shipped to main 2026-09-01) dashboard/board label budget=0 (not only paused) — normal
+- **resolution (2026-09-01):** `queue._publish_hold(ch, approved)` is the
+  reason a missing `next_publish_eta` has approved work sitting there:
+  `paused` / `oauth` / `budget` (same early-return order as
+  `_next_publish_eta`), else None. `GET /dashboard` carries `publish_hold`
+  so the card chips `budget 0` / `paused` / `reconnect` instead of
+  silence; the board banner + approved-card copy stop saying "queued to
+  publish" when `daily_publish_budget<=0`. Suite: `tests/verify_publish.py`
+  209 → 226. Isolated commit; `publish_loop.py` untouched.
+- **why (found 2026-08-31 shipping #27, not bundled):** the dashboard only
+  labeled a missing ETA as "paused"; budget=0 with approved work showed
+  neither a next time nor a chip. Board cards fell through to
+  "queued to publish".
+- **caution:** normal (dashboard payload + SPA; not a money-path file).
+- **acceptance:** budget=0 and budget=-1 with approved work chip
+  `budget 0` / hold=`budget`; paused wins over budget=0; a sibling
+  budget=1 still gets an ETA and no hold.
