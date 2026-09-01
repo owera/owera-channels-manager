@@ -59,7 +59,10 @@ class Settings(BaseSettings):
     # ~/.local/bin/grok → ~/.grok/bin/grok (1.0.5). launchd PATH already has
     # ~/.local/bin; OIDC via `grok login`. No Anthropic / LiteLLM / XAI_API_KEY.
     grok_bin: str = "grok"                    # env: MANAGER_GROK_BIN
-    grok_timeout_seconds: int = 300           # env: MANAGER_GROK_TIMEOUT_SECONDS
+    grok_timeout_seconds: int = 600           # env: MANAGER_GROK_TIMEOUT_SECONDS
+    # 300s was enough for shorts (~6k-char storyboard prompts) but overnight
+    # longs (09-01 v1213/v1223, ~10k-char prompts) hit grok.Timeout at 300s
+    # exactly and the worker swallowed it into kinetic-text fallback.
 
     # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
     hf_token: str = ""

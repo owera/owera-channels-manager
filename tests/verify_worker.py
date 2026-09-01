@@ -34,7 +34,8 @@ Covers, dependency-free (no network, no HyperFrames CLI, no live ffmpeg/TTS/LLM)
   - ``_probe_duration`` / ``_has_visible_frames`` (subprocess stubbed):
     parse/fail, dur<=0 does not block, uniform vs varied 32x32 gray
   - ``_render`` / ``_mux`` command contracts
-  - ``_generate_composition`` version switch + compose-exception → ""
+  - ``_generate_composition`` version switch + generic compose-exception → ""
+    (GrokCLIError re-raises so the render loop can retry)
   - ``run_job``: happy path, unknown-aspect fallback, invalid HTML →
     fallback, render-raise rebuild, blank-frame rebuild, any exception →
     STATE_FAILED
@@ -772,7 +773,23 @@ try:
     except Exception:
         raised = True
     ok((not raised) and got == "",
-       "compose() exception → '' (never raises into run_job)")
+       "compose() generic exception → '' (never raises into run_job)")
+
+    from app.services.llm import GrokCLIError
+    grok_raised = False
+    grok_got = "sentinel"
+    try:
+        with patch("app.services.engines.storyboard.compose",
+                   side_effect=GrokCLIError(
+                       "grok.Timeout: grok -p timed out after 300s. "
+                       "Refresh the Grok CLI OIDC session (`grok login`), then retry.")):
+            grok_got = worker._generate_composition(
+                "s", "x", [], "portrait", 1080, 1920, 8.0)
+    except GrokCLIError as e:
+        grok_raised = True
+        grok_err = str(e)
+    ok(grok_raised and grok_got == "sentinel" and "grok.Timeout" in grok_err,
+       "compose() GrokCLIError re-raises (08-31 v1213/v1223: do not swallow into fallback)")
 
     settings.composition_version = "legacy"
     with patch.object(worker, "_generate_composition_legacy",
@@ -1076,6 +1093,29 @@ try:
            "failed status carries type + message")
         ok(not (job_dir / "final.mp4").exists(),
            "failed job does not write final.mp4")
+
+    # GrokCLIError from compose (the 08-31 long timeout) must FAIL the job,
+    # not complete with kinetic-text fallback. render_loop already retries
+    # "grok.Timeout" as transient.
+    from app.services.llm import GrokCLIError as _GrokCLIError
+    with tempfile.TemporaryDirectory() as td:
+        settings.hyperframes_storage_dir = td
+        handle = "grokto"
+        job_dir = Path(td) / handle
+        job_dir.mkdir()
+        with patch.object(worker, "_generate_script", return_value="s"), \
+                patch.object(worker, "_tts", side_effect=_tts_write), \
+                patch.object(worker, "_probe_duration", return_value=12.0), \
+                patch("app.services.engines.storyboard.compose",
+                      side_effect=_GrokCLIError(
+                          "grok.Timeout: grok -p timed out after 300s")):
+            worker.run_job(handle, job_dir, "S", {})
+        st = json.loads((job_dir / "status.json").read_text())
+        ok(st["state"] == STATE_FAILED, "compose GrokCLIError → STATE_FAILED (not fallback complete)")
+        ok("grok.Timeout" in (st.get("error") or ""),
+           "failed status carries grok.Timeout so render_loop classifies it transient")
+        ok(not (job_dir / "final.mp4").exists(),
+           "timeout-failed job does not write final.mp4")
 finally:
     settings.hyperframes_storage_dir = _orig_storage
 

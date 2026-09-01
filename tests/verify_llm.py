@@ -51,7 +51,7 @@ def ok(cond, msg):
 print("config: grok CLI is the manager LLM")
 
 ok(settings.grok_bin == "grok", "default grok_bin is 'grok' (PATH lookup)")
-ok(settings.grok_timeout_seconds == 300, "default grok timeout is 300s")
+ok(settings.grok_timeout_seconds == 600, "default grok timeout is 600s (long storyboards)")
 ok(not hasattr(settings, "litellm_model"),
    "litellm_model setting is gone (no anthropic/claude default)")
 ok(not hasattr(settings, "anthropic_api_key"),

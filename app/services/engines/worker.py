@@ -572,8 +572,10 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
                           language: str | None = None) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
-    the old clip-array path below as a kill switch. Returns "" on failure so run_job
-    falls back to the deterministic _fallback_composition."""
+    the old clip-array path below as a kill switch. Returns "" on generic failure so
+    run_job falls back to the deterministic _fallback_composition. Re-raises
+    ``GrokCLIError`` (timeout/nonzero) so the render loop can retry instead of
+    shipping kinetic-text fallback."""
     if settings.composition_version == "legacy":
         return _generate_composition_legacy(subject, script, resolution, width, height, duration)
     try:
@@ -586,6 +588,14 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
         )
         return html or ""
     except Exception as e:
+        # grok -p timeout/nonzero is already in render_loop._TRANSIENT
+        # ("grok.Timeout"). Swallowing it here completed the job with a
+        # kinetic-text fallback — 08-31 v1213/v1223 longs shipped 277s of
+        # title cards (log: "grok.Timeout: grok -p timed out after 300s").
+        # Re-raise so run_job → STATE_FAILED and the loop re-queues.
+        from app.services.llm import GrokCLIError
+        if isinstance(e, GrokCLIError):
+            raise
         logger.warning("storyboard compose failed for %r: %s", subject, e)
         return ""
 
