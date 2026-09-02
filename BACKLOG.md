@@ -1216,3 +1216,34 @@ flag the operator step in the commit body.
 - **acceptance:** Board.tsx consults `oauth_status !== "connected"`;
   approved-card copy names reconnect; publish-plan may still ETA an
   expired channel (board must not show that time).
+
+### 30. ✅ DONE (code shipped to main 2026-09-02) Review player Range parser 500'd / mis-sliced — normal
+- **resolution (2026-09-02):** `GET /api/videos/{id}/video` now returns
+  Starlette `FileResponse` (RFC 7233: 206 / 416 / 400) instead of a
+  hand-rolled `StreamingResponse` that `int()`'d the Range header.
+  Malformed `bytes=abc` is 400 not 500; suffix `bytes=-N` is the last
+  N bytes not a prefix from 0; unsatisfiable is 416 with `bytes */size`.
+  404s and auth unchanged. Suite: `tests/verify_media.py` (37 checks).
+  Isolated commit; no money-path files. Discovered follow-up (not
+  bundled): `POST /api/music/generate` ignores `GenerateBody.style`.
+- **why (found 2026-09-02 ranking remaining untested routers after
+  services coverage):** the Review/Board `<video>` tags always send
+  Range for seeking. `start = int(start_str) if start_str else 0`
+  500'd the player on a malformed header and treated an empty start
+  as byte 0, so `bytes=-16` returned the first 17 bytes.
+- **caution:** normal (`media.py` only; not a money-path file).
+- **acceptance:** `bytes=-16` is the last 16 bytes; `bytes=abc` is
+  400 not 500; `bytes=9999-` is 416; valid `bytes=0-15` still 206;
+  missing file still 404; unauth still 401.
+
+### 31. `POST /api/music/generate` ignores `GenerateBody.style` — normal
+- **why (found 2026-09-02 shipping #30, not bundled):** the body
+  documents `style` as "optional style description to filter presets"
+  but `generate_music` always `random.choice(TECHNO_STYLES)` and
+  never reads `body.style`. A dashboard pick is silently discarded.
+- **approach:** if `body.style` is set, pick a matching preset (or
+  400 if none match); unset stays random. Pin in a music-router
+  suite with `generate_and_save` stubbed.
+- **caution:** normal (router only; `music_gen.py` already covered).
+- **acceptance:** a known style desc is the one generated; unknown
+  style is 400 and writes nothing; omitted style still random.
