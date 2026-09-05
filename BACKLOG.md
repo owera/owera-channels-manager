@@ -1255,24 +1255,21 @@ flag the operator step in the commit body.
 - **acceptance:** a known style desc is the one generated; unknown
   style is 400 and writes nothing; omitted style still random.
 
-### 32. `music_gen.generate_and_save` ignores `prompt` and re-rolls style — normal
+### 32. ✅ DONE (code shipped to main 2026-09-05) `generate_and_save` honors a matching `prompt` — normal
+- **resolution (2026-09-05):** `_preset_for_prompt` is the choke point:
+  case-insensitive exact match on `desc` returns that TECHNO_STYLES
+  entry; unknown/blank stays `random.choice` (replenish and the
+  existing "ignored-prompt" path must not 400). `generate_and_save`
+  uses it instead of a second roll, so the router's reported style
+  and replenish's JobRun detail now match the WAV. Substring filter
+  stays in the router. Suite: `tests/verify_music_gen.py` 526 → 538.
+  Isolated commit; `music.py` untouched.
 - **why (found 2026-09-05 shipping #31, not bundled):** the router now
   picks a matching preset and passes `style["desc"]` as `prompt`, but
-  `generate_and_save` does `style = random.choice(TECHNO_STYLES)` and
-  never reads `prompt` (already pinned in `verify_music_gen.py`:
-  "prompt is ignored for style pick"). The API response reports the
-  requested style while the WAV is a different random preset — the
-  same mismatch the random path already had, now misleading when the
-  caller asked for a specific style.
-- **approach:** if `prompt` matches a preset desc, use that preset;
-  otherwise keep today's random (or 400 — but this helper is also
-  used by replenish, which passes a desc it just picked and currently
-  relies on the second roll). Pin in `verify_music_gen.py`.
+  `generate_and_save` did `style = random.choice(TECHNO_STYLES)` and
+  never read `prompt`. The API response reported the requested style
+  while the WAV was a different random preset.
 - **caution:** normal (`music_gen.py` only; not a money-path file).
-  Isolated commit — do not bundle with a router change. Replenish
-  currently double-rolls; decide whether that stays or becomes
-  "use the desc I just picked".
 - **acceptance:** `generate_and_save("EBM Bb minor 136", dir)`
-  synthesises that preset (seed-reproducible vs `generate_techno`
-  with the same style); a prompt that matches nothing keeps today's
-  random (or is specified); replenish still writes N files.
+  synthesises that preset; a prompt that matches nothing keeps today's
+  random; replenish still writes N files.

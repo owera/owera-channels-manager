@@ -28,7 +28,8 @@ and replenish gate had zero direct tests. Covers:
   - list_tracks: missing dir → []; all three audio extensions; non-audio
     ignored; sorted by name; size_kb / created present
   - _write_wav + generate_and_save: real mono 16-bit 44100 WAV named
-    techno_<ms>.wav lands under bgm_dir; prompt is ignored for style pick
+    techno_<ms>.wav lands under bgm_dir; a matching prompt selects that
+    preset (unknown prompt still random)
   - replenish: at-or-above target returns 0 and writes nothing; below target
     generates exactly the deficit; a raising generate_and_save still logs an
     error JobRun and continues the loop (partial success)
@@ -405,6 +406,66 @@ with tempfile.TemporaryDirectory() as td:
     with wave.open(str(out), "r") as wf:
         ok(wf.getnchannels() == 1 and wf.getframerate() == SR,
            "generate_and_save WAV is mono @ SR")
+
+    # Backlog #32: prompt used to be ignored (second random.choice). A
+    # known unique desc must be the style passed to generate_techno;
+    # a prompt that is only a substring, or matches nothing, stays random.
+    KNOWN_DESC = "EBM Bb minor 136"
+    KNOWN = next(s for s in TECHNO_STYLES if s["desc"] == KNOWN_DESC)
+    ok(sum(1 for s in TECHNO_STYLES if s["desc"] == KNOWN_DESC) == 1,
+       "EBM fixture desc is unique")
+    ok(not any(s["desc"].lower() == "ebm" for s in TECHNO_STYLES),
+       "'EBM' itself is not a preset desc (exact-match would random)")
+    ok(sum(1 for s in TECHNO_STYLES if "ebm" in s["desc"].lower()) == 1,
+       "'EBM' substring hits exactly one preset (a second hit would let "
+       "needle-in-desc survive the not-KNOWN pin)")
+    seen: list = []
+    _orig_gt = music_gen.generate_techno
+
+    def _record_gt(duration_s=30, style=None, seed=None):
+        seen.append(style)
+        return _orig_gt(duration_s=duration_s, style=style, seed=seed)
+
+    music_gen.generate_techno = _record_gt
+    try:
+        n_before = len(seen)
+        for _ in range(4):
+            generate_and_save(KNOWN_DESC, nested, duration_s=1)
+        got = seen[n_before:]
+        ok(len(got) == 4, "known desc called generate_techno once per save")
+        ok(all(s is KNOWN for s in got),
+           "known desc prompt selects that TECHNO_STYLES entry "
+           "(pre-fix re-roll would drift across 4 draws)")
+
+        generate_and_save(f"  {KNOWN_DESC.upper()}  ", nested, duration_s=1)
+        ok(seen[-1] is KNOWN,
+           "case/whitespace-padded desc still resolves to the same preset")
+
+        n_before = len(seen)
+        for _ in range(12):
+            generate_and_save("EBM", nested, duration_s=1)
+        sub = seen[n_before:]
+        ok(len(sub) == 12, "substring-only prompt still synthesises")
+        ok(any(s is not KNOWN for s in sub),
+           "substring 'EBM' is not treated as the EBM preset "
+           "(exact-match only; filter lives in the router)")
+
+        n_before = len(seen)
+        generate_and_save("ignored-prompt", nested, duration_s=1)
+        ok(len(seen) == n_before + 1,
+           "unknown prompt still generates (does not 400 / skip)")
+        ok(seen[-1] in TECHNO_STYLES,
+           "unknown prompt still picks a real TECHNO_STYLES preset")
+
+        n_before = len(seen)
+        generate_and_save("", nested, duration_s=1)
+        generate_and_save("   ", nested, duration_s=1)
+        ok(len(seen) == n_before + 2,
+           "blank/whitespace prompt still generates (same random path as unknown)")
+        ok(all(s in TECHNO_STYLES for s in seen[n_before:]),
+           "blank/whitespace prompt still picks a real TECHNO_STYLES preset")
+    finally:
+        music_gen.generate_techno = _orig_gt
 
 
 # --------------------------------------------------------------------------- replenish

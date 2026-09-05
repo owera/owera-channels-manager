@@ -654,9 +654,19 @@ def _write_wav(samples: np.ndarray, path: Path) -> None:
         wf.writeframes(pcm.tobytes())
 
 
+def _preset_for_prompt(prompt: str | None) -> dict:
+    """Exact desc match (case-insensitive); unknown/blank stays random."""
+    if prompt and prompt.strip():
+        needle = prompt.strip().lower()
+        for style in TECHNO_STYLES:
+            if style["desc"].lower() == needle:
+                return style
+    return random.choice(TECHNO_STYLES)
+
+
 def generate_and_save(prompt: str, bgm_dir: Path, duration_s: int = 30) -> Path:
     bgm_dir.mkdir(parents=True, exist_ok=True)
-    style = random.choice(TECHNO_STYLES)
+    style = _preset_for_prompt(prompt)
     samples = generate_techno(duration_s=duration_s, style=style)
     slug = str(int(time.time() * 1000))
     out = bgm_dir / f"techno_{slug}.wav"
