@@ -1236,14 +1236,43 @@ flag the operator step in the commit body.
   400 not 500; `bytes=9999-` is 416; valid `bytes=0-15` still 206;
   missing file still 404; unauth still 401.
 
-### 31. `POST /api/music/generate` ignores `GenerateBody.style` — normal
+### 31. ✅ DONE (code shipped to main 2026-09-05) `POST /api/music/generate` honors `GenerateBody.style` — normal
+- **resolution (2026-09-05):** `_style_pool` is the choke point: unset /
+  blank → all presets (today's random); else case-insensitive substring
+  filter on `desc` (so a unique desc is identity, `"dorian"` still
+  matches the dorian presets, and `"  EBM BB MINOR 136  "` lands on
+  that preset). Zero matches → 400 before any `generate_and_save`.
+  Suite: `tests/verify_music.py` (38 checks) with `generate_and_save`
+  stubbed. Isolated commit; no money-path files. Discovered follow-up
+  (not bundled): `music_gen.generate_and_save` still ignores its
+  `prompt` and re-rolls `random.choice(TECHNO_STYLES)`, so the WAV
+  bytes can disagree with the style the router just reported.
 - **why (found 2026-09-02 shipping #30, not bundled):** the body
   documents `style` as "optional style description to filter presets"
   but `generate_music` always `random.choice(TECHNO_STYLES)` and
   never reads `body.style`. A dashboard pick is silently discarded.
-- **approach:** if `body.style` is set, pick a matching preset (or
-  400 if none match); unset stays random. Pin in a music-router
-  suite with `generate_and_save` stubbed.
 - **caution:** normal (router only; `music_gen.py` already covered).
 - **acceptance:** a known style desc is the one generated; unknown
   style is 400 and writes nothing; omitted style still random.
+
+### 32. `music_gen.generate_and_save` ignores `prompt` and re-rolls style — normal
+- **why (found 2026-09-05 shipping #31, not bundled):** the router now
+  picks a matching preset and passes `style["desc"]` as `prompt`, but
+  `generate_and_save` does `style = random.choice(TECHNO_STYLES)` and
+  never reads `prompt` (already pinned in `verify_music_gen.py`:
+  "prompt is ignored for style pick"). The API response reports the
+  requested style while the WAV is a different random preset — the
+  same mismatch the random path already had, now misleading when the
+  caller asked for a specific style.
+- **approach:** if `prompt` matches a preset desc, use that preset;
+  otherwise keep today's random (or 400 — but this helper is also
+  used by replenish, which passes a desc it just picked and currently
+  relies on the second roll). Pin in `verify_music_gen.py`.
+- **caution:** normal (`music_gen.py` only; not a money-path file).
+  Isolated commit — do not bundle with a router change. Replenish
+  currently double-rolls; decide whether that stays or becomes
+  "use the desc I just picked".
+- **acceptance:** `generate_and_save("EBM Bb minor 136", dir)`
+  synthesises that preset (seed-reproducible vs `generate_techno`
+  with the same style); a prompt that matches nothing keeps today's
+  random (or is specified); replenish still writes N files.

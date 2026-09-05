@@ -17,6 +17,17 @@ class GenerateBody(BaseModel):
     style: str | None = None  # optional style description to filter presets
 
 
+def _style_pool(requested: str | None) -> list[dict]:
+    """Presets to draw from. Unset/blank = all; else case-insensitive desc filter."""
+    if requested is None or not requested.strip():
+        return music_gen.TECHNO_STYLES
+    needle = requested.strip().lower()
+    matched = [s for s in music_gen.TECHNO_STYLES if needle in s["desc"].lower()]
+    if not matched:
+        raise HTTPException(400, f"unknown style {requested!r}")
+    return matched
+
+
 @router.get("")
 def list_music():
     """List audio files in bgm_dir with name, size, and creation time."""
@@ -34,11 +45,12 @@ def generate_music(body: GenerateBody):
     """
     count = min(max(1, body.count), 20)
     bgm_dir = Path(settings.bgm_dir)
+    pool = _style_pool(body.style)
 
     files = []
     errors = []
     for _ in range(count):
-        style = random.choice(music_gen.TECHNO_STYLES)
+        style = random.choice(pool)
         try:
             out = music_gen.generate_and_save(style["desc"], bgm_dir)
             stat = out.stat()
