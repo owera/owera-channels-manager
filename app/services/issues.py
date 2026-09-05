@@ -29,6 +29,7 @@ from app.services import quota
 # grok -p subprocess timeout (distinct from npx TimeoutExpired). Do not
 # add a bare "timed out" — that would retry CLI TimeoutExpired (30 min npx).
 # 2026-08-31: edge-tts NoAudioReceived (v1213) — no artifact, retryable.
+# 2026-09-03: BlockingIOError Errno 35 on 14 concurrent midnight renders.
 TRANSIENT_SIGNATURES = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
@@ -36,6 +37,7 @@ TRANSIENT_SIGNATURES = (
     "InternalServerError", "Server disconnected",
     "grok.Timeout",
     "NoAudioReceived",
+    "BlockingIOError",
 )
 
 # Tunable thresholds (could move to the Settings table later).

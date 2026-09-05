@@ -117,6 +117,10 @@ ok(issues._is_transient(
        "NoAudioReceived: No audio was received. Please verify that your parameters are correct.")
    is True,
    "_is_transient matches NoAudioReceived (edge-tts empty stream, 08-31 v1213)")
+ok(issues._is_transient(
+       "BlockingIOError: [Errno 35] Resource temporarily unavailable")
+   is True,
+   "_is_transient matches BlockingIOError (09-03 midnight EAGAIN storm)")
 ok(issues._is_transient("boom 503 upstream") is True, "_is_transient matches a bare 503")
 ok(issues._is_transient("ValueError: bad script") is False,
    "_is_transient is False for a non-transient error")

@@ -992,6 +992,8 @@ for _sig, _label in (
     ("grok.Timeout", "grok.Timeout alone"),
     ("NoAudioReceived: No audio was received. Please verify that your parameters are correct.",
      "NoAudioReceived (edge-tts empty stream, 08-31 v1213)"),
+    ("BlockingIOError: [Errno 35] Resource temporarily unavailable",
+     "BlockingIOError (09-03 midnight EAGAIN storm)"),
 ):
     s = fresh_session()
     use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": _sig}))
