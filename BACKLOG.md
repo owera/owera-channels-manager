@@ -1273,3 +1273,21 @@ flag the operator step in the commit body.
 - **acceptance:** `generate_and_save("EBM Bb minor 136", dir)`
   synthesises that preset; a prompt that matches nothing keeps today's
   random; replenish still writes N files.
+
+### 33. ✅ DONE (code shipped to main 2026-09-06) PATCH /api/settings rejects 0/null concurrency — normal
+- **resolution (2026-09-06):** `_require_int` is the choke point on
+  `PATCH /api/settings`: JSON null / bool / below-floor ints 400 before
+  any setattr. `render_concurrency` must be `>= 1` (0/null stalled every
+  render: `in_flight >= cfg.render_concurrency` is always true when
+  concurrency is 0, and `>= None` TypeErrors the tick). Drip and autogen
+  ints must be `>= 0` (0 drip = no spacing, still legal). A 400 mixed
+  body writes none of the fields. Suite: `tests/verify_settings.py`
+  (66 checks). Isolated commit; no money-path files. Discovered
+  follow-up (not bundled): Settings.tsx empty-blur still sends
+  `Number("") === 0`, which is now a 400 instead of a stall.
+- **why (found 2026-09-06 ranking remaining untested routers after
+  #32):** the Settings number input has HTML `min={1}` but the API
+  (and the growth agent) did not, and empty-blur is `Number("") === 0`.
+- **caution:** normal (`settings.py` router only; not a money-path file).
+- **acceptance:** PATCH concurrency=0 / -1 / null is 400 and leaves the
+  row unchanged; a valid PATCH still persists; omitted fields stay put.
