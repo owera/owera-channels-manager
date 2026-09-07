@@ -1,5 +1,9 @@
 import { useMut, useSettings } from "../api";
+import { intFromBlur } from "../intFromBlur";
 import { Field, SectionLabel, Toggle } from "../ui";
+
+type IntKey = "render_concurrency" | "publish_drip_minutes"
+  | "topic_autogen_min_pending" | "topic_autogen_target";
 
 export default function Settings() {
   const { data: s } = useSettings();
@@ -7,6 +11,12 @@ export default function Settings() {
   if (!s) return <div className="p-4 md:p-8 font-mono text-fog-400">loading…</div>;
 
   const patch = (body: any) => m.updateSettings.mutate(body);
+
+  const commitInt = (key: IntKey, min: number) => (e: { target: HTMLInputElement }) => {
+    const n = intFromBlur(e.target.value, min);
+    if (n === null) { e.target.value = String(s[key]); return; }
+    patch({ [key]: n });
+  };
 
   return (
     <div className="p-4 md:p-8 max-w-[760px]">
@@ -24,11 +34,11 @@ export default function Settings() {
         <div className="grid grid-cols-2 gap-5">
           <Field label="render concurrency" hint="parallel renders driven into MPT">
             <input type="number" className="input" defaultValue={s.render_concurrency} min={1} max={4}
-              onBlur={(e) => patch({ render_concurrency: Number(e.target.value) })} />
+              onBlur={commitInt("render_concurrency", 1)} />
           </Field>
           <Field label="publish drip (minutes)" hint="min spacing between uploads per channel">
             <input type="number" className="input" defaultValue={s.publish_drip_minutes}
-              onBlur={(e) => patch({ publish_drip_minutes: Number(e.target.value) })} />
+              onBlur={commitInt("publish_drip_minutes", 0)} />
           </Field>
         </div>
       </div>
@@ -41,11 +51,11 @@ export default function Settings() {
         </div>
         <Field label="min pending threshold" hint="generate more when fewer than this many topics remain queued">
           <input type="number" className="input" defaultValue={s.topic_autogen_min_pending}
-            onBlur={(e) => patch({ topic_autogen_min_pending: Number(e.target.value) })} />
+            onBlur={commitInt("topic_autogen_min_pending", 0)} />
         </Field>
         <Field label="max ideas to keep (ceiling)" hint="stop refilling a topic once it has this many pending ideas">
           <input type="number" className="input" defaultValue={s.topic_autogen_target}
-            onBlur={(e) => patch({ topic_autogen_target: Number(e.target.value) })} />
+            onBlur={commitInt("topic_autogen_target", 0)} />
         </Field>
       </div>
     </div>

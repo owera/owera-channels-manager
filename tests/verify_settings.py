@@ -24,14 +24,23 @@ Pins:
   * negative / null drip is 400; 0 drip (no spacing) is allowed
   * null / negative autogen ints are 400; 0 is allowed (autofill already floors)
   * unauthenticated is still 401
+  * Settings.tsx empty/invalid blur does not ``Number()`` the raw input
+    (``Number("") === 0`` is now a 400); it restores the current value
+    and skips the PATCH. ``intFromBlur`` is the choke point.
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db,
-no network, lifespan/scheduler never started). Exits non-zero on the
+no network, lifespan/scheduler never started). The blur helper is driven
+with one node process against a type-stripped temp copy (null/NaN/inf
+are distinct; no --experimental-strip-types). Exits non-zero on the
 first failed assertion.
 """
 from __future__ import annotations
 
+import json
+import re
+import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -256,5 +265,120 @@ try:
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw
+
+
+# --- Settings.tsx empty-blur (BACKLOG #33 follow-up / #34) -----------------
+# After the API floor, empty-blur ``Number("") === 0`` became a 400 instead
+# of a stall. The SPA must not send 0/NaN; it restores and skips the PATCH.
+print("Settings.tsx empty-blur skips PATCH instead of Number('')===0")
+_root = Path(__file__).resolve().parents[1]
+settings_tsx = (_root / "frontend/src/pages/Settings.tsx").read_text()
+ok("Number(e.target.value)" not in settings_tsx,
+   "Settings.tsx does not Number() blur values (Number('')===0 is now a 400)")
+ok('from "../intFromBlur"' in settings_tsx,
+   "Settings.tsx imports intFromBlur (not an inlined copy)")
+ok("intFromBlur(e.target.value, min)" in settings_tsx,
+   "commitInt feeds the raw input + floor into intFromBlur")
+ok(re.search(r'commitInt\(\s*"render_concurrency"\s*,\s*1\s*\)', settings_tsx),
+   "render_concurrency blur uses min=1")
+ok(re.search(r'commitInt\(\s*"publish_drip_minutes"\s*,\s*0\s*\)', settings_tsx),
+   "publish_drip_minutes blur uses min=0 (0 drip is legal)")
+ok(re.search(r'commitInt\(\s*"topic_autogen_min_pending"\s*,\s*0\s*\)', settings_tsx),
+   "autogen min-pending blur uses min=0")
+ok(re.search(r'commitInt\(\s*"topic_autogen_target"\s*,\s*0\s*\)', settings_tsx),
+   "autogen target blur uses min=0")
+ok("if (n === null) { e.target.value = String(s[key]); return; }" in settings_tsx,
+   "null restores the current value AND returns (does not PATCH)")
+ok("patch({ [key]: n })" in settings_tsx,
+   "valid int still PATCHes the same key (not a no-op / not hardcoded concurrency)")
+ok("valueAsNumber" not in settings_tsx,
+   "Settings.tsx does not use valueAsNumber (empty is 0, same class as Number(''))")
+ok("+e.target.value" not in settings_tsx,
+   "Settings.tsx does not coerce with unary-plus")
+
+helper_path = _root / "frontend/src/intFromBlur.ts"
+ok(helper_path.is_file(), "intFromBlur.ts exists (single choke point)")
+helper_src = helper_path.read_text()
+ok("Number.isInteger" in helper_src,
+   "intFromBlur rejects non-integers (1.5 is not truncated to 1)")
+ok("n < min" in helper_src,
+   "intFromBlur rejects below-min (concurrency 0 dies here, not at the API)")
+ok('trimmed === ""' in helper_src,
+   "intFromBlur treats empty as null BEFORE Number('')===0")
+empty_at = helper_src.find('trimmed === ""')
+number_at = helper_src.find("Number(trimmed)")
+ok(0 <= empty_at < number_at,
+   "empty check precedes Number() so empty never becomes 0")
+
+# Strip the one typed signature into a temp .mjs so the suite does not
+# depend on node --experimental-strip-types (Node 18/20 fail that flag;
+# JSON.stringify(NaN) is also "null", which hid a return-NaN mutant).
+_TYPED = "export function intFromBlur(raw: string, min: number): number | null {"
+_JS = "export function intFromBlur(raw, min) {"
+ok(_TYPED in helper_src, "helper keeps a typed signature (stripped only for the node drive)")
+
+
+def drive_cases(cases):
+    """One node process; null / NaN / inf / number are distinct tags."""
+    js = helper_src.replace(_TYPED, _JS, 1)
+    payload = json.dumps([{"raw": raw, "min": mn} for raw, mn, _exp, _msg in cases])
+    with tempfile.TemporaryDirectory() as td:
+        mjs = Path(td) / "intFromBlur.mjs"
+        mjs.write_text(js)
+        script = (
+            f"import {{ intFromBlur }} from {json.dumps(mjs.resolve().as_uri())};\n"
+            f"const cases = {payload};\n"
+            "const out = [];\n"
+            "for (const c of cases) {\n"
+            "  const n = intFromBlur(c.raw, c.min);\n"
+            "  if (n === null) out.push(null);\n"
+            '  else if (typeof n !== "number") out.push({bad: typeof n});\n'
+            '  else if (Number.isNaN(n)) out.push("NaN");\n'
+            '  else if (!Number.isFinite(n)) out.push("inf");\n'
+            "  else out.push(n);\n"
+            "}\n"
+            "console.log(JSON.stringify(out));\n"
+        )
+        r = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True, text=True,
+        )
+    if r.returncode != 0:
+        print("FAIL: intFromBlur drive:", r.stderr.strip() or r.stdout.strip())
+        sys.exit(1)
+    line = r.stdout.strip().splitlines()[-1]
+    return json.loads(line)
+
+
+print("intFromBlur driven with node (null/NaN/inf distinct)")
+CASES = [
+    ("", 1, None, "empty string is null (not 0)"),
+    ("", 0, None, "empty with min=0 is null (not silently drip=0)"),
+    ("   ", 1, None, "whitespace-only is null (not 0)"),
+    ("   ", 0, None, "whitespace with min=0 is null (Number('  ')===0)"),
+    ("0", 1, None, "0 with min=1 is null (concurrency floor)"),
+    ("0", 0, 0, "0 with min=0 is 0 (drip/autogen legal)"),
+    ("1", 1, 1, "exact min is allowed"),
+    ("2", 1, 2, "valid int passes"),
+    (" 3 ", 1, 3, "whitespace-padded int passes"),
+    ("4", 1, 4, "concurrency=4 (HTML max) is allowed"),
+    ("1.5", 1, None, "non-integer is null (not truncated)"),
+    ("abc", 1, None, "NaN is null (not JSON null via Number)"),
+    ("-1", 0, None, "below min is null"),
+    ("-1", 1, None, "negative with min=1 is null"),
+    ("2.0", 1, 2, "2.0 is the integer 2 (Number('2.0')===2)"),
+    ("+2", 1, 2, "unary-plus integer passes"),
+    ("Infinity", 1, None, "Infinity is null (not a JSON-null collapse)"),
+]
+got = drive_cases(CASES)
+ok(len(got) == len(CASES), "node drive returned one result per case")
+for (raw, mn, exp, msg), g in zip(CASES, got):
+    if g == "NaN":
+        print("FAIL:", msg, "(helper returned NaN, which JSON.stringifies to null and 400s)")
+        sys.exit(1)
+    if g == "inf":
+        print("FAIL:", msg, "(helper returned Infinity)")
+        sys.exit(1)
+    ok(g == exp, msg)
 
 print(f"ALL {_checks} CHECKS PASSED")

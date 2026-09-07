@@ -1283,11 +1283,29 @@ flag the operator step in the commit body.
   ints must be `>= 0` (0 drip = no spacing, still legal). A 400 mixed
   body writes none of the fields. Suite: `tests/verify_settings.py`
   (66 checks). Isolated commit; no money-path files. Discovered
-  follow-up (not bundled): Settings.tsx empty-blur still sends
-  `Number("") === 0`, which is now a 400 instead of a stall.
+  follow-up shipped as #34: Settings.tsx empty-blur still sent
+  `Number("") === 0`, which became a 400 instead of a stall.
 - **why (found 2026-09-06 ranking remaining untested routers after
   #32):** the Settings number input has HTML `min={1}` but the API
   (and the growth agent) did not, and empty-blur is `Number("") === 0`.
 - **caution:** normal (`settings.py` router only; not a money-path file).
 - **acceptance:** PATCH concurrency=0 / -1 / null is 400 and leaves the
   row unchanged; a valid PATCH still persists; omitted fields stay put.
+
+### 34. ✅ DONE (code shipped to main 2026-09-07) Settings empty-blur restores instead of PATCHing 0 — normal
+- **resolution (2026-09-07):** `intFromBlur` is the choke point: empty /
+  whitespace / NaN / non-integer / below-min → `null` (checked **before**
+  `Number("") === 0`). `Settings.tsx` `commitInt` restores the current
+  displayed value and skips the PATCH; a valid int still PATCHes.
+  Concurrency floor is 1 (0 would 400 after #33); drip and autogen
+  floors are 0 (legal). Suite: `tests/verify_settings.py` 66 → 101,
+  helper driven with node against the real TypeScript module.
+- **why (found 2026-09-06 shipping #33, not bundled):** the Settings
+  number input's empty-blur was `Number("") === 0`. After the API floor
+  that 0 is a 400 instead of a stall — clearing concurrency and tabbing
+  out now fails the save. `Number("x")` is NaN → JSON null, also 400.
+- **caution:** normal (SPA only; not a money-path file). Isolated
+  commit + regression tests. `Channels.tsx` still `Number()`s budget
+  blurs (0 is legal there — not bundled).
+- **acceptance:** empty/invalid concurrency blur does not PATCH;
+  field restores to the current value; a typed `2` still PATCHes.
