@@ -27,6 +27,11 @@ Pins:
   * Settings.tsx empty/invalid blur does not ``Number()`` the raw input
     (``Number("") === 0`` is now a 400); it restores the current value
     and skips the PATCH. ``intFromBlur`` is the choke point.
+  * Channels.tsx budget blur is the same class, but 0 IS legal there
+    (``daily_publish_budget=0`` stalls the channel on purpose — #27/#28).
+    Empty-blur ``Number("") === 0`` would silently halt publish/render;
+    ``Number("x") === NaN`` → JSON ``null`` setattr TypeErrors the tick.
+    Restore + skip PATCH; typed 0 still PATCHes (min=0).
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db,
 no network, lifespan/scheduler never started). The blur helper is driven
@@ -380,5 +385,37 @@ for (raw, mn, exp, msg), g in zip(CASES, got):
         print("FAIL:", msg, "(helper returned Infinity)")
         sys.exit(1)
     ok(g == exp, msg)
+
+
+# --- Channels.tsx budget empty-blur (BACKLOG #34 follow-up / #35) ----------
+# Settings empty-blur became a 400 after the API floor. Channel budgets
+# accept 0 (tick skips when published_today >= budget), so the same
+# Number("")===0 blur silently stalls the money pipeline, and Number("x")
+# is JSON null which setattr's None and TypeErrors the comparison.
+# Same choke point, min=0 so a typed 0 still PATCHes.
+print("Channels.tsx budget empty-blur skips PATCH instead of Number('')===0")
+channels_tsx = (_root / "frontend/src/pages/Channels.tsx").read_text()
+ok("daily_render_budget: Number(e.target.value)" not in channels_tsx,
+   "render-budget blur does not Number() (Number('')===0 stalls renders)")
+ok("daily_publish_budget: Number(e.target.value)" not in channels_tsx,
+   "publish-budget blur does not Number() (Number('')===0 is budget=0)")
+ok('from "../intFromBlur"' in channels_tsx,
+   "Channels.tsx imports intFromBlur (not an inlined copy)")
+ok("intFromBlur(e.target.value, 0)" in channels_tsx,
+   "budget blur uses intFromBlur with min=0 (typed 0 is still legal)")
+ok("intFromBlur(e.target.value, 1)" not in channels_tsx,
+   "budget blur does not reuse the concurrency min=1 (0 must PATCH)")
+ok("if (n === null) { e.target.value = String(channel[key]); return; }" in channels_tsx,
+   "null restores the current budget AND returns (does not PATCH)")
+ok("updateChannel.mutate({ id: channel.id, body: { [key]: n } })" in channels_tsx,
+   "valid int still PATCHes the same key (not a no-op / not hardcoded render)")
+ok(re.search(r'commitBudget\(\s*"daily_render_budget"\s*\)', channels_tsx),
+   "daily_render_budget input uses commitBudget")
+ok(re.search(r'commitBudget\(\s*"daily_publish_budget"\s*\)', channels_tsx),
+   "daily_publish_budget input uses commitBudget")
+ok("valueAsNumber" not in channels_tsx,
+   "Channels.tsx does not use valueAsNumber (empty is 0, same class as Number(''))")
+ok("+e.target.value" not in channels_tsx,
+   "Channels.tsx does not coerce with unary-plus")
 
 print(f"ALL {_checks} CHECKS PASSED")

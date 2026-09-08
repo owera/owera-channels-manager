@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   useChannels, useMut, useProfiles, useTopics, type Channel, type Topic,
 } from "../api";
+import { intFromBlur } from "../intFromBlur";
 import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
 import ChannelYoutube from "./ChannelYoutube";
 
@@ -171,6 +172,13 @@ function ChannelDetail({ channel }: { channel: Channel }) {
     return () => { clearInterval(t); clearTimeout(stop); };
   }, [connecting, channel.oauth_status, channel.id]);
 
+  type BudgetKey = "daily_render_budget" | "daily_publish_budget";
+  const commitBudget = (key: BudgetKey) => (e: { target: HTMLInputElement }) => {
+    const n = intFromBlur(e.target.value, 0);
+    if (n === null) { e.target.value = String(channel[key]); return; }
+    m.updateChannel.mutate({ id: channel.id, body: { [key]: n } });
+  };
+
   return (
     <div className="panel p-6">
       <div className="flex items-start justify-between">
@@ -226,12 +234,12 @@ function ChannelDetail({ channel }: { channel: Channel }) {
         <div>
           <div className="label mb-1.5">daily render budget</div>
           <input type="number" className="input" defaultValue={channel.daily_render_budget}
-            onBlur={(e) => m.updateChannel.mutate({ id: channel.id, body: { daily_render_budget: Number(e.target.value) } })} />
+            onBlur={commitBudget("daily_render_budget")} />
         </div>
         <div>
           <div className="label mb-1.5">daily publish budget</div>
           <input type="number" className="input" defaultValue={channel.daily_publish_budget}
-            onBlur={(e) => m.updateChannel.mutate({ id: channel.id, body: { daily_publish_budget: Number(e.target.value) } })} />
+            onBlur={commitBudget("daily_publish_budget")} />
         </div>
       </div>
 

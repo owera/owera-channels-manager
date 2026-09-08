@@ -1305,7 +1305,31 @@ flag the operator step in the commit body.
   that 0 is a 400 instead of a stall — clearing concurrency and tabbing
   out now fails the save. `Number("x")` is NaN → JSON null, also 400.
 - **caution:** normal (SPA only; not a money-path file). Isolated
-  commit + regression tests. `Channels.tsx` still `Number()`s budget
-  blurs (0 is legal there — not bundled).
+  commit + regression tests. Discovered follow-up shipped as #35:
+  `Channels.tsx` still `Number()`d budget blurs (0 is legal there,
+  so empty-blur silently stalled the channel).
 - **acceptance:** empty/invalid concurrency blur does not PATCH;
   field restores to the current value; a typed `2` still PATCHes.
+
+### 35. ✅ DONE (code shipped to main 2026-09-08) Channels budget empty-blur restores instead of PATCHing 0 — normal
+- **resolution (2026-09-08):** `ChannelDetail.commitBudget` is the
+  choke point: empty / whitespace / NaN / non-integer / below-0 →
+  restore the current `channel[key]` and skip the PATCH. Typed `0`
+  still PATCHes (`intFromBlur(..., 0)` — 0 is a legal "don't
+  publish/render today"). Same helper as #34; `Number("") === 0`
+  would have written `daily_publish_budget=0` and stalled the
+  channel (the stall #27/#28 spent cycles labeling). `Number("x")`
+  is JSON `null`, which `setattr`s None and TypeErrors
+  `published_today >= budget` on the next tick.
+  Suite: `tests/verify_settings.py` 101 → 112 (Channels.tsx source
+  pins; helper drive already covered min=0). Isolated commit;
+  `Settings.tsx` / `intFromBlur.ts` / channel PATCH untouched.
+  Topic generate-count still `Number()`s (not a money-path stall).
+- **why (found 2026-09-07 shipping #34, not bundled):** Settings
+  empty-blur was a 400 after the API floor. Channel budgets accept
+  0, so the same blur silently halted publish/render.
+- **caution:** normal (SPA only; not a money-path file). Isolated
+  commit + regression tests.
+- **acceptance:** empty/invalid budget blur does not PATCH; field
+  restores to the current value; a typed `0` still PATCHes; a typed
+  `2` still PATCHes.
