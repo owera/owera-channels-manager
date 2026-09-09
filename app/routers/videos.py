@@ -337,6 +337,12 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
         for k in ("title", "description", "privacy"):
             if k in data:
                 setattr(v, k, data[k])
+    topic = session.get(Topic, v.topic_id)
+    fmt = "long" if topic and topic.content_format == "long" else "short"
+    from app.services import craft
+    blocked = craft.title_gate_reason(v.title, fmt)
+    if blocked:
+        raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"approved via API: {v.status} -> approved")
@@ -377,6 +383,12 @@ def retry(video_id: int, session: Session = Depends(get_session)):
     if not v:
         raise HTTPException(404, "video not found")
     if v.video_path:
+        topic = session.get(Topic, v.topic_id)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
+        from app.services import craft
+        blocked = craft.title_gate_reason(v.title, fmt)
+        if blocked:
+            raise HTTPException(409, blocked)
         quota.log(session, kind="retry", status="success", video_id=v.id,
                   channel_id=v.channel_id,
                   detail=f"retried via API: {v.status} -> approved (artifact kept, re-publish)")

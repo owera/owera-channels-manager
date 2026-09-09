@@ -177,7 +177,15 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.metadata_generated = True
 
     video.render_progress = 100
-    if _effective_skip_gate(video, channel):
+    from app.services import craft
+    topic = session.get(Topic, video.topic_id)
+    fmt = "long" if topic and topic.content_format == "long" else "short"
+    blocked = craft.title_gate_reason(video.title, fmt)
+    if blocked:
+        video.status = VideoStatus.REVIEW
+        video.error = blocked
+        video.approved_at = None
+    elif _effective_skip_gate(video, channel):
         video.status = VideoStatus.APPROVED
         video.approved_at = utcnow()
     else:
@@ -440,6 +448,8 @@ def _submit_new(session: Session) -> None:
         )
         params["content_format"] = fmt
         params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
+        from app.services.craft import brand_of
+        params["brand"] = brand_of(channel.slug, channel.name)
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:

@@ -335,6 +335,8 @@ ok("6-15 words" not in prompt,
 # Discriminating pin: short form has the "under 12 words" rule; long has 6-15.
 ok("under 12 words" in prompt,
    "short form pins the under-12-words title rule")
+ok("CRAFT (enforced)" in prompt and "No Follow/Siga" in prompt,
+   "short ideas prompt carries the craft addendum (Follow/Siga/waitlist ban)")
 ok("HARD RULE" not in prompt,
    "language=None → no HARD RULE clause (legacy behavior)")
 ok("Extra guidance" not in prompt,
@@ -437,6 +439,15 @@ ok("Another Numbered One" in out_messy,
    "leading '10. ' multi-digit numbering stripped")
 ok("" not in out_messy and all(t.strip() for t in out_messy),
    "blank / whitespace-only lines are dropped")
+
+# banned CTA titles are dropped in code, not only by the prompt
+_llm_calls.clear()
+out_ban = _run_ideas(
+    _text="Follow for more RAG fixes\nRerank hard then generate thin\nJoin the waitlist",
+    n=8,
+)
+ok(out_ban == ["Rerank hard then generate thin"],
+   "Follow/waitlist idea lines are dropped; builder line kept")
 
 
 # --- case-insensitive dedupe against existing ---

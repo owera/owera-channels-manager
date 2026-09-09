@@ -1172,21 +1172,26 @@ ok(v.status == VideoStatus.REVIEW and v.thumb_path is None,
    "thumbnail failure is best-effort — video still finishes, thumb_path unset")
 
 print("finalize: skip-gate resolution routes REVIEW vs APPROVED")
+OK_TITLE = "Your RAG reads junk · Copilot Credits 1"
 s = fresh_session()
 ch = make_channel(s, default_skip_gate=True)
 t = make_topic(s, ch, content_format="short")
-v = drive_complete(s, ch, t)                          # video.skip_gate None
+v = drive_complete(s, ch, t, title=OK_TITLE)          # video.skip_gate None
 ok(v.status == VideoStatus.APPROVED and v.approved_at is not None,
    "skip_gate None inherits channel default True -> APPROVED with approved_at")
-v = drive_complete(s, ch, t, skip_gate=False)
+v = drive_complete(s, ch, t, skip_gate=False, title=OK_TITLE)
 ok(v.status == VideoStatus.REVIEW,
    "video skip_gate False overrides channel True -> REVIEW")
 s = fresh_session()
 ch = make_channel(s)                                  # default_skip_gate False
 t = make_topic(s, ch, content_format="short")
-v = drive_complete(s, ch, t, skip_gate=True)
+v = drive_complete(s, ch, t, skip_gate=True, title=OK_TITLE)
 ok(v.status == VideoStatus.APPROVED,
    "video skip_gate True overrides channel False -> APPROVED")
+v_blocked = drive_complete(s, ch, t, skip_gate=True)  # MetaStub title=gen-title
+ok(v_blocked.status == VideoStatus.REVIEW
+   and "spoken series pattern" in (v_blocked.error or ""),
+   "skip_gate True + pré-pattern title stays REVIEW (park via reject, no auto-approve)")
 
 print("finalize: grok -p / OIDC failure at metadata fails clearly (no API fallback)")
 from app.services.llm import GrokCLIError  # noqa: E402

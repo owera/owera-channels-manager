@@ -47,6 +47,7 @@ Exits non-zero on the first failed assertion.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import subprocess
 import sys
@@ -169,8 +170,10 @@ p0 = _llm_calls[0]["prompt"]
 ok("Cache misses cost conversions" in p0, "subject is interpolated into the prompt")
 ok("In this video" in p0 and "Welcome" in p0 and "Today" in p0,
    "short prompt forbids the 07-07-class wind-up openers")
-ok("EXPLICIT" in p0 and "follow/subscribe" in p0 and "welded" in p0,
-   "short prompt mandates the spoken follow-ask (R7)")
+ok("builder/confiança" in p0 and "FORBIDDEN" in p0 and "Follow, Siga" in p0,
+   "short prompt is a builder close + Follow/Siga ban (not a spoken follow-ask)")
+ok("The FIRST sentence is the title hook" in p0,
+   "short prompt locks the first spoken sentence to the title hook")
 ok("HARD RULE" not in p0,
    "no voice_name → no HARD RULE (language pin is voice-driven, not _voice default)")
 ok(_llm_calls[0]["max_tokens"] == 600, "short script max_tokens=600")
@@ -184,8 +187,8 @@ with patch.object(worker, "_llm", side_effect=_in_band_short):
     )
 p1 = _llm_calls[0]["prompt"]
 ok("450-700" in p1 and "in-depth" in p1, "long prompt is the in-depth branch")
-ok("FINAL sentence" in p1 and "EXPLICIT" in p1,
-   "long wrap-up still requires the spoken follow-ask")
+ok("builder/confiança" in p1 and "FORBIDDEN" in p1,
+   "long wrap-up is a builder punch, not a spoken follow-ask")
 ok("HARD RULE" in p1 and "Brazilian Portuguese" in p1,
    "pt-BR voice pins HARD RULE Brazilian Portuguese (07-07 EN-on-PT)")
 ok(_llm_calls[0]["max_tokens"] == 1500, "long script max_tokens=1500")
@@ -420,7 +423,10 @@ ok(worker._voice({"voice_name": "en-US-AndrewNeural"}) == "en-US-AndrewNeural",
 ok(worker._voice({"voice_name": "en-US-AndrewNeural-male"}) == "en-US-AndrewNeural-male",
    "strip is case-sensitive (only -Male/-Female)")
 ok(worker._voice({"voice_name": "X-Male-Extra"}) == "X-Male-Extra",
-   "only a trailing -Male/-Female is stripped")
+   "non-terminal -Male is not stripped")
+_tts_src = inspect.getsource(worker._tts)
+ok('"-8%"' in _tts_src and '"-2Hz"' in _tts_src and 'startswith("pt")' in _tts_src,
+   "PT edge-tts eases rate/pitch (no paid TTS API)")
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +488,7 @@ ok((not cc_raised) and cc_err is not None
 # ---------------------------------------------------------------------------
 # _pick_bgm
 # ---------------------------------------------------------------------------
-print("_pick_bgm: off / missing / techno-preferred / named / hash")
+print("_pick_bgm: off / missing / full-pool rotate / named / hash")
 
 _orig_bgm = settings.bgm_dir
 try:
@@ -501,36 +507,36 @@ try:
         Path(td, "song.mp3").write_bytes(b"x")
         Path(td, "techno_aaa.wav").write_bytes(b"x")
         Path(td, "techno_bbb.wav").write_bytes(b"x")
-        techno = sorted(p for p in Path(td).glob("techno_*.wav"))
-        idx = int(hashlib.sha1(b"handle-one").hexdigest(), 16) % len(techno)
+        pool = sorted(p for p in Path(td).iterdir()
+                      if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
+        idx = int(hashlib.sha1(b"handle-one").hexdigest(), 16) % len(pool)
         picked = worker._pick_bgm({}, "handle-one")
-        ok(picked == techno[idx],
-           "prefers techno_*.wav and picks sha1(handle) % n (not tracks[0])")
+        ok(picked == pool[idx],
+           "rotates the full bed pool (not techno_* only); sha1(handle) % n")
         p2 = worker._pick_bgm({}, "handle-one")
         ok(p2 == picked, "same handle → same track (deterministic)")
-        # "alpha" hashes to a different index than "handle-one" when n=2
-        # (sha1 % 2 → 1 vs 0), so return tracks[0] cannot pass both.
-        idx2 = int(hashlib.sha1(b"alpha").hexdigest(), 16) % len(techno)
+        # "alpha" hashes to a different index than "handle-one" when n=4
+        idx2 = int(hashlib.sha1(b"alpha").hexdigest(), 16) % len(pool)
         p3 = worker._pick_bgm({}, "alpha")
-        ok(p3 == techno[idx2] and p3 != picked,
+        ok(p3 == pool[idx2] and p3 != picked,
            "different handle uses its own sha1 index (not tracks[0])")
         named = worker._pick_bgm({"bgm_type": "song.mp3"}, "handle-one")
         ok(named is not None and named.name == "song.mp3",
            "named bgm_type wins when the file exists")
         missing_named = worker._pick_bgm({"bgm_type": "nope.wav"}, "handle-one")
-        ok(missing_named is not None and missing_named.name.startswith("techno_"),
+        ok(missing_named == picked,
            "missing named file falls through to the hash pick")
         rand = worker._pick_bgm({"bgm_type": "random"}, "handle-one")
         ok(rand == picked, "bgm_type='random' uses the hash pick, not a name")
 
-    # No techno_*.wav: fall through to any mp3/m4a/wav (the `wav_tracks or all_tracks` else).
+    # No wav in dir: still pick any mp3/m4a/wav.
     with tempfile.TemporaryDirectory() as td:
         settings.bgm_dir = td
         Path(td, "bed.mp3").write_bytes(b"x")
         Path(td, "notes.txt").write_text("ignore")
         only = worker._pick_bgm({}, "handle-one")
         ok(only is not None and only.name == "bed.mp3",
-           "no techno_*.wav → fall back to other audio (mp3/m4a/wav)")
+           "mp3/m4a/wav pool is used (txt ignored)")
 finally:
     settings.bgm_dir = _orig_bgm
 
@@ -703,6 +709,8 @@ with tempfile.TemporaryDirectory() as td:
     flt = cmd[cmd.index("-filter_complex") + 1]
     ok("volume=0.15" in flt and "amix=inputs=2" in flt,
        "BGM volume + amix when a track is present")
+    ok("sidechaincompress" in flt and "[ducked]" in flt,
+       "BGM is ducked under voice via sidechaincompress")
     ok("atrim=0:9.0" in flt,
        "mux duration is the probed 9.0s (not a hardcoded 12.0)")
     ok("-map" in cmd and "0:v" in cmd and "-c:v" in cmd and "copy" in cmd,

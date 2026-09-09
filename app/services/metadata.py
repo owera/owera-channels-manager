@@ -104,7 +104,7 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 "You are a YouTube Shorts copywriter. For the video below return a single "
                 "minified JSON object with keys title (<=100 chars, hooky), caption (<=400 chars: "
                 "the FIRST sentence must be keyword-rich — what a developer would type into "
-                "search — and it ends with a call to action, no hashtags inside), hashtags "
+                "search — no Follow/Siga/waitlist/Cloud/SMY/Instagram/LinkedIn CTA, no hashtags inside), hashtags "
                 f"(array of 3 strings each starting with #). No commentary.{lang_rule}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
@@ -133,5 +133,12 @@ def generate(subject: str, script: str, content_format: str = "short",
     mpt_language = _LANGUAGE_MPT_CODES.get(language or "", "en-US")
     meta = mpt.social_metadata(subject, script or "", platform=platform, language=mpt_language)
     if meta:
-        return _from_meta(subject, meta)
-    return _llm_fallback(subject, script or "", content_format, language)
+        return _sanitize_meta(_from_meta(subject, meta))
+    return _sanitize_meta(_llm_fallback(subject, script or "", content_format, language))
+
+
+def _sanitize_meta(meta: dict) -> dict:
+    from app.services import craft
+    meta["title"] = craft.strip_banned(meta.get("title") or "") or meta.get("title") or ""
+    meta["description"] = craft.strip_banned(meta.get("description") or "") or meta.get("description") or ""
+    return meta

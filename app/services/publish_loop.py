@@ -17,7 +17,7 @@ from pathlib import Path
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
-from app.services import metadata, quota, thumbnail, video_gen, youtube
+from app.services import craft, metadata, quota, thumbnail, video_gen, youtube
 from app.services.youtube import (NeedsConnect, QuotaExceeded, UploadStalled,
                                   QUOTA_COMMENT_INSERT, QUOTA_PLAYLISTITEM_INSERT,
                                   QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
@@ -254,7 +254,8 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
         png = thumbnail.make_thumbnail_png(
             video.subject, video.title, out_png,
             topic_id=video.topic_id or 0,
-            content_format=content_format)
+            content_format=content_format,
+            brand=craft.brand_of(channel.slug, channel.name))
         if not png:
             quota.log(session, kind="thumbnail", status="error", video_id=video.id,
                       channel_id=channel.id, detail="thumbnail generation failed")
@@ -269,6 +270,18 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
 
 
 def _publish_one(session: Session, channel: Channel, video: Video) -> None:
+    topic = session.get(Topic, video.topic_id)
+    fmt = "long" if topic and topic.content_format == "long" else "short"
+    blocked = craft.title_gate_reason(video.title, fmt)
+    if blocked:
+        video.status = VideoStatus.REVIEW
+        video.error = blocked
+        session.add(video)
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=blocked)
+        session.commit()
+        return
+
     video.status = VideoStatus.PUBLISHING
     video.render_progress = 0          # reuse as upload progress while publishing
     video.last_attempt_at = utcnow()

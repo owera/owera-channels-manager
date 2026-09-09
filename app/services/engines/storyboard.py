@@ -40,6 +40,7 @@ _MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard m
 # blocked that dump whenever the CTA was already at 8s (08-28 residual: ch2-code
 # list 8.72s / CTA 8.00s).
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
+_LIST_MAX = 6.0      # empty list dumps >6s are a retention hole — see _cap_list_holds
 
 
 # --------------------------------------------------------------------------- JS/string helpers
@@ -189,7 +190,8 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
         return {"type": "term_define", "cue": cue, "term": term, "definition": definition}
 
     if btype == "cta":
-        return {"type": "cta", "cue": cue, "text": _words_clip(raw.get("text", "") or "Subscribe", 4),
+        # No Follow/Subscribe default — compose sanitizes to a builder close.
+        return {"type": "cta", "cue": cue, "text": _words_clip(raw.get("text", "") or "Build", 4),
                 "sub": _words_clip(raw.get("sub", ""), 6)}
 
     # Phase B/C: accept + clamp here; rendered only once their renderers are registered.
@@ -893,24 +895,22 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
 # --------------------------------------------------------------------------- LLM prompt
 
 _TYPE_DOCS = {
-    "hook": 'hook: {"cue","text"(≤8w),"emoji"?} — the opening punch; exactly one, first.',
-    "statement": 'statement: {"cue","text"(≤8w),"w":1|2|3,"emoji"?} — an emphasized line (w=3 = the single key point).',
-    "stat": 'stat: {"cue","value","unit"?,"label"(≤6w),"emoji"?} — a number/percentage that animates (e.g. value "300", unit "ms").',
+    "hook": 'hook: {"cue","text"(≤8w)} — DECOLAR LOCK: text MUST equal the first spoken sentence '
+            '(the title hook) or a faithful ≤8-word compression of that SAME claim. Repeating the '
+            'title is REQUIRED. No emoji, no second slogan, no curiosity gap. Exactly one, first.',
+    "statement": 'statement: {"cue","text"(≤8w),"w":1|2|3} — an emphasized line (w=3 = the single key point). Not a second hook.',
+    "stat": 'stat: {"cue","value","unit"?,"label"(≤6w)} — a number/percentage that animates (e.g. value "300", unit "ms").',
     "compare": 'compare: {"cue","title"?,"left":{"title","items"(≤3)},"right":{"title","items"(≤3)}} — A vs B.',
-    "list": 'list: {"cue","title"(≤6w),"ordered":bool,"items":[{"text"(≤6w),"emoji"?}](≤5)} — points revealed one by one.',
+    "list": 'list: {"cue","title"(≤6w),"ordered":bool,"items":[{"text"(≤6w)}](≤5)} — points revealed one by one. Never hold a list >6s.',
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
-    "cta": 'cta: {"cue","text"(≤4w),"sub"(≤6w)} — closing FOLLOW ask; exactly one, last. '
-           '"text" is a follow verb in the narration language ("Follow", "Segue"). "sub" is '
-           'REQUIRED and gives the reason to follow: what the viewer GETS NEXT from the channel '
-           '(tomorrow\'s topic, the next part of this series, the daily cadence — e.g. '
-           '"Daily AI-engineering fixes", "Parte 2: amanhã") — NEVER a repeat of this video\'s '
-           'point, NEVER generic ("like and subscribe"). When the narration itself closes with '
-           'a spoken follow ask, anchor the cta cue on that closing ask and make "sub" the SAME '
-           'promise the narrator speaks (compressed to ≤6 words), not a different invented reason.',
-    "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices.',
-    "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a terminal command and its output.',
-    "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows. layout MUST match the real topology: "pipeline" only when each node feeds the NEXT in a chain; "fanout" when ONE hub serves/connects ALL the others ("one X for every Y") — put the hub FIRST, arrows are drawn hub→each spoke. Never draw a one-to-many idea as a chain.',
+    "cta": 'cta: {"cue","text"(≤4w),"sub"(≤6w)} — closing BUILDER punch; exactly one, last. '
+           '"text" is a ≤4-word compression of the LAST spoken sentence (the lesson / confiança). '
+           'FORBIDDEN: Follow, Siga, Siga-amanhã, subscribe, waitlist, Cloud-as-product, SMY, '
+           'Instagram, LinkedIn. "sub" restates the same lesson, never a follow-for-more tease.',
+    "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices. Prefer a real receipt / API bill / config dump over a toy.',
+    "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a REAL terminal / UI still. Prefer this over diagrams on 9:16.',
+    "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows that CARRY THE CLAIM (labeled edges, real topology). Forbidden on vertical shorts when the boxes would be generic oars/A-B-C. layout MUST match the real topology: "pipeline" only when each node feeds the NEXT in a chain; "fanout" when ONE hub serves/connects ALL the others.',
 }
 
 
@@ -940,6 +940,11 @@ def _system_prompt(allowed: list[str]) -> str:
         "types (" + rich + ") instead.\n"
         "4. Structure: EXACTLY one `hook` first, then 4-9 varied explanatory beats, EXACTLY one "
         "`cta` last. 6-11 beats total, in chronological order.\n"
+        "4b. DECOLAR LOCK: the hook `text` IS the first spoken sentence (or a faithful ≤8-word "
+        "compression of that same claim / the title). Repeating the title is REQUIRED. Forbidden: "
+        "a curiosity-gap headline, a second typographic hook, a different slogan, a hook emoji "
+        "used as a second punch. Beat 2 must add information (stat/code/command/list), not another "
+        "headline.\n"
         "5. Write all visible text in the SAME language as the narration. Keep code, commands, and "
         "identifiers in their original language.\n"
         "6. PACING — cue spacing IS screen time: a beat runs from its cue until the NEXT beat's "
@@ -948,33 +953,42 @@ def _system_prompt(allowed: list[str]) -> str:
         "ONLY the first sentence (anchor beat 2 where sentence 2 begins), no gap over ~18 words "
         "— a card frozen on screen for 8+ seconds is a DRAG that kills retention; split a long "
         "span with a `stat`/`term_define`/`list` that visualizes what those words say — and "
-        "`diagram`/`compare`/`code` get ~10+ words of room. Plan the ending "
-        "BACKWARDS: the narration closes with a spoken follow ask — the `cta` cue sits on the "
-        "FIRST words of that closing ask (~10-16 words before the script ends; never mid-ask), "
-        "and the payoff beat before it gets the ~10 preceding words — a final visual that "
-        "flashes for under 2 seconds is a wasted beat. NEVER anchor two beats inside the same "
-        "short sentence.\n\n"
+        "`command`/`compare`/`code` get ~10+ words of room. Never hold a `list` longer than 6s. "
+        "Plan the ending BACKWARDS: the `cta` cue sits on the FIRST words of the closing punch "
+        "(~10-16 words before the script ends), and the payoff beat before it gets the ~10 "
+        "preceding words — a final visual that flashes for under 2 seconds is a wasted beat. "
+        "NEVER anchor two beats inside the same short sentence. FORBIDDEN on the cta and anywhere "
+        "on screen: Follow, Siga, waitlist, Cloud-as-product, SMY, Instagram, LinkedIn.\n"
+        "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
+        "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
+        "boxes). Prefer code/command over diagram on vertical shorts.\n\n"
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues"
         + (" — and the required code beat" if has_bc else "") + "):\n"
         '{"beats":[\n'
-        ' {"type":"hook","cue":"keeps pulling the wrong chunks","text":"Your RAG pulls junk","emoji":"🗑️"},\n'
+        ' {"type":"hook","cue":"Your RAG pulls junk","text":"Your RAG pulls junk"},\n'
         ' {"type":"term_define","cue":"chunking by character count","term":"Fixed-size chunking","definition":"splitting text every N characters"},\n'
         ' {"type":"stat","cue":"five hundred characters","value":"500","unit":"chars","label":"cut mid-idea"},\n'
         ' {"type":"compare","cue":"chunk by meaning instead","left":{"title":"By characters","items":["splits ideas","loses context"]},"right":{"title":"By meaning","items":["whole thoughts","keeps context"]}},\n'
         + (' {"type":"code","cue":"split on sections paragraphs","lang":"python","lines":["split(text,","  by=\\"section\\",","  overlap=50)"],"highlight":[0]},\n'
            if has_bc else
            ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n')
-        + ' {"type":"cta","cue":"cut it into thoughts","text":"Follow","sub":"New RAG fix tomorrow"}\n]}'
+        + ' {"type":"cta","cue":"cut it into thoughts","text":"Chunk by meaning","sub":"Keep whole thoughts"}\n]}'
     )
 
 
 def _user_prompt(subject: str, script: str, content_format: str) -> str:
-    pace = ("Short vertical video: favor a punchy hook, 1-2 key visuals, and a fast payoff."
+    from app.services import craft
+    first = craft.first_spoken_sentence(script) or subject
+    pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
+            "visuals (terminal/receipt/code), and a builder close. No Follow/Siga CTA."
             if content_format != "long" else
-            "Long-form video: use more beats and richer visuals (code, diagrams, comparisons) "
-            "to sustain a longer narration.")
-    return ("Video title: " + subject + "\n" + pace + "\n\nNarration script:\n" + script +
+            "Long-form video: use more beats and richer visuals (code, terminal, comparisons) "
+            "to sustain a longer narration. Still: frame 0 = first spoken sentence.")
+    return ("Video title: " + subject + "\n"
+            "First spoken sentence (THIS is frame 0 — repeat or compress to ≤8 words, "
+            "do NOT replace with a curiosity gap): " + first + "\n" +
+            pace + "\n\nNarration script:\n" + script +
             "\n\nReturn the storyboard JSON now.")
 
 
@@ -1002,11 +1016,8 @@ def _code_ok(beats, allowed) -> bool:
     return any(b.get("type") in ("code", "command") for b in beats)
 
 
-# The CTA's ask is the follow verb — R7's core signal is subscribers_gained, so the
-# ask MUST be a follow ask, not an action verb ("Try it") and not an English default on a
-# non-English channel. The LLM violated the prompt rule ~half the time (07-18 baseline:
-# ch1-code emitted "Try it"), so — like the R4 pacing floor — code owns this guarantee
-# deterministically. The LLM keeps authoring only the `sub` (the reason to follow).
+# CTA used to force a Follow/Siga verb (R7). Strategy inverted: shorts close on
+# builder/confiança, and Follow/Siga is banned in generation + validation.
 _FOLLOW_VERBS = {
     "english": "Follow",
     "brazilian portuguese": "Siga",
@@ -1016,12 +1027,98 @@ _FOLLOW_VERBS = {
 
 
 def _follow_verb(language: str | None) -> str:
+    """Kept as a detector (banned verbs), not as the CTA text we force on screen."""
     return _FOLLOW_VERBS.get((language or "").strip().lower(), "Follow")
+
+
+_GENERIC_NODE = re.compile(
+    r"^(a|b|c|d|e|x|y|z|step\s*\d+|node\s*\d+|oar|oars)$", re.IGNORECASE)
+
+
+def _lock_opening_hook(beats, script, subject) -> None:
+    """Decolar: frame0 text = first spoken sentence (≤8 words), no second hook."""
+    from app.services import craft
+    claim = craft.spoken_hook_source(None, script, subject)
+    hook = craft.compress_claim(claim, 8) or craft.compress_claim(subject, 8)
+    if not beats or not hook:
+        return
+    b0 = beats[0]
+    b0["type"] = "hook"
+    b0["text"] = hook
+    b0["emoji"] = ""
+    if len(beats) > 1:
+        b1 = beats[1]
+        b1["emoji"] = ""
+        if b1.get("type") == "hook":
+            b1["type"] = "statement"
+            b1["text"] = _words_clip(b1.get("text") or b1.get("cue") or "", 8)
+            b1["w"] = 1
+
+
+def _last_sentence(script: str) -> str:
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if p.strip()]
+    return parts[-1] if parts else (script or "").strip()
+
+
+def _sanitize_cta(beats, script) -> None:
+    from app.services import craft
+    punch = craft.compress_claim(craft.strip_banned(_last_sentence(script)), 4) or "Build"
+    banned_verbs = {theme.fold(v) for v in _FOLLOW_VERBS.values()} | {"subscribe", "inscreva"}
+    for b in beats:
+        if b.get("type") != "cta":
+            continue
+        # Always lock the card to the closing spoken punch — never a Follow verb.
+        b["text"] = punch
+        b["sub"] = craft.strip_banned(b.get("sub") or "")
+        if craft.contains_banned(b["sub"]) or theme.fold(b["sub"]) in banned_verbs:
+            b["sub"] = ""
+
+
+def _diagram_is_nonsense(b: dict) -> bool:
+    nodes = b.get("nodes") or []
+    if len(nodes) < 2:
+        return True
+    labels = [theme.fold(n.get("label") or "") for n in nodes]
+    if labels and all((not x) or _GENERIC_NODE.match(x) for x in labels):
+        return True
+    edges = b.get("edges") or []
+    labeled = [e for e in edges if (e.get("label") or "").strip()]
+    return not labeled and len(nodes) <= 3
+
+
+def _demote_nonsense_diagrams(beats, content_format) -> None:
+    shorts = (content_format or "short") != "long"
+    for b in beats:
+        if b.get("type") != "diagram":
+            continue
+        if not (shorts or _diagram_is_nonsense(b)):
+            continue
+        labels = [n.get("label") for n in (b.get("nodes") or []) if n.get("label")]
+        text = _words_clip(" ".join(labels) or b.get("cue") or "", 8) or "·"
+        cue = b.get("cue", "")
+        b.clear()
+        b.update({"type": "statement", "cue": cue, "text": text, "w": 2, "emoji": ""})
+
+
+def _cap_list_holds(beats) -> None:
+    """Kill empty list dumps >6s by dumping the leftover into the next beat."""
+    for i, b in enumerate(beats):
+        if b.get("type") != "list":
+            continue
+        dur = float(b.get("dur") or 0)
+        if dur <= _LIST_MAX:
+            continue
+        extra = dur - _LIST_MAX
+        b["dur"] = _LIST_MAX
+        if i + 1 < len(beats) and b.get("start") is not None:
+            nxt = beats[i + 1]
+            nxt["start"] = b["start"] + _LIST_MAX
+            nxt["dur"] = float(nxt.get("dur") or 0) + extra
 
 
 def compose(*, subject, script, words, duration, resolution, width, height,
             topic_id=None, content_format="short", allowed_types=None, language=None,
-            llm) -> str | None:
+            llm, brand=None) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -1029,7 +1126,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     importing worker)."""
     allowed = list(allowed_types or ["hook", "statement", "stat", "compare", "list",
                                       "term_define", "quote", "cta"])
-    th = theme.resolve(topic_id, subject)
+    th = theme.resolve(topic_id, subject, brand=brand)
     system = _system_prompt(allowed)
     user = _user_prompt(subject, script, content_format)
 
@@ -1051,7 +1148,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             "words. Redo it: use AT MOST two 'statement' beats and convert the rest into "
             "stat / compare / list / term_define" +
             ("/ code / command / diagram" if any(t in allowed for t in ("code", "command", "diagram")) else "") +
-            ". Exactly one hook first and one cta last.",
+            ". Exactly one hook first and one cta last. Hook text = first spoken sentence.",
             system=system, max_tokens=1500).strip()
         rb = parse_storyboard(retry, allowed)
         if rb and (_variety_ok(rb) or len(_rich_types(rb)) > len(_rich_types(beats))):
@@ -1064,22 +1161,21 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
             "cta-last, keep variety (at most two statement beats), and include EXACTLY one "
             "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
-            "that shows the thing the narration only describes.",
+            "that shows the thing the narration only describes (terminal, receipt, API bill).",
             system=system, max_tokens=1500).strip()
         rb = parse_storyboard(retry, allowed)
         if rb and _code_ok(rb, allowed):
             beats = rb
 
-    # R7: force the CTA's ask to the follow verb in the narration language — whatever the
-    # LLM wrote (an action verb, an English "Subscribe" leak). The `sub` it authored stays.
-    verb = _follow_verb(language)
-    for b in beats:
-        if b.get("type") == "cta":
-            b["text"] = verb
+    _lock_opening_hook(beats, script, subject)
+    _demote_nonsense_diagrams(beats, content_format)
+    _sanitize_cta(beats, script)
 
     align_storyboard(beats, words, duration)
+    _cap_list_holds(beats)
     if not validate_storyboard(beats, duration):
         _even_space(beats, duration)
+        _cap_list_holds(beats)
         if not validate_storyboard(beats, duration):
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None

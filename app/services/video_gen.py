@@ -83,10 +83,12 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
     lang_rule = (f"\nHARD RULE: write every title in {language} — the channel publishes "
                  f"exclusively in {language}, whatever language the theme name is in." if language else "")
+    from app.services.craft import CRAFT_RULES_SHORT, contains_banned
+    craft_rule = f"\n{CRAFT_RULES_SHORT}"
     if content_format == "long":
         prompt = (
             f"Generate {n} distinct, compelling ideas for in-depth long-form YouTube videos, "
-            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}{craft_rule}\n"
             "Each must be a clear, specific, search-friendly video title (6-15 words) covering a "
             "substantial topic worth several minutes. "
             "RULE: lead with a question, tension, or situation the viewer already feels — NOT the "
@@ -109,7 +111,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     else:
         prompt = (
             f"Generate {n} distinct, engaging short-video ideas for a YouTube Shorts channel, "
-            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}{craft_rule}\n"
             "Each must be a concise, hooky video title under 12 words, covering a specific angle "
             "of the theme. "
             "RULE: lead with the viewer's situation or mistake — NOT the solution. The hook works "
@@ -135,6 +137,8 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     for line in text.splitlines():
         title = re.sub(r"^\s*[-*\d.)\s]+", "", line).strip().strip('"')
         if not title or title.lower() in seen:
+            continue
+        if contains_banned(title):
             continue
         seen.add(title.lower())
         out.append(title)

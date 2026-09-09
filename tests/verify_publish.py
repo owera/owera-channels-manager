@@ -132,7 +132,7 @@ _ORIG_GET, _ORIG_UPLOAD = youtube.get_service, youtube.upload_video
 
 s = fresh_session()
 ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
-v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T")
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 
 
 def _raise_needs_connect(slug):
@@ -165,7 +165,7 @@ youtube.upload_video = _raise_stalled
 s = fresh_session()
 ch = make_channel(s)
 v = make_video(s, ch, status=VideoStatus.APPROVED, retry_count=0,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 ok(v.status == VideoStatus.APPROVED, "a stalled upload under the cap goes back to approved")
 ok(v.retry_count == 1, "stall bumps retry_count")
@@ -173,7 +173,7 @@ ok(v.retry_count == 1, "stall bumps retry_count")
 s = fresh_session()
 ch = make_channel(s)
 v = make_video(s, ch, status=VideoStatus.APPROVED, retry_count=CAP - 1,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 ok(v.status == VideoStatus.FAILED, "a stalled upload at the cap is marked failed")
 ok("gave up" in (v.error or ""), "failed stall records that it gave up")
@@ -191,7 +191,7 @@ youtube.upload_video = _raise_quota
 
 s = fresh_session()
 ch = make_channel(s)
-v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T")
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 try:
     publish_loop._publish_one(s, ch, v)
     raised = False
@@ -305,7 +305,7 @@ ch = make_channel(s, publish_windows=_minute_spec(120, 180), publish_tz="UTC")
 topic = Topic(channel_id=ch.id, name="Windows", theme_prompt="x")
 s.add(topic); s.commit(); s.refresh(topic)   # _next_approved inner-joins Topic
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 
 _uploads = []
 _ORIG_SCOPE = publish_loop.session_scope
@@ -379,7 +379,7 @@ s = fresh_session()
 app_settings(s)
 ch = make_channel(s, publish_windows="10:00-11:00", publish_tz="UTC")
 vids = [make_video(s, ch, status=VideoStatus.APPROVED, subject=f"w{i}",
-                   video_path="/tmp/x.mp4", title="T", approved_at=utcnow())
+                   video_path="/tmp/x.mp4", title="T · Copilot Credits 1", approved_at=utcnow())
         for i in range(4)]
 plan = publish_plan(ch.id, s)
 etas = [datetime.fromisoformat(plan[str(v.id)]) for v in vids]
@@ -505,7 +505,7 @@ s.add(short_pl); s.commit(); s.refresh(short_pl)
 topic.playlist_id = short_pl.id
 s.add(topic); s.commit()
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 s.refresh(topic); s.refresh(v)
 ok(v.status == VideoStatus.PUBLISHED, "video publishes")
@@ -539,7 +539,7 @@ s.add(dead_pl); s.commit(); s.refresh(dead_pl)
 topic.playlist_id = dead_pl.id
 s.add(topic); s.commit()
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 s.commit()  # tick()'s session_scope commits after _publish_one returns
 s.refresh(topic); s.refresh(v)
@@ -1024,7 +1024,7 @@ ch = make_channel(s)
 t = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x")
 s.add(t); s.commit(); s.refresh(t)
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 ok(v.status == VideoStatus.PUBLISHED, "comment path still publishes")
 ok(len(_comments) == 1, "_publish_one actually calls insert_comment (wiring)")
@@ -1050,7 +1050,7 @@ s.add(pl); s.commit(); s.refresh(pl)
 t.playlist_id = pl.id
 s.add(t); s.commit()
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 ok(v.status == VideoStatus.PUBLISHED, "pt-BR + playlist still publishes")
 ok(len(_comments) == 1, "one comment posted")
@@ -1071,7 +1071,7 @@ ch = make_channel(s)
 t = Topic(channel_id=ch.id, name="Shorts", theme_prompt="x")
 s.add(t); s.commit(); s.refresh(t)
 v = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=t.id,
-               video_path="/tmp/x.mp4", title="T")
+               video_path="/tmp/x.mp4", title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch, v)
 ok(v.status == VideoStatus.PUBLISHED,
    "_publish_one still PUBLISHED when insert_comment raises")
@@ -1136,7 +1136,8 @@ def _ready(session, title="ready", **ch_kw):
     session.commit()
     session.refresh(topic)
     v = make_video(session, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
-                   video_path="/tmp/x.mp4", title=title)
+                   video_path="/tmp/x.mp4",
+                   title=title if " · " in title else f"{title} · Copilot Credits 1")
     return ch, v
 
 
@@ -1151,7 +1152,7 @@ try:
     s.commit()
     ch, v = _ready(s, title="paused-sched")
     stuck = make_video(s, ch, status=VideoStatus.PUBLISHING, topic_id=v.topic_id,
-                       video_path="/tmp/x.mp4", title="stuck",
+                       video_path="/tmp/x.mp4", title="stuck · Copilot Credits 1",
                        retry_count=0,
                        last_attempt_at=utcnow() - timedelta(seconds=TIMEOUT + 60))
 

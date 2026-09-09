@@ -198,7 +198,7 @@ ok(d["summary"]["needs_operator"] == 0, "clean system needs no operator")
 for bucket in ("failed", "rejected", "stuck_rendering", "stuck_publishing",
                "stuck_review", "oauth", "cooldown", "quota", "error_runs_24h",
                "board_overflow", "bgm_pool_low", "board_inventory",
-               "pipeline_starved"):
+               "pipeline_starved", "title_pattern_blocked"):
     ok(bucket in d, f"digest always carries the '{bucket}' bucket")
 ok(d["pipeline_starved"] == [],
    "a channel that has never published is 'not started', not starved (no false positive)")

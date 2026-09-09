@@ -327,6 +327,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             topic_id=params.get("topic_id"),
             content_format=params.get("content_format") or "short",
             language=language_from_voice(params.get("voice_name")),
+            brand=params.get("brand"),
         )
         used_fallback = False
         if not _looks_valid(html):
@@ -373,7 +374,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
     growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
     raises (a bad snapshot must not fail a render)."""
     try:
-        th = theme.resolve(params.get("topic_id"), subject)
+        th = theme.resolve(params.get("topic_id"), subject, brand=params.get("brand"))
         beats = re.findall(r'class="beat ([a-z_]+)"', html)
         return {
             "composition_version": settings.composition_version,
@@ -422,13 +423,9 @@ def _generate_script(subject: str, params: dict) -> str:
             "do NOT start with 'In this video', 'Today we will', or 'Welcome back'; instead "
             "open with the core question, surprising claim, or the pain point the viewer "
             "already feels. Follow with substantive sections explaining with concrete detail "
-            "and examples, then a short wrap-up. The wrap-up's FINAL sentence is an EXPLICIT "
-            "spoken ask for the viewer to follow/subscribe (imperative, addressed to the "
-            "viewer, in the script's language), welded to the value just delivered by naming "
-            "the concrete thing they'd miss next (tomorrow's fix, the next part of this "
-            "topic, the daily cadence). A tease without the ask fails; 'like and subscribe' "
-            "without the named next-value fails — the line must only make sense at the end "
-            "of THIS video. "
+            "and examples, then a short wrap-up. Close on a builder/confiança punch — the "
+            "lesson in one sentence. FORBIDDEN in the script: Follow/Siga/'follow for more'/"
+            "Siga-amanhã, waitlist, Owera Cloud-as-product, SMY, Instagram, LinkedIn CTAs. "
             "Conversational and authoritative, no filler, "
             "no headings, no stage directions, no emojis. "
             "Return ONLY the spoken words."
@@ -446,12 +443,10 @@ def _generate_script(subject: str, params: dict) -> str:
             "'Today', 'Welcome', 'Here's how'. After that hook, give the honest verdict or "
             "concrete insight — take a clear position, don't hedge. Close with one tight, "
             "memorable line that crystallises the lesson in a sentence the viewer will quote. "
-            "Then END with ONE more short spoken line: an EXPLICIT ask for the viewer to "
-            "follow/subscribe (imperative, addressed to the viewer, in the script's language), "
-            "welded to the value just delivered by naming the concrete thing they'd miss next "
-            "(tomorrow's fix, part two of this topic, the daily cadence). A tease without the "
-            "ask fails; 'like and subscribe' without the named next-value fails — the line "
-            "must only make sense at the end of THIS video. "
+            "That last line is a builder/confiança punch, NOT a Follow/Siga/subscribe ask. "
+            "FORBIDDEN anywhere in the script: Follow, Siga, Siga-amanhã, 'follow for more', "
+            "waitlist, Owera Cloud-as-product, SMY, Instagram, LinkedIn. "
+            "The FIRST sentence is the title hook — keep it short (≤10 words). "
             "Conversational, concrete, no filler, no headings, no stage directions, no emojis. "
             "Return ONLY the spoken words."
         )
@@ -481,6 +476,8 @@ def _generate_script(subject: str, params: dict) -> str:
         if retry:
             text = retry
 
+    from app.services import craft
+    text = craft.strip_banned(text) or text
     return text
 
 
@@ -569,7 +566,7 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
 def _generate_composition(subject: str, script: str, words: list[dict], resolution: str,
                           width: int, height: int, duration: float, *,
                           topic_id=None, content_format: str = "short",
-                          language: str | None = None) -> str:
+                          language: str | None = None, brand: str | None = None) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
     the old clip-array path below as a kill switch. Returns "" on generic failure so
@@ -584,7 +581,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             subject=subject, script=script, words=words, duration=duration,
             resolution=resolution, width=width, height=height, topic_id=topic_id,
             content_format=content_format, allowed_types=settings.composition_beat_types,
-            language=language, llm=_llm,
+            language=language, llm=_llm, brand=brand,
         )
         return html or ""
     except Exception as e:
@@ -761,7 +758,9 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
     words: list[dict] = []
 
     async def _gen() -> None:
-        comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
+        comm = edge_tts.Communicate(text, voice, boundary="WordBoundary",
+                                    **({"rate": "-8%", "pitch": "-2Hz"}
+                                       if voice.lower().startswith("pt") else {}))
         with open(out_path, "wb") as f:
             async for chunk in comm.stream():
                 if chunk["type"] == "audio":
@@ -852,7 +851,9 @@ def _pick_bgm(params: dict, handle: str) -> Path | None:
         return None
     wav_tracks = sorted(p for p in bgm_dir.glob("techno_*.wav"))
     all_tracks = sorted(p for p in bgm_dir.glob("*") if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
-    tracks = wav_tracks or all_tracks
+    # Rotate the full bed pool (techno_* used to starve every other track). Named
+    # files still win; explicit-off is bgm_type="".
+    tracks = all_tracks or wav_tracks
     if not tracks:
         return None
     if isinstance(bgm_type, str) and bgm_type not in ("", "random"):
@@ -872,7 +873,8 @@ def _mux(video: Path, narration: Path, bgm: Path | None, bgm_volume: float,
         cmd += ["-stream_loop", "-1", "-i", str(bgm)]
         flt = (f"[1:a]apad,atrim=0:{dur}[n];"
                f"[2:a]volume={bgm_volume},atrim=0:{dur}[b];"
-               f"[n][b]amix=inputs=2:duration=first:normalize=0[a]")
+               f"[b][n]sidechaincompress=threshold=0.06:ratio=8:attack=40:release=280[ducked];"
+               f"[n][ducked]amix=inputs=2:duration=first:normalize=0[a]")
     else:
         flt = f"[1:a]apad,atrim=0:{dur}[a]"
     cmd += ["-filter_complex", flt, "-map", "0:v", "-map", "[a]",
