@@ -871,10 +871,14 @@ def _mux(video: Path, narration: Path, bgm: Path | None, bgm_volume: float,
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-i", str(narration)]
     if bgm is not None:
         cmd += ["-stream_loop", "-1", "-i", str(bgm)]
-        flt = (f"[1:a]apad,atrim=0:{dur}[n];"
-               f"[2:a]volume={bgm_volume},atrim=0:{dur}[b];"
-               f"[b][n]sidechaincompress=threshold=0.06:ratio=8:attack=40:release=280[ducked];"
-               f"[n][ducked]amix=inputs=2:duration=first:normalize=0[a]")
+        # asplit: lavfi pads are single-use. PR #17 reused [n] as both the
+        # sidechain and the amix voice input; ffmpeg 7+ (Homebrew) then treats
+        # the second [n] as a stream specifier and mux dies:
+        #   Stream specifier 'n' ... matches no streams
+        flt = (f"[1:a]apad,atrim=0:{dur},asplit=2[voice][sc];"
+               f"[2:a]volume={bgm_volume},atrim=0:{dur}[bed];"
+               f"[bed][sc]sidechaincompress=threshold=0.06:ratio=8:attack=40:release=280[ducked];"
+               f"[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]")
     else:
         flt = f"[1:a]apad,atrim=0:{dur}[a]"
     cmd += ["-filter_complex", flt, "-map", "0:v", "-map", "[a]",

@@ -711,6 +711,10 @@ with tempfile.TemporaryDirectory() as td:
        "BGM volume + amix when a track is present")
     ok("sidechaincompress" in flt and "[ducked]" in flt,
        "BGM is ducked under voice via sidechaincompress")
+    ok("asplit=2" in flt and "[voice]" in flt and "[sc]" in flt,
+       "voice is asplit so sidechain + amix each get their own pad")
+    ok("[n][ducked]" not in flt and "[b][n]sidechaincompress" not in flt,
+       "does not reuse [n] after sidechaincompress (ffmpeg 7 stream-specifier 'n')")
     ok("atrim=0:9.0" in flt,
        "mux duration is the probed 9.0s (not a hardcoded 12.0)")
     ok("-map" in cmd and "0:v" in cmd and "-c:v" in cmd and "copy" in cmd,
