@@ -115,7 +115,7 @@ def spoken_hook_source(title: str | None, script: str | None, subject: str | Non
 
 def compress_claim(text: str | None, max_words: int = 8) -> str:
     words = (text or "").split()
-    return " ".join(words[:max_words]).strip()
+    return " ".join(words[:max_words]).strip().rstrip(".!?…,;:").strip()
 
 
 def claim_aligned(hook: str | None, spoken: str | None) -> bool:

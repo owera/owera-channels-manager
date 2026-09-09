@@ -842,7 +842,7 @@ try:
         mux_calls = []
 
         def _gen_comp(subject, script, words, resolution, width, height, duration,
-                      topic_id=None, content_format="short", language=None):
+                      topic_id=None, content_format="short", language=None, **_k):
             compose_args.update(resolution=resolution, width=width, height=height,
                                 duration=duration, language=language,
                                 content_format=content_format, topic_id=topic_id)
@@ -902,7 +902,7 @@ try:
         seen_lang = {}
 
         def _gen_en(subject, script, words, resolution, width, height, duration,
-                    topic_id=None, content_format="short", language=None):
+                    topic_id=None, content_format="short", language=None, **_k):
             seen_lang["language"] = language
             return VALID
 
@@ -928,7 +928,7 @@ try:
         seen_lang = {}
 
         def _gen_none(subject, script, words, resolution, width, height, duration,
-                      topic_id=None, content_format="short", language=None):
+                      topic_id=None, content_format="short", language=None, **_k):
             seen_lang["language"] = language
             return VALID
 

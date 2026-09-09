@@ -907,8 +907,12 @@ def happy_llm(user, system=None, max_tokens=None):
 html = _compose(happy_llm)
 ok(html is not None and "<!doctype html>" in html.lower(),
    "happy-path compose returns a full index.html")
-ok("alpha bravo charlie delta echo foxtrot golf hotel" in html,
+hook_html = html.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
+ok(all(f'<span class="word">{w}</span>' in hook_html
+       for w in "alpha bravo charlie delta echo foxtrot golf hotel".split()),
    "Decolar: hook text is the first spoken sentence (script has no period → whole line, ≤8w)")
+ok("Hook" not in hook_html,
+   "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
    "compose does NOT force Follow/Siga (CTA ban) and overwrites 'Try it'")
 ok(len(calls) == 1 and calls[0]["max_tokens"] == 1500,

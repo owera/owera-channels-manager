@@ -1185,7 +1185,7 @@ try:
     s.refresh(stuck)
     ok(stuck.status == VideoStatus.APPROVED,
        "unpaused: the stuck upload is recovered (proves the pause pin was the early return)")
-    ok("paused-sched" in _tick_uploads or "stuck" in _tick_uploads,
+    ok(any("paused-sched" in str(t) or "stuck" in str(t) for t in _tick_uploads),
        "unpaused: tick publishes (recovery + approved pool)")
 
     # Channel.paused: skip this channel, sibling still publishes.

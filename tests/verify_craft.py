@@ -69,6 +69,8 @@ ok(craft.spoken_hook_source("Your RAG reads junk · Copilot Credits 1",
 ok(craft.compress_claim("Your RAG reads junk because it embeds garbage tokens", 8)
    == "Your RAG reads junk because it embeds garbage",
    "compress_claim keeps the first 8 words, original casing (not Title Case)")
+ok(craft.compress_claim("Your RAG reads junk.", 8) == "Your RAG reads junk",
+   "compress_claim strips the trailing sentence period (on-screen claim, not a slogan)")
 ok(craft.claim_aligned("Your RAG reads junk", "Your RAG reads junk because X"),
    "compression of the same claim aligns")
 ok(craft.claim_aligned("Reranking in 5 lines", "Reranking in 5 lines · Copilot Credits 1"),
@@ -150,8 +152,11 @@ html = storyboard.compose(
     llm=lambda *a, **k: _board(),
 )
 ok(html is not None, "compose returns HTML")
-ok("Your RAG reads junk" in html, "frame0 is the first spoken sentence (Decolar)")
-ok("Curiosity gap slogan" not in html,
+hook_html = html.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
+ok(all(f'<span class="word">{w}</span>' in hook_html
+       for w in "Your RAG reads junk".split()),
+   "frame0 is the first spoken sentence (Decolar)")
+ok("Curiosity" not in hook_html and "slogan" not in hook_html,
    "curiosity-gap hook text is overwritten, not shown")
 ok("Follow" not in html and "Siga" not in html,
    "compose does NOT force Follow/Siga (banned)")
