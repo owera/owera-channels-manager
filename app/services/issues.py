@@ -362,6 +362,23 @@ def detect(session: Session) -> dict:
     }
     # board_inventory is informational — excluded from issue counts.
     extra = {"board_inventory": board_inventory}
+
+    from app.services import craft as _craft
+    title_pattern_blocked = []
+    for v in session.exec(select(Video).where(
+            Video.status.in_([VideoStatus.APPROVED, VideoStatus.REVIEW]))).all():
+        topic = session.get(Topic, v.topic_id)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
+        reason = _craft.title_gate_reason(v.title, fmt)
+        if reason:
+            title_pattern_blocked.append({
+                "id": v.id, "channel_id": v.channel_id, "title": v.title,
+                "status": v.status,
+                "suggested_action": "reject (pré-pattern leftover — do not mass-retitle)",
+                "auto": False,
+                "detail": reason,
+            })
+    extra["title_pattern_blocked"] = title_pattern_blocked
     # needs_operator = anything explicitly non-auto (OAuth, quota walls, cooldown).
     needs_operator = sum(
         1 for b in buckets.values() for item in b

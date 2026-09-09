@@ -96,16 +96,21 @@ with patch.object(thumbnail, "_llm", side_effect=_llm_ok):
     _llm_calls.clear()
     out = thumbnail._hook_text("subject ignored", "Reranking in 5 lines",
                                content_format="short")
-ok(out == "The Cache Is Lying", "LLM hook used when 3–6 words and ≤60 chars")
+ok(out == "Reranking in 5 lines",
+   "curiosity-gap LLM slogan is rejected; fallback is the spoken title (Decolar)")
 ok(len(_llm_calls) == 1, "exactly one LLM call on happy path")
 ok(_llm_calls[0]["max_tokens"] == 100, "hook LLM capped at max_tokens=100")
 ok("short-form vertical video" in _llm_calls[0]["prompt"],
    "content_format=short → short-form hint in prompt")
 ok("Reranking in 5 lines" in _llm_calls[0]["prompt"],
    "title is what the LLM sees (not the subject when title is set)")
-ok("thumbnail hooks" in (_llm_calls[0]["system"] or "").lower()
-   or "You write YouTube thumbnail hooks" in (_llm_calls[0]["system"] or ""),
-   "system prompt is the thumbnail-hook brief")
+ok("Compress THIS claim" in _llm_calls[0]["prompt"],
+   "user prompt asks to compress THIS claim, not open a gap")
+sys_brief = _llm_calls[0]["system"] or ""
+ok("DECOLAR LOCK" in sys_brief and "Repeating the title is REQUIRED" in sys_brief,
+   "system prompt requires repeating the title (curiosity-gap invert)")
+ok("Do NOT reuse the title" not in sys_brief,
+   "old do-not-reuse-title brief is gone")
 
 # content_format=long pins the long-form hint
 with patch.object(thumbnail, "_llm", side_effect=_llm_ok):
@@ -156,19 +161,20 @@ with patch.object(thumbnail, "_llm", side_effect=_llm_ok):
     ok(long_ and not short,
        "canonical long still long-form (leftover gate does not invert longs)")
 
-# quote strip is whole-string (re ^…$ before splitlines), then first line only
+# quote strip is whole-string (re ^…$ before splitlines), then first line only.
+# Title must share the claim or the aligned-compression gate rejects the LLM line.
 with patch.object(thumbnail, "_llm", return_value='"Quoted Hook Words"'):
-    out = thumbnail._hook_text("s", "T")
+    out = thumbnail._hook_text("s", "Quoted Hook Words")
 ok(out == "Quoted Hook Words",
    "surrounding double quotes stripped from a single-line LLM response")
 
 with patch.object(thumbnail, "_llm", return_value="`backtick hook here`"):
-    out = thumbnail._hook_text("s", "T")
+    out = thumbnail._hook_text("s", "backtick hook here")
 ok(out == "backtick hook here", "leading/trailing backticks stripped")
 
 with patch.object(thumbnail, "_llm",
                   return_value="First Line Hook\nsecond line discarded"):
-    out = thumbnail._hook_text("s", "T")
+    out = thumbnail._hook_text("s", "First Line Hook")
 ok(out == "First Line Hook",
    "multi-line LLM response keeps only the first line")
 
@@ -177,12 +183,12 @@ ok(out == "First Line Hook",
 # mid-string (not at $), so it survives on the kept first line.
 with patch.object(thumbnail, "_llm",
                   return_value='"Quoted Hook Words"\nsecond line discarded'):
-    out = thumbnail._hook_text("s", "T")
+    out = thumbnail._hook_text("s", "Quoted Hook Words")
 ok(out == 'Quoted Hook Words"',
    "multi-line: opening quote stripped at ^; trailing quote on line 1 KEPT "
    "(it is not at end-of-string — documents the real strip-then-splitlines order)")
 
-# word-count / length gates force fallback (first 5 title words, Title Case)
+# word-count / length gates force fallback (first 8 title words, original casing)
 def _assert_fallback(llm_return, title, expected, label):
     with patch.object(thumbnail, "_llm", return_value=llm_return):
         got = thumbnail._hook_text("subject", title)
@@ -190,8 +196,8 @@ def _assert_fallback(llm_return, title, expected, label):
 
 
 _assert_fallback("one", "Alpha Beta Gamma Delta Epsilon Zeta",
-                 "Alpha Beta Gamma Delta Epsilon",
-                 "1-word LLM output → title fallback (first 5 words, Title Case)")
+                 "Alpha Beta Gamma Delta Epsilon Zeta",
+                 "1-word LLM output → spoken-claim fallback (first 8 words, original casing)")
 _assert_fallback("a b c d e f g h i", "Alpha Beta Gamma",
                  "Alpha Beta Gamma",
                  "9-word LLM output → title fallback (word gate is ≤8)")
@@ -199,17 +205,19 @@ _assert_fallback("X" * 61, "Alpha Beta",
                  "Alpha Beta",
                  "61-char LLM output → title fallback (len gate is ≤60)")
 # boundary: exactly 2 words and exactly 8 words and exactly 60 chars all ACCEPT
+# when they stay claim-aligned with the title
 with patch.object(thumbnail, "_llm", return_value="Two Words"):
-    ok(thumbnail._hook_text("s", "T") == "Two Words",
+    ok(thumbnail._hook_text("s", "Two Words") == "Two Words",
        "exactly 2 words accepted (lower bound inclusive)")
-with patch.object(thumbnail, "_llm", return_value="one two three four five six seven eight"):
-    ok(thumbnail._hook_text("s", "T") == "one two three four five six seven eight",
+_eight = "one two three four five six seven eight"
+with patch.object(thumbnail, "_llm", return_value=_eight):
+    ok(thumbnail._hook_text("s", _eight) == _eight,
        "exactly 8 words accepted (upper bound inclusive)")
 # 60 chars across ≥2 words so the word-count gate does not fire first
 _sixty = ("x" * 29) + " " + ("y" * 30)  # len=60, 2 words
 assert len(_sixty) == 60 and 2 <= len(_sixty.split()) <= 8
 with patch.object(thumbnail, "_llm", return_value=_sixty):
-    ok(thumbnail._hook_text("s", "T") == _sixty,
+    ok(thumbnail._hook_text("s", _sixty) == _sixty,
        "exactly 60 chars (with 2–8 words) accepted (length bound inclusive)")
 # 61 chars with valid word count still falls back
 _sixty_one = ("x" * 30) + " " + ("y" * 30)  # len=61, 2 words
@@ -222,28 +230,26 @@ with patch.object(thumbnail, "_llm", return_value=_sixty_one):
 with patch.object(thumbnail, "_llm", side_effect=RuntimeError("llm down")):
     out = thumbnail._hook_text("s", "Title Case Words Here Extra")
 ok(out == "Title Case Words Here Extra",
-   "LLM exception → first 5 title words Title-Cased (no raise)")
+   "LLM exception → spoken claim, original casing (no raise)")
 
-# title preferred; subject when title is None; empty everything
-# Note: base = (title or subject or "").strip() — a whitespace title is truthy,
-# so it wins over subject and then strips to "" (subject is NOT consulted).
+# title preferred; subject when title is None/blank after strip
 with patch.object(thumbnail, "_llm", side_effect=RuntimeError("x")):
     ok(thumbnail._hook_text("Only Subject Words", None) == "Only Subject Words",
        "title=None → subject drives the fallback")
     ok(thumbnail._hook_text("Only Subject Words", "") == "Only Subject Words",
        "empty-string title is falsy → subject drives the fallback")
-    ok(thumbnail._hook_text("Only Subject Words", "   ") == "Watch This",
-       "whitespace title is truthy, strips to '' → sentinel (subject NOT used)")
+    ok(thumbnail._hook_text("Only Subject Words", "   ") == "Only Subject Words",
+       "whitespace title strips empty → subject (Decolar: don't invent Watch This)")
     ok(thumbnail._hook_text("", None) == "Watch This",
        "empty subject+title → sentinel 'Watch This'")
     ok(thumbnail._hook_text("   ", None) == "Watch This",
        "whitespace-only subject → sentinel 'Watch This'")
 
-# fallback truncates to 5 words
+# fallback truncates to 8 words, original casing (not Title Case)
 with patch.object(thumbnail, "_llm", side_effect=RuntimeError("x")):
-    ok(thumbnail._hook_text("s", "one two three four five six seven")
-       == "One Two Three Four Five",
-       "fallback keeps only the first 5 words, Title-Cased")
+    ok(thumbnail._hook_text("s", "one two three four five six seven eight nine")
+       == "one two three four five six seven eight",
+       "fallback keeps the first 8 words, original casing")
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +286,10 @@ ok('id="hook"' in html_evil and "&lt;img" in html_evil,
 html_default = thumbnail._thumbnail_html("Default")
 ok("#5b8cff" in html_default and "#1b2a6b" in html_default,
    "default accent/bg match palette[0] (blue brand)")
+ok('id="slab"' in html_default and "RECEIPT" in html_default,
+   "object-of-angle receipt/terminal chrome (not a generic emoji punch)")
+ok("#a36bff" not in html_default and "#ff5bb0" not in html_default,
+   "rainbow accent bar (#a36bff/#ff5bb0) is gone")
 
 
 # ---------------------------------------------------------------------------

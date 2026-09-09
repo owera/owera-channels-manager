@@ -55,9 +55,11 @@ with Session(engine) as s:
     s.add(Topic(channel_id=1, name="T"))
     s.commit()
     s.add(Video(channel_id=1, topic_id=1, subject="in review",
-                status=VideoStatus.REVIEW))                       # id 1
+                status=VideoStatus.REVIEW,
+                title="Hook · Copilot Credits 1"))                       # id 1
     s.add(Video(channel_id=1, topic_id=1, subject="rendered, unreviewed",
-                status=VideoStatus.RENDERED))                     # id 2
+                status=VideoStatus.RENDERED,
+                title="Hook · Copilot Credits 1"))                     # id 2
     s.add(Video(channel_id=1, topic_id=1, subject="still a draft",
                 status=VideoStatus.DRAFT))                        # id 3
     s.add(Video(channel_id=1, topic_id=1, subject="weak hook",
@@ -67,7 +69,8 @@ with Session(engine) as s:
                 mpt_task_id="t-dead", render_progress=40))        # id 5
     s.add(Video(channel_id=1, topic_id=1, subject="upload failed",
                 status=VideoStatus.FAILED, error="upload 500",
-                video_path="storage/videos/5/video.mp4"))         # id 6
+                video_path="storage/videos/5/video.mp4",
+                title="Hook · Copilot Credits 1"))         # id 6
     s.add(Video(channel_id=1, topic_id=1, subject="render failed too",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 7
     s.commit()
@@ -76,12 +79,14 @@ with Session(engine) as s:
     s.add(Topic(channel_id=2, name="T2"))
     s.commit()
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 in review",
-                status=VideoStatus.REVIEW))                       # id 8
+                status=VideoStatus.REVIEW,
+                title="Hook · Copilot Credits 1"))                       # id 8
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 render failed",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 9
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 upload failed",
                 status=VideoStatus.FAILED, error="upload 500",
-                video_path="storage/videos/9/video.mp4"))         # id 10
+                video_path="storage/videos/9/video.mp4",
+                title="Hook · Copilot Credits 1"))         # id 10
     s.commit()
 
 

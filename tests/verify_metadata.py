@@ -180,6 +180,8 @@ ok("HARD RULE" in prompt and "Brazilian Portuguese" in prompt,
    "language rule present in the LLM prompt when language is set")
 ok("Shorts" in prompt or "short" in prompt.lower(),
    "short format uses the Shorts copywriter prompt")
+ok("no Follow/Siga" in prompt,
+   "shorts caption brief bans Follow/Siga/waitlist CTAs")
 ok("Subject: Subj" in prompt and "script text" in prompt,
    "subject + script reach the LLM prompt")
 

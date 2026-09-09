@@ -333,8 +333,8 @@ ok(len(td["term"].split()) == 4 and len(td["definition"].split()) == 14,
    "term clipped to 4 words, definition to 14")
 
 cta = storyboard._coerce_beat({"type": "cta", "cue": "go"}, set(ALL_TYPES))
-ok(cta["text"] == "Subscribe" and cta["sub"] == "",
-   "cta with no text defaults to 'Subscribe' (compose later overwrites the verb)")
+ok(cta["text"] == "Build" and cta["sub"] == "",
+   "cta with no text defaults to 'Build' (compose sanitizes Follow/Subscribe away)")
 cta2 = storyboard._coerce_beat(
     {"type": "cta", "text": qtext, "sub": qtext}, set(ALL_TYPES))
 ok(len(cta2["text"].split()) == 4 and len(cta2["sub"].split()) == 6,
@@ -828,10 +828,20 @@ ok(storyboard._code_ok(
    "_code_ok passes with a command beat")
 ok("8+ seconds is a DRAG" in sys_a,
    "PACING rule still names the 8s drag line")
-ok("FIRST words of that closing ask" in sys_a,
-   "ending plan is anchored on the spoken follow-ask (f79fa33)")
+ok("DECOLAR LOCK" in sys_a,
+   "system prompt names the Decolar lock (frame0 = first spoken sentence)")
+ok("Repeating the title is REQUIRED" in sys_a,
+   "hook brief requires repeating the title (curiosity-gap invert)")
+ok("Follow, Siga" in sys_a,
+   "Follow/Siga named as FORBIDDEN, not as the CTA verb")
+ok("FIRST words of the closing punch" in sys_a,
+   "ending plan is anchored on the closing punch (not a spoken follow-ask)")
 ok("Short vertical" in storyboard._user_prompt("t", "s", "short"),
    "short format asks for a punchy hook")
+ok("First spoken sentence" in storyboard._user_prompt("t", "spoken line here", "short"),
+   "user prompt injects the first spoken sentence as frame 0")
+ok("do NOT replace with a curiosity gap" in storyboard._user_prompt("t", "s", "short"),
+   "user prompt forbids a curiosity-gap replacement hook")
 ok("Long-form" in storyboard._user_prompt("t", "s", "long"),
    "long format asks for more beats / richer visuals")
 ok("Video title: My Subject" in storyboard._user_prompt("My Subject", "narration", "short"),
@@ -897,23 +907,29 @@ def happy_llm(user, system=None, max_tokens=None):
 html = _compose(happy_llm)
 ok(html is not None and "<!doctype html>" in html.lower(),
    "happy-path compose returns a full index.html")
-ok("Follow" in html and "Try it" not in html,
-   "compose forces the CTA text to the follow verb (70861ef) — 'Try it' is overwritten")
-ok("Tomorrow the next part" in html,
-   "compose keeps the LLM's CTA sub (the reason to follow)")
+hook_html = html.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
+ok(all(f'<span class="word">{w}</span>' in hook_html
+       for w in "alpha bravo charlie delta echo foxtrot golf hotel".split()),
+   "Decolar: hook text is the first spoken sentence (script has no period → whole line, ≤8w)")
+ok("Hook" not in hook_html,
+   "LLM curiosity-gap hook text is overwritten")
+ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
+   "compose does NOT force Follow/Siga (CTA ban) and overwrites 'Try it'")
 ok(len(calls) == 1 and calls[0]["max_tokens"] == 1500,
    "happy path is a single llm call at max_tokens=1500")
 ok("Video title: Test video" in calls[0]["user"],
    "compose forwards the real subject into the user prompt")
+ok("First spoken sentence" in calls[0]["user"],
+   "compose injects the spoken sentence into the user prompt")
 ok("2b." not in (calls[0]["system"] or ""),
    "default allowlist has no Phase-B types so rule 2b is absent")
 ok(worker._looks_valid(html), "composed HTML passes the worker validity guard")
 
 pt_html = _compose(lambda *a, **k: _board(), language="Brazilian Portuguese")
-ok("Siga" in pt_html and "Follow" not in pt_html,
-   "PT compose forces CTA text to Siga (not the English default, not the LLM's Try it)")
+ok("Siga" not in pt_html and "Follow" not in pt_html,
+   "PT compose does not force Siga/Follow")
 es_html = _compose(lambda *a, **k: _board(), language="Spanish")
-ok("Sigue" in es_html, "Spanish compose forces CTA text to Sigue")
+ok("Sigue" not in es_html, "Spanish compose does not force Sigue")
 
 n_bad = [0]
 

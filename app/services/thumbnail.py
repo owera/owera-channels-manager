@@ -37,69 +37,75 @@ _THUMB_PALETTE = PALETTE
 
 def _hook_text(subject: str, title: str | None,
                content_format: str = "short") -> str:
-    """A punchy 3–6 word thumbnail hook. LLM with a deterministic fallback."""
-    base = (title or subject or "").strip()
+    """Frame-0 / thumb copy: the spoken title hook, not a curiosity gap.
+
+    Decolar lock — MUST equal the first spoken sentence (the title before `·`)
+    or a faithful ≤8-word compression of that same claim. Repeating the title
+    is required. A drifted LLM slogan falls back to the compressed claim.
+    """
+    from app.services import craft
+    spoken = craft.spoken_hook_source(title, None, subject)
+    fallback = craft.compress_claim(spoken, 8) or "Watch This"
     try:
-        # Same == "long" / else-short split as render/issues/publish/autofill.
-        # `== "short"` asked the LLM for a long-form hook on empty/"LONG"/None leftovers.
         fmt_hint = ("long-form YouTube video" if content_format == "long"
                     else "short-form vertical video")
         system = (
-            "You write YouTube thumbnail hooks. The hook is shown NEXT TO the title, so "
-            "repeating the title wastes the slot — the hook must open a curiosity GAP the "
-            "title doesn't: name the stakes, the pain, or a surprising claim and WITHHOLD "
-            "the resolution, or reframe with a fresh metaphor, so the viewer has to watch to "
-            "find out. Do NOT reuse the title's distinctive words — the specific tool, "
-            "technique, or number it names (e.g. if the title says 'reranking in 5 lines', "
-            "the hook must not say 'reranking' or '5 lines'). Pick a different angle. "
-            "BUT the hook must still be unmistakably about THIS video: anchor it in one "
-            "concrete detail of the video's specific problem — the symptom, the broken "
-            "thing, the cost — phrased in your own words. Generic bait that could caption "
-            "any video ('Nobody told you this', 'This changes everything') is banned: if "
-            "the hook would fit a different video unchanged, rewrite it. "
-            "Return ONLY a single punchy hook of 3 to 6 words — no quotes, no emojis, no "
-            "hashtags, no trailing punctuation. Prefer concrete, high-contrast words. Use "
-            "natural capitalization (Title Case or ALL CAPS for single key words only if it "
-            "adds punch — never force everything to uppercase). "
-            "Always respond in the same language as the video title."
+            "You compress YouTube title hooks for the thumbnail. DECOLAR LOCK: "
+            "the thumbnail MUST equal the first spoken sentence (the title hook) "
+            "or a faithful compression of that SAME claim, at most 8 words. "
+            "Repeating the title is REQUIRED — do not invent a curiosity gap, "
+            "a second slogan, or a different angle. Do NOT withhold the claim. "
+            "Do NOT tell the viewer something the title does not already say. "
+            "No emojis, no hashtags, no quotes, no trailing punctuation. "
+            "Keep the title's language and distinctive words (the tool, the number, "
+            "the object of the claim: receipt, terminal, bill). "
+            "Prefer naming the object of the angle (receipt, terminal, invoice) "
+            "when it is already in the title; never swap in a generic 💸 emoji punch. "
+            "Return ONLY the compressed hook."
         )
         prompt = (
-            f"Video title: {base}\n"
+            f"Video title: {spoken or (title or subject or '')}\n"
             f"Format: {fmt_hint}\n\n"
-            "Write the thumbnail hook — a curiosity gap that does NOT repeat the title's "
-            "words."
+            "Compress THIS claim into ≤8 words — same claim, not a new hook."
         )
         out = _llm(prompt, system=system, max_tokens=100).strip()
         out = re.sub(r'^["\'`]+|["\'`]+$', "", out).splitlines()[0].strip()
         words = out.split()
-        if 2 <= len(words) <= 8 and len(out) <= 60:
+        if 2 <= len(words) <= 8 and len(out) <= 60 and craft.claim_aligned(out, spoken):
             return out
     except Exception as e:
-        logger.info("thumbnail hook LLM failed, using title: %s", e)
-    # Fallback: first ~5 words of the title in Title Case.
-    return " ".join(base.split()[:5]).title() or "Watch This"
+        logger.info("thumbnail hook LLM failed, using spoken claim: %s", e)
+    return fallback
 
 
 def _thumbnail_html(hook: str, accent: str = "#5b8cff",
-                    bg_deep: str = "#1b2a6b") -> str:
-    """A deterministic, guaranteed-valid static hook card. One clip, fully visible
-    for the whole (tiny) duration; the timeline is non-empty so HyperFrames seeks it
-    cleanly, and every extracted frame shows the text."""
+                    bg_deep: str = "#1b2a6b", brand: str | None = None) -> str:
+    """Static claim card. Object-of-angle still (receipt / terminal chrome), not a
+    generic emoji hook. Brand: os = B&W; rr = warm personal; else legacy."""
     pad = int(_W * 0.07)
-    font = int(_W * 0.085)
+    font = int(_W * 0.078)
+    fg = "#f4efe8" if brand == "rr" else "#ffffff"
+    bar = accent if brand != "os" else "#f5f5f5"
+    # Receipt/terminal slab — Designer winners were the object of the claim, not 💸.
+    slab_bg = "rgba(255,255,255,.04)" if brand != "os" else "rgba(255,255,255,.06)"
+    slab_border = accent if brand != "os" else "#888"
     return f"""<!doctype html>
 <html lang="en" data-resolution="landscape">
 <head><meta charset="UTF-8"/>
 <script src="gsap.min.js"></script>
 <style>
   html,body{{margin:0;padding:0;width:{_W}px;height:{_H}px;overflow:hidden;
-    font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}}
+    font-family:{'-apple-system,Segoe UI,Helvetica,Arial,sans-serif'}}}
   #root{{width:{_W}px;height:{_H}px;position:relative;
-    background:radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#0b0b16 60%)}}
-  #accent{{position:absolute;left:0;top:0;height:18px;width:100%;
-    background:linear-gradient(90deg,{accent},#a36bff,#ff5bb0)}}
+    background:radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#000 62%)}}
+  #accent{{position:absolute;left:0;top:0;height:10px;width:100%;background:{bar}}}
+  #slab{{position:absolute;left:{pad}px;right:{pad}px;top:18%;bottom:18%;
+    border:3px solid {slab_border};background:{slab_bg};border-radius:8px;
+    box-sizing:border-box}}
+  #chrome{{position:absolute;left:{pad + 28}px;top:20%;font-family:ui-monospace,Menlo,Consolas,monospace;
+    color:{accent};font-size:28px;letter-spacing:.12em;opacity:.85}}
   #hook{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    padding:0 {pad}px;box-sizing:border-box;text-align:center;color:#fff;opacity:1;
+    padding:0 {pad + 40}px;box-sizing:border-box;text-align:center;color:{fg};opacity:1;
     font-size:{font}px;font-weight:800;line-height:1.04;letter-spacing:-2px;
     text-shadow:0 6px 28px rgba(0,0,0,.55)}}
 </style></head>
@@ -107,7 +113,9 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
   <div id="root" data-composition-id="master" data-width="{_W}" data-height="{_H}"
        data-start="0" data-duration="1">
     <div id="accent"></div>
-    <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="0">{_esc(hook)}</div>
+    <div id="slab" class="clip" data-start="0" data-duration="1" data-track-index="0"></div>
+    <div id="chrome">RECEIPT</div>
+    <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
   </div>
   <script>
     window.__timelines = window.__timelines || {{}};
@@ -142,18 +150,20 @@ def _extract_frame(mp4: Path, out_png: Path) -> None:
 
 def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
                        topic_id: int | None = None,
-                       content_format: str = "short") -> Path | None:
+                       content_format: str = "short",
+                       brand: str | None = None) -> Path | None:
     """Build a custom thumbnail PNG at `out_png`. Returns the path, or None on any
     failure (caller treats thumbnails as best-effort)."""
     out_png = Path(out_png)
     work = out_png.parent / ".thumb_work"
     try:
-        tokens = resolve(topic_id, subject)
+        tokens = resolve(topic_id, subject, brand=brand)
         accent, bg_deep = tokens["accent"], tokens["bg_deep"]
         work.mkdir(parents=True, exist_ok=True)
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
         hook = _hook_text(subject, title, content_format=content_format)
-        (work / "index.html").write_text(_thumbnail_html(hook, accent=accent, bg_deep=bg_deep))
+        (work / "index.html").write_text(
+            _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand))
         _render(work, work / "thumb.mp4")
         _extract_frame(work / "thumb.mp4", out_png)
         return out_png

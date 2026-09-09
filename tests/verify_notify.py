@@ -274,7 +274,8 @@ youtube.get_service = _raise_needs_connect
 youtube.has_token = lambda slug: True
 s = fresh_session()
 ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
-v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T")
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+               title="T · Copilot Credits 1")
 
 cap = CaptureAlerts()
 publish_loop._publish_one(s, ch, v)
@@ -285,7 +286,8 @@ ok(len(cap.records) == 1, "a repeat NeedsConnect on the dead channel adds no ale
 
 youtube.has_token = lambda slug: False   # the token *file* itself vanished
 ch3 = make_channel(s, slug="ch-gone")
-v3 = make_video(s, ch3, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title="T")
+v3 = make_video(s, ch3, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+                title="T · Copilot Credits 1")
 publish_loop._publish_one(s, ch3, v3)
 ok(ch3.oauth_status == OAuthStatus.DISCONNECTED,
    "token-file loss classifies as DISCONNECTED (not the old EXPIRED mislabel)")

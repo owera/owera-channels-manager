@@ -27,15 +27,11 @@ For a small channel, discovery is gated by **CTR** and the **first 3 seconds**. 
 ## The levers
 
 ### R1 — Hook (0–2 seconds)  ·  PRIORITY 1
-**Good:** the very first frame shows the hook beat (no dead air — the hook beat must start at t=0),
-and the first spoken line voices the viewer's *pain / tension / doubt* — not a preamble. The viewer
-thinks "that's exactly my problem" within 2 seconds. Concrete stakes (a number, a loss, a failure).
-No "In this video / Today / Welcome".
+**Good:** the very first frame shows the hook beat at t=0, and that on-screen text IS the first spoken sentence (the title hook) or a faithful ≤8-word compression of that same claim — Decolar lock. Repeating the title is required. No second typographic hook, no curiosity-gap slogan, no hook emoji as a second punch. The spoken line still voices the viewer's pain. No "In this video / Today / Welcome".
 **Controls:** `app/services/engines/worker.py` `_generate_script` (opening line);
-`app/services/engines/storyboard.py` hook beat + `_system_prompt`; `app/services/thumbnail.py`
+`app/services/engines/storyboard.py` `_lock_opening_hook` + `_system_prompt`; `app/services/thumbnail.py`
 `_hook_text`; titles in `app/services/metadata.py` / `app/services/video_gen.py`.
-**Self-review:** read frame `b0` — is the hook on screen at ~1s with a punchy line? Read the script's
-first sentence — pain-first or preamble?
+**Self-review:** read frame `b0` — does it say the same claim as the first spoken sentence / title?
 **Signal (later):** hook-hold = retention at the first decile; CTR.
 
 ### R2 — Information gain per second  ·  PRIORITY 3
@@ -77,18 +73,15 @@ repeating, or does it just stop?
 **Signal:** ending retention, rewatches.
 
 ### R7 — Call to action  ·  PRIORITY 8
-**Good:** exactly one clear reason to follow, tied to the value just delivered; a clean `cta` beat last.
-**Controls:** `storyboard` cta beat, script close.
-**Self-review:** is there a single, specific CTA (not a generic "like and subscribe")?
-**Signal:** subscribers_gained.
+**Good:** a builder/confiança close — the lesson in one line. ZERO Follow / Siga / Siga-amanhã / follow-for-more / waitlist / Cloud-as-product / SMY / Instagram / LinkedIn CTAs on Shorts.
+**Controls:** `storyboard` cta beat (`_sanitize_cta`), `worker._generate_script`, `app/services/craft.py`.
+**Self-review:** is the last card a punch, not a follow ask?
+**Signal:** subscribers_gained (indirect — trust, not a spoken Follow).
 
 ### R8 — Thumbnail + title CTR  ·  PRIORITY 2
-**Good:** thumbnail is a high-contrast hook card with a curiosity gap that matches the video; title
-leads with the viewer's problem, has concrete stakes, and is not clickbait it doesn't pay off. Title
-and thumbnail don't say the same words.
-**Controls:** `app/services/thumbnail.py`, `app/services/metadata.py`, `app/services/video_gen.py` titles.
-**Self-review:** read the generated thumbnail hook + title together — would you click? Do they create
-a gap the video closes?
+**Good:** thumbnail IS the title hook (first spoken sentence, or ≤8-word compression of that same claim). Repeating the title is required — no curiosity gap, no second slogan. Prefer the object of the angle (receipt, terminal, bill) over generic emoji. Title leads with the viewer's problem and carries `· <series> <nn>`.
+**Controls:** `app/services/thumbnail.py`, `app/services/metadata.py`, `app/services/craft.py` title gate.
+**Self-review:** read thumb + title together — same claim?
 **Signal:** CTR, impressions (once measured).
 
 ### R9 — Audio  ·  PRIORITY 9
@@ -98,10 +91,9 @@ a gap the video closes?
 **Signal:** retention (bad audio kills it).
 
 ### R10 — Brand / visual identity  ·  PRIORITY 10
-**Good:** consistent per-topic accent (matches the thumbnail — already wired via `theme.resolve`),
-varied backgrounds, not obviously templated. A viewer recognizes the channel.
-**Controls:** `app/services/engines/theme.py`, `storyboard` backgrounds.
-**Self-review:** does the accent match the thumbnail? Do consecutive videos look distinct yet on-brand?
+**Good:** Owera Software = B&W brand; Rodrigo Recio = personal warm look. No shared neon. Accent still matches the thumbnail via `theme.resolve(..., brand=)`.
+**Controls:** `app/services/engines/theme.py` brand palettes, `storyboard` backgrounds, `thumbnail._thumbnail_html`.
+**Self-review:** is ch1 black/white and ch2 personal, not the old rainbow?
 **Signal:** CTR, recall.
 
 ### R11 — Format fit  ·  PRIORITY 11

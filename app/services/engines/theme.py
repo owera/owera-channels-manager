@@ -39,22 +39,86 @@ def _subject_hash(subject: str) -> int:
     return int(hashlib.sha1((subject or "").encode()).hexdigest(), 16)
 
 
-def resolve(topic_id=None, subject: str = "") -> dict:
+# Owera Software (ch1): B&W brand. No neon. Topic still shifts the gray so two
+# videos aren't identical, but every token stays in the black/white family.
+_OS_PALETTE = [
+    ("#f5f5f5", "#0a0a0a"),
+    ("#e8e8e8", "#111111"),
+    ("#ffffff", "#000000"),
+    ("#d0d0d0", "#141414"),
+    ("#f0f0f0", "#0d0d0d"),
+    ("#c8c8c8", "#101010"),
+    ("#eeeeee", "#0b0b0b"),
+    ("#dadada", "#121212"),
+]
+_OS_VARIANTS = ("scan", "overlay", "gradient", "scan", "overlay")
+
+# Rodrigo Recio (ch2): personal warm ink, not the shared neon rainbow.
+_RR_PALETTE = [
+    ("#c45c26", "#1c1410"),   # rust
+    ("#b8956a", "#18140f"),   # ink-gold (muted)
+    ("#8b5e3c", "#16120e"),   # leather
+    ("#d4a574", "#1a1510"),   # paper
+    ("#a0673b", "#14110d"),   # walnut
+    ("#c4a484", "#1b160f"),   # kraft
+    ("#9a6b4f", "#17130f"),   # clay
+    ("#e0c4a0", "#1c1711"),   # cream-ink
+]
+_RR_VARIANTS = ("gradient", "overlay", "scan", "gradient", "overlay")
+
+
+def resolve(topic_id=None, subject: str = "", brand: str | None = None) -> dict:
     """Resolve the visual theme for a video.
 
     The palette is keyed by ``topic_id`` (matching the thumbnail, which also keys by
     topic_id) so the in-video accent equals the thumbnail accent; it falls back to a
     subject hash when topic_id is missing. The background variant always varies by
     subject so two videos under the same topic still look distinct.
+
+    ``brand``: ``"os"`` Owera B&W, ``"rr"`` Rodrigo personal, ``None`` legacy neon
+    (kept so unbranded unit tests and leftover templates stay deterministic).
     """
     try:
         tid = int(topic_id) if topic_id else 0
     except (TypeError, ValueError):
         tid = 0
+    h = _subject_hash(subject)
+    if brand == "os":
+        pal, variants = _OS_PALETTE, _OS_VARIANTS
+        if tid:
+            accent, bg_deep = pal[tid % len(pal)]
+        else:
+            accent, bg_deep = pal[h % len(pal)]
+        return {
+            "accent": accent,
+            "bg_deep": bg_deep,
+            "bg_base": "#000000",
+            "fg": "#ffffff",
+            "fg_dim": "#b0b0b0",
+            "mono": MONO_STACK,
+            "sans": _SANS_STACK,
+            "bg_variant": variants[h % len(variants)],
+        }
+    if brand == "rr":
+        pal, variants = _RR_PALETTE, _RR_VARIANTS
+        if tid:
+            accent, bg_deep = pal[tid % len(pal)]
+        else:
+            accent, bg_deep = pal[h % len(pal)]
+        return {
+            "accent": accent,
+            "bg_deep": bg_deep,
+            "bg_base": "#14110e",
+            "fg": "#f4efe8",
+            "fg_dim": "#c4b8a8",
+            "mono": MONO_STACK,
+            "sans": _SANS_STACK,
+            "bg_variant": variants[h % len(variants)],
+        }
     if tid:
         accent, bg_deep = PALETTE[tid % len(PALETTE)]
     else:
-        accent, bg_deep = PALETTE[_subject_hash(subject) % len(PALETTE)]
+        accent, bg_deep = PALETTE[h % len(PALETTE)]
     return {
         "accent": accent,
         "bg_deep": bg_deep,
@@ -63,7 +127,7 @@ def resolve(topic_id=None, subject: str = "") -> dict:
         "fg_dim": "#c9d2ff",
         "mono": MONO_STACK,
         "sans": _SANS_STACK,
-        "bg_variant": BG_VARIANTS[_subject_hash(subject) % len(BG_VARIANTS)],
+        "bg_variant": BG_VARIANTS[h % len(BG_VARIANTS)],
     }
 
 
