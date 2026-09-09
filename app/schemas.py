@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ChannelCreate(BaseModel):
@@ -26,6 +26,15 @@ class ChannelUpdate(BaseModel):
     # publish_tz (IANA name, e.g. "America/Sao_Paulo"). Null/"" clears.
     publish_windows: Optional[str] = None
     publish_tz: Optional[str] = None
+
+    @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
+    @classmethod
+    def _reject_bool_budget(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # 0 is a legal stall, so false would silently park the channel.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer >= 0, not a boolean")
+        return v
 
 
 class PlaylistCreate(BaseModel):

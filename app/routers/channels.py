@@ -104,6 +104,23 @@ def _slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:60]
 
 
+def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
+    """Reject JSON null / bool / below-floor ints before they hit the DB.
+
+    ``int`` columns on Channel are NOT NULL. ``setattr(..., None)`` persists
+    SQL NULL, and the next ``published_today >= channel.daily_publish_budget``
+    (or ``rendered_today + in_flight >= channel.daily_render_budget``)
+    TypeErrors the tick. JSON bools are rejected earlier by ChannelUpdate
+    (lax Optional[int] would coerce false→0, a silent stall); the bool
+    check here is defense in depth for non-HTTP callers.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, int) or isinstance(v, bool) or v < minimum:
+        raise HTTPException(400, hint)
+
+
 @router.get("")
 def list_channels(session: Session = Depends(get_session)):
     return session.exec(select(Channel).order_by(Channel.id)).all()
@@ -143,6 +160,17 @@ def update_channel(channel_id: int, body: ChannelUpdate, session: Session = Depe
     if not ch:
         raise HTTPException(404, "channel not found")
     fields = body.model_dump(exclude_unset=True)
+    # 0 is a legal stall (#27/#28). null TypeErrors the publish/render ticks
+    # (published_today >= budget; rendered_today + in_flight >= budget).
+    # Negative is the same skip as 0 but a typo — 400 rather than a silent park.
+    _require_int(fields, "daily_render_budget", 0,
+                 "daily_render_budget must be >= 0 "
+                 "(null TypeErrors the render tick: "
+                 "rendered_today + in_flight >= budget)")
+    _require_int(fields, "daily_publish_budget", 0,
+                 "daily_publish_budget must be >= 0 "
+                 "(null TypeErrors the publish tick: "
+                 "published_today >= budget)")
     # Refuse malformed publish windows here: the loop fails open on a bad stored
     # spec (mistimed publishes beat a silently-stalled channel), so the API must
     # be the place a typo actually surfaces. Empty strings clear the field.

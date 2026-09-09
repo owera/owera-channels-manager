@@ -1325,6 +1325,9 @@ flag the operator step in the commit body.
   pins; helper drive already covered min=0). Isolated commit;
   `Settings.tsx` / `intFromBlur.ts` / channel PATCH untouched.
   Topic generate-count still `Number()`s (not a money-path stall).
+  Discovered follow-up shipped as #36: the API still `setattr`s JSON
+  `null` into the budget columns (growth-agent / curl), TypeErroring
+  the publish/render ticks.
 - **why (found 2026-09-07 shipping #34, not bundled):** Settings
   empty-blur was a 400 after the API floor. Channel budgets accept
   0, so the same blur silently halted publish/render.
@@ -1333,3 +1336,32 @@ flag the operator step in the commit body.
 - **acceptance:** empty/invalid budget blur does not PATCH; field
   restores to the current value; a typed `0` still PATCHes; a typed
   `2` still PATCHes.
+
+### 36. ✅ DONE (code shipped to main 2026-09-09) PATCH /api/channels rejects null/negative budgets — normal
+- **resolution (2026-09-09):** `_require_int` is the choke point on
+  `PATCH /api/channels/{id}`: JSON null / below-0 ints 400 before any
+  setattr. JSON bool is rejected earlier by
+  `ChannelUpdate._reject_bool_budget` (`mode="before"`) because lax
+  `Optional[int]` would coerce `false→0` / `true→1` and 0 is a legal
+  stall — the same silent park #35 just stopped the SPA from sending.
+  `daily_publish_budget` / `daily_render_budget` must be `>= 0`
+  (null TypeErrors `published_today >= budget` and
+  `rendered_today + in_flight >= budget`). A 400 mixed body writes
+  none of the fields. `default_render_profile_id` stays nullable.
+  Suite: `tests/verify_channels.py` (67 checks). Isolated commit;
+  oauth start/callback / `publish_loop.py` untouched. Frontend
+  empty-blur already restored in #35 — this is the API floor the
+  growth agent and curl still hit. `POST /api/channels` create
+  still accepts negative/bool (null already 422) — not bundled.
+- **why (found 2026-09-08 shipping #35, not bundled):** Channels.tsx
+  empty-blur no longer PATCHes 0/NaN, but `exclude_unset` still
+  forwards JSON `null` and the handler setattr'd it. A growth-agent
+  or curl `{"daily_publish_budget": null}` persisted SQL NULL and
+  the next publish tick TypeError'd inside `_safe`.
+- **caution:** normal (`channels.py` PATCH only; oauth paths
+  untouched). Isolated commit + regression tests. Not a schema
+  migration.
+- **acceptance:** PATCH budget=null / -1 is 400 and leaves the row
+  unchanged; JSON true/false is 4xx and writes nothing; 0 still
+  persists; a valid PATCH still persists; omitted fields stay put;
+  sibling channel untouched.
