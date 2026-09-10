@@ -108,9 +108,13 @@ def _mpt_ok(subject, script, platform="youtube_shorts", language="en-US"):
 with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_ok):
     out = metadata.generate("Subj", "the script body", content_format="short",
                             language="Brazilian Portuguese")
-ok(out == metadata._from_meta("Subj", {
+mapped = metadata._from_meta("Subj", {
     "title": "MPT Title", "caption": "MPT cap", "hashtags": ["#mpt"],
-}), "MPT hit → _from_meta of its payload (no litellm)")
+})
+ok(out["description"] == mapped["description"] and out["tags"] == mapped["tags"],
+   "MPT hit → caption/tags from _from_meta of its payload (no litellm)")
+ok(out["title"] == "the script body",
+   "Decolar: unpatterned short title locks to the first spoken sentence")
 ok(_calls[-1]["platform"] == "youtube_shorts",
    "short format → platform=youtube_shorts")
 ok(_calls[-1]["language"] == "pt-BR",
@@ -171,7 +175,8 @@ with patch.object(metadata.mpt, "social_metadata", return_value=None), \
      patch.object(metadata, "complete", side_effect=_fake_complete):
     out = metadata.generate("Subj", "script text", content_format="short",
                             language="Brazilian Portuguese")
-ok(out["title"] == "LLM Title", "LLM title used when MPT returns None")
+ok(out["title"] == "script text",
+   "Decolar: unpatterned LLM title locks to the first spoken sentence")
 ok(out["tags"][:3] == ["llm", "ai", "code"], "LLM hashtags stripped + kept")
 ok(metadata.EXTRA_TAGS[0] in out["tags"], "EXTRA_TAGS still appended on LLM path")
 ok(len(_llm_calls) == 1, "exactly one llm.complete call on the fallback path")
@@ -182,6 +187,8 @@ ok("Shorts" in prompt or "short" in prompt.lower(),
    "short format uses the Shorts copywriter prompt")
 ok("no Follow/Siga" in prompt,
    "shorts caption brief bans Follow/Siga/waitlist CTAs")
+ok("DECOLAR" in prompt and "first spoken sentence" in prompt,
+   "shorts title brief is the Decolar lock (title = spoken hook)")
 ok("Subject: Subj" in prompt and "script text" in prompt,
    "subject + script reach the LLM prompt")
 
@@ -217,8 +224,10 @@ def _fenced_complete(prompt, system=None, max_tokens=None):
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
      patch.object(metadata, "complete", side_effect=_fenced_complete):
     out_f = metadata.generate("S", "x")
-ok(out_f["title"] == "Fenced",
+ok(out_f["tags"][0] == "x" and "c" in (out_f.get("description") or ""),
    "markdown-fenced JSON from the LLM is stripped and parsed")
+ok(out_f["title"] == "x",
+   "Decolar still locks the fenced-JSON title to the first spoken sentence")
 
 
 print("generate: grok -p / OIDC failure is not papered over")
@@ -248,8 +257,10 @@ def _garbage_complete(*a, **k):
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
      patch.object(metadata, "complete", side_effect=_garbage_complete):
     out_g = metadata.generate("S", "x")
-ok(out_g == {"title": "S", "description": "S", "tags": list(metadata.EXTRA_TAGS)},
-   "unparseable LLM body → same last-resort heuristic")
+ok(out_g["description"] == "S" and out_g["tags"] == list(metadata.EXTRA_TAGS),
+   "unparseable LLM body → last-resort heuristic for caption/tags")
+ok(out_g["title"] == "x",
+   "Decolar: heuristic title still locks to the first spoken sentence")
 
 # empty content from LLM
 def _empty_complete(*a, **k):
@@ -259,7 +270,7 @@ def _empty_complete(*a, **k):
 with patch.object(metadata.mpt, "social_metadata", return_value=None), \
      patch.object(metadata, "complete", side_effect=_empty_complete):
     out_e = metadata.generate("S", "x")
-ok(out_e["title"] == "S", "None LLM content → heuristic (no AttributeError)")
+ok(out_e["title"] == "x", "None LLM content → heuristic then Decolar lock (no AttributeError)")
 
 
 # MPT returns empty dict / falsy → also falls through (if meta is falsy)
@@ -270,8 +281,8 @@ with patch.object(metadata.mpt, "social_metadata", return_value={}), \
     # from LLM) fails this suite.
     _llm_calls.clear()
     out_empty = metadata.generate("S", "x")
-ok(out_empty["title"] == "LLM Title",
-   "MPT empty-dict is falsy → LLM fallback (not _from_meta of {})")
+ok(out_empty["title"] == "x" and "llm" in (out_empty.get("tags") or []),
+   "MPT empty-dict is falsy → LLM fallback (not _from_meta of {}), then Decolar lock")
 
 
 # --------------------------------- finalize_description residual edges
@@ -345,6 +356,51 @@ ok(set(metadata._CTA_LINES.keys()) == {"pt", "en"},
    "_CTA_LINES keys are exactly {pt, en} (es falls through)")
 ok(metadata._SUB_CONFIRM_MARKER == "sub_confirmation=1",
    "idempotency marker pin")
+
+
+# -------------------------------------------------------------- Decolar title lock
+print("Decolar: generate() title lock")
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_ok):
+    patterned = metadata.generate(
+        "Copilot billed $27 when the model timed out. · Copilot Credits 75",
+        "A totally different opener that would have been v1249.",
+        content_format="short",
+    )
+ok(patterned["title"] == "Copilot billed $27 when the model timed out. · Copilot Credits 75",
+   "patterned subject wins verbatim (v1249 class — keep the series suffix)")
+
+def _mpt_compressed(subject, script, platform="youtube_shorts", language="en-US"):
+    return {"title": "Your RAG is slow and still getting it",
+            "caption": "c", "hashtags": ["#x"]}
+
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_compressed):
+    aligned = metadata.generate(
+        "Why RAG is slow",
+        "Your RAG is slow and still getting it wrong. Then we rerank.",
+        content_format="short",
+    )
+ok(aligned["title"] == "Your RAG is slow and still getting it",
+   "compression of the same spoken claim is kept")
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_ok):
+    drifted = metadata.generate(
+        "Fix Your Slow RAG: Add a Reranking Step in Five Lines",
+        "Your RAG is slow and still getting it wrong. You dump twenty chunks.",
+        content_format="short",
+    )
+ok(drifted["title"] == "Your RAG is slow and still getting it wrong.",
+   "shared RAG+slow words are NOT enough to keep a second slogan (ch1-code baseline)")
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_ok):
+    long_out = metadata.generate(
+        "Deep dive subject",
+        "A long-form opener that is not the title.",
+        content_format="long",
+    )
+ok(long_out["title"] == "MPT Title",
+   "long-form is exempt from the Decolar title lock")
 
 
 # -------------------------------------------------------------- module wiring
