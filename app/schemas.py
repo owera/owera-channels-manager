@@ -13,6 +13,15 @@ class ChannelCreate(BaseModel):
     daily_render_budget: int = 6
     daily_publish_budget: int = 6
 
+    @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
+    @classmethod
+    def _reject_bool_budget(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # 0 is a legal stall, so false would silently park the new channel.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer >= 0, not a boolean")
+        return v
+
 
 class ChannelUpdate(BaseModel):
     name: Optional[str] = None

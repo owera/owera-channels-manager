@@ -110,9 +110,9 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
     ``int`` columns on Channel are NOT NULL. ``setattr(..., None)`` persists
     SQL NULL, and the next ``published_today >= channel.daily_publish_budget``
     (or ``rendered_today + in_flight >= channel.daily_render_budget``)
-    TypeErrors the tick. JSON bools are rejected earlier by ChannelUpdate
-    (lax Optional[int] would coerce false→0, a silent stall); the bool
-    check here is defense in depth for non-HTTP callers.
+    TypeErrors the tick. JSON bools are rejected earlier by ChannelCreate
+    / ChannelUpdate (lax int would coerce false→0, a silent stall); the
+    bool check here is defense in depth for non-HTTP callers.
     """
     if key not in fields:
         return
@@ -131,6 +131,19 @@ def create_channel(body: ChannelCreate, session: Session = Depends(get_session))
     slug = _slugify(body.slug or body.name)
     if session.exec(select(Channel).where(Channel.slug == slug)).first():
         raise HTTPException(409, f"channel slug '{slug}' already exists")
+    fields = body.model_dump()
+    # 0 is a legal stall (#27/#28). Negative is the same skip as 0 but a
+    # typo — 400 rather than a silent park from day one. Null is already
+    # 422 (ChannelCreate budgets are required ints). JSON bool is rejected
+    # earlier by ChannelCreate._reject_bool_budget.
+    _require_int(fields, "daily_render_budget", 0,
+                 "daily_render_budget must be >= 0 "
+                 "(null TypeErrors the render tick: "
+                 "rendered_today + in_flight >= budget)")
+    _require_int(fields, "daily_publish_budget", 0,
+                 "daily_publish_budget must be >= 0 "
+                 "(null TypeErrors the publish tick: "
+                 "published_today >= budget)")
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
     ch = Channel(

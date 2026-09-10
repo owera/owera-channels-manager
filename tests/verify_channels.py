@@ -1,4 +1,5 @@
-"""Regression checks for PATCH /api/channels/{id} integer budget floors.
+"""Regression checks for PATCH /api/channels/{id} and POST /api/channels
+integer budget floors.
 
 This project has no pytest; run directly:
     PYTHONPATH=. uv run python tests/verify_channels.py
@@ -23,6 +24,13 @@ Live failure modes (same class as #33 on Settings):
 body writes none of the fields. ``default_render_profile_id`` is
 legitimately nullable and is not floored.
 
+#36 floored PATCH. POST /api/channels still accepted negative budgets
+and JSON bool (lax ``int`` coerces ``false→0`` / ``true→1``), so a
+create could persist a silent park from day one. Null is already 422
+on create (the field is a required ``int``, not ``Optional[int]``).
+The SPA omits both budgets (defaults 6/6); growth-agent / curl still
+reach this path.
+
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db,
 no network, lifespan/scheduler never started). Exits non-zero on the
 first failed assertion.
@@ -34,7 +42,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.main as main
 from app.config import settings
@@ -78,12 +86,26 @@ ok(">= (channel.daily_render_budget or 0)" not in _ren_src,
 # setattr-then-400 is observationally equivalent today (get_session does
 # not commit on HTTPException), but a later auto-commit would persist the
 # mixed body. Pin source order so that mutant dies here, not in prod.
+# Finds are scoped to update_channel: an unscoped find would hit
+# create_channel's _require_int (added in #37) and the pin would no
+# longer catch a PATCH setattr-then-400 reorder.
 _ch_src = Path(channels_router.__file__).read_text()
-_req_render = _ch_src.find('_require_int(fields, "daily_render_budget"')
-_req_publish = _ch_src.find('_require_int(fields, "daily_publish_budget"')
-_setattr = _ch_src.find("for k, v in fields.items():")
-ok(0 <= _req_render < _req_publish < _setattr,
-   "_require_int for both budgets runs before setattr")
+_update_def = _ch_src.find("def update_channel")
+_req_render = _ch_src.find('_require_int(fields, "daily_render_budget"', _update_def)
+_req_publish = _ch_src.find('_require_int(fields, "daily_publish_budget"', _update_def)
+_setattr = _ch_src.find("for k, v in fields.items():", _update_def)
+ok(0 <= _update_def < _req_render < _req_publish < _setattr,
+   "update_channel floors both budgets before setattr")
+
+_create_def = _ch_src.find("def create_channel")
+_create_end = _ch_src.find("def get_channel")
+_create_req_r = _ch_src.find('_require_int(fields, "daily_render_budget"', _create_def)
+_create_req_p = _ch_src.find('_require_int(fields, "daily_publish_budget"', _create_def)
+_create_add = _ch_src.find("session.add(ch)", _create_def)
+ok(0 <= _create_def < _create_req_r < _create_req_p < _create_add < _create_end,
+   "create_channel floors both budgets before session.add")
+ok(_create_end < _update_def,
+   "create_channel is defined before update_channel (create pin end bound)")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
@@ -127,6 +149,20 @@ def snapshot(cid: int = 1):
         "default_render_profile_id": ch.default_render_profile_id,
         "oauth_status": ch.oauth_status,
     }
+
+
+def slugs() -> set[str]:
+    with Session(engine) as s:
+        return {c.slug for c in s.exec(select(Channel)).all()}
+
+
+def n_channels() -> int:
+    with Session(engine) as s:
+        return len(list(s.exec(select(Channel)).all()))
+
+
+def post(**body):
+    return client.post("/api/channels", auth=auth, json=body)
 
 
 def patch(cid: int = 1, **body):
@@ -267,6 +303,92 @@ try:
     ok(snapshot() == before, "404 PATCH writes nothing on the live row")
 
     ok(snapshot(2) == before_b, "ch-b still at seeded 7/7 after every ch-a probe")
+
+    print("POST /api/channels: omitted budgets default to 6; 0 is legal")
+    before_a = snapshot(1)
+    before_b = snapshot(2)
+    seed_slugs = slugs()
+    r = post(name="New", slug="new-ok")
+    ok(r.status_code == 201, "POST omitted budgets is 201")
+    got = r.json()
+    ok(got.get("daily_render_budget") == 6, "omitted render budget defaults to 6")
+    ok(got.get("daily_publish_budget") == 6, "omitted publish budget defaults to 6")
+    ok(got.get("slug") == "new-ok", "POST slug is the requested slug")
+    ok(snapshot(got["id"])["daily_publish_budget"] == 6, "default publish budget persisted")
+    ok(snapshot(1) == before_a, "POST left ch-a untouched")
+    ok(snapshot(2) == before_b, "POST left ch-b untouched")
+
+    r = post(name="Zero", slug="zero-ok", daily_publish_budget=0, daily_render_budget=0)
+    ok(r.status_code == 201, "POST budget=0 is 201 (legal stall)")
+    ok(r.json().get("daily_publish_budget") == 0, "POST publish=0 persisted")
+    ok(r.json().get("daily_render_budget") == 0, "POST render=0 persisted")
+
+    r = post(name="Custom", slug="custom-ok", daily_publish_budget=2, daily_render_budget=4)
+    ok(r.status_code == 201, "POST custom budgets is 201")
+    ok(r.json().get("daily_publish_budget") == 2, "POST publish=2 persisted")
+    ok(r.json().get("daily_render_budget") == 4, "POST render=4 persisted")
+
+    print("POST /api/channels: negative / bool budgets are 4xx, write nothing")
+    n_before = n_channels()
+    before_slugs = slugs()
+
+    r = post(name="BadNeg", slug="bad-neg", daily_publish_budget=-1)
+    ok(r.status_code == 400, "POST publish budget=-1 is 400")
+    ok(">= 0" in r.text, "negative-publish POST 400 names the floor")
+    ok("bad-neg" not in slugs(), "POST publish=-1 creates no row")
+    ok(n_channels() == n_before, "POST publish=-1 does not add a row")
+
+    r = post(name="BadNegR", slug="bad-neg-r", daily_render_budget=-3)
+    ok(r.status_code == 400, "POST render budget=-3 is 400")
+    ok(">= 0" in r.text, "negative-render POST 400 names the floor")
+    ok("bad-neg-r" not in slugs(), "POST render=-3 creates no row")
+
+    # Lax int coerces false→0 before the handler. 0 is a legal stall, so
+    # without a mode=before guard this would persist a silent park.
+    r = post(name="BadFalse", slug="bad-false", daily_publish_budget=False)
+    ok(r.status_code in (400, 422),
+       "POST publish budget=false is 4xx (must not coerce to 0)")
+    ok("bad-false" not in slugs(), "POST publish=false creates no row")
+    ok(n_channels() == n_before, "POST publish=false does not add a row")
+
+    r = post(name="BadTrue", slug="bad-true", daily_publish_budget=True)
+    ok(r.status_code in (400, 422),
+       "POST publish budget=true is 4xx (must not coerce to 1)")
+    ok("bad-true" not in slugs(), "POST publish=true creates no row")
+
+    r = post(name="BadFalseR", slug="bad-false-r", daily_render_budget=False)
+    ok(r.status_code in (400, 422), "POST render budget=false is 4xx")
+    ok("bad-false-r" not in slugs(), "POST render=false creates no row")
+
+    r = post(name="BadTrueR", slug="bad-true-r", daily_render_budget=True)
+    ok(r.status_code in (400, 422), "POST render budget=true is 4xx")
+    ok("bad-true-r" not in slugs(), "POST render=true creates no row")
+
+    r = post(name="BadNull", slug="bad-null", daily_publish_budget=None)
+    ok(r.status_code in (400, 422), "POST publish budget=null is 4xx")
+    ok("bad-null" not in slugs(), "POST publish=null creates no row")
+
+    print("POST /api/channels: mixed body cannot smuggle a row past a 400")
+    r = post(name="Smuggle", slug="smuggle",
+             daily_publish_budget=-1, daily_render_budget=9)
+    ok(r.status_code == 400, "mixed POST with publish=-1 is 400")
+    ok("smuggle" not in slugs(), "400 mixed POST creates no row")
+    ok(n_channels() == n_before, "400 mixed POST adds no row")
+
+    print("POST /api/channels: duplicate slug + auth")
+    r = post(name="A", slug="ch-a")
+    ok(r.status_code == 409, "POST duplicate slug is 409")
+    ok(n_channels() == n_before, "409 POST adds no row")
+
+    r = client.post("/api/channels", json={"name": "NoAuth", "slug": "no-auth"})
+    ok(r.status_code == 401, "POST still requires auth")
+    ok("no-auth" not in slugs(), "unauthenticated POST creates no row")
+
+    ok(slugs() == seed_slugs | {"new-ok", "zero-ok", "custom-ok"},
+       "only the three valid POSTs added rows")
+    ok(slugs() == before_slugs, "invalid POSTs added no extra slugs")
+    ok(snapshot(1) == before_a, "ch-a still untouched after every POST probe")
+    ok(snapshot(2) == before_b, "ch-b still at seeded 7/7 after every POST probe")
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw

@@ -1352,7 +1352,7 @@ flag the operator step in the commit body.
   oauth start/callback / `publish_loop.py` untouched. Frontend
   empty-blur already restored in #35 — this is the API floor the
   growth agent and curl still hit. `POST /api/channels` create
-  still accepts negative/bool (null already 422) — not bundled.
+  still accepted negative/bool (null already 422) — closed as #37.
 - **why (found 2026-09-08 shipping #35, not bundled):** Channels.tsx
   empty-blur no longer PATCHes 0/NaN, but `exclude_unset` still
   forwards JSON `null` and the handler setattr'd it. A growth-agent
@@ -1365,3 +1365,27 @@ flag the operator step in the commit body.
   unchanged; JSON true/false is 4xx and writes nothing; 0 still
   persists; a valid PATCH still persists; omitted fields stay put;
   sibling channel untouched.
+
+### 37. ✅ DONE (code shipped to main 2026-09-10) POST /api/channels rejects negative/bool budgets — normal
+- **resolution (2026-09-10):** `_require_int` is now also the choke point
+  on `POST /api/channels`: below-0 ints 400 before `session.add`. JSON
+  bool is rejected earlier by `ChannelCreate._reject_bool_budget`
+  (`mode="before"`) because lax `int` coerces `false→0` / `true→1` and
+  0 is a legal stall — a create could park the channel from day one.
+  Null is already 422 (the field is a required `int`, not
+  `Optional[int]`). 0 still persists. Omitted budgets still default to
+  6/6 (the SPA path). A 400 mixed body creates no row. Suite:
+  `tests/verify_channels.py` 67 → 111. Isolated commit; oauth
+  start/callback / `publish_loop.py` untouched. PATCH floor from #36
+  unchanged.
+- **why (found 2026-09-09 shipping #36, not bundled):** PATCH floored
+  null/negative/bool, but create still assigned `body.daily_*_budget`
+  straight onto the row. Growth-agent / curl `{"daily_publish_budget":
+  -1}` or `false` persisted a silent park. The SPA omits both fields.
+- **caution:** normal (`channels.py` POST create only; oauth paths
+  untouched). Isolated commit + regression tests. Not a schema
+  migration.
+- **acceptance:** POST budget=-1 is 400 and creates no row; JSON
+  true/false is 4xx and writes nothing; 0 still persists; omitted
+  budgets still 6/6; duplicate slug still 409; sibling channels
+  untouched.
