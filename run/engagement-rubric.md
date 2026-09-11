@@ -73,10 +73,10 @@ repeating, or does it just stop?
 **Signal:** ending retention, rewatches.
 
 ### R7 — Call to action  ·  PRIORITY 8
-**Good:** a builder/confiança close — the lesson in one line. ZERO Follow / Siga / Siga-amanhã / follow-for-more / waitlist / Cloud-as-product / SMY / Instagram / LinkedIn CTAs on Shorts.
-**Controls:** `storyboard` cta beat (`_sanitize_cta`), `worker._generate_script`, `app/services/craft.py`.
-**Self-review:** is the last card a punch, not a follow ask?
-**Signal:** subscribers_gained (indirect — trust, not a spoken Follow).
+**Good:** series endcard after the claim — spoken `Subscribe — next {series} {noun}.` (≤8 words) + on-screen chip `· {series}` (optional micro `same series` if it fits). ZERO Follow / Follow-tomorrow / Siga / amanhã / waitlist / owera.com / Cloud / “part 2 coming” / SMY / 💸 / neon on the card. Must not compete with frame0. Hold ≤4.0s.
+**Controls:** `storyboard` cta beat (`_sanitize_cta`, `_cap_endcard`), `worker._generate_script` (`ensure_series_endcard_vo`), `app/services/craft.py`.
+**Self-review:** last spoken line is the Subscribe VO; last card is the series chip, not a Follow ask or a second hook.
+**Signal:** subscribers_gained.
 
 ### R8 — Thumbnail + title CTR  ·  PRIORITY 2
 **Good:** thumbnail IS the title hook (first spoken sentence, or ≤8-word compression of that same claim). Repeating the title is required — no curiosity gap, no second slogan. Prefer the object of the angle (receipt, terminal, bill) over generic emoji. Title leads with the viewer's problem and carries `· <series> <nn>`.

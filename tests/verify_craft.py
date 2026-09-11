@@ -3,6 +3,7 @@
     PYTHONPATH=. .venv/bin/python tests/verify_craft.py
 """
 import json
+import re
 import sys
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -99,6 +100,136 @@ ok(not craft.contains_banned("Retrieve wide, rerank hard, generate thin."),
 ok("Rerank hard" in craft.strip_banned(
     "Follow for more. Rerank hard. Siga amanhã."),
    "strip_banned drops CTA sentences and keeps the lesson")
+ok(not craft.contains_banned("Subscribe — next Copilot Credits trap."),
+   "series endcard VO is not a banned Follow/waitlist/Cloud CTA")
+
+
+# ---------------------------------------------------------------------------
+print("series endcard template")
+
+os_card = craft.series_endcard("Copilot billed $27. · Copilot Credits 75", brand="os")
+ok(os_card["series"] == "Copilot Credits" and os_card["noun"] == "trap",
+   "OS default series/noun = Copilot Credits / trap")
+ok(os_card["vo"] == "Subscribe — next Copilot Credits trap.",
+   "OS VO is the exact CMO line")
+ok(os_card["chip"] == "· Copilot Credits",
+   "OS chip is · Copilot Credits")
+ok(os_card["micro"] == "same series",
+   "short chip gets the same-series micro")
+ok(len(os_card["vo"].rstrip(".").split()) <= 8,
+   "OS VO is ≤8 words")
+ok(craft.endcard_clean(os_card), "OS endcard passes the hard-ban gate")
+
+rr_card = craft.series_endcard("Você lotou a VRAM. · IA 175", brand="rr")
+ok(rr_card["vo"] == "Subscribe — next IA trap." and rr_card["chip"] == "· IA",
+   "RR default VO/chip = next IA trap / · IA")
+ok(craft.endcard_clean(rr_card), "RR endcard passes the hard-ban gate")
+
+am = craft.series_endcard("Memory died between chats · Agent memory 2")
+ok(am["vo"] == "Subscribe — next Agent memory trap."
+   and am["chip"] == "· Agent memory",
+   "non-Credits/IA series only swaps {series}/{noun}")
+ok(craft.endcard_clean(am), "Agent memory endcard invents no extra CTA")
+
+bill = craft.series_endcard(
+    "Copilot billed the cancelled run · Copilot Credits 14",
+    "The receipt on the bill is the drop.",
+)
+ok(bill["noun"] == "receipt" and bill["vo"].endswith("receipt."),
+   "noun is picked from title/script (receipt before bill/drop/trap)")
+
+ok(craft.series_of(None, "os") == "Copilot Credits",
+   "missing title + OS brand → Copilot Credits")
+ok(craft.series_of(None, "rr") == "IA",
+   "missing title + RR brand → IA")
+ok(craft.series_of(None, None) == "Copilot Credits",
+   "English public fallback is Copilot Credits")
+
+pinned = craft.ensure_series_endcard_vo(
+    "Your RAG reads junk. Then we fix the embed path.",
+    "Your RAG reads junk · Copilot Credits 1",
+    brand="os",
+)
+ok(pinned.endswith("Subscribe — next Copilot Credits trap."),
+   "ensure appends the VO after the claim")
+ok(pinned.startswith("Your RAG reads junk."),
+   "ensure does not rewrite the Decolar opener")
+already = craft.ensure_series_endcard_vo(
+    "Lesson punch. Subscribe — next Local drop.",
+    "Ollama on the 3060 · Local 7",
+)
+ok(already.endswith("Subscribe — next Local drop."),
+   "already-shaped last sentence is canonicalized, not doubled")
+ok(already.count("Subscribe —") == 1, "VO is pinned once")
+
+ok(craft.ENDCARD_MAX_S == 4.0, "endcard duration ceiling is 4.0s")
+for bad in ("Follow tomorrow", "amanhã", "waitlist", "owera.com",
+            "Owera Cloud", "part 2 coming", "SMY", "💸", "neon"):
+    ok(craft.endcard_scan_banned(bad), f"endcard bans {bad!r}")
+ok(not craft.endcard_scan_banned(os_card["vo"]),
+   "canonical VO is clean of endcard bans")
+ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": "Subscribe now",
+                            "micro": ""}),
+   "Subscribe on the chip fails endcard_clean (VO-only)")
+ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": os_card["chip"],
+                            "micro": "Follow tomorrow"}),
+   "invented extra CTA on the micro fails")
+ok("Subscribe" in os_card["vo"] and craft.endcard_clean(os_card),
+   "endcard VO may contain Subscribe (Rodrigo/CoS exception — not Follow-tomorrow)")
+
+
+# ---------------------------------------------------------------------------
+print("global sanitize stays: mid-script / title / description")
+
+mid = (
+    "Your RAG reads junk. Follow tomorrow for the rest. "
+    "Join the waitlist. Owera Cloud is live. See owera.com."
+)
+cleaned = craft.strip_banned(mid)
+ok("Your RAG reads junk" in cleaned,
+   "global sanitize keeps the mid-script lesson")
+ok(not craft.contains_banned(cleaned),
+   "global sanitize is not inverted — mid-script CTAs still match")
+ok("Follow" not in cleaned and "tomorrow" not in cleaned.lower(),
+   "Follow-tomorrow is stripped from mid-script")
+ok("waitlist" not in cleaned.lower(), "waitlist is stripped from mid-script")
+ok("Cloud" not in cleaned and "owera.com" not in cleaned,
+   "Cloud / owera.com are stripped from mid-script")
+ok(not craft.contains_banned("Subscribe — next Copilot Credits trap."),
+   "endcard Subscribe VO is still allowed after the mid-script strip")
+
+pinned_mid = craft.ensure_series_endcard_vo(
+    cleaned, "Your RAG reads junk · Copilot Credits 1", brand="os",
+)
+ok(pinned_mid.endswith("Subscribe — next Copilot Credits trap."),
+   "Subscribe is pinned only as the endcard VO")
+ok(not craft.contains_banned(pinned_mid.rsplit("Subscribe —", 1)[0]),
+   "body before the endcard VO stays clean of Follow/waitlist/Cloud")
+
+for title in (
+    "Follow tomorrow the chunking fix · Copilot Credits 1",
+    "Join the waitlist · IA 1",
+    "Owera Cloud is live · Local 1",
+    "Read more at owera.com · CrewAI 1",
+):
+    ok(craft.contains_banned(title), f"title still banned: {title!r}")
+ok(not craft.contains_banned("Copilot billed the cancelled run · Copilot Credits 14"),
+   "clean patterned title is not banned")
+
+from app.services import metadata
+dirty_meta = metadata._sanitize_meta({
+    "title": "Follow tomorrow the chunking fix · Copilot Credits 1",
+    "description": "Join the waitlist. Owera Cloud is live. See owera.com.",
+    "tags": ["x"],
+})
+ok("Follow" not in (dirty_meta["title"] or ""),
+   "generic title strip still drops Follow-tomorrow")
+ok(not craft.contains_banned(dirty_meta["description"]),
+   "generic description still cannot carry Follow-tomorrow/waitlist/Cloud")
+ok("waitlist" not in (dirty_meta["description"] or "").lower()
+   and "Cloud" not in (dirty_meta["description"] or "")
+   and "owera.com" not in (dirty_meta["description"] or ""),
+   "description body is stripped of waitlist / Cloud / owera.com")
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +345,21 @@ ok("Curiosity" not in hook_html and "slogan" not in hook_html,
    "curiosity-gap hook text is overwritten, not shown")
 ok("Follow" not in html and "Siga" not in html,
    "compose does NOT force Follow/Siga (banned)")
+ok("cta-chip" in html and "· Copilot Credits" in html,
+   "compose locks the series chip (not a Follow box)")
+ok("same series" in html, "chip micro is same series when it fits")
 ok("💸" not in html.split("beat hook")[1].split("beat ")[0] if "beat hook" in html else True,
    "hook emoji is stripped (no second punch)")
+ok('class="cta-chip"' in html,
+   "shorts endcard paints class=cta-chip")
+ok('class="cta-box"' not in html and 'class="cta-arrow"' not in html,
+   "shorts endcard does not paint the neon CTA box")
+cta_html = html.split('class="beat cta"', 1)[1]
+ok("Subscribe" not in cta_html,
+   "Subscribe stays on the VO, not on the chip")
+m = re.search(r'class="beat cta"[^>]*data-duration="([0-9.]+)"', html)
+ok(m and float(m.group(1)) <= craft.ENDCARD_MAX_S + 1e-6,
+   "compose endcard hold is ≤4.0s")
 
 
 # ---------------------------------------------------------------------------
