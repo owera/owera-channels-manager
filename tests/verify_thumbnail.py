@@ -11,7 +11,7 @@ LLM fallback, HTML escape, render/extract command contracts, topic_id accent
 selection, and the never-raises outer wrapper had zero direct coverage.
 
 Covers, dependency-free (no network, no HyperFrames, no ffmpeg, no live YouTube):
-  - module contracts: YouTube 1280x720 output, landscape render size, palette
+  - module contracts: Shorts native 9:16 (720x1280) output, portrait render, palette
     is theme.PALETTE (single source), render timeout pin
   - ``_hook_text``: LLM happy path, quote/multi-line strip, word-count + length
     gates that force the title fallback, LLM exception fallback, empty →
@@ -63,10 +63,14 @@ def ok(cond, msg):
 # ---------------------------------------------------------------------------
 print("module contracts: sizes, palette identity, timeout")
 
-ok(thumbnail._OUT_W == 1280 and thumbnail._OUT_H == 720,
-   "YouTube thumbnail output is 1280x720")
-ok(thumbnail._W == 1920 and thumbnail._H == 1080,
-   "HyperFrames render canvas is landscape 1920x1080")
+ok(thumbnail._OUT_W == 720 and thumbnail._OUT_H == 1280,
+   "Shorts thumbnail output is native 9:16 720x1280")
+ok(thumbnail._W == 1080 and thumbnail._H == 1920,
+   "HyperFrames shorts canvas is portrait 1080x1920")
+ok(thumbnail._canvas("short") == (1080, 1920, 720, 1280),
+   "_canvas(short) is 9:16")
+ok(thumbnail._canvas("long") == (1920, 1080, 1280, 720),
+   "_canvas(long) stays 16:9 (this PR does not redesign long thumbs)")
 ok(thumbnail._THUMB_PALETTE is theme.PALETTE,
    "thumbnail palette IS theme.PALETTE (single source — no private copy)")
 ok(len(thumbnail._THUMB_PALETTE) == 8,
@@ -296,25 +300,54 @@ ok('id="hook"' in html_evil and "&lt;img" in html_evil,
 html_default = thumbnail._thumbnail_html("Default")
 ok("#5b8cff" in html_default and "#1b2a6b" in html_default,
    "default accent/bg match palette[0] (blue brand)")
-ok('id="slab"' in html_default and 'id="chrome"' in html_default,
-   "object-of-angle slab/chrome present (not a generic emoji punch)")
+ok('data-resolution="portrait"' in html_default,
+   "default (shorts) thumb is native 9:16 / portrait")
+ok('class="obj ' in html_default and "data-kind=" in html_default,
+   "object widget present (typography-only thumb is a hard FAIL)")
 ok('data-object="DEFAULT"' in html_default and "DEFAULT" in html_default,
    "unkeyed hook mines a concrete noun from the copy (not a hardcoded RECEIPT)")
-ok("💸" not in html_default, "default thumb is not an emoji punch")
-html_bill = thumbnail._thumbnail_html("Copilot billed the cancelled run")
-ok('data-object="BILL"' in html_bill and "BILL" in html_bill,
-   "billed spoken phrase → BILL chrome (echoes the title, not generic RECEIPT)")
+ok("💸" not in html_default and "🔥" not in html_default,
+   "default thumb is not an emoji punch")
+ok("#accent" not in html_default,
+   "neon-bar / rainbow accent strip is gone")
+html_bill = thumbnail._thumbnail_html("Copilot billed $58 when the model timed out")
+ok('data-object="BILL"' in html_bill and 'data-kind="bill"' in html_bill,
+   "billed+$ → bill UI (not generic RECEIPT, not 💸)")
+ok("$58" in html_bill, "credit counter shows the spoken amount")
+ok(html_bill.find("obj-bill") < html_bill.find('id="hook"'),
+   "object sits above the hook type (does not cover line 1)")
+html_gpu = thumbnail._thumbnail_html("VRAM 24GB batch died on the 4090")
+ok('data-kind="gpu"' in html_gpu and "💸" not in html_gpu,
+   "GPU/VRAM/batch → VRAM meter, never 💸")
+ok("24 GB" in html_gpu, "VRAM caption echoes the spoken GB")
+html_app = thumbnail._thumbnail_html("Chrome ate the tab again")
+ok('data-object="CHROME"' in html_app and 'data-kind="app"' in html_app,
+   "Chrome → named app icon, not an emoji")
+html_term = thumbnail._thumbnail_html("Ollama na RTX ainda cabe")
+ok('data-kind="terminal"' in html_term and "ollama run" in html_term,
+   "Ollama → terminal / Ollama prompt")
 html_rag = thumbnail._thumbnail_html("Sua RAG busca lixo e você culpa o modelo")
 ok('data-object="RAG"' in html_rag,
-   "PT RAG spoken phrase → RAG chrome on the thumb")
+   "PT RAG spoken phrase → RAG object on the thumb")
 html_forced = thumbnail._thumbnail_html("ignored slogan", obj={"label": "TERMINAL"})
-ok('data-object="TERMINAL"' in html_forced,
+ok('data-object="TERMINAL"' in html_forced and 'data-kind="terminal"' in html_forced,
    "explicit obj overrides hook-text mining (frame0/thumb share one object)")
+html_long = thumbnail._thumbnail_html("Hello Hook", content_format="long")
+ok('data-resolution="landscape"' in html_long,
+   "long-form thumb stays 16:9 (object beside type)")
 ok("#a36bff" not in html_default and "#ff5bb0" not in html_default,
    "rainbow accent bar (#a36bff/#ff5bb0) is gone")
+from app.services import craft as _craft
+ok(_craft.object_hard_fail(html_bill, "Copilot billed $58 when the model timed out",
+                           "Copilot billed $58 when the model timed out") is None,
+   "bill thumb passes the Designer hard-FAIL gate")
+ok(_craft.object_hard_fail('<div id="hook">only type</div>', "x", "x")
+   == "typography-only",
+   "typography-only HTML is a hard FAIL")
 
-# OS vs RR mute-scroll split on the thumb card (move #2). Object chrome (RECEIPT
-# slab) stays — that's move #1 — but identity is glow + OS mark vs burgundy stroke.
+# OS vs RR mute-scroll split on the thumb card (move #2). Object widget stays
+# (move #1) but identity is glow + OS mark vs burgundy stroke — widgets inherit
+# --obj-accent from brand stroke, not a generic slab.
 os_card = thumbnail._thumbnail_html("Hook", brand="os",
                                     th=theme.resolve(1, "hello", brand="os"))
 rr_card = thumbnail._thumbnail_html("Hook", brand="rr",
@@ -329,8 +362,12 @@ ok(theme.OS_LOGO_FILE not in rr_card, "RR thumb has no Owera asset path")
 ok("#c41e5a" in rr_card.lower() and "#4a1528" in rr_card.lower(),
    "RR thumb uses burgundy stroke + glow")
 ok("#1a1a1a" in os_card.lower(), "OS thumb uses cold glow")
-ok("RECEIPT" in os_card and "RECEIPT" in rr_card,
-   "object chrome stays on both brands (not a duplicate #1 PR)")
+ok('class="obj ' in os_card and 'class="obj ' in rr_card,
+   "object widget stays on both brands (not a typography-only card)")
+ok("--obj-accent:#c41e5a" in rr_card.lower(),
+   "RR object widget is stroked burgundy, not a generic accent slab")
+ok("#c41e5a" not in os_card.lower() and "--obj-accent:#5b8cff" not in os_card.lower(),
+   "OS object widget is not RR burgundy and not leftover neon blue")
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +516,7 @@ def _fake_render_write(job_dir: Path, out_mp4: Path) -> None:
     out_mp4.write_bytes(b"fake-mp4")
 
 
-def _fake_extract_write(mp4: Path, out_png: Path) -> None:
+def _fake_extract_write(mp4: Path, out_png: Path, **_kw) -> None:
     out_png.write_bytes(b"\x89PNG\r\nfake")
 
 

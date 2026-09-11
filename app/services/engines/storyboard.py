@@ -454,6 +454,7 @@ def _brand_css(width: int, height: int, th: dict) -> str:
 
 
 def _base_css(width: int, height: int, th: dict) -> str:
+    from app.services import craft
     fs = max(32, int(width * 0.065))
     body_fs = max(28, int(width * 0.045))
     pad = max(60, int(width * 0.08))
@@ -480,12 +481,16 @@ def _base_css(width: int, height: int, th: dict) -> str:
         "align-items:center;justify-content:center;gap:.4em;padding:0 var(--pad);box-sizing:border-box;"
         "text-align:center;opacity:0}"
         ".word{display:inline-block}"
-        # hook — spoken-noun object above type (YPP1). Stroke from brand tokens (YPP2).
-        ".hook .htext{font-size:calc(var(--fs)*1.28);font-weight:800;line-height:1.12;letter-spacing:-1px;"
-        "text-shadow:0 4px 24px rgba(0,0,0,.7)}"
-        ".hook .hobject{font-size:calc(var(--fs)*.42);font-weight:800;letter-spacing:.12em;"
-        "text-transform:uppercase;color:var(--stroke);border:2px solid var(--stroke);"
-        "padding:.18em .55em;border-radius:10px;margin-bottom:.35em}"
+        # hook — object ABOVE type (never covers line 1); no emoji; no rainbow bar
+        ".hook{flex-direction:column;justify-content:center;gap:.55em}"
+        ".hook{--obj-accent:var(--stroke);--obj-mono:var(--mono)}"
+        ".hook .hobj{flex:0 0 auto;width:min(78%,540px);max-height:36%;z-index:1;"
+        "pointer-events:none;position:relative}"
+        ".hook .htext{position:relative;z-index:2;font-size:calc(var(--fs)*1.28);font-weight:800;"
+        "line-height:1.12;letter-spacing:-1px;text-shadow:0 4px 24px rgba(0,0,0,.7)}"
+        + craft.OBJECT_CSS +
+        ((".hook{flex-direction:row;align-items:center}"
+          ".hook .hobj{width:38%;max-height:62%}") if height < width else "") +
         # statement
         ".stmt .stext{font-size:var(--fs);font-weight:800;line-height:1.3;letter-spacing:-.5px;"
         "text-shadow:0 3px 18px rgba(0,0,0,.6)}.stmt .semoji{font-size:calc(var(--fs)*.9);line-height:1}"
@@ -603,11 +608,13 @@ def render_hook(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
     from app.services import craft
-    obj = (b.get("object") or "").strip() or craft.opening_object(b.get("text"))["label"]
-    obj_html = '<div class="hobject">' + theme.esc(obj) + "</div>"
-    # Hook emoji is not the object (YPP1 hard FAIL) — never render 💸/🔥 as a punch.
-    inner = obj_html + '<div class="htext">' + _words_html(b["text"]) + "</div>"
-    tw = [_from(bid + " .hobject", s, "opacity:0,y:-12", "opacity:1,y:0", dur=0.2)]
+    spec = b.get("object_spec") or craft.opening_object(b.get("text"))
+    if b.get("object") and not b.get("object_spec"):
+        spec = craft.coerce_object({"label": b["object"], "kind": b.get("object_kind")})
+    obj = '<div class="hobj">' + craft.object_markup(spec) + "</div>"
+    # Hook emoji is a hard-FAIL as the object — never render 💸/🔥 as a punch.
+    inner = obj + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    tw = [_from(bid + " .hobj", s, "opacity:0,y:16", "opacity:1,y:0", dur=0.22)]
     tw.append(_from(bid + " .word", s + 0.05, "opacity:0,y:30", "opacity:1,y:0", dur=0.3, stagger=0.045))
     return _shell(i, b, "hook", inner), _wrap(i, ctx, tw)
 
@@ -1169,8 +1176,8 @@ def _lock_opening_hook(beats, script, subject) -> None:
     'modelo') so frame0 diverged from spoken/title. The opener is already ~10
     words; 12 is a wrap-safe ceiling, not a compression slogan.
 
-    Also stamps a concrete ``object`` on beat 0 so render_hook / the thumb share
-    the same chrome (receipt, terminal, named tool) instead of emoji or oars.
+    Also stamps a concrete ``object_spec`` on beat 0 so render_hook / the thumb
+    share the same widget (bill / receipt / GPU meter / app / terminal).
     """
     from app.services import craft
     claim = craft.spoken_hook_source(None, script, subject)
@@ -1188,6 +1195,7 @@ def _lock_opening_hook(beats, script, subject) -> None:
     # YPP1: object is the noun of the spoken first phrase (not a leftover LLM prop).
     b0["object"] = derived["label"]
     b0["object_kind"] = derived["kind"]
+    b0["object_spec"] = derived
     if len(beats) > 1:
         b1 = beats[1]
         b1["emoji"] = ""

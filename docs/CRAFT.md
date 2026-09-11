@@ -37,12 +37,24 @@ Ops park leftover pré-pattern items via **reject**. Do **not** mass-retitle.
 thumbnail to echo the spoken claim. Repeating the title is required.
 Curiosity-gap / “don’t reuse the title’s words” is inverted.
 
-The opening visual is a **concrete object** on frame0 AND the thumb
-(`craft.opening_object`) that echoes that spoken phrase — receipt, bill,
-terminal, RAG index, the named tool. Nonsense diagrams (generic A→B oars),
-emoji soup, and generic slides are gated / demoted. Object widgets inherit
+The opening visual is **1 concrete object** on frame0 AND the thumb
+(`craft.opening_object` + `object_markup`). The object **is the noun of the
+spoken first phrase**; hook typography stays (P1). Object sits **above**
+(9:16) or **beside** (16:9) the type — never covers line 1. Widgets inherit
 the live OS/RR stroke (cold gray + O mark / burgundy, no Owera mark) — not a
 generic slab that collapses the brand split.
+
+Designer mapping:
+
+- Copilot / credits / billed / `$` → bill UI / invoice / credit counter (large `$58` ok)
+- API / paid / product → receipt / API stub
+- GPU / VRAM / board / batch → GPU icon or VRAM meter — **not** 💸
+- Chrome / Discord / apps → named app icons
+- Ollama / local / terminal → terminal / Ollama prompt
+
+Hard FAIL: typography-only thumb/frame0; 💸/🔥 as the object; neon-bar
+rainbow; glass/abstract diagrams without the noun; punchline ≠ spoken first
+phrase. Shorts thumb is native 9:16.
 
 Live clips (not the same number):
 

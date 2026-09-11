@@ -1,13 +1,8 @@
-"""Generate a custom YouTube thumbnail (1280x720 PNG) for a published video.
+"""Generate a custom YouTube thumbnail PNG for a published video.
 
-The single biggest unused CTR lever: the pipeline rendered preview frames locally
-but never uploaded a designed thumbnail. This builds a bold, high-contrast "hook
-card" through the existing HyperFrames render path (bundled chromium — zero new
-dependencies) and extracts a still frame with ffmpeg. The hook copy comes from a
-small LLM call, falling back to the video's title.
-
-YouTube thumbnails are always 16:9 regardless of the video's aspect, so this always
-produces 1280x720 (well under YouTube's 2MB limit). Best-effort by contract: every
+Shorts (YPP move 1): native 9:16 card — concrete OBJECT above the spoken hook
+type. Long-form stays 16:9 with the object beside the type. HyperFrames renders
+the card (bundled chromium) and ffmpeg extracts a still. Best-effort: every
 entry point returns None on failure so a publish is never blocked.
 """
 
@@ -24,9 +19,9 @@ from app.services.engines.worker import _ASSETS, _esc, _llm
 
 logger = logging.getLogger("manager.thumbnail")
 
-# Render at the proven landscape preset size, then downscale to YouTube's spec.
-_W, _H = 1920, 1080
-_OUT_W, _OUT_H = 1280, 720
+# Shorts default = native 9:16 (Designer lock). Long-form uses _canvas("long").
+_W, _H = 1080, 1920
+_OUT_W, _OUT_H = 720, 1280
 _RENDER_TIMEOUT = 240            # a static card renders fast; never stall a publish
 
 # Accent palette keyed by topic_id (same topic = same brand color). Canonical home is
@@ -36,6 +31,13 @@ _RENDER_TIMEOUT = 240            # a static card renders fast; never stall a pub
 _THUMB_PALETTE = PALETTE
 
 
+def _canvas(content_format: str = "short") -> tuple[int, int, int, int]:
+    """render_w, render_h, out_w, out_h. Shorts = 9:16; long = 16:9."""
+    if (content_format or "short") == "long":
+        return 1920, 1080, 1280, 720
+    return 1080, 1920, 720, 1280
+
+
 def _hook_text(subject: str, title: str | None,
                content_format: str = "short") -> str:
     """Frame-0 / thumb copy: the spoken title hook, not a curiosity gap.
@@ -43,6 +45,7 @@ def _hook_text(subject: str, title: str | None,
     Decolar lock — MUST equal the first spoken sentence (the title before `·`)
     or a faithful ≤8-word compression of that same claim. Repeating the title
     is required. A drifted LLM slogan falls back to the compressed claim.
+    Typography of the hook STAYS (P1) — the object widget proves the angle.
     """
     from app.services import craft
     spoken = craft.spoken_hook_source(title, None, subject)
@@ -84,90 +87,99 @@ def _hook_text(subject: str, title: str | None,
 def _thumbnail_html(hook: str, accent: str = "#5b8cff",
                     bg_deep: str = "#1b2a6b", brand: str | None = None,
                     th: dict | None = None,
-                    obj: dict | str | None = None) -> str:
-    """Static claim card. Object-of-angle still (receipt / terminal / named tool),
-    not a generic emoji hook. Chrome label echoes the spoken first phrase.
-    Brand: os = B&W + O mark; rr = burgundy glow, no logo;
-    else legacy (keeps the solid accent bar so unbranded tests stay pinned)."""
+                    obj: dict | str | None = None,
+                    content_format: str = "short") -> str:
+    """Object-above-type 9:16 card (shorts) or object-beside (long).
+
+    Object proves the spoken angle (bill / receipt / GPU / app / terminal).
+    Hook typography stays. Widgets are themed by YPP2 brand tokens:
+    os = cold gray stroke + O crop; rr = burgundy #C41E5A stroke, no mark;
+    else legacy neon (accent bar kept so unbranded tests stay pinned).
+    """
     from app.services import craft
     if brand and not th:
         tokens = theme_mod.resolve(None, hook, brand=brand)
     else:
         tokens = th or {}
-    if isinstance(obj, dict) and obj.get("label"):
-        label = str(obj["label"])
-    elif isinstance(obj, str) and obj.strip():
-        label = obj.strip()
-    else:
-        label = craft.opening_object(hook)["label"]
-    pad = int(_W * 0.07)
-    font = int(_W * 0.078)
+    spec = craft.coerce_object(obj) if obj is not None else craft.opening_object(hook)
+    rw, rh, _, _ = _canvas(content_format)
+    portrait = rh >= rw
+    pad = int(rw * 0.08)
+    font = int(rw * (0.072 if portrait else 0.068))
     fg = tokens.get("fg") or "#ffffff"
     bg_base = tokens.get("bg_base") or "#000"
     glow = tokens.get("glow") or bg_deep
     glow2 = tokens.get("glow2") or bg_base
     stroke = tokens.get("stroke") or accent
     logo = tokens.get("logo") if brand == "os" else ""
-    inset = theme_mod.mark_inset_px(_W, _H)
-    logo_h = theme_mod.logo_height_px(_H)
+    inset = theme_mod.mark_inset_px(rw, rh)
+    logo_h = theme_mod.logo_height_px(rh)
+    resolution = "portrait" if portrait else "landscape"
+    obj_accent = stroke if brand in ("os", "rr") else accent
 
     if brand == "os":
         bg = f"radial-gradient(120% 90% at 18% 0%,{glow} 0%,{bg_base} 64%)"
-        slab_bg = "transparent"
-        slab_border = stroke
         bar_html = ""
         mark_html = (f'<img id="brand-mark" src="{_esc(logo)}" alt="" />'
                      if logo else "")
         mark_css = (f"#brand-mark{{position:absolute;left:{inset}px;bottom:{inset}px;"
                     f"height:{logo_h}px;width:auto;opacity:.9;z-index:5;pointer-events:none}}")
-        chrome_color = stroke
     elif brand == "rr":
         bg = (f"radial-gradient(110% 80% at 82% 0%,{glow} 0%,{glow2} 28%,{bg_base} 62%)")
-        slab_bg = "transparent"
-        slab_border = stroke
         bar_html = ""
         mark_html = ""
         mark_css = ""
-        chrome_color = stroke
     else:
         bg = f"radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#000 62%)"
-        slab_bg = "rgba(255,255,255,.04)"
-        slab_border = accent
-        bar_html = f'<div id="accent"></div>'
+        bar_html = ""
         mark_html = ""
-        mark_css = ("#accent{position:absolute;left:0;top:0;height:10px;width:100%;"
-                    f"background:{accent}}}")
-        chrome_color = accent
+        mark_css = ""
         fg = "#ffffff"
 
+    if portrait:
+        layout = (
+            f"#stage{{position:absolute;inset:0;display:flex;flex-direction:column;"
+            f"align-items:center;justify-content:flex-end;gap:{int(rh * 0.03)}px;"
+            f"padding:{int(rh * 0.10)}px {pad}px {int(rh * 0.12)}px;box-sizing:border-box}}"
+            f"#hobj{{flex:0 0 auto;width:78%;max-height:34%;--obj-accent:{obj_accent};"
+            f"--obj-mono:ui-monospace,Menlo,Consolas,monospace}}"
+            f"#hook{{flex:0 0 auto;width:100%;text-align:center;color:{fg};"
+            f"font-size:{font}px;font-weight:800;line-height:1.08;letter-spacing:-2px;"
+            f"text-shadow:0 6px 28px rgba(0,0,0,.55);z-index:2}}"
+        )
+    else:
+        layout = (
+            f"#stage{{position:absolute;inset:0;display:flex;flex-direction:row;"
+            f"align-items:center;justify-content:center;gap:{int(rw * 0.04)}px;"
+            f"padding:0 {pad}px;box-sizing:border-box}}"
+            f"#hobj{{flex:0 0 38%;max-height:70%;--obj-accent:{obj_accent};"
+            f"--obj-mono:ui-monospace,Menlo,Consolas,monospace}}"
+            f"#hook{{flex:1 1 auto;text-align:left;color:{fg};"
+            f"font-size:{font}px;font-weight:800;line-height:1.08;letter-spacing:-2px;"
+            f"text-shadow:0 6px 28px rgba(0,0,0,.55);z-index:2}}"
+        )
     brand_attr = f' data-brand="{brand}"' if brand else ""
     return f"""<!doctype html>
-<html lang="en" data-resolution="landscape"{brand_attr}>
+<html lang="en" data-resolution="{resolution}"{brand_attr}>
 <head><meta charset="UTF-8"/>
 <script src="gsap.min.js"></script>
 <style>
-  html,body{{margin:0;padding:0;width:{_W}px;height:{_H}px;overflow:hidden;
+  html,body{{margin:0;padding:0;width:{rw}px;height:{rh}px;overflow:hidden;
     font-family:{'-apple-system,Segoe UI,Helvetica,Arial,sans-serif'}}}
-  #root{{width:{_W}px;height:{_H}px;position:relative;background:{bg}}}
+  #root{{width:{rw}px;height:{rh}px;position:relative;background:{bg}}}
   {mark_css}
-  #slab{{position:absolute;left:{pad}px;right:{pad}px;top:18%;bottom:18%;
-    border:2px solid {slab_border};background:{slab_bg};border-radius:8px;
-    box-sizing:border-box}}
-  #chrome{{position:absolute;left:{pad + 28}px;top:20%;font-family:ui-monospace,Menlo,Consolas,monospace;
-    color:{chrome_color};font-size:28px;letter-spacing:.12em;opacity:.85}}
-  #hook{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    padding:0 {pad + 40}px;box-sizing:border-box;text-align:center;color:{fg};opacity:1;
-    font-size:{font}px;font-weight:800;line-height:1.04;letter-spacing:-2px;
-    text-shadow:0 6px 28px rgba(0,0,0,.55)}}
+  {layout}
+  {craft.OBJECT_CSS}
 </style></head>
 <body>
-  <div id="root" data-composition-id="master" data-width="{_W}" data-height="{_H}"
+  <div id="root" data-composition-id="master" data-width="{rw}" data-height="{rh}"
        data-start="0" data-duration="1">
     {bar_html}
-    <div id="slab" class="clip" data-start="0" data-duration="1" data-track-index="0"></div>
-    <div id="chrome" data-object="{_esc(label)}">{_esc(label)}</div>
     {mark_html}
-    <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
+    <div id="stage" class="clip" data-start="0" data-duration="1" data-track-index="0">
+      <div id="hobj">{craft.object_markup(spec)}</div>
+      <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
+    </div>
   </div>
   <script>
     window.__timelines = window.__timelines || {{}};
@@ -192,9 +204,11 @@ def _render(job_dir: Path, out_mp4: Path) -> None:
         raise RuntimeError(f"hyperframes thumbnail render failed: {tail}")
 
 
-def _extract_frame(mp4: Path, out_png: Path) -> None:
+def _extract_frame(mp4: Path, out_png: Path,
+                   content_format: str = "short") -> None:
+    _, _, out_w, out_h = _canvas(content_format)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.4", "-i", str(mp4),
-           "-frames:v", "1", "-vf", f"scale={_OUT_W}:{_OUT_H}", str(out_png)]
+           "-frames:v", "1", "-vf", f"scale={out_w}:{out_h}", str(out_png)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if r.returncode != 0 or not out_png.exists():
         raise RuntimeError(f"ffmpeg thumbnail extract failed: {(r.stderr or '')[-300:]}")
@@ -220,9 +234,9 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         obj = craft.opening_object(spoken or hook)
         (work / "index.html").write_text(
             _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand,
-                            th=tokens, obj=obj))
+                            th=tokens, obj=obj, content_format=content_format))
         _render(work, work / "thumb.mp4")
-        _extract_frame(work / "thumb.mp4", out_png)
+        _extract_frame(work / "thumb.mp4", out_png, content_format=content_format)
         return out_png
     except Exception as e:
         logger.info("custom thumbnail generation failed for %r: %s", subject, e)

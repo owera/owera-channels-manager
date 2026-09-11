@@ -768,7 +768,10 @@ xss_html, _ = storyboard.render_hook(
     dict(_CTX, dur=2.0))
 ok("<script>" not in xss_html and "&lt;script&gt;" in xss_html,
    "hook text is HTML-escaped (theme.esc)")
-ok("&lt;x&gt;" in xss_html, "hook emoji is HTML-escaped")
+ok("hemoji" not in xss_html and "💸" not in xss_html,
+   "hook does not render emoji as the object (Designer hard FAIL)")
+ok('class="obj ' in xss_html and "data-kind=" in xss_html,
+   "hook always emits an object widget (typography-only is a hard FAIL)")
 w3_html, w3_tw = storyboard.render_statement(
     {"text": "Key point", "w": 3, "start": 0.0, "dur": 2}, dict(_CTX, dur=2.0))
 ok("calc(var(--fs)*1.3)" in w3_html and "var(--accent)" in w3_html,
@@ -984,8 +987,12 @@ ok(keep_obj[0]["text"].startswith("Your RAG") and keep_obj[0]["object"] == "RAG"
    "Decolar lock stamps the spoken noun (RAG), not a leftover receipt prop")
 ok(pt_opener[0].get("object") == "RAG" and pt_opener[0].get("object_kind") == "object",
    "lock stamps RAG as the opening object (echoes the spoken phrase)")
-ok('data-object="ALPHA"' in hook_html and "hobject" in hook_html,
+ok(pt_opener[0].get("object_spec", {}).get("label") == "RAG",
+   "lock keeps the full object spec for the widget renderer")
+ok('data-object="ALPHA"' in hook_html and 'class="hobj"' in hook_html,
    "compose frame0 object echoes the first spoken token (alpha), not RECEIPT/emoji")
+ok(hook_html.find("hobj") < hook_html.find("htext"),
+   "object is above the hook type (does not cover line 1)")
 ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,

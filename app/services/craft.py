@@ -203,26 +203,40 @@ def claim_aligned(hook: str | None, spoken: str | None) -> bool:
     return bool(hw & sw)
 
 
-# Opening visual: a concrete noun that echoes the spoken title, not 💸 / A→B oars.
-# First matching hint wins — billed/invoice before copilot so "Copilot billed $27"
-# becomes BILL (the object of the angle), not a generic COPILOT badge.
+# Designer lock (YPP move 1): 1 object = the noun of the spoken first phrase.
+# Kind picks the widget (bill UI / receipt / GPU meter / named app / terminal).
+# GPU before $ so "VRAM ate $58" is a meter, never 💸. Copilot/credits/$ → bill.
 _OBJECT_HINTS = (
-    (r"\b(recibo|receipt)\b", "RECEIPT", "receipt"),
-    (r"\b(invoice|fatura)\b", "INVOICE", "receipt"),
-    (r"\b(billed|billing|bill|cobr(?:ou|ar|anca)|credits?|creditos?)\b",
-     "BILL", "receipt"),
-    (r"\b(terminal|cli|shell|stdout|stderr)\b", "TERMINAL", "terminal"),
-    (r"\b(comando|command)\b", "TERMINAL", "terminal"),
+    (r"\b(chrome|chromium)\b", "CHROME", "app"),
+    (r"\bdiscord\b", "DISCORD", "app"),
+    (r"\b(slack|vscode|notion|figma|whatsapp|telegram)\b", None, "app"),
+    (r"\bollama\b", "OLLAMA", "terminal"),
+    (r"\b(gpu|vram|rtx|egpu|e-gpu|4090|3080|placa|batch)\b", "GPU", "gpu"),
+    (r"\b(terminal|cli|shell|stdout|stderr|prompt|comando|command|local)\b",
+     "TERMINAL", "terminal"),
     (r"\b(config|\.env\b|yaml|toml)\b", "CONFIG", "terminal"),
-    (r"\b(mcp|integra(?:cao|coes)|connector|conector)\b", "MCP", "terminal"),
+    (r"(?:r\$|\$)\s*\d", "BILL", "bill"),
+    (r"\b(billed|billing|bill|cobr(?:ou|ar|anca)|credits?|creditos?|copilot)\b",
+     "BILL", "bill"),
+    (r"\b(recibo|receipt|invoice|fatura)\b", "RECEIPT", "receipt"),
+    (r"\b(api|paid|pago|produto|product)\b", "RECEIPT", "receipt"),
+    (r"\b(mcp|integra(?:cao|coes)|connector|conector)\b", "MCP", "object"),
     (r"\b(rag|retriev|chunk|embed|rerank)\b", "RAG", "object"),
     (r"\b(memor(?:y|ia)|forget|amnesia|session|sessao)\b", "MEMORY", "object"),
-    (r"\b(traceback|stack trace)\b", "TRACEBACK", "terminal"),
-    (r"\b(ollama|rtx|e?gpu)\b", "LOCAL", "object"),
     (r"\bcrew(?:ai)?\b", "CREW", "object"),
     (r"\bclaude\b", "CLAUDE", "terminal"),
-    (r"\bcopilot\b", "COPILOT", "receipt"),
 )
+
+_AMOUNT_RE = re.compile(
+    r"(?:r\$|\$)\s*(\d+(?:[.,]\d{1,2})?)|"
+    r"(\d+(?:[.,]\d{1,2})?)\s*(?:usd|credits?|creditos?)",
+    re.IGNORECASE,
+)
+_VRAM_RE = re.compile(r"(\d+)\s*(gb|%|percent)", re.IGNORECASE)
+
+# Hard-FAIL tokens: never the opening object (Designer + VM lock).
+FORBIDDEN_OBJECT_EMOJI = ("💸", "🔥")
+RAINBOW_HEX = ("#a36bff", "#ff5bb0")
 
 # Extra folds dropped when mining a fallback noun (title grammar, not the object).
 _OBJECT_STOP = STOPWORDS | {
@@ -251,24 +265,74 @@ _EMOJI_RE = re.compile(
 )
 
 
-def opening_object(text: str | None) -> dict:
-    """Concrete object chrome for frame0 + thumb, grounded in the spoken phrase.
+def _spoken_amount(text: str | None) -> str:
+    m = _AMOUNT_RE.search(text or "")
+    if not m:
+        return ""
+    n = (m.group(1) or m.group(2) or "").replace(",", ".")
+    raw = theme.fold(m.group(0))
+    if "$" in (m.group(0) or "") or raw.startswith("r$"):
+        return "$" + n
+    return n
 
-    Returns ``{"label": str, "kind": "receipt"|"terminal"|"object"}``. Label is
-    a short uppercase noun (RECEIPT / BILL / RAG / …). Kind only picks the
-    chrome treatment — not an OS/RR brand split.
+
+def _vram_fill(text: str | None) -> tuple[str, str]:
+    """(meter width %, caption) from a spoken GB/% — else a mute 70% meter."""
+    m = _VRAM_RE.search(text or "")
+    if not m:
+        return "70%", "VRAM"
+    n, unit = m.group(1), theme.fold(m.group(2))
+    if unit == "gb":
+        return "70%", n + " GB"
+    return f"{min(100, int(n))}%", n + "%"
+
+
+def opening_object(text: str | None) -> dict:
+    """Concrete object for frame0 + thumb, grounded in the spoken first phrase.
+
+    Returns label / kind / amount / prompt / app. Kind is the widget
+    (bill, receipt, gpu, app, terminal, object) — not an OS/RR brand split.
     """
-    folded = theme.fold(text or "")
+    raw = text or ""
+    folded = theme.fold(raw)
+    spec = {"label": "OBJECT", "kind": "object", "amount": "", "prompt": "",
+            "app": "", "meter": "70%", "meter_caption": "VRAM"}
     for pat, label, kind in _OBJECT_HINTS:
-        if re.search(pat, folded):
-            return {"label": label, "kind": kind}
-    words = [w for w in re.findall(r"[A-Za-zÀ-ÿ0-9$]+", text or "")
-             if theme.fold(w) not in _OBJECT_STOP and len(w) >= 3]
-    if words:
-        long_enough = [w for w in words if len(w) >= 4]
-        pick = (long_enough[0] if long_enough else words[0])
-        return {"label": pick.upper()[:16], "kind": "object"}
-    return {"label": "OBJECT", "kind": "object"}
+        m = re.search(pat, folded)
+        if not m:
+            continue
+        spec["kind"] = kind
+        spec["label"] = (label or m.group(0)).upper()[:16]
+        break
+    else:
+        words = [w for w in re.findall(r"[A-Za-zÀ-ÿ0-9$]+", raw)
+                 if theme.fold(w) not in _OBJECT_STOP and len(w) >= 3]
+        if words:
+            long_enough = [w for w in words if len(w) >= 4]
+            spec["label"] = (long_enough[0] if long_enough else words[0]).upper()[:16]
+    spec["amount"] = _spoken_amount(raw)
+    if spec["kind"] == "app":
+        spec["app"] = spec["label"]
+    if spec["kind"] == "terminal":
+        spec["prompt"] = "$ ollama run" if "ollama" in folded else "$"
+    if spec["kind"] == "gpu":
+        spec["meter"], spec["meter_caption"] = _vram_fill(raw)
+    return spec
+
+
+def coerce_object(obj) -> dict:
+    """Normalize a label-string / partial dict into a full opening_object spec."""
+    if isinstance(obj, dict) and obj.get("kind") and obj.get("label"):
+        base = opening_object(obj.get("label"))
+        base.update({k: obj[k] for k in obj if obj[k] not in (None, "")})
+        return base
+    if isinstance(obj, dict) and obj.get("label"):
+        guessed = opening_object(str(obj["label"]))
+        guessed["label"] = str(obj["label"])
+        return guessed
+    if isinstance(obj, str) and obj.strip():
+        return opening_object(obj)
+    return opening_object("")
 
 
 def object_echoes(label: str | None, spoken: str | None) -> bool:
@@ -279,6 +343,82 @@ def object_echoes(label: str | None, spoken: str | None) -> bool:
     if theme.fold(label) == theme.fold(derived):
         return True
     return claim_aligned(label, spoken)
+
+
+def object_markup(obj: dict | str | None) -> str:
+    """HTML widget for the opening object. Never emoji. Never covers hook type."""
+    spec = coerce_object(obj)
+    kind = spec["kind"]
+    label = theme.esc(spec["label"])
+    amount = theme.esc(spec.get("amount") or "")
+    attrs = (f'class="obj obj-{theme.esc(kind)}" data-object="{label}" '
+             f'data-kind="{theme.esc(kind)}"')
+    if kind == "bill":
+        big = amount or label
+        return (f'<div {attrs}><div class="obj-head">INVOICE</div>'
+                f'<div class="obj-amt">{big}</div>'
+                f'<div class="obj-line"></div><div class="obj-line obj-line-s"></div></div>')
+    if kind == "receipt":
+        extra = f'<div class="obj-amt">{amount}</div>' if amount else ""
+        return (f'<div {attrs}><div class="obj-head">RECEIPT</div>'
+                f'<div class="obj-stub">POST /v1/charges</div>{extra}'
+                f'<div class="obj-tear"></div></div>')
+    if kind == "gpu":
+        fill = theme.esc(spec.get("meter") or "70%")
+        cap = theme.esc(spec.get("meter_caption") or "VRAM")
+        return (f'<div {attrs}><div class="obj-chip"><i></i><i></i><i></i></div>'
+                f'<div class="obj-meter"><b style="width:{fill}"></b></div>'
+                f'<div class="obj-cap">{cap}</div></div>')
+    if kind == "app":
+        mark = theme.esc((spec.get("app") or spec["label"])[:2])
+        return (f'<div {attrs}><div class="obj-icon">{mark}</div>'
+                f'<div class="obj-name">{label}</div></div>')
+    if kind == "terminal":
+        prompt = theme.esc(spec.get("prompt") or "$")
+        return (f'<div {attrs}><div class="obj-tb"><i></i><i></i><i></i></div>'
+                f'<div class="obj-prompt">{prompt}</div></div>')
+    return (f'<div {attrs}><div class="obj-token">{label}</div></div>')
+
+
+# Shared widget CSS — storyboard + thumbnail. Object sits ABOVE/BESIDE the hook
+# type; it must not overlay line 1. No emoji, no rainbow bar.
+OBJECT_CSS = (
+    ".obj{display:flex;flex-direction:column;align-items:stretch;justify-content:center;"
+    "gap:.28em;width:100%;box-sizing:border-box;border:3px solid var(--obj-accent,#888);"
+    "background:rgba(0,0,0,.45);border-radius:10px;padding:.55em .7em;text-align:left}"
+    ".obj-head,.obj-cap,.obj-name,.obj-stub,.obj-prompt{font-family:var(--obj-mono,ui-monospace,Menlo,Consolas,monospace);"
+    "font-size:clamp(14px,2.1vw,22px);letter-spacing:.1em;opacity:.85;font-weight:700}"
+    ".obj-amt{font-weight:900;font-size:clamp(42px,8vw,92px);line-height:.95;letter-spacing:-2px}"
+    ".obj-line{height:6px;background:rgba(255,255,255,.22);border-radius:3px;width:88%}"
+    ".obj-line-s{width:54%}"
+    ".obj-tear{height:10px;margin-top:.2em;background:repeating-linear-gradient(90deg,"
+    "transparent 0 8px,rgba(255,255,255,.25) 8px 10px)}"
+    ".obj-chip{display:flex;gap:6px;align-items:center}"
+    ".obj-chip i{display:block;width:22px;height:22px;border:2px solid var(--obj-accent,#888);"
+    "background:rgba(255,255,255,.08)}"
+    ".obj-meter{height:14px;background:rgba(255,255,255,.12);border-radius:7px;overflow:hidden}"
+    ".obj-meter b{display:block;height:100%;background:var(--obj-accent,#888)}"
+    ".obj-icon{width:72px;height:72px;border-radius:16px;border:3px solid var(--obj-accent,#888);"
+    "display:flex;align-items:center;justify-content:center;font-weight:900;font-size:28px}"
+    ".obj-tb{display:flex;gap:6px}"
+    ".obj-tb i{display:block;width:10px;height:10px;border-radius:50%;background:var(--obj-accent,#888)}"
+    ".obj-token{font-weight:900;font-size:clamp(28px,5.4vw,56px);letter-spacing:.08em}"
+    ".obj-prompt{font-size:clamp(16px,2.6vw,28px)}"
+)
+
+
+def object_hard_fail(html: str | None, hook: str | None, spoken: str | None) -> str | None:
+    """None = pass. Reason = Designer hard-FAIL (typography-only / emoji / rainbow / drift)."""
+    h = html or ""
+    if any(tok in h for tok in FORBIDDEN_OBJECT_EMOJI):
+        return "emoji-as-object"
+    if any(c in h.lower() for c in RAINBOW_HEX):
+        return "neon-bar rainbow"
+    if 'class="obj ' not in h or "data-kind=" not in h:
+        return "typography-only"
+    if spoken and hook and not claim_aligned(hook, spoken):
+        return "punchline ≠ spoken first phrase"
+    return None
 
 
 def emoji_first(text: str | None) -> bool:
