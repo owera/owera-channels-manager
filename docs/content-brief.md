@@ -18,8 +18,8 @@ Machine-readable copy: [`schemas/content-brief.schema.json`](schemas/content-bri
 Review instances: news+social [`content-brief.example.json`](schemas/content-brief.example.json); YPP#5 Subscribe-fork [`content-brief.ypp5.example.json`](schemas/content-brief.ypp5.example.json).
 
 `publications[].network` must be the same set as `target_networks` (exactly one adapter each).
-Each publication **must** declare its own native `format` (kind + ratio + size +
-teaser duration). Do **not** reuse one generic cut across networks.
+Each publication **must** declare `kind`, `aspect`, `size`, `duration_s_max`
+(those four fields, those names). Do **not** reuse one generic cut across networks.
 
 ---
 
@@ -42,11 +42,11 @@ and not a `Topic`:
 ```
 ContentBrief
   ├─ art                    ONE object on the brief root (not a second art root)
-  └─ Publication[]          one per target network; native format lives here
-       ├─ instagram         → Reel 9:16 — Social Ops after Rodrigo yes
-       ├─ linkedin          → video 1:1 (alt 4:5) — Social Ops after Rodrigo yes
-       ├─ x                 → video 16:9 — Social Ops after Rodrigo yes
-       └─ youtube_os        → Short 9:16 — handoff to existing Video (Channels ops)
+  └─ Publication[]          one per target network; kind/aspect/size/duration_s_max live here
+       ├─ instagram         → reel 9:16 1080x1920 duration_s_max=30
+       ├─ linkedin          → video 1:1 (alt 4:5) duration_s_max=45
+       ├─ x                 → video 16:9 1920x1080 duration_s_max=30
+       └─ youtube_os        → short 9:16 1080x1920 duration_s_max=60
 ```
 
 `youtube_os` is optional: only when the brief marks it. It is a pointer into the
@@ -107,10 +107,10 @@ defaults off.
 | `angle` | pillar / angle. `source_url` **required** when `objective=news_angle_social` |
 | `voz` | **CMO delta.** EN spoken/builder. First line **is** spoken (1ª linha falada). Company English. Simple spoken cadence like Rodrigo — not a corporate teaser. |
 | `hard_nos` | locked set below (always in force; extras allowed, removals forbidden) |
-| `art` | **ONE** object on the brief root. Must illustrate **this** copy, not a generic O lockup. `asset_path` **or** Designer brief. Adaptations live on `publications[].format` — **not** a second art root. |
+| `art` | **ONE** object on the brief root. Must illustrate **this** copy, not a generic O lockup. `asset_path` **or** Designer brief. Adaptations live on `publications[]` (`kind` / `aspect` / `size` / `duration_s_max`) — **not** a second art root. |
 | `cta` | `https://owera.com` waitlist **only if natural**. **Never** in YouTube title or script |
 | `status` | machine above |
-| `publications` | one adapter object per target network; each declares native `format` |
+| `publications` | one adapter object per target network; each **must** have `kind`, `aspect`, `size`, `duration_s_max` |
 
 `voz` is the voice field. Do not add a second “copy tone” knob that can drift.
 
@@ -137,34 +137,22 @@ and `app/services/craft.py`).
 
 ## Per-network format (locked — Rodrigo YES)
 
-CMO + Designer lock. This table **replaces** any earlier LI/X still proposal
-(LI is **not** still 1.91:1; X is **not** still 1:1). Use **only** this matrix.
-Each publication declares its own native cut. Do not reuse one generic cut.
+CMO + Designer lock. Each publication **must** have these fields **exactly**:
+`kind`, `aspect`, `size`, `duration_s_max`. No generic one-cut.
 
-`linkedin` and `x` publication `format.kind` is **`video`**. Enum is `video`.
-**NEVER** `image` or `still` (or `still+caption` / `native_video`). A still may
-exist only as a **review placeholder** (`publications[].review_still` — Designer
-sample / teaser frame). It is **not** `format.kind`.
+`kind` enum: `short` \| `reel` \| `video`. `linkedin` / `x` are **`video`**
+(NOT `still` / `image`). A still may exist only as a **review placeholder**
+(`publications[].review_still`). It is **not** `kind`.
 
-| network | kind | ratio | size | teaser duration |
-| --- | --- | --- | --- | --- |
-| youtube_os | short | 9:16 | 1080×1920 | ~30–45s (≤60s) |
-| instagram | reel | 9:16 | 1080×1920 | ~15–30s |
-| linkedin | video | 1:1 (alt 4:5) | 1080×1080 (alt 1080×1350) | ~30–45s |
-| x | video | 16:9 | 1920×1080 | ~15–30s |
+| network | kind | aspect | size | duration_s_max | teaser |
+| --- | --- | --- | --- | --- | --- |
+| youtube_os | short | 9:16 | 1080x1920 | 60 | ~30-45s |
+| instagram | reel | 9:16 | 1080x1920 | 30 | ~15-30s |
+| linkedin | video | 1:1 (alt 4:5) | 1080x1080 (alt 1080x1350) | 45 | ~30-45s |
+| x | video | 16:9 | 1920x1080 | 30 | ~15-30s |
 
-Schema field map on `publications[].format`:
-
-| Table | Schema |
-| --- | --- |
-| kind short | `kind: short` (`youtube_os` only) |
-| kind reel | `kind: reel` (`instagram` only) |
-| kind video | `kind: video` (`linkedin` and `x` only) |
-| forbidden kinds | `image`, `still`, `still+caption`, `native_video` |
-| ratio / size / teaser duration | `ratio`, `size`, `teaser_duration` — exact strings from the table |
-| LinkedIn alt | `ratio: 4:5` pairs with `size: 1080×1350`; primary is `1:1` / `1080×1080` |
-
-`reuse_generic_cut` is `false` on every publication.
+LinkedIn alt: `aspect=4:5` pairs with `size=1080x1350`. Primary is `1:1` /
+`1080x1080`.
 
 `youtube_os` is the live Short pipeline, OS only (`channel_scope: os_only`).
 Do not re-spec generate / render / publish.
@@ -184,39 +172,40 @@ Do not re-spec generate / render / publish.
 
 Art stays **one** object on the brief root (`must_illustrate_copy`, no generic
 O). Those nits are fields on that same `art` object. Per-network adaptations
-(`format.kind` / `ratio` / `size` / `teaser_duration` / IG `cut`) live on
+(`kind` / `aspect` / `size` / `duration_s_max` / IG `cut`) live on
 `publications[]` only.
 
 ---
 
 ## Publication adapters
 
-### `instagram` — Reel 9:16 1080×1920 ~15–30s
+### `instagram` — reel 9:16 1080x1920 duration_s_max=30
 
 Social Ops after `rodrigo_yes`. Company English. Caption follows `voz` (first
 line spoken). Art illustrates the copy. CTA = owera.com waitlist only if the
 sentence would exist without the link.
 
-`format.kind=reel` (not story). `format.cut=object_beat_0_3s` — the object
-beat, not a random crop of the YT short.
+`kind=reel` (not story). `aspect=9:16` `size=1080x1920` `duration_s_max=30`
+(teaser ~15-30s). `cut=object_beat_0_3s` — the object beat, not a random crop
+of the YT short.
 
 `skip_gate` lives on the Publication (default `false`). Do not inherit ch1’s
 YouTube skip-gate.
 
-### `linkedin` — video 1:1 (alt 4:5)
+### `linkedin` — video 1:1 (alt 4:5) duration_s_max=45
 
 Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
 
-`format.kind=video` (never `image` / `still`). Primary `1:1` / `1080×1080`.
-Alt `4:5` / `1080×1350`. Teaser `~30–45s`. **Not** a 1.91:1 still. A still
-is a review placeholder only.
+`kind=video` (NOT `still` / `image`). Primary `aspect=1:1` `size=1080x1080`.
+Alt `aspect=4:5` `size=1080x1350`. `duration_s_max=45` (teaser ~30-45s). A
+still is a review placeholder only.
 
-### `x` — video 16:9 1920×1080 ~15–30s
+### `x` — video 16:9 1920x1080 duration_s_max=30
 
 Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
 
-`format.kind=video` (never `image` / `still`). `16:9` / `1920×1080`. **Not**
-a 1:1 still. A still is a review placeholder only.
+`kind=video` (NOT `still` / `image`). `aspect=16:9` `size=1920x1080`
+`duration_s_max=30` (teaser ~15-30s). A still is a review placeholder only.
 
 ### `youtube_os` — reference the live short pipeline, do not re-spec it
 
@@ -226,7 +215,7 @@ brief must satisfy:
 
 | Invariant | Live seat | This spec |
 | --- | --- | --- |
-| native format | live Short 9:16 1080×1920 | `kind=short`, `ratio=9:16`, `size=1080×1920`, teaser `~30–45s (≤60s)` |
+| native format | live Short 9:16 1080x1920 | `kind=short`, `aspect=9:16`, `size=1080x1920`, `duration_s_max=60` (teaser ~30-45s) |
 | frame0 = spoken `· <series> <nn>` | title gate + Decolar | same; first line **is** the spoken line |
 | Decolar object | `_lock_opening_hook` / `_hook_text` — frame0/thumb = title-before-`·` or that claim | same; also on every other publication aspect |
 | OS vs RR | `craft.brand_of` → `os` (B&W) vs `rr` (warm ink) | this hub is **OS only**; RR is out |

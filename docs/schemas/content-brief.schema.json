@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://owera.com/schemas/content-brief.schema.json",
   "title": "ContentBrief",
-  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only. Per-network format matrix is locked: youtube_os kind=short 9:16, instagram kind=reel 9:16, linkedin kind=video 1:1 (alt 4:5), x kind=video 16:9. linkedin/x kind enum is video — NEVER image or still. Stills are review placeholders only, not the publication kind.",
+  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Each publication MUST have kind, aspect, size, duration_s_max. kind enum: short | reel | video. youtube_os: short 9:16 1080x1920 duration_s_max=60. instagram: reel 9:16 1080x1920 duration_s_max=30. linkedin: video 1:1 1080x1080 (alt 4:5 1080x1350) duration_s_max=45. x: video 16:9 1920x1080 duration_s_max=30. linkedin/x kind is video — NEVER still/image. No generic one-cut.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -50,7 +50,7 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/definitions/publication" },
-      "description": "Exactly one adapter per target_networks entry. Native format lives here, not on a second art root."
+      "description": "Exactly one adapter per target_networks entry. Each item MUST have kind, aspect, size, duration_s_max. No second art root. No generic one-cut."
     }
   },
   "if": {
@@ -112,7 +112,7 @@
     "art": {
       "type": "object",
       "additionalProperties": false,
-      "description": "ONE object on the brief root. Adaptations are publications[].format, not a second art root.",
+      "description": "ONE object on the brief root. Adaptations are publications[] kind/aspect/size/duration_s_max, not a second art root.",
       "required": [
         "must_illustrate_copy",
         "generic_o_lockup",
@@ -182,7 +182,7 @@
     },
     "publication": {
       "type": "object",
-      "required": ["network", "skip_gate", "format"],
+      "required": ["network", "skip_gate", "kind", "aspect", "size", "duration_s_max"],
       "properties": {
         "network": { "$ref": "#/definitions/network" },
         "skip_gate": {
@@ -195,11 +195,34 @@
           "const": 0,
           "description": "Default 0 for newly materialized networks. Do not raise live YT budgets here."
         },
-        "format": { "$ref": "#/definitions/nativeFormat" },
+        "kind": {
+          "type": "string",
+          "enum": ["short", "reel", "video"],
+          "description": "youtube_os=short, instagram=reel, linkedin/x=video. NEVER still or image."
+        },
+        "aspect": {
+          "type": "string",
+          "enum": ["9:16", "1:1", "4:5", "16:9"],
+          "description": "Native aspect. Do not reuse one generic cut."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["1080x1920", "1080x1080", "1080x1350", "1920x1080"],
+          "description": "Native pixel size. ASCII x, not ×."
+        },
+        "duration_s_max": {
+          "type": "integer",
+          "enum": [60, 45, 30],
+          "description": "Hard max seconds. Teaser target is documented per network and must be ≤ this cap."
+        },
+        "cut": {
+          "type": "string",
+          "description": "Instagram only: object_beat_0_3s. Not a generic YT crop."
+        },
         "review_still": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional Designer review placeholder frame. NOT the publication kind. linkedin/x format.kind stays video; never image or still."
+          "description": "Optional Designer review placeholder frame. NOT the publication kind. linkedin/x kind stays video; never still or image."
         }
       },
       "allOf": [
@@ -253,132 +276,85 @@
         }
       ]
     },
-    "nativeFormat": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": ["short", "reel", "video"],
-          "description": "youtube_os=short, instagram=reel, linkedin/x=video. NEVER image or still. Stills are review placeholders only, not the publication kind."
-        },
-        "ratio": {
-          "type": "string",
-          "enum": ["9:16", "1:1", "4:5", "16:9"],
-          "description": "Native aspect. Do not reuse one generic cut."
-        },
-        "size": {
-          "type": "string",
-          "enum": ["1080×1920", "1080×1080", "1080×1350", "1920×1080"],
-          "description": "Native pixel size. Multiplication sign ×, not x."
-        },
-        "teaser_duration": {
-          "type": "string",
-          "enum": ["~30–45s (≤60s)", "~15–30s", "~30–45s"],
-          "description": "Exact teaser-duration strings from the locked table."
-        },
-        "reuse_generic_cut": {
-          "const": false,
-          "description": "Each network gets its own native cut."
-        },
-        "cut": {
-          "type": "string",
-          "description": "Instagram only: object_beat_0_3s."
-        }
-      }
-    },
     "youtubeOsFormat": {
       "type": "object",
+      "required": ["kind", "aspect", "size", "duration_s_max"],
       "properties": {
-        "format": {
-          "type": "object",
-          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
-          "properties": {
-            "kind": { "const": "short" },
-            "ratio": { "const": "9:16" },
-            "size": { "const": "1080×1920" },
-            "teaser_duration": { "const": "~30–45s (≤60s)" },
-            "reuse_generic_cut": { "const": false }
-          },
-          "not": { "required": ["cut"] }
+        "kind": { "const": "short" },
+        "aspect": { "const": "9:16" },
+        "size": { "const": "1080x1920" },
+        "duration_s_max": {
+          "const": 60,
+          "description": "Hard cap. Teaser target ~30-45s."
         }
-      }
+      },
+      "not": { "required": ["cut"] }
     },
     "instagramFormat": {
       "type": "object",
+      "required": ["kind", "aspect", "size", "duration_s_max", "cut"],
       "properties": {
-        "format": {
-          "type": "object",
-          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut", "cut"],
-          "properties": {
-            "kind": { "const": "reel" },
-            "ratio": { "const": "9:16" },
-            "size": { "const": "1080×1920" },
-            "teaser_duration": { "const": "~15–30s" },
-            "reuse_generic_cut": { "const": false },
-            "cut": {
-              "const": "object_beat_0_3s",
-              "description": "IG Reel is the object beat 0–3s, not a random crop of the YT short."
-            }
-          }
+        "kind": { "const": "reel" },
+        "aspect": { "const": "9:16" },
+        "size": { "const": "1080x1920" },
+        "duration_s_max": {
+          "const": 30,
+          "description": "Hard cap. Teaser target ~15-30s."
+        },
+        "cut": {
+          "const": "object_beat_0_3s",
+          "description": "IG Reel is the object beat 0-3s, not a random crop of the YT short."
         }
       }
     },
     "linkedinFormat": {
       "type": "object",
-      "description": "kind=video. NEVER image or still. Not still 1.91:1. Primary 1:1 / 1080×1080; alt 4:5 / 1080×1350. Stills are review placeholders only.",
+      "description": "kind=video. NEVER still or image. Primary 1:1 / 1080x1080; alt 4:5 / 1080x1350. duration_s_max=45 (teaser ~30-45s).",
+      "required": ["kind", "aspect", "size", "duration_s_max"],
       "properties": {
-        "format": {
-          "type": "object",
-          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
-          "properties": {
-            "kind": { "const": "video" },
-            "ratio": { "enum": ["1:1", "4:5"] },
-            "teaser_duration": { "const": "~30–45s" },
-            "reuse_generic_cut": { "const": false }
-          },
-          "not": { "required": ["cut"] },
-          "allOf": [
-            {
-              "if": {
-                "properties": { "ratio": { "const": "1:1" } },
-                "required": ["ratio"]
-              },
-              "then": {
-                "properties": { "size": { "const": "1080×1080" } }
-              }
-            },
-            {
-              "if": {
-                "properties": { "ratio": { "const": "4:5" } },
-                "required": ["ratio"]
-              },
-              "then": {
-                "properties": { "size": { "const": "1080×1350" } }
-              }
-            }
-          ]
+        "kind": { "const": "video" },
+        "aspect": { "enum": ["1:1", "4:5"] },
+        "duration_s_max": {
+          "const": 45,
+          "description": "Hard cap. Teaser target ~30-45s."
         }
-      }
+      },
+      "not": { "required": ["cut"] },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "aspect": { "const": "1:1" } },
+            "required": ["aspect"]
+          },
+          "then": {
+            "properties": { "size": { "const": "1080x1080" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "aspect": { "const": "4:5" } },
+            "required": ["aspect"]
+          },
+          "then": {
+            "properties": { "size": { "const": "1080x1350" } }
+          }
+        }
+      ]
     },
     "xFormat": {
       "type": "object",
-      "description": "kind=video 16:9. NEVER image or still. Not still 1:1. Stills are review placeholders only.",
+      "description": "kind=video. NEVER still or image. aspect=16:9 size=1920x1080 duration_s_max=30 (teaser ~15-30s).",
+      "required": ["kind", "aspect", "size", "duration_s_max"],
       "properties": {
-        "format": {
-          "type": "object",
-          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
-          "properties": {
-            "kind": { "const": "video" },
-            "ratio": { "const": "16:9" },
-            "size": { "const": "1920×1080" },
-            "teaser_duration": { "const": "~15–30s" },
-            "reuse_generic_cut": { "const": false }
-          },
-          "not": { "required": ["cut"] }
+        "kind": { "const": "video" },
+        "aspect": { "const": "16:9" },
+        "size": { "const": "1920x1080" },
+        "duration_s_max": {
+          "const": 30,
+          "description": "Hard cap. Teaser target ~15-30s."
         }
-      }
+      },
+      "not": { "required": ["cut"] }
     },
     "youtubeOsAdapter": {
       "type": "object",

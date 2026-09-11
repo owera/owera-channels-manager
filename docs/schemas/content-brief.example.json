@@ -46,14 +46,11 @@
       "daily_budget": 0,
       "handle": "@owerasoftware",
       "caption_first_line_is_spoken": true,
-      "format": {
-        "kind": "reel",
-        "ratio": "9:16",
-        "size": "1080×1920",
-        "teaser_duration": "~15–30s",
-        "reuse_generic_cut": false,
-        "cut": "object_beat_0_3s"
-      }
+      "kind": "reel",
+      "aspect": "9:16",
+      "size": "1080x1920",
+      "duration_s_max": 30,
+      "cut": "object_beat_0_3s"
     },
     {
       "network": "linkedin",
@@ -61,13 +58,10 @@
       "daily_budget": 0,
       "handle": "linkedin:company",
       "caption_first_line_is_spoken": true,
-      "format": {
-        "kind": "video",
-        "ratio": "1:1",
-        "size": "1080×1080",
-        "teaser_duration": "~30–45s",
-        "reuse_generic_cut": false
-      }
+      "kind": "video",
+      "aspect": "1:1",
+      "size": "1080x1080",
+      "duration_s_max": 45
     },
     {
       "network": "x",
@@ -75,13 +69,10 @@
       "daily_budget": 0,
       "handle": "@owerasoftware",
       "caption_first_line_is_spoken": true,
-      "format": {
-        "kind": "video",
-        "ratio": "16:9",
-        "size": "1920×1080",
-        "teaser_duration": "~15–30s",
-        "reuse_generic_cut": false
-      }
+      "kind": "video",
+      "aspect": "16:9",
+      "size": "1920x1080",
+      "duration_s_max": 30
     },
     {
       "network": "youtube_os",
@@ -92,13 +83,10 @@
         "allow_subscribe": false,
         "series": null
       },
-      "format": {
-        "kind": "short",
-        "ratio": "9:16",
-        "size": "1080×1920",
-        "teaser_duration": "~30–45s (≤60s)",
-        "reuse_generic_cut": false
-      }
+      "kind": "short",
+      "aspect": "9:16",
+      "size": "1080x1920",
+      "duration_s_max": 60
     }
   ]
 }
