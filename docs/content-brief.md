@@ -6,8 +6,13 @@ publish wiring, no mix/spend/concurrency/deploy change. Implementation needs a
 stays the `Channel → Topic → Video` pipeline in `app/models.py`.
 
 GitHub is **out of this hub** (Community stays on-call, separate). Do not add
-`github` or `github_discussion` to the schema. Personal channels are **out**:
-YouTube `rodrigorecio` / ch2 (`brand=rr`), X `@rod_recio`, `@rrecio`.
+`github` or `github_discussion` to the schema. Personal channels are **out**
+(do not mix IG/X handles):
+
+- Instagram `@rod_recio`
+- X `@rrecio`
+- LinkedIn `rodrigorecio`
+- YouTube RR / ch2 (`brand=rr`)
 
 Machine-readable copy: [`schemas/content-brief.schema.json`](schemas/content-brief.schema.json).
 Review instances: news+social [`content-brief.example.json`](schemas/content-brief.example.json); YPP#5 Subscribe-fork [`content-brief.ypp5.example.json`](schemas/content-brief.ypp5.example.json).
@@ -66,7 +71,7 @@ Company handles (locked):
 - X `@owerasoftware`
 - YouTube OS (Owera Software / ch1) — only if `youtube_os` is in `target_networks`
 
-Personal out. GitHub out.
+Personal out (IG `@rod_recio` · X `@rrecio` · LinkedIn `rodrigorecio` · YouTube RR / ch2 `brand=rr`). GitHub out.
 
 ---
 
@@ -114,6 +119,8 @@ register: spoken_builder
 first_line_is_spoken: true    # 1ª linha falada
 cadence: rodrigo_simple       # company EN, spoken, not teaser
 ```
+
+Company inherits the *tone* of Rodrigo’s personal spoken anchors, not the content (do not paste Grok/Chrome/TCE into company briefs).
 
 ### Locked hard nos (company social + YT-if-marked)
 

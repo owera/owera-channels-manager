@@ -86,7 +86,7 @@
         },
         "cadence": {
           "const": "rodrigo_simple",
-          "description": "Simple spoken cadence like Rodrigo."
+          "description": "Company inherits the tone of Rodrigo personal spoken anchors, not the content. Do not paste Grok/Chrome/TCE into company briefs."
         }
       }
     },
@@ -186,7 +186,7 @@
         "handoff": { "const": "video_short" },
         "channel_scope": {
           "const": "os_only",
-          "description": "Owera Software / ch1. Personal rr / rodrigorecio is out."
+          "description": "Owera Software / ch1. YouTube RR / ch2 brand=rr is out."
         },
         "video_id": {
           "type": "integer",
