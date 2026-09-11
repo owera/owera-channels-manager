@@ -1036,10 +1036,16 @@ _GENERIC_NODE = re.compile(
 
 
 def _lock_opening_hook(beats, script, subject) -> None:
-    """Decolar: frame0 text = first spoken sentence (≤8 words), no second hook."""
+    """Decolar: frame0 text = first spoken sentence (safety-clip 12w), no second hook.
+
+    The title lock already pins YouTube title to that sentence. An 8-word first-N
+    clip dropped PT objects (e.g. 'Sua RAG busca lixo e você culpa o' without
+    'modelo') so frame0 diverged from spoken/title. The opener is already ~10
+    words; 12 is a wrap-safe ceiling, not a compression slogan.
+    """
     from app.services import craft
     claim = craft.spoken_hook_source(None, script, subject)
-    hook = craft.compress_claim(claim, 8) or craft.compress_claim(subject, 8)
+    hook = craft.compress_claim(claim, 12) or craft.compress_claim(subject, 12)
     if not beats or not hook:
         return
     b0 = beats[0]

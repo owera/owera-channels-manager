@@ -910,7 +910,14 @@ ok(html is not None and "<!doctype html>" in html.lower(),
 hook_html = html.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
 ok(all(f'<span class="word">{w}</span>' in hook_html
        for w in "alpha bravo charlie delta echo foxtrot golf hotel".split()),
-   "Decolar: hook text is the first spoken sentence (script has no period → whole line, ≤8w)")
+   "Decolar: hook text is the first spoken sentence (script has no period → whole line)")
+pt_opener = [{"type": "hook", "text": "old slogan", "cue": "x", "emoji": "x"}]
+storyboard._lock_opening_hook(
+    pt_opener, "Sua RAG busca lixo e você culpa o modelo. O modelo não errou.", "subject")
+ok(pt_opener[0]["text"] == "Sua RAG busca lixo e você culpa o modelo",
+   "Decolar: 9-word PT opener keeps the object (8w clip used to drop 'modelo')")
+ok(pt_opener[0]["emoji"] == "" and pt_opener[0]["type"] == "hook",
+   "lock forces hook type and strips emoji")
 ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
