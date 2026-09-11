@@ -12,6 +12,7 @@ Pré-pattern leftovers are parked via reject. Do not mass-retitle.
 
 from __future__ import annotations
 
+import json
 import re
 
 from app.services.engines import theme
@@ -164,3 +165,377 @@ def brand_of(slug: str | None, name: str | None = None, channel_id=None) -> str 
     slug/name tokens win; live-fleet ids 1/2 are the fallback.
     """
     return theme.infer_brand(channel_id, slug, name)
+
+
+# ---------------------------------------------------------------------------
+# Video Maker craft gate (Shorts only) — A object 0–3s / B beats ≤3s / C spam
+# ---------------------------------------------------------------------------
+
+OBJECT_BEAT_TYPES = frozenset({"code", "command", "diagram", "compare", "stat"})
+TYPOGRAPHY_ONLY_TYPES = frozenset({"hook", "statement"})
+CTA_TYPES = frozenset({"cta", "endcard"})
+OPENING_WINDOW_S = 3.0
+MID_BEAT_MAX_S = 3.0
+CTA_BEAT_MAX_S = 4.0
+STATEMENT_MAX_SHORTS = 1
+LIST_MAX_PER_SHORT = 1
+LIST_MAX_ITEMS = 3
+LIST_STAGGER_MAX_S = 0.6
+LIST_REVEAL_PAD_S = 0.8  # matches storyboard.render_list win = dur - 0.8
+
+_BEAT_SNAP_KEYS = (
+    "type", "start", "dur", "cue", "text", "sub", "object", "prop", "emoji",
+    "items", "value", "unit", "label", "title", "lines", "command", "nodes",
+)
+# Subscribe CTA is legal only on the trailing cta/endcard series (Rodrigo CoS).
+# Word-boundary so "subscribers" (analytics copy) does not trip.
+SUBSCRIBE_CTA_RE = re.compile(
+    r"\bsubscribe\b|\binscreva(?:-se)?\b",
+    re.IGNORECASE,
+)
+_BEATS_SCRIPT_RE = re.compile(
+    r'<script type="application/json" id="storyboard-beats">(.*?)</script>',
+    re.DOTALL,
+)
+_BEAT_DIV_RE = re.compile(
+    r'class="beat ([a-z_]+)"[^>]*data-start="([0-9.]+)"[^>]*data-duration="([0-9.]+)"',
+)
+_HAS_WORD_RE = re.compile(r"[A-Za-z0-9À-ÿ]")
+
+
+def _as_dict(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
+def _emoji_only(text: str | None) -> bool:
+    """True when the string has no letters/digits — emoji/punct is not a Decolar object."""
+    s = (text or "").strip()
+    return (not s) or (_HAS_WORD_RE.search(s) is None)
+
+
+def hook_object(beat: dict | None) -> str:
+    """Non-empty Decolar prop on a hook. Emoji is rejected (does not count as object)."""
+    if not isinstance(beat, dict):
+        return ""
+    raw = beat.get("object") or beat.get("prop") or ""
+    if not isinstance(raw, str):
+        raw = str(raw or "")
+    raw = raw.strip()
+    if _emoji_only(raw):
+        return ""
+    return raw
+
+
+def snapshot_beats(beats) -> list[dict]:
+    """Gate-relevant subset (JSON-safe). Drops renderer-only keys."""
+    out = []
+    for b in beats or []:
+        if not isinstance(b, dict):
+            continue
+        snap = {k: b[k] for k in _BEAT_SNAP_KEYS if k in b}
+        out.append(snap)
+    return out
+
+
+def beats_from_html(html: str | None) -> list[dict]:
+    """Prefer the compose-embedded JSON snapshot; scrape data-* divs otherwise."""
+    raw = html or ""
+    m = _BEATS_SCRIPT_RE.search(raw)
+    if m:
+        try:
+            data = json.loads(m.group(1).replace("<\\/", "</"))
+            if isinstance(data, list):
+                return [b for b in data if isinstance(b, dict)]
+        except (TypeError, ValueError):
+            pass
+    scraped = []
+    for m in _BEAT_DIV_RE.finditer(raw):
+        scraped.append({
+            "type": m.group(1),
+            "start": float(m.group(2)),
+            "dur": float(m.group(3)),
+        })
+    return scraped
+
+
+def _cue_start(beat: dict) -> float:
+    try:
+        return float(beat.get("start") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _cue_span(beats: list[dict], i: int) -> float:
+    """next_cue_start - cue_start. Last beat falls back to stored dur."""
+    start = _cue_start(beats[i])
+    if i + 1 < len(beats):
+        nxt = beats[i + 1].get("start")
+        if nxt is not None:
+            try:
+                return max(0.0, float(nxt) - start)
+            except (TypeError, ValueError):
+                pass
+    try:
+        return max(0.0, float(beats[i].get("dur") or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _list_items(beat: dict) -> list:
+    items = beat.get("items")
+    return items if isinstance(items, list) else []
+
+
+def _list_stagger(beat: dict, span: float) -> float:
+    n = len(_list_items(beat))
+    if n <= 0:
+        return 0.0
+    win = max(0.0, span - LIST_REVEAL_PAD_S)
+    return min(win / n, LIST_STAGGER_MAX_S)
+
+
+def _endcard_series_start(board: list[dict]) -> int:
+    """Index of the trailing cta/endcard series. len(board) if the last beat is not one."""
+    i = len(board)
+    while i > 0 and (board[i - 1].get("type") or "") in CTA_TYPES:
+        i -= 1
+    return i
+
+
+def _visible_copy(beat: dict) -> str:
+    """On-screen copy only (not cue). Subscribe on a mid card is a CTA, not a sync word."""
+    parts: list[str] = []
+    for k in ("text", "sub", "title", "label"):
+        v = beat.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    for it in _list_items(beat):
+        if isinstance(it, dict):
+            t = it.get("text")
+            if t:
+                parts.append(str(t))
+        elif it:
+            parts.append(str(it))
+    for side in ("left", "right"):
+        col = beat.get(side)
+        if not isinstance(col, dict):
+            continue
+        if col.get("title"):
+            parts.append(str(col["title"]))
+        for x in col.get("items") or []:
+            parts.append(str(x))
+    return " ".join(parts)
+
+
+def _subscribe_hits(text: str) -> list[str]:
+    return [m.group(0) for m in SUBSCRIBE_CTA_RE.finditer(text or "")]
+
+
+def _echoes_narration(beat: dict) -> bool:
+    """True when on-screen copy is just the cue / spoken words (no added information)."""
+    cue = theme.fold(str(beat.get("cue") or ""))
+    text = theme.fold(str(beat.get("text") or ""))
+    if not text:
+        parts = []
+        for it in _list_items(beat):
+            if isinstance(it, dict):
+                parts.append(str(it.get("text") or ""))
+            else:
+                parts.append(str(it))
+        text = theme.fold(" ".join(parts))
+    if not text or not cue:
+        return False
+    tw = {w for w in text.split() if w not in STOPWORDS}
+    cw = {w for w in cue.split() if w not in STOPWORDS}
+    if not tw:
+        return False
+    return tw <= cw or text in cue or cue in text
+
+
+def _pass_fail(ok: bool) -> str:
+    return "PASS" if ok else "FAIL"
+
+
+def video_maker_gate(beats, *, content_format: str | None = "short",
+                     used_fallback: bool = False) -> dict:
+    """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
+    checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
+    reasons: list[str] = []
+    if (content_format or "short") == "long":
+        return {"result": "PASS", "checks": checks, "reasons": reasons}
+
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+
+    if used_fallback and not board:
+        checks["A"] = "FAIL"
+        checks["C"] = "FAIL"
+        reasons.append(
+            "[A] Object 0–3s: FAIL — kinetic-text fallback has no typed beats "
+            "(typography-only; emoji is not an object). Need a code/command/diagram/"
+            "compare/stat beat starting before t=3.0s, or hook.object (receipt/"
+            "terminal/bill)."
+        )
+        reasons.append(
+            "[C] Spoken list/slide spam: FAIL — fallback re-displays narration as "
+            "text cards (no code/command/diagram/compare/stat). statement max 1; "
+            "list forbidden-or ≤1 list / ≤3 items / ≤3.0s / stagger ≤0.6s."
+        )
+        return {"result": "FAIL", "checks": checks, "reasons": reasons}
+
+    if not board:
+        # Legacy row / missing snapshot — caller fail-opens via video_maker_gate_reason.
+        return {"result": "PASS", "checks": checks, "reasons": reasons,
+                "legacy": True}
+
+    # --- A: object in the first 3.0s ---------------------------------------
+    opening = [b for b in board if _cue_start(b) < OPENING_WINDOW_S + 1e-9]
+    if not opening:
+        opening = [board[0]]
+    hooks = [b for b in board if (b.get("type") or "") == "hook"]
+    has_object_beat = any((b.get("type") or "") in OBJECT_BEAT_TYPES for b in opening)
+    has_hook_object = any(hook_object(b) for b in (hooks or opening[:1]))
+    if not (has_object_beat or has_hook_object):
+        kinds = [b.get("type") or "?" for b in opening]
+        checks["A"] = "FAIL"
+        reasons.append(
+            f"[A] Object 0–3s: FAIL — first {OPENING_WINDOW_S:.1f}s is typography-only "
+            f"(types={kinds}; emoji does not count). Need ≥1 beat type in "
+            f"{sorted(OBJECT_BEAT_TYPES)} starting before t={OPENING_WINDOW_S:.1f}s, "
+            "or a non-empty hook.object Decolar prop (receipt/terminal/bill)."
+        )
+
+    # --- B: mid beats ≤3.0s; cta/endcard series ≤4.0s ----------------------
+    b_hits = []
+    for i, b in enumerate(board):
+        span = _cue_span(board, i)
+        btype = b.get("type") or "?"
+        cap = CTA_BEAT_MAX_S if btype in CTA_TYPES else MID_BEAT_MAX_S
+        if span > cap + 1e-9:
+            label = "cta/endcard" if btype in CTA_TYPES else "mid"
+            b_hits.append(
+                f"beat[{i}] type={btype} {label} held {span:.2f}s "
+                f"(next_cue − cue; limit {cap:.1f}s)"
+            )
+    if b_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Beats ≤3s: FAIL — " + "; ".join(b_hits) +
+            ". Mid cards/slides must be ≤3.0s; cta/endcard series ≤4.0s "
+            "(not a Follow-tomorrow hold)."
+        )
+
+    # --- C: kill spoken list/slide spam ------------------------------------
+    types = [b.get("type") or "" for b in board]
+    n_stmt = types.count("statement")
+    list_idxs = [i for i, t in enumerate(types) if t == "list"]
+    rich = {t for t in types if t in OBJECT_BEAT_TYPES}
+    c_hits = []
+    if n_stmt > STATEMENT_MAX_SHORTS:
+        c_hits.append(
+            f"{n_stmt} statement beats (max {STATEMENT_MAX_SHORTS} on Shorts; "
+            "was tolerated at 2)"
+        )
+    if len(list_idxs) > LIST_MAX_PER_SHORT:
+        c_hits.append(
+            f"{len(list_idxs)} list beats (max {LIST_MAX_PER_SHORT}; prefer "
+            "code/command/diagram/compare/stat)"
+        )
+    for i in list_idxs:
+        b = board[i]
+        n_items = len(_list_items(b))
+        span = _cue_span(board, i)
+        stagger = _list_stagger(b, span)
+        if n_items > LIST_MAX_ITEMS:
+            c_hits.append(
+                f"list beat[{i}] has {n_items} items (max {LIST_MAX_ITEMS})"
+            )
+        if span > MID_BEAT_MAX_S + 1e-9:
+            c_hits.append(
+                f"list beat[{i}] held {span:.2f}s (max {MID_BEAT_MAX_S:.1f}s)"
+            )
+        if stagger > LIST_STAGGER_MAX_S + 1e-9:
+            c_hits.append(
+                f"list beat[{i}] item stagger {stagger:.2f}s "
+                f"(max {LIST_STAGGER_MAX_S:.1f}s)"
+            )
+    echo_spam = []
+    for i, b in enumerate(board):
+        if (b.get("type") or "") not in ("statement", "list"):
+            continue
+        if _echoes_narration(b) and not rich:
+            echo_spam.append(f"beat[{i}] type={b.get('type')}")
+    if echo_spam:
+        c_hits.append(
+            "list/statement only re-displays narration with no rich type "
+            f"({', '.join(echo_spam)}; need code/command/diagram/compare/stat "
+            "in the middle)"
+        )
+    elif (n_stmt or list_idxs) and not rich:
+        c_hits.append(
+            "list/statement mid-board with no code/command/diagram/compare/stat "
+            "(spoken-slide spam)"
+        )
+    # Subscribe CTA is only legal on the trailing cta/endcard series.
+    end_i = _endcard_series_start(board)
+    for i, b in enumerate(board[:end_i]):
+        hits = _subscribe_hits(_visible_copy(b))
+        if hits:
+            shown = "/".join(dict.fromkeys(hits))
+            c_hits.append(
+                f"beat[{i}] type={b.get('type') or '?'} has Subscribe CTA "
+                f"({shown!r}) — Subscribe is only allowed on the series "
+                "endcard, never on a mid card"
+            )
+    if c_hits:
+        checks["C"] = "FAIL"
+        reasons.append("[C] Spoken list/slide spam: FAIL — " + "; ".join(c_hits))
+
+    result = "FAIL" if reasons else "PASS"
+    return {"result": result, "checks": checks, "reasons": reasons}
+
+
+def format_craft_gate_reason(gate: dict | None) -> str | None:
+    if not gate or gate.get("result") != "FAIL":
+        return None
+    reasons = [r for r in (gate.get("reasons") or []) if r]
+    if not reasons:
+        return "Video Maker craft gate FAIL"
+    return "Video Maker craft gate FAIL: " + " ".join(reasons)
+
+
+def video_maker_gate_reason(creation_config=None,
+                            content_format: str | None = "short") -> str | None:
+    """None = allowed to leave review toward publish. Longs are exempt."""
+    if (content_format or "short") == "long":
+        return None
+    cc = _as_dict(creation_config)
+    beats = cc.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+    used_fallback = bool(cc.get("used_fallback"))
+    if not beats and not used_fallback:
+        stored = cc.get("craft_gate")
+        if isinstance(stored, dict) and stored.get("result") == "FAIL":
+            return format_craft_gate_reason(stored)
+        return None  # no snapshot (pré-gate inventory) — fail-open
+    gate = video_maker_gate(beats, content_format=content_format,
+                            used_fallback=used_fallback)
+    return format_craft_gate_reason(gate)
+
+
+def review_gate_reason(title: str | None,
+                       content_format: str | None = "short",
+                       creation_config=None) -> str | None:
+    """Title pattern then Video Maker A+B+C. First failure wins (operator-readable)."""
+    return (title_gate_reason(title, content_format)
+            or video_maker_gate_reason(creation_config, content_format))

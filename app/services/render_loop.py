@@ -180,7 +180,7 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     from app.services import craft
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    blocked = craft.title_gate_reason(video.title, fmt)
+    blocked = craft.review_gate_reason(video.title, fmt, video.creation_config)
     if blocked:
         video.status = VideoStatus.REVIEW
         video.error = blocked

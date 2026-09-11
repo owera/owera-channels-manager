@@ -340,7 +340,7 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
     from app.services import craft
-    blocked = craft.title_gate_reason(v.title, fmt)
+    blocked = craft.review_gate_reason(v.title, fmt, v.creation_config)
     if blocked:
         raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
@@ -386,7 +386,7 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft
-        blocked = craft.title_gate_reason(v.title, fmt)
+        blocked = craft.review_gate_reason(v.title, fmt, v.creation_config)
         if blocked:
             raise HTTPException(409, blocked)
         quota.log(session, kind="retry", status="success", video_id=v.id,

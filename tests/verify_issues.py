@@ -198,7 +198,7 @@ ok(d["summary"]["needs_operator"] == 0, "clean system needs no operator")
 for bucket in ("failed", "rejected", "stuck_rendering", "stuck_publishing",
                "stuck_review", "oauth", "cooldown", "quota", "error_runs_24h",
                "board_overflow", "bgm_pool_low", "board_inventory",
-               "pipeline_starved", "title_pattern_blocked"):
+               "pipeline_starved", "title_pattern_blocked", "craft_gate_blocked"):
     ok(bucket in d, f"digest always carries the '{bucket}' bucket")
 ok(d["pipeline_starved"] == [],
    "a channel that has never published is 'not started', not starved (no false positive)")
@@ -723,6 +723,26 @@ s.commit()
 groups = issues.detect(s)["error_runs_24h"]
 ok(len(groups) == 1 and groups[0]["last_detail"] == "boom at attempt 2",
    "error_runs_24h.last_detail is the most recent row of the group, not the oldest")
+
+
+print("detect (craft_gate_blocked informational)")
+s = fresh_session()
+ch = make_channel(s)
+make_video(s, ch, status=VideoStatus.REVIEW,
+           title="Your RAG reads junk · Copilot Credits 1",
+           creation_config=(
+               '{"beats":[{"type":"hook","start":0,"dur":3,"text":"x","emoji":"x"},'
+               '{"type":"statement","start":3,"dur":3,"text":"y","cue":"y"},'
+               '{"type":"cta","start":6,"dur":4,"text":"Go"}],'
+               '"used_fallback":false}'
+           ))
+d = issues.detect(s)
+ok(len(d["craft_gate_blocked"]) == 1, "REVIEW short that fails A+C is listed")
+ok("[A]" in d["craft_gate_blocked"][0]["detail"]
+   and "requeue" in d["craft_gate_blocked"][0]["suggested_action"],
+   "craft_gate_blocked carries the letter-tagged reason + requeue action")
+ok(d["craft_gate_blocked"][0]["auto"] is False,
+   "craft_gate_blocked is informational / operator (not auto-counted in buckets)")
 
 
 # --- detect(): BGM pool health (filesystem-backed, controlled temp dir) ------

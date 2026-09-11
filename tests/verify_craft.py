@@ -2,6 +2,7 @@
 
     PYTHONPATH=. .venv/bin/python tests/verify_craft.py
 """
+import json
 import sys
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -277,6 +278,259 @@ s.add(v2); s.commit(); s.refresh(v2)
 # Don't actually run the rest of publish (playlist/thumbnail) — just the gate.
 blocked = craft.title_gate_reason(v2.title, "short")
 ok(blocked is None, "matching title is not blocked")
+youtube.get_service, youtube.upload_video = _orig_get, _orig_up
+
+
+# ---------------------------------------------------------------------------
+print("Video Maker craft gate A/B/C (Shorts)")
+
+
+def _pass_beats(*_a, **_k):
+    return [
+        {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Your RAG reads junk",
+         "object": "receipt", "cue": "Your RAG"},
+        {"type": "code", "start": 2.0, "dur": 2.4, "lines": ["rerank(q)"],
+         "cue": "rerank the pile"},
+        {"type": "stat", "start": 4.5, "dur": 2.4, "value": "40", "unit": "%",
+         "cue": "forty percent"},
+        {"type": "cta", "start": 7.0, "dur": 3.5, "text": "Rerank first",
+         "cue": "rerank first"},
+    ]
+
+
+g = craft.video_maker_gate(_pass_beats())
+ok(g["result"] == "PASS" and g["checks"] == {"A": "PASS", "B": "PASS", "C": "PASS"},
+   "golden short: object hook + code in 0–3s, mid ≤3s, cta ≤4s, 0 statements")
+ok(g["reasons"] == [], "PASS carries no fail reasons")
+ok(craft.video_maker_gate_reason({"beats": _pass_beats()}, "short") is None,
+   "video_maker_gate_reason is None on PASS")
+ok(craft.review_gate_reason("x · IA 1", "short", {"beats": _pass_beats()}) is None,
+   "review_gate_reason allows a patterned title + PASS board")
+
+# A — FAIL typography-only (emoji is not an object)
+typo = [
+    {"type": "hook", "start": 0.0, "dur": 3.0, "text": "Your RAG reads junk",
+     "emoji": "💸", "object": "🔥", "cue": "Your RAG"},
+    {"type": "statement", "start": 3.0, "dur": 2.5, "text": "Then we fix it",
+     "cue": "Then we"},
+    {"type": "stat", "start": 5.5, "dur": 2.5, "value": "40", "cue": "forty"},
+    {"type": "cta", "start": 8.0, "dur": 3.5, "text": "Fix the embed", "cue": "fix"},
+]
+ga = craft.video_maker_gate(typo)
+ok(ga["checks"]["A"] == "FAIL" and ga["result"] == "FAIL",
+   "A FAIL: hook+statement until t=3, emoji object stripped")
+ok("[A]" in ga["reasons"][0] and "emoji" in ga["reasons"][0].lower(),
+   "A fail reason names the 0–3s object rule and that emoji does not count")
+
+# A — PASS via rich beat in the window, no hook.object
+a_rich = [
+    {"type": "hook", "start": 0.0, "dur": 1.5, "text": "Your RAG reads junk", "cue": "Your"},
+    {"type": "command", "start": 1.5, "dur": 2.5, "command": "curl /bill", "cue": "curl"},
+    {"type": "cta", "start": 4.0, "dur": 3.0, "text": "Read the bill", "cue": "read"},
+]
+ok(craft.video_maker_gate(a_rich)["checks"]["A"] == "PASS",
+   "A PASS: command beat starts at t=1.5 (in the 0–3s window)")
+
+# A — PASS via hook.object even when the first rich beat is after t=3
+a_obj = [
+    {"type": "hook", "start": 0.0, "dur": 3.2, "text": "Your RAG reads junk",
+     "object": "terminal", "cue": "Your"},
+    {"type": "code", "start": 3.2, "dur": 2.5, "lines": ["x=1"], "cue": "code"},
+    {"type": "cta", "start": 5.8, "dur": 3.0, "text": "Show the term", "cue": "show"},
+]
+ok(craft.video_maker_gate(a_obj)["checks"]["A"] == "PASS",
+   "A PASS: hook.object=terminal counts even if the rich beat starts after t=3")
+ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "FAIL",
+   "B still FAILs that 3.2s hook (next_cue − cue > 3.0) — letters are independent")
+
+# B — mid >3s
+b_mid = _pass_beats()
+b_mid[1] = {"type": "code", "start": 2.0, "dur": 4.5, "lines": ["x"], "cue": "slow"}
+b_mid[2] = {"type": "stat", "start": 6.6, "dur": 2.0, "value": "1", "cue": "one"}
+b_mid[3] = {"type": "cta", "start": 8.6, "dur": 3.0, "text": "Go", "cue": "go"}
+gb = craft.video_maker_gate(b_mid)
+ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
+   "B FAIL: mid code held 4.60s (6.6 − 2.0)")
+ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
+
+# B — CTA >4s
+b_cta = _pass_beats()
+b_cta[-1] = {"type": "cta", "start": 7.0, "dur": 5.5, "text": "Go", "cue": "go"}
+# last beat span falls back to dur
+gbc = craft.video_maker_gate(b_cta)
+ok(gbc["checks"]["B"] == "FAIL" and "cta" in gbc["reasons"][0],
+   "B FAIL: cta held 5.50s (limit 4.0s)")
+ok("4.0" in gbc["reasons"][0] and "Follow" in gbc["reasons"][0],
+   "B fail reason cites the 4.0s endcard cap (not Follow-tomorrow)")
+
+b_cta_ok = _pass_beats()
+b_cta_ok[-1] = {"type": "cta", "start": 7.0, "dur": 4.0, "text": "Go", "cue": "go"}
+ok(craft.video_maker_gate(b_cta_ok)["checks"]["B"] == "PASS",
+   "B PASS: cta exactly 4.0s is allowed")
+
+# C — ≥2 statements
+c_stmt = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook", "object": "bill", "cue": "h"},
+    {"type": "statement", "start": 2.0, "dur": 2.0, "text": "One", "cue": "one more"},
+    {"type": "statement", "start": 4.0, "dur": 2.0, "text": "Two", "cue": "two more"},
+    {"type": "stat", "start": 6.0, "dur": 2.0, "value": "1", "cue": "stat"},
+    {"type": "cta", "start": 8.0, "dur": 3.0, "text": "Go", "cue": "go"},
+]
+gc = craft.video_maker_gate(c_stmt)
+ok(gc["checks"]["C"] == "FAIL" and "2 statement" in gc["reasons"][0],
+   "C FAIL: 2 statements (tightened from the old tolerance of 2)")
+
+# C — list >3 items
+c_list = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook", "object": "bill", "cue": "h"},
+    {"type": "list", "start": 2.0, "dur": 2.5,
+     "items": [{"text": "a"}, {"text": "b"}, {"text": "c"}, {"text": "d"}],
+     "cue": "steps"},
+    {"type": "stat", "start": 4.5, "dur": 2.0, "value": "1", "cue": "stat"},
+    {"type": "cta", "start": 6.5, "dur": 3.0, "text": "Go", "cue": "go"},
+]
+gl = craft.video_maker_gate(c_list)
+ok(gl["checks"]["C"] == "FAIL" and "4 items" in gl["reasons"][0],
+   "C FAIL: list with 4 items (max 3)")
+
+# C — two lists
+c_two = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook", "object": "bill", "cue": "h"},
+    {"type": "list", "start": 2.0, "dur": 2.0, "items": [{"text": "a"}], "cue": "a"},
+    {"type": "list", "start": 4.0, "dur": 2.0, "items": [{"text": "b"}], "cue": "b"},
+    {"type": "stat", "start": 6.0, "dur": 2.0, "value": "1", "cue": "stat"},
+    {"type": "cta", "start": 8.0, "dur": 3.0, "text": "Go", "cue": "go"},
+]
+ok("2 list" in craft.video_maker_gate(c_two)["reasons"][0],
+   "C FAIL: two list beats (max 1)")
+
+# C — kept list within constraints + 1 statement + rich type
+c_ok = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook", "object": "bill", "cue": "h"},
+    {"type": "statement", "start": 2.0, "dur": 2.0, "text": "One idea", "cue": "idea"},
+    {"type": "list", "start": 4.0, "dur": 2.4,
+     "items": [{"text": "a"}, {"text": "b"}, {"text": "c"}], "cue": "three"},
+    {"type": "code", "start": 6.5, "dur": 2.4, "lines": ["x=1"], "cue": "code"},
+    {"type": "cta", "start": 9.0, "dur": 3.0, "text": "Go", "cue": "go"},
+]
+ok(craft.video_maker_gate(c_ok)["result"] == "PASS",
+   "C PASS: 1 statement + 1 list (3 items, ≤3s) + a code beat")
+
+# C — list/statement echo with no rich type
+c_echo = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Your RAG reads junk",
+     "object": "receipt", "cue": "Your RAG"},
+    {"type": "statement", "start": 2.0, "dur": 2.5, "text": "reads junk",
+     "cue": "reads junk then"},
+    {"type": "cta", "start": 4.5, "dur": 3.0, "text": "Go", "cue": "go"},
+]
+ge = craft.video_maker_gate(c_echo)
+ok(ge["checks"]["C"] == "FAIL" and "re-displays narration" in ge["reasons"][0],
+   "C FAIL: statement only re-displays narration without a rich type")
+
+# C — Subscribe CTA on mid cards (legal only on trailing cta/endcard)
+c_sub = _pass_beats()
+c_sub[1] = {"type": "statement", "start": 2.0, "dur": 2.4, "text": "Subscribe now",
+            "cue": "stay"}
+c_sub[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "40", "cue": "forty"}
+gs = craft.video_maker_gate(c_sub)
+ok(gs["checks"]["C"] == "FAIL" and "Subscribe CTA" in gs["reasons"][0],
+   "C FAIL: mid statement 'Subscribe now' (endcard-only)")
+ok("beat[1]" in gs["reasons"][0] and "endcard" in gs["reasons"][0],
+   "Subscribe fail reason names the mid beat and that only the endcard may say it")
+
+c_sub_lcase = _pass_beats()
+c_sub_lcase[1] = {"type": "list", "start": 2.0, "dur": 2.4,
+                  "items": [{"text": "please subscribe"}], "cue": "list"}
+c_sub_lcase[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok("subscribe" in craft.video_maker_gate(c_sub_lcase)["reasons"][0].lower(),
+   "C FAIL: lowercase subscribe on a mid list item")
+
+c_end = _pass_beats()
+c_end[-1] = {"type": "cta", "start": 7.0, "dur": 3.5, "text": "Subscribe",
+             "sub": "for the series", "cue": "go"}
+ok(craft.video_maker_gate(c_end)["result"] == "PASS",
+   "C PASS: Subscribe on the final cta/endcard is allowed (Rodrigo CoS)")
+
+c_series = _pass_beats()
+c_series.append({"type": "endcard", "start": 10.5, "dur": 3.0,
+                 "text": "Subscribe", "sub": "next short tomorrow"})
+# last pre-endcard cta span becomes 10.5-7.0=3.5 ≤4; endcard 3.0 ≤4
+ok(craft.video_maker_gate(c_series)["result"] == "PASS",
+   "C PASS: Subscribe on a trailing endcard after cta is not blocked")
+
+c_noun = _pass_beats()
+c_noun[1] = {"type": "statement", "start": 2.0, "dur": 2.4,
+             "text": "subscribers churn", "cue": "churn"}
+c_noun[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok(craft.video_maker_gate(c_noun)["result"] == "PASS",
+   "C PASS: the noun 'subscribers' is not a Subscribe CTA")
+
+c_pt = _pass_beats()
+c_pt[1] = {"type": "statement", "start": 2.0, "dur": 2.4,
+           "text": "Inscreva-se agora", "cue": "agora"}
+c_pt[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok("Inscreva" in craft.video_maker_gate(c_pt)["reasons"][0]
+   or "inscreva" in craft.video_maker_gate(c_pt)["reasons"][0].lower(),
+   "C FAIL: PT Inscreva-se on a mid card is the same CTA")
+
+# Longs exempt; fallback FAIL; legacy fail-open
+ok(craft.video_maker_gate(typo, content_format="long")["result"] == "PASS",
+   "longs are exempt from A+B+C")
+ok(craft.video_maker_gate_reason({"beats": typo}, "long") is None,
+   "video_maker_gate_reason is None for longs")
+fb = craft.video_maker_gate([], used_fallback=True)
+ok(fb["result"] == "FAIL" and fb["checks"]["A"] == "FAIL" and fb["checks"]["C"] == "FAIL",
+   "kinetic-text fallback with no beats FAILs A and C")
+ok(craft.video_maker_gate_reason({}, "short") is None,
+   "missing beat snapshot fail-opens (pré-gate inventory)")
+ok(craft.video_maker_gate_reason({"craft_gate": {"result": "FAIL",
+                                                "reasons": ["[A] no object"]}},
+                                "short") == "Video Maker craft gate FAIL: [A] no object",
+   "stored FAIL verdict is honored when beats were not snapshotted")
+
+reason = craft.video_maker_gate_reason({"beats": typo}, "short")
+ok(reason.startswith("Video Maker craft gate FAIL:") and "[A]" in reason,
+   "gate reason is operator-readable and letter-tagged")
+ok(craft.review_gate_reason("nope", "short", {"beats": _pass_beats()})
+   == craft.TITLE_GATE_REASON,
+   "review_gate_reason: title pattern wins over a PASS board")
+ok("craft gate FAIL" in (craft.review_gate_reason("x · IA 1", "short", {"beats": typo}) or ""),
+   "review_gate_reason: patterned title still blocked by A+B+C")
+
+# hook_object / snapshot / html parse
+ok(craft.hook_object({"object": "  receipt "}) == "receipt", "hook_object trims")
+ok(craft.hook_object({"object": "💸"}) == "", "hook_object rejects emoji")
+ok(craft.hook_object({"prop": "terminal"}) == "terminal", "hook_object reads prop alias")
+html = (
+    '<div class="beat hook" data-start="0" data-duration="2.0"></div>'
+    '<script type="application/json" id="storyboard-beats">'
+    '[{"type":"stat","start":1.0,"dur":2.0}]</script>'
+)
+ok(craft.beats_from_html(html) == [{"type": "stat", "start": 1.0, "dur": 2.0}],
+   "beats_from_html prefers the embedded JSON snapshot")
+ok(craft.beats_from_html('<div class="beat hook" id="b0" data-start="0" '
+                         'data-duration="2.1" data-track-index="0"></div>')
+   == [{"type": "hook", "start": 0.0, "dur": 2.1}],
+   "beats_from_html scrapes data-start/duration when the snapshot is missing")
+
+
+# ---------------------------------------------------------------------------
+print("publish_loop refuses a craft-gate FAIL (no upload)")
+
+v3 = Video(channel_id=ch.id, topic_id=t.id, subject="craft",
+           status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+           title="Copilot billed the cancelled run · Copilot Credits 14",
+           creation_config=json.dumps({"beats": typo, "used_fallback": False}))
+s.add(v3); s.commit(); s.refresh(v3)
+_uploads = []
+youtube.get_service = lambda slug: object()
+youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
+publish_loop._publish_one(s, ch, v3)
+ok(_uploads == [], "craft-gate FAIL never opens upload_video")
+ok(v3.status == VideoStatus.REVIEW, "blocked craft publish returns the row to review")
+ok(v3.error and "craft gate FAIL" in v3.error and "[A]" in v3.error,
+   "blocked craft publish records the letter-tagged reason")
 youtube.get_service, youtube.upload_video = _orig_get, _orig_up
 
 

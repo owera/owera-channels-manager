@@ -272,7 +272,7 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
 def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    blocked = craft.title_gate_reason(video.title, fmt)
+    blocked = craft.review_gate_reason(video.title, fmt, video.creation_config)
     if blocked:
         video.status = VideoStatus.REVIEW
         video.error = blocked

@@ -1222,6 +1222,20 @@ v_blocked = drive_complete(s, ch, t, skip_gate=True)  # MetaStub title=gen-title
 ok(v_blocked.status == VideoStatus.REVIEW
    and "spoken series pattern" in (v_blocked.error or ""),
    "skip_gate True + pré-pattern title stays REVIEW (park via reject, no auto-approve)")
+FAIL_BOARD = {
+    "beats": [
+        {"type": "hook", "start": 0, "dur": 3, "text": "only type", "emoji": "🔥"},
+        {"type": "statement", "start": 3, "dur": 3, "text": "echo", "cue": "echo"},
+        {"type": "cta", "start": 6, "dur": 5, "text": "Build"},
+    ],
+    "used_fallback": False,
+}
+v_craft = drive_complete(s, ch, t, skip_gate=True, title=OK_TITLE,
+                         task={"creation_config": FAIL_BOARD})
+ok(v_craft.status == VideoStatus.REVIEW
+   and "craft gate FAIL" in (v_craft.error or "")
+   and "[A]" in (v_craft.error or ""),
+   "skip_gate True + craft-gate FAIL stays REVIEW (A+B+C, no auto-approve)")
 
 print("finalize: grok -p / OIDC failure at metadata fails clearly (no API fallback)")
 from app.services.llm import GrokCLIError  # noqa: E402
