@@ -171,6 +171,24 @@ for cls in ("beat hook", "beat stat", "beat cmp", "beat lst", "beat term", "beat
 ok('class="code" style="font-size:' in html, "code beat emits an adaptive font-size (no clip)")
 ok('marker-end="url(#ar)"' in html, "diagram emits arrowhead marker")
 
+# OS vs RR stills: same beats, different brand tokens. Mute-scroll (~0.3s) fail
+# condition is indistinguishable stills.
+os_board = storyboard.build_index_html(
+    ALL, theme.resolve(1, "x", brand="os"), "portrait", 1080, 1920, 44.0)
+rr_board = storyboard.build_index_html(
+    ALL, theme.resolve(1, "x", brand="rr"), "portrait", 1080, 1920, 44.0)
+ok('data-brand="os"' in os_board and theme.OS_LOGO_FILE in os_board,
+   "OS storyboard still carries the O crop")
+ok('data-brand="rr"' in rr_board and theme.OS_LOGO_FILE not in rr_board,
+   "RR storyboard still has zero Owera asset")
+ok("#c41e5a" in rr_board.lower() and "#c41e5a" not in os_board.lower(),
+   "RR stroke #C41E5A is absent from OS")
+ok("#4a1528" in rr_board.lower() and "#1a1a1a" in os_board.lower(),
+   "glow families diverge (burgundy vs cold gray)")
+ok("border:2px solid var(--stroke)" in rr_board,
+   "RR uses thin stroke on boxes, not accent fill as identity")
+ok(os_board != rr_board, "OS and RR compositions are not the same bytes")
+
 # --- creation_config capture (Phase 2 treatment signal) ----------------------
 print("_creation_config")
 cc = worker._creation_config("x", {"topic_id": 1, "content_format": "short"}, html,

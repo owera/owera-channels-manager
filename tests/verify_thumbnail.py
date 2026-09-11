@@ -291,6 +291,25 @@ ok('id="slab"' in html_default and "RECEIPT" in html_default,
 ok("#a36bff" not in html_default and "#ff5bb0" not in html_default,
    "rainbow accent bar (#a36bff/#ff5bb0) is gone")
 
+# OS vs RR mute-scroll split on the thumb card (move #2). Object chrome (RECEIPT
+# slab) stays — that's move #1 — but identity is glow + OS mark vs burgundy stroke.
+os_card = thumbnail._thumbnail_html("Hook", brand="os",
+                                    th=theme.resolve(1, "hello", brand="os"))
+rr_card = thumbnail._thumbnail_html("Hook", brand="rr",
+                                    th=theme.resolve(1, "hello", brand="rr"))
+ok('data-brand="os"' in os_card and theme.OS_LOGO_FILE in os_card,
+   "OS thumb is tagged + carries 03-owera-o-avatar.png")
+ok('id="brand-mark"' in os_card and 'id="accent"' not in os_card,
+   "OS thumb has the O mark and no neon top bar")
+ok('data-brand="rr"' in rr_card and 'id="brand-mark"' not in rr_card,
+   "RR thumb is tagged and has ZERO Owera mark")
+ok(theme.OS_LOGO_FILE not in rr_card, "RR thumb has no Owera asset path")
+ok("#c41e5a" in rr_card.lower() and "#4a1528" in rr_card.lower(),
+   "RR thumb uses burgundy stroke + glow")
+ok("#1a1a1a" in os_card.lower(), "OS thumb uses cold glow")
+ok("RECEIPT" in os_card and "RECEIPT" in rr_card,
+   "object chrome stays on both brands (not a duplicate #1 PR)")
+
 
 # ---------------------------------------------------------------------------
 # _render / _extract_frame command contracts

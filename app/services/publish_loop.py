@@ -255,7 +255,7 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
             video.subject, video.title, out_png,
             topic_id=video.topic_id or 0,
             content_format=content_format,
-            brand=craft.brand_of(channel.slug, channel.name))
+            brand=craft.brand_of(channel.slug, channel.name, channel_id=channel.id))
         if not png:
             quota.log(session, kind="thumbnail", status="error", video_id=video.id,
                       channel_id=channel.id, detail="thumbnail generation failed")

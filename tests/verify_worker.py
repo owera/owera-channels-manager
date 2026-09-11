@@ -406,6 +406,21 @@ fb_long = worker._fallback_composition("T", "A. B. C. D. E. F. G. H. I.",
 # _key_lines returns up to k=8; + title = 9
 ok(fb_long.count('id="seg') == 9, "long fallback caps at 8 lines + title")
 
+fb_os = worker._fallback_composition(
+    "Cache billed the cancelled run", "First. Second.",
+    "portrait", 1080, 1920, 12.0, brand="os", topic_id=1)
+fb_rr = worker._fallback_composition(
+    "Cache billed the cancelled run", "First. Second.",
+    "portrait", 1080, 1920, 12.0, brand="rr", topic_id=1)
+ok(theme.OS_LOGO_FILE in fb_os and 'id="brand-mark"' in fb_os,
+   "OS fallback still carries the O crop")
+ok('id="brand-mark"' not in fb_rr and theme.OS_LOGO_FILE not in fb_rr,
+   "RR fallback has zero Owera mark")
+ok("#1a1a1a" in fb_os.lower() and "#4a1528" in fb_rr.lower(),
+   "OS vs RR fallback glows diverge (cold gray vs burgundy)")
+ok(worker._looks_valid(fb_os) and worker._looks_valid(fb_rr),
+   "branded fallbacks still pass _looks_valid")
+
 
 # ---------------------------------------------------------------------------
 # _voice

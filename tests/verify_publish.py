@@ -791,6 +791,28 @@ publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytS")
 ok(_thumb_calls[0].get("content_format") == "short",
    "short topic forwards content_format=short")
 
+# YPP craft move #2: brand follows channel slug/id into the thumbnail.
+_thumb_calls.clear()
+s = fresh_session()
+ch_os = make_channel(s, slug="ch1", name="Owera Software")
+t = Topic(channel_id=ch_os.id, name="Fmt", theme_prompt="x", content_format="short")
+s.add(t); s.commit(); s.refresh(t)
+v = make_video(s, ch_os, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T", subject="s")
+publish_loop._set_custom_thumbnail(s, object(), ch_os, v, "ytOS")
+ok(_thumb_calls[-1].get("brand") == "os",
+   "ch1 Owera Software thumbnail is brand=os")
+_thumb_calls.clear()
+s = fresh_session()
+ch_rr = make_channel(s, slug="ch2", name="Rodrigo Recio")
+t = Topic(channel_id=ch_rr.id, name="Fmt", theme_prompt="x", content_format="short")
+s.add(t); s.commit(); s.refresh(t)
+v = make_video(s, ch_rr, status=VideoStatus.APPROVED, topic_id=t.id,
+               video_path="/tmp/x.mp4", title="T", subject="s")
+publish_loop._set_custom_thumbnail(s, object(), ch_rr, v, "ytRR")
+ok(_thumb_calls[-1].get("brand") == "rr",
+   "ch2 Rodrigo Recio thumbnail is brand=rr")
+
 # THE BUG: overrides_json is the operator blob; render_loop never writes the
 # topic format into it. A long topic with a leftover/empty/poisoned override
 # must still get a long-form hook prompt.

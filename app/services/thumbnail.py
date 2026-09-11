@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.engines.theme import PALETTE, resolve
+from app.services.engines import theme as theme_mod
 from app.services.engines.worker import _ASSETS, _esc, _llm
 
 logger = logging.getLogger("manager.thumbnail")
@@ -79,31 +80,70 @@ def _hook_text(subject: str, title: str | None,
 
 
 def _thumbnail_html(hook: str, accent: str = "#5b8cff",
-                    bg_deep: str = "#1b2a6b", brand: str | None = None) -> str:
+                    bg_deep: str = "#1b2a6b", brand: str | None = None,
+                    th: dict | None = None) -> str:
     """Static claim card. Object-of-angle still (receipt / terminal chrome), not a
-    generic emoji hook. Brand: os = B&W; rr = warm personal; else legacy."""
+    generic emoji hook. Brand: os = B&W + O mark; rr = burgundy glow, no logo;
+    else legacy (keeps the solid accent bar so unbranded tests stay pinned)."""
+    if brand and not th:
+        tokens = theme_mod.resolve(None, hook, brand=brand)
+    else:
+        tokens = th or {}
     pad = int(_W * 0.07)
     font = int(_W * 0.078)
-    fg = "#f4efe8" if brand == "rr" else "#ffffff"
-    bar = accent if brand != "os" else "#f5f5f5"
-    # Receipt/terminal slab — Designer winners were the object of the claim, not 💸.
-    slab_bg = "rgba(255,255,255,.04)" if brand != "os" else "rgba(255,255,255,.06)"
-    slab_border = accent if brand != "os" else "#888"
+    fg = tokens.get("fg") or "#ffffff"
+    bg_base = tokens.get("bg_base") or "#000"
+    glow = tokens.get("glow") or bg_deep
+    glow2 = tokens.get("glow2") or bg_base
+    stroke = tokens.get("stroke") or accent
+    logo = tokens.get("logo") if brand == "os" else ""
+    inset = theme_mod.mark_inset_px(_W, _H)
+    logo_h = theme_mod.logo_height_px(_H)
+
+    if brand == "os":
+        bg = f"radial-gradient(120% 90% at 18% 0%,{glow} 0%,{bg_base} 64%)"
+        slab_bg = "transparent"
+        slab_border = stroke
+        bar_html = ""
+        mark_html = (f'<img id="brand-mark" src="{_esc(logo)}" alt="" />'
+                     if logo else "")
+        mark_css = (f"#brand-mark{{position:absolute;left:{inset}px;bottom:{inset}px;"
+                    f"height:{logo_h}px;width:auto;opacity:.9;z-index:5;pointer-events:none}}")
+        chrome_color = stroke
+    elif brand == "rr":
+        bg = (f"radial-gradient(110% 80% at 82% 0%,{glow} 0%,{glow2} 28%,{bg_base} 62%)")
+        slab_bg = "transparent"
+        slab_border = stroke
+        bar_html = ""
+        mark_html = ""
+        mark_css = ""
+        chrome_color = stroke
+    else:
+        bg = f"radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#000 62%)"
+        slab_bg = "rgba(255,255,255,.04)"
+        slab_border = accent
+        bar_html = f'<div id="accent"></div>'
+        mark_html = ""
+        mark_css = ("#accent{position:absolute;left:0;top:0;height:10px;width:100%;"
+                    f"background:{accent}}}")
+        chrome_color = accent
+        fg = "#ffffff"
+
+    brand_attr = f' data-brand="{brand}"' if brand else ""
     return f"""<!doctype html>
-<html lang="en" data-resolution="landscape">
+<html lang="en" data-resolution="landscape"{brand_attr}>
 <head><meta charset="UTF-8"/>
 <script src="gsap.min.js"></script>
 <style>
   html,body{{margin:0;padding:0;width:{_W}px;height:{_H}px;overflow:hidden;
     font-family:{'-apple-system,Segoe UI,Helvetica,Arial,sans-serif'}}}
-  #root{{width:{_W}px;height:{_H}px;position:relative;
-    background:radial-gradient(120% 120% at 20% 0%,{bg_deep} 0%,#000 62%)}}
-  #accent{{position:absolute;left:0;top:0;height:10px;width:100%;background:{bar}}}
+  #root{{width:{_W}px;height:{_H}px;position:relative;background:{bg}}}
+  {mark_css}
   #slab{{position:absolute;left:{pad}px;right:{pad}px;top:18%;bottom:18%;
-    border:3px solid {slab_border};background:{slab_bg};border-radius:8px;
+    border:2px solid {slab_border};background:{slab_bg};border-radius:8px;
     box-sizing:border-box}}
   #chrome{{position:absolute;left:{pad + 28}px;top:20%;font-family:ui-monospace,Menlo,Consolas,monospace;
-    color:{accent};font-size:28px;letter-spacing:.12em;opacity:.85}}
+    color:{chrome_color};font-size:28px;letter-spacing:.12em;opacity:.85}}
   #hook{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     padding:0 {pad + 40}px;box-sizing:border-box;text-align:center;color:{fg};opacity:1;
     font-size:{font}px;font-weight:800;line-height:1.04;letter-spacing:-2px;
@@ -112,9 +152,10 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
 <body>
   <div id="root" data-composition-id="master" data-width="{_W}" data-height="{_H}"
        data-start="0" data-duration="1">
-    <div id="accent"></div>
+    {bar_html}
     <div id="slab" class="clip" data-start="0" data-duration="1" data-track-index="0"></div>
     <div id="chrome">RECEIPT</div>
+    {mark_html}
     <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
   </div>
   <script>
@@ -161,9 +202,10 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         accent, bg_deep = tokens["accent"], tokens["bg_deep"]
         work.mkdir(parents=True, exist_ok=True)
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
+        theme_mod.stage_brand_assets(work, brand)
         hook = _hook_text(subject, title, content_format=content_format)
         (work / "index.html").write_text(
-            _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand))
+            _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand, th=tokens))
         _render(work, work / "thumb.mp4")
         _extract_frame(work / "thumb.mp4", out_png)
         return out_png
