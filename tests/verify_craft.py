@@ -388,8 +388,10 @@ for bad in theme.OS_FORBIDDEN_HEX:
 ok("#1a1a1a" in os_l, "OS still has the cold glow")
 ok("#4a1528" in rr_l and "#2a0a14" in rr_l, "RR still has the burgundy upper-corner glow")
 ok("#c41e5a" in rr_l, "RR still uses #C41E5A as object stroke")
-ok("linear-gradient(90deg" not in os_l and "linear-gradient(90deg" not in rr_l,
+ok("linear-gradient(90deg,#" not in os_l and "linear-gradient(90deg,#" not in rr_l,
    "no rainbow neon-bar top gradient on branded stills")
+ok("repeating-linear-gradient(90deg" in os_l,
+   "receipt/bill tear is a serration, not the neon identity bar")
 ok(os_html != rr_html, "OS and RR storyboard HTML are not identical")
 
 os_thumb = thumbnail._thumbnail_html("Cache billed the cancelled run", brand="os")

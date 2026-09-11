@@ -94,7 +94,7 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
     Object proves the spoken angle (bill / receipt / GPU / app / terminal).
     Hook typography stays. Widgets are themed by YPP2 brand tokens:
     os = cold gray stroke + O crop; rr = burgundy #C41E5A stroke, no mark;
-    else legacy neon (accent bar kept so unbranded tests stay pinned).
+    else legacy neon (no OS mark; object uses the topic accent, not a brand stroke).
     """
     from app.services import craft
     if brand and not th:
