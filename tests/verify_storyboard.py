@@ -44,6 +44,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from app.services import craft
 from app.services.engines import storyboard, theme, worker
 from app.services.thumbnail import _THUMB_PALETTE
 
@@ -218,9 +219,11 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
 ok(storyboard._MID_MAX == 7.5,
-   "align max-hold: mid-body 7.5s (last-beat CTA absorber is uncapped)")
-ok(not hasattr(storyboard, "_TAIL_MAX"),
-   "finite last-beat tail cap is gone (08-28 residual: 8s CTA blocked the dump)")
+   "align max-hold: mid-body 7.5s (penultimate dump still lands on the CTA first)")
+ok(storyboard._ENDCARD_MAX == 4.0,
+   "series endcard / last-cta hold ceiling is 4.0s")
+ok(storyboard._ENDCARD_MAX == craft.ENDCARD_MAX_S,
+   "storyboard ceiling matches the craft gate")
 ok(storyboard._ROW_STEP_MAX == 1.1,
    "list row-step cap is 1.1s (ce46b43: last item must not land 7s in)")
 ok(storyboard._ROW_STEP_SHORTS == 0.6,
@@ -367,11 +370,11 @@ ok(len(td["term"].split()) == 4 and len(td["definition"].split()) == 14,
 
 cta = storyboard._coerce_beat({"type": "cta", "cue": "go"}, set(ALL_TYPES))
 ok(cta["text"] == "Build" and cta["sub"] == "",
-   "cta with no text defaults to 'Build' (compose sanitizes Follow/Subscribe away)")
+   "cta with no text defaults to 'Build' (compose overwrites shorts to the series chip)")
 cta2 = storyboard._coerce_beat(
     {"type": "cta", "text": qtext, "sub": qtext}, set(ALL_TYPES))
-ok(len(cta2["text"].split()) == 4 and len(cta2["sub"].split()) == 6,
-   "cta text clipped to 4 words, sub to 6 (R7 residual: over-long sub is truncated)")
+ok(len(cta2["text"].split()) == 6 and len(cta2["sub"].split()) == 6,
+   "cta text clipped to 6 words (chip · Series Name), sub to 6")
 
 ok(storyboard._coerce_beat({"type": "code", "lines": ["", "  "]}, set(ALL_TYPES)) is None,
    "code with only blank lines is dropped")
@@ -583,9 +586,10 @@ ok(draggy[3]["start"] < draggy[4]["start"],
    "capped list still precedes the cmp (monotonic)")
 ok(storyboard.validate_storyboard(draggy, 43.3),
    "max-hold layout still validates")
-# Word-sync would have put cmp at 19.5; the cap must pull it earlier.
-ok(draggy[4]["start"] < 19.5 - 0.01,
-   "cmp start is pulled EARLIER than its cue so the list stops dragging")
+# Word-sync would freeze the list ~9s (cmp cue at 19.5). Max-hold + endcard
+# walk must keep the list ≤ _MID_MAX; later mids may slide but stay capped.
+ok(draggy[3]["start"] + draggy[3]["dur"] <= draggy[4]["start"] + 1e-6,
+   "list yields to cmp (no 9s drag into the claim)")
 
 # Successor already at the cap: only shorten as far as the successor can absorb.
 tight_succ_words = (
@@ -607,7 +611,7 @@ ok(tight_succ[2]["dur"] <= storyboard._MID_MAX + 1e-6,
 ok(storyboard.validate_storyboard(tight_succ, 22.0),
    "partial max-hold (successor at cap) still validates")
 
-# Last beat (CTA) is NOT shortened — the follow card holds through the ask.
+# Last beat (CTA/endcard) is capped at 4.0s — surplus stays on the claim.
 cta_long_words = (
     [{"text": "open", "start": 0.0, "dur": 0.4},
      {"text": "mid", "start": 5.0, "dur": 0.3},
@@ -619,14 +623,17 @@ cta_long = [
     {"type": "cta", "cue": "follow", "text": "C"},
 ]
 storyboard.align_storyboard(cta_long, cta_long_words, 20.2)
-ok(cta_long[-1]["dur"] > storyboard._MID_MAX,
-   "CTA longer than _MID_MAX is kept (spoken-ask hold is intentional)")
+ok(cta_long[-1]["dur"] <= storyboard._ENDCARD_MAX + 1e-6,
+   "CTA/endcard hold is capped at 4.0s")
+ok(cta_long[-1]["start"] >= 20.2 - storyboard._ENDCARD_MAX - 1e-6,
+   "endcard slides to the tail (after the claim, not on frame0)")
+ok(cta_long[0]["start"] == 0.0, "endcard cap still pins hook at 0")
 ok(storyboard.validate_storyboard(cta_long, 20.2),
-   "uncapped CTA still validates")
+   "capped endcard still validates")
 
-# 08-28 residual: penultimate list 8.72s cannot dump into a CTA already at 8s
-# when the last-beat absorber is capped at 8.0. Uncap it so the list hits
-# _MID_MAX and the CTA grows (the spoken-ask hold is the point of uncap).
+# Penultimate 8.72s list still dumps into the CTA first, then the 4.0s chip
+# ceiling slides the endcard to the tail and re-caps the list at _MID_MAX
+# (surplus goes to the hook, which stays at 0).
 penult_words = (
     [{"text": "open", "start": 0.0, "dur": 0.4},
      {"text": "list", "start": 2.0, "dur": 0.3},
@@ -639,12 +646,14 @@ penult = [
 ]
 storyboard.align_storyboard(penult, penult_words, 18.72)
 ok(penult[1]["dur"] <= storyboard._MID_MAX + 1e-6,
-   "penultimate 8.72s list is capped at _MID_MAX by dumping into the CTA")
-ok(penult[2]["dur"] > 8.0,
-   "CTA grows past 8s to absorb the penultimate surplus (spoken-ask hold)")
-ok(penult[0]["start"] == 0.0, "uncapped-CTA dump still pins hook at 0")
+   "penultimate list stays ≤ _MID_MAX after the endcard cap")
+ok(penult[2]["dur"] <= storyboard._ENDCARD_MAX + 1e-6,
+   "endcard does not grow past 4.0s to absorb the surplus")
+ok(penult[0]["start"] == 0.0, "endcard cap still pins hook at 0")
+ok(penult[2]["start"] >= penult[1]["start"] + penult[1]["dur"] - 1e-6,
+   "chip starts after the claim beat (no overlap with frame0)")
 ok(storyboard.validate_storyboard(penult, 18.72),
-   "uncapped last-beat absorber still validates")
+   "4.0s endcard + re-capped penultimate still validates")
 
 even = [{"type": "x"}, {"type": "y"}, {"type": "z"}]
 storyboard._even_space(even, 10.0)
@@ -876,10 +885,12 @@ ok("DECOLAR LOCK" in sys_a,
    "system prompt names the Decolar lock (frame0 = first spoken sentence)")
 ok("Repeating the title is REQUIRED" in sys_a,
    "hook brief requires repeating the title (curiosity-gap invert)")
-ok("Follow, Siga" in sys_a,
+ok("Follow" in sys_a and "Siga" in sys_a,
    "Follow/Siga named as FORBIDDEN, not as the CTA verb")
-ok("FIRST words of the closing punch" in sys_a,
-   "ending plan is anchored on the closing punch (not a spoken follow-ask)")
+ok("Subscribe — next" in sys_a,
+   "ending plan is anchored on the series endcard VO")
+ok("≤4.0s" in sys_a or "4.0s" in sys_a,
+   "system prompt names the 4.0s endcard hold")
 ok("Short vertical" in storyboard._user_prompt("t", "s", "short"),
    "short format asks for a punchy hook")
 ok("First spoken sentence" in storyboard._user_prompt("t", "spoken line here", "short"),
@@ -972,6 +983,12 @@ ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
    "compose does NOT force Follow/Siga (CTA ban) and overwrites 'Try it'")
+ok("cta-chip" in html and "· Copilot Credits" in html,
+   "compose shorts lock the OS default series chip")
+ok("same series" in html, "compose shorts emit the same-series micro")
+ok('class="cta-box"' not in html, "shorts endcard is a chip, not the punch box")
+ok("Subscribe" not in html.split('class="beat cta"', 1)[-1],
+   "Subscribe is VO-only — not painted on the chip")
 ok(len(calls) == 1 and calls[0]["max_tokens"] == 1500,
    "happy path is a single llm call at max_tokens=1500")
 ok("Video title: Test video" in calls[0]["user"],
@@ -993,6 +1010,26 @@ ok("Siga" not in pt_html and "Follow" not in pt_html,
    "PT compose does not force Siga/Follow")
 es_html = _compose(lambda *a, **k: _board(), language="Spanish")
 ok("Sigue" not in es_html, "Spanish compose does not force Sigue")
+
+rr_html = _compose(
+    lambda *a, **k: _board(),
+    subject="Você lotou a VRAM. · IA 175",
+    brand="rr",
+)
+ok("cta-chip" in rr_html and "· IA" in rr_html,
+   "RR compose locks the IA series chip")
+ok("Copilot Credits" not in rr_html,
+   "RR chip does not invent the OS series label")
+ok("Follow" not in rr_html and "amanhã" not in rr_html.lower()
+   and "waitlist" not in rr_html and "💸" not in rr_html,
+   "RR endcard keeps the hard bans")
+
+mem_html = _compose(
+    lambda *a, **k: _board(),
+    subject="Memory died between chats · Agent memory 2",
+)
+ok("· Agent memory" in mem_html and "Subscribe — next" not in mem_html,
+   "non-Credits/IA series only swaps the chip; no extra on-screen CTA")
 
 n_bad = [0]
 
@@ -1102,6 +1139,21 @@ ok(_compose(already_has_code_llm, allowed_types=PHASE_A + ["code"]) is not None
    and n_has[0] == 1,
    "draft that already has a code beat does not retry")
 
+sub_mid = _compose(
+    lambda *a, **k: _board(extra=[{
+        "type": "statement", "cue": "echo foxtrot", "text": "Subscribe now",
+    }]),
+    script="alpha bravo charlie delta echo foxtrot golf hotel. Subscribe — next Copilot Credits trap.",
+    subject="alpha bravo charlie · Copilot Credits 1",
+)
+ok("Subscribe now" not in sub_mid,
+   "compose strips Subscribe from a mid-body statement")
+hook_mid = sub_mid.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
+ok("Subscribe" not in hook_mid,
+   "frame0 / mid beats do not carry Subscribe (endcard VO only)")
+ok("cta-chip" in sub_mid and "· Copilot Credits" in sub_mid,
+   "endcard chip still renders after a mid-Subscribe scrub")
+
 # validate-fail → even-space rescue, then success
 _real_val = storyboard.validate_storyboard
 n_val = [0]
@@ -1133,5 +1185,21 @@ try:
        "validate failing even after even-space → None (never emits invalid HTML)")
 finally:
     storyboard.validate_storyboard = _real_val
+
+# Long-form: _sanitize_cta keeps the global CTA ban (Subscribe is endcard-only).
+long_beats = [
+    {"type": "hook", "text": "H", "cue": "h"},
+    {"type": "cta", "text": "Subscribe", "sub": "Follow tomorrow"},
+]
+storyboard._sanitize_cta(
+    long_beats, "The lesson is cut by meaning.",
+    subject="Deep dive", brand="os", content_format="long",
+)
+ok(long_beats[-1]["text"] == "The lesson is cut",
+   "long-form CTA still locks to the spoken punch, not Subscribe")
+ok(long_beats[-1].get("endcard") is False, "long-form is not the series endcard")
+ok("Follow" not in (long_beats[-1].get("sub") or "")
+   and "Subscribe" not in (long_beats[-1].get("sub") or ""),
+   "long-form still strips Follow/Subscribe from the card")
 
 print(f"\nALL {_checks} CHECKS PASSED")

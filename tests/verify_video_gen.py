@@ -448,6 +448,13 @@ out_ban = _run_ideas(
 )
 ok(out_ban == ["Rerank hard then generate thin"],
    "Follow/waitlist idea lines are dropped; builder line kept")
+_llm_calls.clear()
+out_sub = _run_ideas(
+    _text="Subscribe for more RAG fixes\nRerank hard then generate thin\nInscreva-se já",
+    n=8,
+)
+ok(out_sub == ["Rerank hard then generate thin"],
+   "Subscribe/Inscreva idea titles are dropped (endcard-only exception)")
 
 
 # --- case-insensitive dedupe against existing ---

@@ -83,7 +83,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
     lang_rule = (f"\nHARD RULE: write every title in {language} — the channel publishes "
                  f"exclusively in {language}, whatever language the theme name is in." if language else "")
-    from app.services.craft import CRAFT_RULES_SHORT, contains_banned
+    from app.services.craft import CRAFT_RULES_SHORT, contains_banned, contains_subscribe_cta
     craft_rule = f"\n{CRAFT_RULES_SHORT}"
     if content_format == "long":
         prompt = (
@@ -138,7 +138,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
         title = re.sub(r"^\s*[-*\d.)\s]+", "", line).strip().strip('"')
         if not title or title.lower() in seen:
             continue
-        if contains_banned(title):
+        if contains_banned(title) or contains_subscribe_cta(title):
             continue
         seen.add(title.lower())
         out.append(title)

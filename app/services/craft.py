@@ -7,6 +7,11 @@ second typographic hook or curiosity gap.
 Spoken-title suffix (shorts): `· <series> <nn>` with series in
 Copilot Credits | Agent memory | CrewAI | IA | Local | Claude Code.
 
+Series endcard (shorts, after the claim — not frame0): spoken
+`Subscribe — next {series} {noun}.` (≤8 words) + chip `· {series}`.
+Optional micro `same series` only if it fits. No Follow / waitlist /
+Cloud / SMY. Endcard hold ≤ ENDCARD_MAX_S (4.0s).
+
 Pré-pattern leftovers are parked via reject. Do not mass-retitle.
 """
 
@@ -39,8 +44,63 @@ TITLE_GATE_REASON = (
     "— pré-pattern leftovers must be parked via reject, not mass-retitled"
 )
 
+# Next-claim noun on the series endcard VO. Only these — never invent a CTA.
+NEXT_CLAIM_NOUNS = ("trap", "receipt", "bill", "drop")
+
+# Brand defaults when the title has no · series nn (English public YT).
+# OS = Copilot Credits; RR = IA. Other series only swap {series}/{noun}.
+DEFAULT_SERIES = {"os": "Copilot Credits", "rr": "IA"}
+DEFAULT_SERIES_FALLBACK = "Copilot Credits"
+DEFAULT_NOUN = "trap"
+
+# Craft gate: last cta/endcard visual hold. Claim stays on screen; chip is last.
+ENDCARD_MAX_S = 4.0
+
+# Spoken series endcard. 1 line, ≤8 words. Subscribe is the YT ask — not Follow.
+#   Subscribe — next {series} {noun}.
+# ALLOWED only as the last spoken line / last visual slot. Mid-short (miolo)
+# Subscribe CTAs are stripped — this is not a global invert of Follow/waitlist.
+_ENDCARD_VO_RE = re.compile(
+    r"subscribe\s*[—–-]\s*next\s+.+\s+(?:trap|receipt|bill|drop)\.?\s*$",
+    re.IGNORECASE,
+)
+
+# Subscribe / Inscreva CTAs. Never added to BANNED_RE (that would strip the
+# endcard VO). Use strip_mid_subscribe / contains_subscribe_cta instead.
+SUBSCRIBE_CTA_RE = re.compile(
+    r"\bsubscribe\b"
+    r"|\binscreva(?:-se)?"
+    r"|\binscreve(?:-se)?"
+    r"|\bse\s+inscreve\b",
+    re.IGNORECASE,
+)
+
+# Endcard-only bans (card + VO). Broader than BANNED_RE: amanhã / owera.com /
+# Cloud / "part 2 coming" / 💸 / neon. Do NOT run this on the whole script —
+# "cloud GPU" in a lesson is fine; it must not appear on the endcard.
+_ENDCARD_BANNED_PHRASES = (
+    r"\bfollow(?:\s+tomorrow)?\b",
+    r"\bsiga\b",
+    r"\bsigue\b",
+    r"\bamanh[ãa]\b",
+    r"\bwaitlist\b",
+    r"\bowera\.com\b",
+    r"\bowera\.ai\b",
+    r"\bowera cloud\b",
+    r"\bcloud[- ]as[- ](?:a[- ])?(?:product|ready|service)\b",
+    r"\bcloud is (?:live|ready)\b",
+    r"\bpart\s*2\s+coming\b",
+    r"\bsmy\b",
+    r"\binstagram\b",
+    r"\blinkedin\b",
+    r"💸",
+    r"\bneon\b",
+)
+ENDCARD_BANNED_RE = re.compile("|".join(_ENDCARD_BANNED_PHRASES), re.IGNORECASE)
+
 # Builder/confiança shorts: ZERO follow / waitlist / Cloud-as-product / SMY /
 # Instagram-LinkedIn CTAs. Matched case-insensitively against folded text.
+# Subscribe on the series endcard VO is allowed (English public YT).
 _BANNED_PHRASES = (
     r"\bfollow\s+for\s+more\b",
     r"\bfollow\s*→",
@@ -62,6 +122,7 @@ _BANNED_PHRASES = (
     r"\blinkedin\b",
     r"\bowera\.ai\b",
     r"\bcli\.owera\.ai\b",
+    r"\bowera\.com\b",
 )
 
 BANNED_RE = re.compile("|".join(_BANNED_PHRASES), re.IGNORECASE)
@@ -69,8 +130,12 @@ BANNED_RE = re.compile("|".join(_BANNED_PHRASES), re.IGNORECASE)
 # Idea / script / metadata prompt addenda — enforced in code, not only theme_prompt.
 CRAFT_RULES_SHORT = (
     "CRAFT (enforced): first spoken sentence IS the title hook. "
-    "No Follow/Siga/'follow for more'/Siga-amanhã. No waitlist, Owera Cloud-as-product, "
-    "SMY, Instagram or LinkedIn CTAs. Short = builder/confiança close, not a subscribe ask. "
+    "No Follow/Siga/'follow for more'/Siga-amanhã/Follow-tomorrow. No waitlist, "
+    "owera.com, Owera Cloud-as-product, SMY, 'part 2 coming', Instagram or LinkedIn. "
+    "Subscribe is ALLOWED only as the LAST spoken line of the series endcard "
+    "('Subscribe — next {series} {noun}.') + chip '· {series}'. FORBIDDEN in the "
+    "mid-short / body / miolo: no Subscribe text, VO, or chip before the endcard. "
+    "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
     "Title suffix must be '· <series> <nn>' with series one of: "
     + " | ".join(SERIES_LABELS) + "."
 )
@@ -144,6 +209,60 @@ def contains_banned(text: str | None) -> bool:
     return bool(scan_banned(text))
 
 
+def is_endcard_vo(text: str | None) -> bool:
+    """True when text is the series endcard spoken closer (trailing match)."""
+    return bool(_ENDCARD_VO_RE.search((text or "").strip()))
+
+
+def contains_subscribe_cta(text: str | None) -> bool:
+    return bool(SUBSCRIBE_CTA_RE.search(text or ""))
+
+
+def strip_subscribe_cta(text: str | None) -> str:
+    """Drop subscribe-CTA sentences. Does not protect the endcard VO — use
+    strip_mid_subscribe for scripts that may already carry the closer."""
+    raw = (text or "").strip()
+    if not raw or not contains_subscribe_cta(raw):
+        return raw
+    parts = re.split(r"(?<=[.!?…])\s+", raw)
+    kept = [p for p in parts if p.strip() and not contains_subscribe_cta(p)]
+    if kept:
+        return " ".join(kept).strip()
+    cleaned = SUBSCRIBE_CTA_RE.sub("", raw)
+    return re.sub(r"\s{2,}", " ", cleaned).strip(" -—,;:→")
+
+
+def strip_mid_subscribe(script: str | None) -> str:
+    """Ban Subscribe in the miolo. Keep only a trailing endcard VO, if present."""
+    raw = (script or "").strip()
+    if not raw:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    if not parts:
+        return ""
+    out: list[str] = []
+    last = len(parts) - 1
+    for i, p in enumerate(parts):
+        if i == last and is_endcard_vo(p):
+            out.append(p)
+            continue
+        if contains_subscribe_cta(p):
+            continue
+        out.append(p)
+    return " ".join(out).strip()
+
+
+def mid_body_has_subscribe(script: str | None) -> bool:
+    """True if Subscribe appears before a trailing endcard VO (or anywhere if none)."""
+    raw = (script or "").strip()
+    if not raw or not contains_subscribe_cta(raw):
+        return False
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    if parts and is_endcard_vo(parts[-1]):
+        return any(contains_subscribe_cta(p) for p in parts[:-1])
+    return True
+
+
 def strip_banned(text: str | None) -> str:
     """Drop sentences that carry a banned CTA. Keeps the rest (never raises)."""
     raw = (text or "").strip()
@@ -187,12 +306,8 @@ _BEAT_SNAP_KEYS = (
     "type", "start", "dur", "cue", "text", "sub", "object", "prop", "emoji",
     "items", "value", "unit", "label", "title", "lines", "command", "nodes",
 )
-# Subscribe CTA is legal only on the trailing cta/endcard series (Rodrigo CoS).
-# Word-boundary so "subscribers" (analytics copy) does not trip.
-SUBSCRIBE_CTA_RE = re.compile(
-    r"\bsubscribe\b|\binscreva(?:-se)?\b",
-    re.IGNORECASE,
-)
+# Subscribe CTA regex lives above (never in BANNED_RE). Gate C uses it via
+# _subscribe_hits — legal only on the trailing cta/endcard series.
 _BEATS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="storyboard-beats">(.*?)</script>',
     re.DOTALL,
@@ -539,3 +654,116 @@ def review_gate_reason(title: str | None,
     """Title pattern then Video Maker A+B+C. First failure wins (operator-readable)."""
     return (title_gate_reason(title, content_format)
             or video_maker_gate_reason(creation_config, content_format))
+
+
+# ---------------------------------------------------------------------------
+# Series endcard (shorts) — Subscribe VO + chip · {series}. Not in BANNED_RE.
+# ---------------------------------------------------------------------------
+
+def _canonical_series(raw: str) -> str:
+    folded = theme.fold(raw)
+    for label in SERIES_LABELS:
+        if theme.fold(label) == folded:
+            return label
+    return raw.strip()
+
+
+def series_of(title: str | None, brand: str | None = None) -> str:
+    """Series label for the endcard. Title suffix wins; else brand default.
+
+    OS → Copilot Credits; RR → IA. Unknown brand → Copilot Credits (English
+    public YT). Never invent a third CTA — only swap {series}/{noun}.
+    """
+    m = SPOKEN_TITLE_RE.search(title or "")
+    if m:
+        return _canonical_series(m.group(1))
+    return DEFAULT_SERIES.get(brand or "", DEFAULT_SERIES_FALLBACK)
+
+
+def next_claim_noun(*blobs: str | None) -> str:
+    """Pick trap|receipt|bill|drop from title/script; default trap."""
+    blob = theme.fold(" ".join(b or "" for b in blobs))
+    for noun in ("receipt", "bill", "drop", "trap"):
+        if re.search(rf"\b{noun}\b", blob):
+            return noun
+    return DEFAULT_NOUN
+
+
+def series_endcard_vo(series: str, noun: str = DEFAULT_NOUN) -> str:
+    """Spoken closer: Subscribe — next {series} {noun}.  ≤8 words by construction."""
+    n = noun if noun in NEXT_CLAIM_NOUNS else DEFAULT_NOUN
+    line = f"Subscribe — next {series} {n}."
+    # Safety clip — live series labels are 1–2 words; never invent extra CTA.
+    words = line.rstrip(".").split()
+    if len(words) > 8:
+        line = " ".join(words[:8]) + "."
+    return line
+
+
+def series_endcard_chip(series: str) -> str:
+    """On-screen chip, one line. Not a Follow/Subscribe button."""
+    return f"· {series}"
+
+
+def series_endcard_micro(series: str) -> str:
+    """Optional second line. Only if the chip is short enough; no extra CTA."""
+    chip = series_endcard_chip(series)
+    if len(chip) <= 24:
+        return "same series"
+    return ""
+
+
+def series_endcard(title: str | None, script: str | None = None,
+                   brand: str | None = None, noun: str | None = None) -> dict:
+    """VO + chip + optional micro for the series endcard.
+
+    Defaults: OS / Copilot Credits / trap; RR / IA / trap.
+    """
+    series = series_of(title, brand)
+    n = noun if noun in NEXT_CLAIM_NOUNS else next_claim_noun(title, script)
+    vo = series_endcard_vo(series, n)
+    chip = series_endcard_chip(series)
+    micro = series_endcard_micro(series)
+    return {"series": series, "noun": n, "vo": vo, "chip": chip, "micro": micro}
+
+
+def endcard_scan_banned(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return [m.group(0) for m in ENDCARD_BANNED_RE.finditer(text)]
+
+
+def endcard_clean(card: dict) -> bool:
+    """True when VO/chip/micro carry no banned endcard CTA and stay in template."""
+    vo = (card.get("vo") or "").strip()
+    chip = (card.get("chip") or "").strip()
+    micro = (card.get("micro") or "").strip()
+    if endcard_scan_banned(vo) or endcard_scan_banned(chip) or endcard_scan_banned(micro):
+        return False
+    if "subscribe" in theme.fold(chip) or "subscribe" in theme.fold(micro):
+        return False  # Subscribe is VO-only
+    if micro and micro != "same series":
+        return False
+    if not chip.startswith("· "):
+        return False
+    if len(vo.split()) > 8:
+        return False
+    return bool(_ENDCARD_VO_RE.search(vo))
+
+
+def ensure_series_endcard_vo(script: str | None, subject: str | None,
+                             brand: str | None = None,
+                             noun: str | None = None) -> str:
+    """Pin the last spoken sentence to the series endcard VO. No TTS overhaul —
+    one appended (or replaced) English line. Long-form callers should skip this."""
+    card = series_endcard(subject, script, brand, noun)
+    vo = card["vo"]
+    raw = strip_mid_subscribe(script)
+    if not raw:
+        return vo
+    if is_endcard_vo(raw):
+        parts = [p for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+        if parts:
+            parts[-1] = vo
+            return " ".join(parts).strip()
+    return (raw.rstrip() + " " + vo).strip()

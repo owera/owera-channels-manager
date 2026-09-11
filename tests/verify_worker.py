@@ -164,14 +164,16 @@ with patch.object(worker, "_llm", side_effect=_in_band_short):
         "Cache misses cost conversions",
         {"content_format": "short", "paragraph_number": 2},
     )
-ok(text == " ".join(["word"] * 60), "in-band short script returned as-is")
+ok(text == " ".join(["word"] * 60) + " Subscribe — next Copilot Credits trap.",
+   "in-band short script keeps the body and appends the series endcard VO")
 ok(len(_llm_calls) == 1, "in-band script does not retry")
 p0 = _llm_calls[0]["prompt"]
 ok("Cache misses cost conversions" in p0, "subject is interpolated into the prompt")
 ok("In this video" in p0 and "Welcome" in p0 and "Today" in p0,
    "short prompt forbids the 07-07-class wind-up openers")
-ok("builder/confiança" in p0 and "FORBIDDEN" in p0 and "Follow, Siga" in p0,
-   "short prompt is a builder close + Follow/Siga ban (not a spoken follow-ask)")
+ok("builder/confiança" in p0 and "FORBIDDEN" in p0 and "Follow" in p0 and "Siga" in p0,
+   "short prompt is a builder close + Follow/Siga ban")
+ok("Subscribe — next" in p0, "short prompt names the series endcard VO")
 ok("The FIRST sentence is the title hook" in p0,
    "short prompt locks the first spoken sentence to the title hook")
 ok("HARD RULE" not in p0,
@@ -196,7 +198,8 @@ ok(_llm_calls[0]["max_tokens"] == 1500, "long script max_tokens=1500")
 _llm_calls.clear()
 with patch.object(worker, "_llm", side_effect=_out_then_in):
     retried = worker._generate_script("x", {"content_format": "short"})
-ok(retried == " ".join(["retry"] * 80), "out-of-band first try is replaced by the retry")
+ok(retried == " ".join(["retry"] * 80) + " Subscribe — next Copilot Credits trap.",
+   "out-of-band first try is replaced by the retry, then the endcard VO")
 ok(len(_llm_calls) == 2, "out-of-band triggers exactly one retry")
 ok("MUST be between 50 and 140 words" in _llm_calls[1]["prompt"],
    "retry prompt names the short [50,140] band")
@@ -204,8 +207,59 @@ ok("MUST be between 50 and 140 words" in _llm_calls[1]["prompt"],
 _llm_calls.clear()
 with patch.object(worker, "_llm", side_effect=_out_then_empty):
     kept = worker._generate_script("x", {"content_format": "short"})
-ok(kept == "quoted original that is way too short",
-   "empty retry keeps the (quote-stripped) original; leading/trailing quotes stripped")
+ok(kept == "quoted original that is way too short Subscribe — next Copilot Credits trap.",
+   "empty retry keeps the (quote-stripped) original + endcard VO")
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_in_band_short):
+    rr_script = worker._generate_script(
+        "Você lotou a VRAM. · IA 175",
+        {"content_format": "short", "brand": "rr"},
+    )
+ok(rr_script.endswith("Subscribe — next IA trap."),
+   "RR short pins the IA default VO (English public YT)")
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_in_band_short):
+    mem = worker._generate_script(
+        "Memory died between chats · Agent memory 2",
+        {"content_format": "short", "brand": "os"},
+    )
+ok(mem.endswith("Subscribe — next Agent memory trap."),
+   "non-Credits/IA series only swaps {series}/{noun}")
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_in_band_short):
+    lng = worker._generate_script(
+        "Deep dive",
+        {"content_format": "long", "paragraph_number": 8},
+    )
+ok("Subscribe —" not in lng,
+   "long-form does not append the series endcard VO")
+
+def _dirty_mid(_prompt, system=None, max_tokens=2000):
+    _llm_calls.append({"prompt": _prompt})
+    return (
+        "Subscribe for more. Your RAG reads junk. Follow tomorrow for the rest. "
+        "Join the waitlist. Owera Cloud is live. " + " ".join(["word"] * 50)
+    )
+
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_dirty_mid):
+    stripped = worker._generate_script(
+        "Your RAG reads junk · Copilot Credits 1",
+        {"content_format": "short"},
+    )
+ok(stripped.endswith("Subscribe — next Copilot Credits trap."),
+   "dirty mid-script still gets the endcard Subscribe VO")
+ok("Follow" not in stripped and "waitlist" not in stripped.lower()
+   and "Cloud" not in stripped and "owera.com" not in stripped,
+   "worker strip_banned still kills Follow-tomorrow/waitlist/Cloud mid-script")
+ok(stripped.startswith("Your RAG reads junk."),
+   "Decolar opener survives the mid-script CTA strip")
+ok(stripped.count("Subscribe") == 1 and stripped.endswith("trap."),
+   "mid-script Subscribe is stripped; only the endcard VO remains")
 
 
 # ---------------------------------------------------------------------------

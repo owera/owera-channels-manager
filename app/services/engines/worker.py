@@ -455,10 +455,13 @@ def _generate_script(subject: str, params: dict) -> str:
             "directly, then stop. Forbidden openers: 'In this video', "
             "'Today', 'Welcome', 'Here's how'. After that hook, give the honest verdict or "
             "concrete insight — take a clear position, don't hedge. Close with one tight, "
-            "memorable line that crystallises the lesson in a sentence the viewer will quote. "
-            "That last line is a builder/confiança punch, NOT a Follow/Siga/subscribe ask. "
-            "FORBIDDEN anywhere in the script: Follow, Siga, Siga-amanhã, 'follow for more', "
-            "waitlist, Owera Cloud-as-product, SMY, Instagram, LinkedIn. "
+            "memorable builder/confiança line that crystallises the lesson, THEN the series "
+            "endcard as the LAST spoken line, exactly: 'Subscribe — next {series} {noun}.' "
+            "(≤8 words; noun = trap|receipt|bill|drop). On-screen chip is '· {series}', "
+            "not a Follow ask. Subscribe is FORBIDDEN in the mid-short / body / miolo "
+            "(no Subscribe text or ask before that last line). FORBIDDEN anywhere: "
+            "Follow, Follow tomorrow, Siga, Siga-amanhã, 'follow for more', waitlist, "
+            "owera.com, Owera Cloud-as-product, 'part 2 coming', SMY, Instagram, LinkedIn. "
             "The FIRST sentence is the title hook — keep it short (≤10 words). "
             "Conversational, concrete, no filler, no headings, no stage directions, no emojis. "
             "Return ONLY the spoken words."
@@ -491,6 +494,12 @@ def _generate_script(subject: str, params: dict) -> str:
 
     from app.services import craft
     text = craft.strip_banned(text) or text
+    # Shorts: pin the series endcard VO after the claim. No TTS overhaul — one
+    # English line appended (or the last sentence replaced if it already matches).
+    if (params.get("content_format") or "short") != "long":
+        text = craft.ensure_series_endcard_vo(
+            text, subject, brand=params.get("brand"),
+        )
     return text
 
 

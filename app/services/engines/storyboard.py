@@ -35,10 +35,12 @@ _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
 _MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard max-hold
-# Last beat (CTA) is an *uncapped* absorber: dump a penultimate 8s+ card into it
-# so the follow card holds through the spoken ask. A finite _TAIL_MAX (8.0, 08-27)
-# blocked that dump whenever the CTA was already at 8s (08-28 residual: ch2-code
-# list 8.72s / CTA 8.00s).
+# Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
+# claim. Surplus stays on the payoff / earlier mids — never back on frame0
+# and never a long neon Follow card. Mid-body still dumps into the CTA first
+# (so a penultimate 8s+ list can shrink); _cap_endcard then slides the chip
+# to the last 4s and re-caps the penultimate at _MID_MAX.
+_ENDCARD_MAX = 4.0
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
 _ROW_STEP_SHORTS = 0.6  # Shorts craft gate C: item stagger ≤0.6s
 _LIST_MAX = 6.0      # empty list dumps >6s are a retention hole — see _cap_list_holds
@@ -197,8 +199,8 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
         return {"type": "term_define", "cue": cue, "term": term, "definition": definition}
 
     if btype == "cta":
-        # No Follow/Subscribe default — compose sanitizes to a builder close.
-        return {"type": "cta", "cue": cue, "text": _words_clip(raw.get("text", "") or "Build", 4),
+        # Compose overwrites shorts to the series chip; longs keep a punch.
+        return {"type": "cta", "cue": cue, "text": _words_clip(raw.get("text", "") or "Build", 6),
                 "sub": _words_clip(raw.get("sub", ""), 6)}
 
     # Phase B/C: accept + clamp here; rendered only once their renderers are registered.
@@ -299,6 +301,7 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
 
     if not tokens:
         _even_space(beats, duration)
+        _cap_endcard(beats, duration)
         return beats
 
     starts: list[float | None] = [None] * n
@@ -364,15 +367,15 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
     # for 8-10s (R4 DRAG). Prompt-level "split the span" is exhausted (07-13);
     # this is the deterministic counterpart of the min floor. Pull the NEXT start
     # earlier so beat i's visual hold is <= _MID_MAX, but never dump enough into
-    # a *mid-body* successor that *it* exceeds _MID_MAX. The last beat (CTA) is
-    # the uncapped absorber — a follow card holding through the ask is
-    # intentional, and a finite tail cap blocked the penultimate dump (08-28).
+    # a *mid-body* successor that *it* exceeds _MID_MAX. The last beat still
+    # absorbs the penultimate dump (so an 8s+ list can shrink); _cap_endcard
+    # then enforces the 4.0s chip ceiling and re-caps the penultimate.
     for i in range(n - 1):
         wanted = starts[i] + _MID_MAX + _GAP
         if starts[i + 1] <= wanted + 1e-9:
             continue
         if i + 1 == n - 1:
-            new_next = wanted  # dump into CTA freely; last beat is not capped
+            new_next = wanted  # dump into CTA; chip ceiling is applied after
         else:
             succ_end = starts[i + 2] - _GAP
             new_next = max(wanted, succ_end - _MID_MAX)
@@ -386,6 +389,7 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
         b["start"] = round(max(0.0, starts[i]), 3)
         end = duration if i == n - 1 else max(starts[i] + _MIN_DUR, starts[i + 1] - _GAP)
         b["dur"] = round(max(_MIN_DUR, end - starts[i]), 3)
+    _cap_endcard(beats, duration)
     return beats
 
 
@@ -515,8 +519,15 @@ def _base_css(width: int, height: int, th: dict) -> str:
         ".quote .qtext{font-size:calc(var(--fs)*1.05);font-weight:700;font-style:italic;line-height:1.3}"
         ".quote .qmark{color:var(--accent);font-size:calc(var(--fs)*1.8);font-weight:900;line-height:.2}"
         ".quote .qattr{font-size:var(--body-fs);color:var(--fg-dim);margin-top:.4em}"
-        # cta
-        ".cta .cta-box{background:var(--accent);color:#08080f;font-weight:900;border-radius:18px;"
+        # cta — series endcard chip (outline, no neon fill, no arrow, no 💸)
+        ".cta .cta-chip{display:inline-flex;align-items:center;justify-content:center;"
+        "border:1px solid var(--fg);background:transparent;color:var(--fg);"
+        "border-radius:999px;padding:.28em .75em;font-size:calc(var(--fs)*.72);"
+        "font-weight:700;letter-spacing:.03em}"
+        ".cta .cta-micro{font-size:calc(var(--body-fs)*.8);color:var(--fg-dim);"
+        "margin-top:.4em;font-weight:500;letter-spacing:.02em}"
+        # long-form punch box (shorts never use this — _sanitize_cta sets the chip)
+        ".cta .cta-box{background:var(--fg);color:var(--bg);font-weight:900;border-radius:18px;"
         "padding:.5em .9em;font-size:calc(var(--fs)*1.05);display:inline-flex;align-items:center;gap:.3em}"
         ".cta .cta-sub{font-size:var(--body-fs);color:var(--fg-dim);margin-top:.5em;font-weight:600}"
         # --- Phase B/C (code / command / diagram) ---
@@ -734,11 +745,21 @@ def render_quote(b, ctx):
 def render_cta(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
+    chip = bool(b.get("endcard")) or (b.get("text") or "").startswith("·")
+    if chip:
+        # Series endcard: one-line chip, optional micro. No arrow, no neon fill.
+        micro = ('<div class="cta-micro">' + theme.esc(b["sub"]) + "</div>") if b.get("sub") else ""
+        inner = '<div class="cta-chip">' + theme.esc(b["text"]) + "</div>" + micro
+        tw = [
+            _from(bid + " .cta-chip", s, "opacity:0,y:12", "opacity:1,y:0", dur=0.28, ease="power2.out"),
+        ]
+        if b.get("sub"):
+            tw.append(_from(bid + " .cta-micro", s + 0.18, "opacity:0", "opacity:1", dur=0.22))
+        return _shell(i, b, "cta", inner), _wrap(i, ctx, tw)
     sub = ('<div class="cta-sub">' + theme.esc(b["sub"]) + "</div>") if b.get("sub") else ""
-    inner = '<div class="cta-box">' + theme.esc(b["text"]) + ' <span class="cta-arrow">→</span></div>' + sub
+    inner = '<div class="cta-box">' + theme.esc(b["text"]) + "</div>" + sub
     tw = [
         _from(bid + " .cta-box", s, "opacity:0,scale:0.6", "opacity:1,scale:1", dur=0.32, ease="back.out(2)"),
-        _to(bid + " .cta-arrow", s + 0.5, "x:10", dur=0.4, ease="power1.inOut"),
     ]
     if b.get("sub"):
         tw.append(_from(bid + " .cta-sub", s + 0.3, "opacity:0", "opacity:1", dur=0.3))
@@ -985,10 +1006,14 @@ _TYPE_DOCS = {
     "list": 'list: {"cue","title"(≤6w),"ordered":bool,"items":[{"text"(≤6w)}](≤5)} — points revealed one by one. Never hold a list >6s.',
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
-    "cta": 'cta: {"cue","text"(≤4w),"sub"(≤6w)} — closing BUILDER punch; exactly one, last. '
-           '"text" is a ≤4-word compression of the LAST spoken sentence (the lesson / confiança). '
-           'FORBIDDEN: Follow, Siga, Siga-amanhã, subscribe, waitlist, Cloud-as-product, SMY, '
-           'Instagram, LinkedIn. "sub" restates the same lesson, never a follow-for-more tease.',
+    "cta": 'cta: {"cue","text","sub"?} — series endcard, exactly one, last, AFTER the claim. '
+           'On-screen chip text is "· {series}" (one line). Optional micro sub "same series" '
+           'only if it fits — no extra CTA. Spoken VO (not on the chip): '
+           '"Subscribe — next {series} {noun}." ≤8 words; noun ∈ trap|receipt|bill|drop. '
+           'FORBIDDEN on the card: Follow, Follow tomorrow, amanhã, waitlist, owera.com, '
+           'Cloud, "part 2 coming", SMY, 💸, neon. Subscribe text is FORBIDDEN on every '
+           'beat before this last card (no mid-short Subscribe VO/chip). '
+           'Must not compete with frame0. Hold ≤4.0s.',
     "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices. Prefer a real receipt / API bill / config dump over a toy.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a REAL terminal / UI still. Prefer this over diagrams on 9:16.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows that CARRY THE CLAIM (labeled edges, real topology). Forbidden on vertical shorts when the boxes would be generic oars/A-B-C. layout MUST match the real topology: "pipeline" only when each node feeds the NEXT in a chain; "fanout" when ONE hub serves/connects ALL the others.',
@@ -1035,11 +1060,12 @@ def _system_prompt(allowed: list[str]) -> str:
         "— a card frozen on screen for 8+ seconds is a DRAG that kills retention; split a long "
         "span with a `stat`/`term_define`/`list` that visualizes what those words say — and "
         "`command`/`compare`/`code` get ~10+ words of room. Never hold a `list` longer than 6s. "
-        "Plan the ending BACKWARDS: the `cta` cue sits on the FIRST words of the closing punch "
-        "(~10-16 words before the script ends), and the payoff beat before it gets the ~10 "
-        "preceding words — a final visual that flashes for under 2 seconds is a wasted beat. "
+        "Plan the ending BACKWARDS: the `cta` cue sits on the FIRST words of the series "
+        "endcard VO ('Subscribe — next …'), after the claim/payoff — never on frame0. "
+        "Endcard visual hold ≤4.0s. The payoff beat before it carries the lesson. "
         "NEVER anchor two beats inside the same short sentence. FORBIDDEN on the cta and anywhere "
-        "on screen: Follow, Siga, waitlist, Cloud-as-product, SMY, Instagram, LinkedIn.\n"
+        "on screen: Follow, Follow tomorrow, Siga, waitlist, owera.com, Cloud-as-product, "
+        "'part 2 coming', SMY, Instagram, LinkedIn, 💸, neon. Endcard also forbids amanhã.\n"
         "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
         "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
         "boxes). Prefer code/command over diagram on vertical shorts.\n\n"
@@ -1054,7 +1080,7 @@ def _system_prompt(allowed: list[str]) -> str:
         + (' {"type":"code","cue":"split on sections paragraphs","lang":"python","lines":["split(text,","  by=\\"section\\",","  overlap=50)"],"highlight":[0]},\n'
            if has_bc else
            ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n')
-        + ' {"type":"cta","cue":"cut it into thoughts","text":"Chunk by meaning","sub":"Keep whole thoughts"}\n]}'
+        + ' {"type":"cta","cue":"Subscribe next","text":"· Copilot Credits","sub":"same series"}\n]}'
     )
 
 
@@ -1062,7 +1088,9 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
     from app.services import craft
     first = craft.first_spoken_sentence(script) or subject
     pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
-            "visuals (terminal/receipt/code), and a builder close. No Follow/Siga CTA. "
+            "visuals (terminal/receipt/code), then the series endcard chip (· series). "
+            "No Follow/Siga/waitlist/Cloud/SMY. No Subscribe on any beat before the last "
+            "endcard. Endcard after the claim, not on frame0. "
             "CRAFT GATE (PASS/FAIL before publish): "
             "(A) first 3.0s MUST show a real object — a code/command/diagram/compare/stat beat "
             "starting before t=3, OR hook.object (receipt/terminal/bill; emoji is NOT an object). "
@@ -1141,6 +1169,9 @@ def _lock_opening_hook(beats, script, subject) -> None:
     from app.services import craft
     claim = craft.spoken_hook_source(None, script, subject)
     hook = craft.compress_claim(claim, 12) or craft.compress_claim(subject, 12)
+    # Frame0 is the claim — never the endcard Subscribe VO or a mid-body ask.
+    if hook and (craft.contains_subscribe_cta(hook) or craft.is_endcard_vo(hook)):
+        hook = craft.compress_claim(craft.spoken_hook_source(subject, None, subject), 12)
     if not beats or not hook:
         return
     b0 = beats[0]
@@ -1164,18 +1195,115 @@ def _last_sentence(script: str) -> str:
     return parts[-1] if parts else (script or "").strip()
 
 
-def _sanitize_cta(beats, script) -> None:
+def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short") -> None:
+    """Shorts: lock the last card to the series chip. Longs: punch + CTA ban.
+
+    Subscribe is a Rodrigo/CoS exception on the *spoken* endcard VO only
+    (``ensure_series_endcard_vo``). This sanitizer does NOT invert the global
+    Follow/waitlist/Cloud ban — chip text is ``· {series}``, never Follow or
+    Subscribe. Long-form cards still reject Follow/Subscribe verbs.
+    """
     from app.services import craft
-    punch = craft.compress_claim(craft.strip_banned(_last_sentence(script)), 4) or "Build"
     banned_verbs = {theme.fold(v) for v in _FOLLOW_VERBS.values()} | {"subscribe", "inscreva"}
+    shorts = (content_format or "short") != "long"
+    if shorts:
+        card = craft.series_endcard(subject, script, brand)
+        chip, micro = card["chip"], card["micro"]
+        if craft.endcard_scan_banned(chip) or craft.endcard_scan_banned(micro):
+            chip, micro = craft.series_endcard_chip(card["series"]), ""
+    else:
+        chip = craft.compress_claim(craft.strip_banned(_last_sentence(script)), 4) or "Build"
+        micro = ""
     for b in beats:
         if b.get("type") != "cta":
             continue
-        # Always lock the card to the closing spoken punch — never a Follow verb.
-        b["text"] = punch
-        b["sub"] = craft.strip_banned(b.get("sub") or "")
-        if craft.contains_banned(b["sub"]) or theme.fold(b["sub"]) in banned_verbs:
-            b["sub"] = ""
+        if shorts:
+            # Series chip after the claim — never Follow, never a second hook.
+            b["text"] = chip
+            b["sub"] = micro
+            b["endcard"] = True
+        else:
+            b["text"] = chip
+            b["sub"] = craft.strip_banned(b.get("sub") or "")
+            if craft.contains_banned(b["sub"]) or theme.fold(b["sub"]) in banned_verbs:
+                b["sub"] = ""
+            b["endcard"] = False
+
+
+def _strip_mid_subscribe_beats(beats) -> None:
+    """No Subscribe text/chip/cue on any beat before the last endcard."""
+    from app.services import craft
+
+    def _scrub(value):
+        if isinstance(value, str):
+            if craft.contains_subscribe_cta(value) and not craft.is_endcard_vo(value):
+                return craft.strip_subscribe_cta(value)
+            return value
+        if isinstance(value, list):
+            return [_scrub(x) for x in value]
+        if isinstance(value, dict):
+            return {k: _scrub(v) for k, v in value.items()}
+        return value
+
+    n = len(beats)
+    for i, b in enumerate(beats):
+        last_endcard = i == n - 1 and b.get("type") == "cta" and b.get("endcard")
+        if last_endcard:
+            # Chip/micro must stay Subscribe-free; cue may match the VO words.
+            for key in ("text", "sub"):
+                if craft.contains_subscribe_cta(b.get(key) or ""):
+                    b[key] = craft.strip_subscribe_cta(b.get(key) or "")
+            continue
+        for key, val in list(b.items()):
+            if key in ("type", "start", "dur", "w", "endcard"):
+                continue
+            b[key] = _scrub(val)
+
+
+def _cap_endcard(beats, duration: float) -> None:
+    """Craft gate: last cta/endcard ≤ 4.0s, after the claim, not on frame0.
+
+    Slide the chip to the tail. Surplus walks backward onto earlier mids,
+    each re-capped at _MID_MAX. Hook stays pinned at 0 and may grow.
+    """
+    if not beats or beats[-1].get("type") != "cta":
+        return
+    last = beats[-1]
+    start = float(last.get("start") or 0.0)
+    dur = float(last.get("dur") or 0.0)
+    end = start + dur
+    if end < float(duration) - 1e-9:
+        end = float(duration)
+        dur = end - start
+    if dur > _ENDCARD_MAX + 1e-9:
+        extra = dur - _ENDCARD_MAX
+        last["start"] = round(start + extra, 3)
+        last["dur"] = round(_ENDCARD_MAX, 3)
+        if len(beats) >= 2:
+            prev = beats[-2]
+            prev_start = float(prev.get("start") or 0.0)
+            prev["dur"] = round(max(_MIN_DUR, last["start"] - _GAP - prev_start), 3)
+    elif dur >= _MIN_DUR:
+        last["dur"] = round(dur, 3)
+
+    # Walk surplus backward so a 4s chip does not revive R4 DRAG on mids.
+    for i in range(len(beats) - 2, 0, -1):
+        nxt = beats[i + 1]
+        cur = beats[i]
+        cur_start = float(cur.get("start") or 0.0)
+        nxt_start = float(nxt.get("start") or 0.0)
+        cur["dur"] = round(max(_MIN_DUR, nxt_start - _GAP - cur_start), 3)
+        if float(cur["dur"]) <= _MID_MAX + 1e-9:
+            continue
+        extra = float(cur["dur"]) - _MID_MAX
+        new_start = min(cur_start + extra, nxt_start - _MIN_DUR)
+        if new_start <= cur_start + 1e-9:
+            continue
+        cur["start"] = round(new_start, 3)
+        cur["dur"] = round(max(_MIN_DUR, nxt_start - _GAP - cur["start"]), 3)
+        prev = beats[i - 1]
+        prev_start = float(prev.get("start") or 0.0)
+        prev["dur"] = round(max(_MIN_DUR, cur["start"] - _GAP - prev_start), 3)
 
 
 def _diagram_is_nonsense(b: dict) -> bool:
@@ -1277,13 +1405,16 @@ def compose(*, subject, script, words, duration, resolution, width, height,
 
     _lock_opening_hook(beats, script, subject)
     _demote_nonsense_diagrams(beats, content_format)
-    _sanitize_cta(beats, script)
+    _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
+    _strip_mid_subscribe_beats(beats)
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
+    _cap_endcard(beats, duration)
     if not validate_storyboard(beats, duration):
         _even_space(beats, duration)
         _cap_list_holds(beats)
+        _cap_endcard(beats, duration)
         if not validate_storyboard(beats, duration):
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None

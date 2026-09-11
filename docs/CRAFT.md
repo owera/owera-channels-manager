@@ -1,4 +1,4 @@
-# Craft gates (spoken title, Decolar, CTA ban)
+# Craft gates (spoken title, Decolar, series endcard)
 
 Live render engine is HyperFrames. Theme prompts already ask for the spoken-title
 pattern; this repo now **enforces** it in code.
@@ -48,17 +48,15 @@ Live clips (not the same number):
 Happy-path OS/RR palettes are live (`theme.resolve(brand=)`). Fallback
 composition ignores brand and Decolar (kinetic title cards).
 
-YPP items **yesed but not in this code** (object-on-frame0 as a still,
-series endcard runtime): see `docs/PIPELINE_REVIEW.md`. YPP #3 (object
-0–3s / beats ≤3s / no mid-video spoken list) is the Video Maker craft
-gate below.
+YPP #3 (object 0–3s / beats ≤3s / no mid-video spoken list) is the Video
+Maker craft gate below. YPP #5 runtime (this PR) pins the series endcard.
 
 YPP #5 is Rodrigo YES (locked): Subscribe is allowed **only** on the series
 endcard template — **visual + final VO** (`Subscribe — next {series} {noun}.`
 + chip `· {series}`). `_sanitize_cta` stays on mid-video / title /
 Follow-tomorrow / waitlist / Cloud. Do **not** invert the global CTA ban.
-Runtime does not ship the endcard yet (docs #26). Generic description
-still appends Subscribe/Inscreva-se; that is not the endcard.
+Generic description still appends Subscribe/Inscreva-se; that is not the
+endcard.
 
 ## Video Maker craft gate (Shorts A+B+C)
 
@@ -115,13 +113,39 @@ Subscribe is **only** allowed on the trailing `cta` / `endcard` series
 Pré-gate inventory with no beat snapshot fail-opens (do not mass-reject).
 Kinetic-text fallback (`used_fallback`) fails A+C.
 
+## Series endcard (shorts)
+
+After the claim (never on frame0). Template fields: `{series}` from the title
+suffix (OS default **Copilot Credits**, RR default **IA**); `{noun}` ∈
+trap | receipt | bill | drop (default **trap**). Other series only swap those
+two fields — no invented extra CTA.
+
+- **VO** (1 line, ≤8 words): `Subscribe — next {series} {noun}.`
+- **Chip** (1 line): `· {series}`
+- **Micro** (optional, only if it fits): `same series`
+
+Pinned in `craft.series_endcard` / `ensure_series_endcard_vo` (script) and
+`storyboard._sanitize_cta` (chip). Visual hold ≤ `ENDCARD_MAX_S` (4.0s).
+Subscribe is **FORBIDDEN** in the mid-short / body / miolo (no Subscribe
+text, VO, or chip before the endcard).
+
+Subscribe is **ALLOWED only on this endcard** (final VO + last visual slot).
+`strip_mid_subscribe` / `_strip_mid_subscribe_beats` drop Subscribe / Inscreva
+from the mid-short (miolo): no Subscribe text, VO, or chip before the last beat.
+
+### Hard bans on the endcard
+
+Follow / Follow tomorrow / amanhã / waitlist / owera.com / Cloud /
+“part 2 coming” / SMY / emoji 💸 / neon. Subscribe is VO-only — not on the chip.
+
 ## CTA ban
 
 Generation + post-gen strip/reject: Follow, Siga, Siga-amanhã, follow for more,
 waitlist, Owera Cloud-as-product, SMY, Instagram, LinkedIn.
 
-Live close is still a builder/confiança punch (sanitize strips subscribe).
-Locked exception (not shipped): series endcard visual + final VO only.
+Shorts close on the series endcard (Subscribe VO + series chip), not a Follow ask.
+Long-form close stays a builder/confiança punch (sanitize strips subscribe).
+Subscribe is not in `BANNED_RE` (that would strip the endcard VO).
 
 ## Visual systems
 

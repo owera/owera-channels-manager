@@ -190,6 +190,16 @@ def generate(subject: str, script: str, content_format: str = "short",
 
 def _sanitize_meta(meta: dict) -> dict:
     from app.services import craft
-    meta["title"] = craft.strip_banned(meta.get("title") or "") or meta.get("title") or ""
-    meta["description"] = craft.strip_banned(meta.get("description") or "") or meta.get("description") or ""
+
+    def _copy(s):
+        raw = s or ""
+        out = craft.strip_banned(raw) or raw
+        # Title / caption body are not the endcard. Strip Subscribe CTAs here;
+        # finalize_description still appends the YT subscribe *link* at publish.
+        if craft.contains_subscribe_cta(out) and not craft.is_endcard_vo(out):
+            out = craft.strip_subscribe_cta(out)
+        return out
+
+    meta["title"] = _copy(meta.get("title"))
+    meta["description"] = _copy(meta.get("description"))
     return meta
