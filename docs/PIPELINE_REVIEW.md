@@ -9,8 +9,10 @@ Locked product intent this review is scored against:
 - P1 live: frame0/thumb echo the spoken title hook (PRs [#17](https://github.com/owera/owera-channels-manager/pull/17), [#18](https://github.com/owera/owera-channels-manager/pull/18)).
 - YPP yesed (implementing, not assumed shipped): (1) Decolar object on
   frame0/thumb = claim noun; (2) OS vs RR visual split; (3) first 3s + beats
-  ≤3s, ban spoken list mid-video; (5) series endcard `Subscribe — next {Series}
-  {noun}`. TTS upgrade deferred.
+  ≤3s, ban spoken list mid-video. (5) Rodrigo YES: series endcard
+  `Subscribe — next {series} {noun}.` (visual + final VO) + chip `· {series}`.
+  `_sanitize_cta` stays on mid-video / title / Follow-tomorrow / waitlist /
+  Cloud. TTS upgrade deferred.
 - Mix: 1 short/day each channel. No volume/spend up without human yes.
 - Agents that must stay consistent with the code: Channels, CMO, Designer,
   Video Maker, CTO, Social Ops, CoS.
@@ -137,27 +139,36 @@ Shipped pacing (`storyboard.py`):
 
 No first-3s gate. No ≤3s beat ceiling. Script prompt does not forbid mid-video enumeration.
 
-### YPP (5) — series endcard `Subscribe — next {series} {noun}` — **CMO voice cut (not in code)**
+### YPP (5) — series endcard Subscribe — **Rodrigo YES (locked; not shipped)**
 
-CMO: Subscribe is allowed **only** on the series endcard template:
+Locked exception: Subscribe is allowed **only** on the series endcard template,
+**visual + final VO**:
 
 ```
 Subscribe — next {series} {noun}.
 ```
 
-plus chip `· {series}` on that card. Nowhere else.
+plus chip `· {series}` on that card. Nowhere else. This is not an unresolved
+CMO/CoS fork.
 
-Live `_sanitize_cta` stays the global rule for **mid-video / title / generic description**. Do **not** invert it, do **not** punch a hole in `craft.contains_banned` / script prompts for a generic “subscribe”. A later endcard renderer is a template exception, not a CTA-ban rollback.
+`_sanitize_cta` **stays** on mid-video / title / Follow-tomorrow / waitlist /
+Cloud. Do **not** invert the global ban. Do **not** punch a hole in
+`craft.contains_banned` or script prompts for a generic “subscribe”.
 
-What ships today (unchanged):
+Runtime today (implementation gap, not a policy dispute):
 
-- `_sanitize_cta` overwrites the last card from the last spoken sentence and strips Follow/Siga/subscribe
-- Script + storyboard prompts forbid a subscribe ask
-- `metadata.finalize_description` still appends `🔔 Subscribe` / `Inscreva-se` + channel URL (generic description — keep sanitize; this is not the endcard template)
+- `_sanitize_cta` still overwrites the last card from the last spoken sentence
+  and strips Follow/Siga/subscribe — endcard template is not wired
+- Script + storyboard prompts still forbid a subscribe ask (including final VO)
+- `metadata.finalize_description` still appends `🔔 Subscribe` / `Inscreva-se`
+  + channel URL (generic description — not the endcard; sanitize stays)
 - Author first comment is an engagement seed, not a series endcard
-- Series identity lives only in the title suffix `· Copilot Credits 14` — **no endcard chip**
+- Series identity lives only in the title suffix `· Copilot Credits 14` —
+  **no endcard chip**
 
-Playbook `run/daily-agent-playbook.md` directive 3 still says “Part N tomorrow” in the close. That remains banned mid-video (`Siga-amanhã` / follow-for-more). Stale vs this cut.
+Playbook `run/daily-agent-playbook.md` directive 3 (“Part N tomorrow” in the
+close) is Follow-tomorrow: still banned mid-video. The yes’d close is the
+endcard template only.
 
 ### TTS — deferred, as locked
 
@@ -176,7 +187,7 @@ Skip-gate on a patterned title means the artifact never stops for a human. That 
 | Agent | Should gate | What the app does today |
 |---|---|---|
 | **Channels (ops)** | Budgets, produce, reject leftovers, claw0 restart | Dashboard + growth agent (`run/daily-agent-playbook.md`) via REST. Issues digest. Auto-produce fills budget. **No craft sample.** |
-| **CMO (voice/funnel)** | Hook language, series promise, endcard-only Subscribe | Prompt strings + `CRAFT_RULES_SHORT`. Spoken subscribe banned globally; generic description still auto-appends Subscribe/Inscreva-se. Endcard template is the only yesed hole (not built). **No voice review.** Funnel today = YouTube only. |
+| **CMO (voice/funnel)** | Hook language, series promise, endcard Subscribe (visual + final VO) | Rodrigo YES’d the endcard exception. Runtime still sanitizes last-card + script. Generic description still auto-appends Subscribe/Inscreva-se (not the endcard). **No voice review.** Funnel today = YouTube only. |
 | **Designer (visual)** | Frame0/thumb object, OS vs RR | Palettes automated. Thumb is a template. **No sample gate.** Fallback can ship neon kinetic text. |
 | **Video Maker (craft)** | Frame0=spoken, object, beat length, endcard, no mid-list | **Title-pattern gate only.** Compose locks are render-time; approve does not re-read HTML/frames. Rubric review is a growth-agent batch (`run/rubric_review.py`), not a per-video gate. |
 | **CTO (infra)** | grok OIDC, hyperframes pin, ffmpeg, quotas | Transient retries, blank-frame check, publish stall cap. `DEFAULT_ENGINE="mpt"` is a footgun if a profile is missing. |
@@ -195,9 +206,9 @@ Other hub networks start as **publications of an already-approved YouTube packag
 
 ### Phase A — YouTube harden (this repo)
 
-Priority order if CoS still wants the yesed YPP set:
+Priority order (YPP #5 is Rodrigo YES — implement later, not this PR):
 
-1. Series **endcard template** (YPP #5 CMO cut): `Subscribe — next {series} {noun}.` + chip `· {series}` on that card only. Keep live `_sanitize_cta` on mid-video / title / generic description. Do **not** invert global sanitize, R7, or script bans.
+1. Series **endcard template** (visual + final VO): `Subscribe — next {series} {noun}.` + chip `· {series}` on that card only. Keep live `_sanitize_cta` on mid-video / title / Follow-tomorrow / waitlist / Cloud. Do **not** invert global sanitize.
 2. Point frame0 lock at the **same claim source as the title** (title-before-`·`, or rewrite script sentence 0 to match). Align thumb clip with frame0 (12 vs 8).
 3. Replace hardcoded `RECEIPT` with a claim-noun still (or at least label). Typography-only is the live CTR miss vs Designer intent.
 4. Beat ceiling / first-3s / no mid-video spoken list — new aligner rules + script ban. Current 7.5s mid cap is the opposite shape.
@@ -239,6 +250,11 @@ Out of scope until yesed: posting automation, paid APIs, extra daily volume, Clo
 
 ## 5. What this PR changes
 
-Docs only: this file, plus `docs/CRAFT.md` pointers so agents stop treating ≤8w frame0 / curiosity-gap-era endcards / 1L+4S playbook as live law.
+Docs only: this file, plus `docs/CRAFT.md` pointers so agents stop treating
+≤8w frame0 / a global Subscribe invert / 1L+4S playbook as live law.
+
+Hub sketch is YouTube + Instagram + LinkedIn + X. GitHub/Community is out.
+YPP #5 is Rodrigo YES: endcard visual + final VO only; live `_sanitize_cta`
+stays on mid-video / title / Follow-tomorrow / waitlist / Cloud.
 
 No pipeline, budget, prompt, or mix edits.

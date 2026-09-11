@@ -51,18 +51,20 @@ composition ignores brand and Decolar (kinetic title cards).
 YPP items **yesed but not in this code** (object-on-frame0, beats ≤3s / no
 mid-video spoken list, series endcard): see `docs/PIPELINE_REVIEW.md`.
 
-CMO voice cut on YPP #5: Subscribe is allowed **only** on the series endcard
-template (`Subscribe — next {series} {noun}.` + chip `· {series}`). Keep live
-`_sanitize_cta` on mid-video / title / generic description. Do **not** invert
-the global CTA ban. Generic description still appends Subscribe/Inscreva-se
-today; that is not the endcard.
+YPP #5 is Rodrigo YES (locked): Subscribe is allowed **only** on the series
+endcard template — **visual + final VO** (`Subscribe — next {series} {noun}.`
++ chip `· {series}`). `_sanitize_cta` stays on mid-video / title /
+Follow-tomorrow / waitlist / Cloud. Do **not** invert the global CTA ban.
+Runtime does not ship the endcard yet (this PR is docs-only). Generic
+description still appends Subscribe/Inscreva-se; that is not the endcard.
 
 ## CTA ban
 
 Generation + post-gen strip/reject: Follow, Siga, Siga-amanhã, follow for more,
 waitlist, Owera Cloud-as-product, SMY, Instagram, LinkedIn.
 
-Shorts close on builder/confiança, not a subscribe ask.
+Live close is still a builder/confiança punch (sanitize strips subscribe).
+Locked exception (not shipped): series endcard visual + final VO only.
 
 ## Visual systems
 
