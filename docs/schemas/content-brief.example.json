@@ -1,0 +1,69 @@
+{
+  "id": "brief-cmo-v2-example",
+  "objective": "news_angle_social",
+  "target_networks": ["instagram", "linkedin", "x", "youtube_os"],
+  "angle": "Copilot billed a cancelled run — the receipt is the story",
+  "source_url": "https://example.com/news/copilot-cancelled-run",
+  "voz": {
+    "language": "en",
+    "register": "spoken_builder",
+    "first_line_is_spoken": true,
+    "cadence": "rodrigo_simple"
+  },
+  "hard_nos": [
+    "Aquila",
+    "TCE",
+    "Agenda internals",
+    "Cloud-as-if-ready",
+    "walkthrough",
+    "IP/VPN",
+    "client names",
+    "invented metrics",
+    "spend"
+  ],
+  "art": {
+    "must_illustrate_copy": true,
+    "generic_o_lockup": false,
+    "designer_brief": "Show the cancelled-run receipt, not the O lockup."
+  },
+  "cta": {
+    "url": "https://owera.com",
+    "kind": "waitlist",
+    "natural_only": true,
+    "never_on_youtube_title_or_script": true
+  },
+  "status": "draft",
+  "publications": [
+    {
+      "network": "instagram",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "@owerasoftware",
+      "caption_first_line_is_spoken": true
+    },
+    {
+      "network": "linkedin",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "linkedin:company",
+      "caption_first_line_is_spoken": true
+    },
+    {
+      "network": "x",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "@owerasoftware",
+      "caption_first_line_is_spoken": true
+    },
+    {
+      "network": "youtube_os",
+      "skip_gate": false,
+      "handoff": "video_short",
+      "channel_scope": "os_only",
+      "subscribe_endcard": {
+        "allow_subscribe": false,
+        "series": null
+      }
+    }
+  ]
+}

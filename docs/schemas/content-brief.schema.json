@@ -1,0 +1,266 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://owera.com/schemas/content-brief.schema.json",
+  "title": "ContentBrief",
+  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "objective",
+    "target_networks",
+    "angle",
+    "voz",
+    "hard_nos",
+    "art",
+    "cta",
+    "status",
+    "publications"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Optional review id. Not a Video.id."
+    },
+    "objective": {
+      "type": "string",
+      "enum": ["ypp_click_watch_sub", "news_angle_social"]
+    },
+    "target_networks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/network" }
+    },
+    "angle": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pillar / angle."
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Required when objective is news_angle_social."
+    },
+    "voz": { "$ref": "#/definitions/voz" },
+    "hard_nos": { "$ref": "#/definitions/hardNos" },
+    "art": { "$ref": "#/definitions/art" },
+    "cta": { "$ref": "#/definitions/cta" },
+    "status": { "$ref": "#/definitions/briefStatus" },
+    "publications": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/publication" }
+    }
+  },
+  "if": {
+    "properties": { "objective": { "const": "news_angle_social" } },
+    "required": ["objective"]
+  },
+  "then": { "required": ["source_url"] },
+  "definitions": {
+    "network": {
+      "type": "string",
+      "enum": ["youtube_os", "instagram", "linkedin", "x"]
+    },
+    "briefStatus": {
+      "type": "string",
+      "enum": ["draft", "cmo", "cos", "rodrigo_yes", "publish"],
+      "description": "Manual only. draft → cmo → cos → rodrigo_yes → publish. No auto-publish."
+    },
+    "voz": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["language", "register", "first_line_is_spoken", "cadence"],
+      "properties": {
+        "language": {
+          "const": "en",
+          "description": "Company English. Locked."
+        },
+        "register": {
+          "const": "spoken_builder",
+          "description": "EN spoken/builder. Not corporate teaser."
+        },
+        "first_line_is_spoken": {
+          "const": true,
+          "description": "1ª linha falada. First line IS the spoken line."
+        },
+        "cadence": {
+          "const": "rodrigo_simple",
+          "description": "Simple spoken cadence like Rodrigo."
+        }
+      }
+    },
+    "hardNos": {
+      "type": "array",
+      "minItems": 9,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "allOf": [
+        { "contains": { "const": "Aquila" } },
+        { "contains": { "const": "TCE" } },
+        { "contains": { "const": "Agenda internals" } },
+        { "contains": { "const": "Cloud-as-if-ready" } },
+        { "contains": { "const": "walkthrough" } },
+        { "contains": { "const": "IP/VPN" } },
+        { "contains": { "const": "client names" } },
+        { "contains": { "const": "invented metrics" } },
+        { "contains": { "const": "spend" } }
+      ],
+      "description": "Locked set always in force. Extra strings allowed. Removals invalid."
+    },
+    "art": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["must_illustrate_copy", "generic_o_lockup"],
+      "properties": {
+        "must_illustrate_copy": { "const": true },
+        "generic_o_lockup": {
+          "const": false,
+          "description": "Generic O lockup is forbidden."
+        },
+        "asset_path": { "type": "string", "minLength": 1 },
+        "designer_brief": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "required": ["asset_path"] },
+        { "required": ["designer_brief"] }
+      ]
+    },
+    "cta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "kind",
+        "natural_only",
+        "never_on_youtube_title_or_script"
+      ],
+      "properties": {
+        "url": { "const": "https://owera.com" },
+        "kind": { "const": "waitlist" },
+        "natural_only": {
+          "const": true,
+          "description": "Waitlist only if the sentence exists without the link."
+        },
+        "never_on_youtube_title_or_script": { "const": true }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "required": ["network", "skip_gate"],
+      "properties": {
+        "network": { "$ref": "#/definitions/network" },
+        "skip_gate": {
+          "type": "boolean",
+          "const": false,
+          "description": "Per Publication. Default false. Do not inherit Channel.default_skip_gate."
+        },
+        "daily_budget": {
+          "type": "integer",
+          "const": 0,
+          "description": "Default 0 for newly materialized networks. Do not raise live YT budgets here."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "network": { "const": "youtube_os" } },
+            "required": ["network"]
+          },
+          "then": { "$ref": "#/definitions/youtubeOsAdapter" }
+        },
+        {
+          "if": {
+            "properties": { "network": { "enum": ["instagram", "linkedin", "x"] } },
+            "required": ["network"]
+          },
+          "then": { "$ref": "#/definitions/socialAdapter" }
+        }
+      ]
+    },
+    "youtubeOsAdapter": {
+      "type": "object",
+      "description": "Handoff to the existing Video (youtube short) pipeline. Do not re-spec generate/render/publish.",
+      "required": ["handoff", "channel_scope", "subscribe_endcard"],
+      "properties": {
+        "handoff": { "const": "video_short" },
+        "channel_scope": {
+          "const": "os_only",
+          "description": "Owera Software / ch1. Personal rr / rodrigorecio is out."
+        },
+        "video_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional later FK to Video.id. Not allocated by this spec."
+        },
+        "subscribe_endcard": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allow_subscribe", "series"],
+          "properties": {
+            "allow_subscribe": {
+              "type": "boolean",
+              "description": "True only for YPP#5 series endcard. Live sanitize stays on title/script/mid-video/generic description. Do not invert live code."
+            },
+            "series": {
+              "type": ["string", "null"],
+              "description": "Set to ypp5 when this publication is that series endcard; otherwise null and allow_subscribe must be false."
+            }
+          },
+          "if": {
+            "properties": { "series": { "const": "ypp5" } },
+            "required": ["series"]
+          },
+          "then": {
+            "properties": { "allow_subscribe": { "const": true } }
+          },
+          "else": {
+            "properties": { "allow_subscribe": { "const": false } }
+          }
+        }
+      }
+    },
+    "socialAdapter": {
+      "type": "object",
+      "description": "Company social. Social Ops after rodrigo_yes. Copy + Designer + Research.",
+      "required": ["handle"],
+      "properties": {
+        "handle": {
+          "type": "string",
+          "enum": ["@owerasoftware", "linkedin:company"]
+        },
+        "caption_first_line_is_spoken": { "const": true },
+        "daily_budget": { "const": 0 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "network": { "const": "instagram" } },
+            "required": ["network"]
+          },
+          "then": {
+            "properties": { "handle": { "const": "@owerasoftware" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "network": { "const": "x" } },
+            "required": ["network"]
+          },
+          "then": {
+            "properties": { "handle": { "const": "@owerasoftware" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "network": { "const": "linkedin" } },
+            "required": ["network"]
+          },
+          "then": {
+            "properties": { "handle": { "const": "linkedin:company" } }
+          }
+        }
+      ]
+    }
+  }
+}
