@@ -10,7 +10,7 @@ Spoken-title suffix (shorts): `· <series> <nn>` with series in
 Copilot Credits | Agent memory | CrewAI | IA | Local | Claude Code.
 
 Series endcard (shorts, after the claim — not frame0): spoken
-`Subscribe — next {series} {noun}.` (≤8 words) + chip `· {series}`.
+`Subscribe — next {series} {noun}.` (≤8 words) + chip `Subscribe · {series}`.
 Optional micro `same series` only if it fits. No Follow / waitlist /
 Cloud / SMY. Endcard hold ≤ ENDCARD_MAX_S (4.0s).
 
@@ -64,6 +64,13 @@ ENDCARD_MAX_S = 4.0
 # Subscribe CTAs are stripped — this is not a global invert of Follow/waitlist.
 _ENDCARD_VO_RE = re.compile(
     r"subscribe\s*[—–-]\s*next\s+.+\s+(?:trap|receipt|bill|drop)\.?\s*$",
+    re.IGNORECASE,
+)
+
+# Mute on-screen chip. YPP#5 visual exception — not a Follow button.
+#   Subscribe · {series}
+_ENDCARD_CHIP_RE = re.compile(
+    r"^subscribe\s*·\s+\S.*$",
     re.IGNORECASE,
 )
 
@@ -137,7 +144,7 @@ CRAFT_RULES_SHORT = (
     "No Follow/Siga/'follow for more'/Siga-amanhã/Follow-tomorrow. No waitlist, "
     "owera.com, Owera Cloud-as-product, SMY, 'part 2 coming', Instagram or LinkedIn. "
     "Subscribe is ALLOWED only as the LAST spoken line of the series endcard "
-    "('Subscribe — next {series} {noun}.') + chip '· {series}'. FORBIDDEN in the "
+    "('Subscribe — next {series} {noun}.') + chip 'Subscribe · {series}'. FORBIDDEN in the "
     "mid-short / body / miolo: no Subscribe text, VO, or chip before the endcard. "
     "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
     "Title suffix must be '· <series> <nn>' with series one of: "
@@ -449,6 +456,11 @@ def contains_banned(text: str | None) -> bool:
 def is_endcard_vo(text: str | None) -> bool:
     """True when text is the series endcard spoken closer (trailing match)."""
     return bool(_ENDCARD_VO_RE.search((text or "").strip()))
+
+
+def is_endcard_chip(text: str | None) -> bool:
+    """True when text is the series endcard chip (`Subscribe · {series}`)."""
+    return bool(_ENDCARD_CHIP_RE.fullmatch((text or "").strip()))
 
 
 def contains_subscribe_cta(text: str | None) -> bool:
@@ -894,7 +906,7 @@ def review_gate_reason(title: str | None,
 
 
 # ---------------------------------------------------------------------------
-# Series endcard (shorts) — Subscribe VO + chip · {series}. Not in BANNED_RE.
+# Series endcard (shorts) — Subscribe VO + chip Subscribe · {series}. Not in BANNED_RE.
 # ---------------------------------------------------------------------------
 
 def _canonical_series(raw: str) -> str:
@@ -938,14 +950,15 @@ def series_endcard_vo(series: str, noun: str = DEFAULT_NOUN) -> str:
 
 
 def series_endcard_chip(series: str) -> str:
-    """On-screen chip, one line. Not a Follow/Subscribe button."""
-    return f"· {series}"
+    """On-screen chip, one line. YPP#5: Subscribe · {series}."""
+    return f"Subscribe · {series}"
 
 
 def series_endcard_micro(series: str) -> str:
     """Optional second line. Only if the chip is short enough; no extra CTA."""
     chip = series_endcard_chip(series)
-    if len(chip) <= 24:
+    # Chip grew from `· {series}` (~+10). 32 still fits Copilot Credits.
+    if len(chip) <= 32:
         return "same series"
     return ""
 
@@ -971,17 +984,22 @@ def endcard_scan_banned(text: str | None) -> list[str]:
 
 
 def endcard_clean(card: dict) -> bool:
-    """True when VO/chip/micro carry no banned endcard CTA and stay in template."""
+    """True when VO/chip/micro stay in the YPP#5 template.
+
+    Subscribe is allowed on the VO and on the chip as `Subscribe · {series}`.
+    Subscribe on the micro, or any other Subscribe chip, fails. Off-endcard
+    Subscribe is a different gate (mid_body_has_subscribe / craft C).
+    """
     vo = (card.get("vo") or "").strip()
     chip = (card.get("chip") or "").strip()
     micro = (card.get("micro") or "").strip()
     if endcard_scan_banned(vo) or endcard_scan_banned(chip) or endcard_scan_banned(micro):
         return False
-    if "subscribe" in theme.fold(chip) or "subscribe" in theme.fold(micro):
-        return False  # Subscribe is VO-only
-    if micro and micro != "same series":
+    if "subscribe" in theme.fold(micro):
         return False
-    if not chip.startswith("· "):
+    if not is_endcard_chip(chip):
+        return False
+    if micro and micro != "same series":
         return False
     if len(vo.split()) > 8:
         return False

@@ -172,8 +172,8 @@ ok(os_card["series"] == "Copilot Credits" and os_card["noun"] == "trap",
    "OS default series/noun = Copilot Credits / trap")
 ok(os_card["vo"] == "Subscribe — next Copilot Credits trap.",
    "OS VO is the exact CMO line")
-ok(os_card["chip"] == "· Copilot Credits",
-   "OS chip is · Copilot Credits")
+ok(os_card["chip"] == "Subscribe · Copilot Credits",
+   "OS chip is Subscribe · Copilot Credits")
 ok(os_card["micro"] == "same series",
    "short chip gets the same-series micro")
 ok(len(os_card["vo"].rstrip(".").split()) <= 8,
@@ -181,13 +181,14 @@ ok(len(os_card["vo"].rstrip(".").split()) <= 8,
 ok(craft.endcard_clean(os_card), "OS endcard passes the hard-ban gate")
 
 rr_card = craft.series_endcard("Você lotou a VRAM. · IA 175", brand="rr")
-ok(rr_card["vo"] == "Subscribe — next IA trap." and rr_card["chip"] == "· IA",
-   "RR default VO/chip = next IA trap / · IA")
+ok(rr_card["vo"] == "Subscribe — next IA trap."
+   and rr_card["chip"] == "Subscribe · IA",
+   "RR default VO/chip = next IA trap / Subscribe · IA")
 ok(craft.endcard_clean(rr_card), "RR endcard passes the hard-ban gate")
 
 am = craft.series_endcard("Memory died between chats · Agent memory 2")
 ok(am["vo"] == "Subscribe — next Agent memory trap."
-   and am["chip"] == "· Agent memory",
+   and am["chip"] == "Subscribe · Agent memory",
    "non-Credits/IA series only swaps {series}/{noun}")
 ok(craft.endcard_clean(am), "Agent memory endcard invents no extra CTA")
 
@@ -230,12 +231,16 @@ ok(not craft.endcard_scan_banned(os_card["vo"]),
    "canonical VO is clean of endcard bans")
 ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": "Subscribe now",
                             "micro": ""}),
-   "Subscribe on the chip fails endcard_clean (VO-only)")
+   "non-template Subscribe on the chip fails endcard_clean")
+ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": "· Copilot Credits",
+                            "micro": ""}),
+   "legacy · {series} chip fails — CMO lock requires Subscribe · {series}")
 ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": os_card["chip"],
                             "micro": "Follow tomorrow"}),
    "invented extra CTA on the micro fails")
-ok("Subscribe" in os_card["vo"] and craft.endcard_clean(os_card),
-   "endcard VO may contain Subscribe (Rodrigo/CoS exception — not Follow-tomorrow)")
+ok("Subscribe" in os_card["vo"] and "Subscribe" in os_card["chip"]
+   and craft.endcard_clean(os_card),
+   "endcard VO + chip may contain Subscribe (YPP#5 exception — not Follow-tomorrow)")
 
 miolo = (
     "Subscribe for more RAG fixes. Your RAG reads junk. "
@@ -454,7 +459,7 @@ ok("Curiosity" not in hook_html and "slogan" not in hook_html,
    "curiosity-gap hook text is overwritten, not shown")
 ok("Follow" not in html and "Siga" not in html,
    "compose does NOT force Follow/Siga (banned)")
-ok("cta-chip" in html and "· Copilot Credits" in html,
+ok("cta-chip" in html and "Subscribe · Copilot Credits" in html,
    "compose locks the series chip (not a Follow box)")
 ok("same series" in html, "chip micro is same series when it fits")
 ok("💸" not in html.split("beat hook")[1].split("beat ")[0] if "beat hook" in html else True,
@@ -464,8 +469,8 @@ ok('class="cta-chip"' in html,
 ok('class="cta-box"' not in html and 'class="cta-arrow"' not in html,
    "shorts endcard does not paint the neon CTA box")
 cta_html = html.split('class="beat cta"', 1)[1]
-ok("Subscribe" not in cta_html,
-   "Subscribe stays on the VO, not on the chip")
+ok("Subscribe · Copilot Credits" in cta_html,
+   "endcard chip paints Subscribe · {series}")
 m = re.search(r'class="beat cta"[^>]*data-duration="([0-9.]+)"', html)
 ok(m and float(m.group(1)) <= craft.ENDCARD_MAX_S + 1e-6,
    "compose endcard hold is ≤4.0s")

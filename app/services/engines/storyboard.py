@@ -1012,8 +1012,8 @@ _TYPE_DOCS = {
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
     "cta": 'cta: {"cue","text","sub"?} — series endcard, exactly one, last, AFTER the claim. '
-           'On-screen chip text is "· {series}" (one line). Optional micro sub "same series" '
-           'only if it fits — no extra CTA. Spoken VO (not on the chip): '
+           'On-screen chip text is "Subscribe · {series}" (one line). Optional micro sub '
+           '"same series" only if it fits — no extra CTA. Spoken VO: '
            '"Subscribe — next {series} {noun}." ≤8 words; noun ∈ trap|receipt|bill|drop. '
            'FORBIDDEN on the card: Follow, Follow tomorrow, amanhã, waitlist, owera.com, '
            'Cloud, "part 2 coming", SMY, 💸, neon. Subscribe text is FORBIDDEN on every '
@@ -1087,7 +1087,7 @@ def _system_prompt(allowed: list[str]) -> str:
         + (' {"type":"code","cue":"split on sections paragraphs","lang":"python","lines":["split(text,","  by=\\"section\\",","  overlap=50)"],"highlight":[0]},\n'
            if has_bc else
            ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n')
-        + ' {"type":"cta","cue":"Subscribe next","text":"· Copilot Credits","sub":"same series"}\n]}'
+        + ' {"type":"cta","cue":"Subscribe next","text":"Subscribe · Copilot Credits","sub":"same series"}\n]}'
     )
 
 
@@ -1096,7 +1096,7 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
     first = craft.first_spoken_sentence(script) or subject
     obj = craft.opening_object(first)["label"]
     pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
-            "visuals (terminal/receipt/code), then the series endcard chip (· series). "
+            "visuals (terminal/receipt/code), then the series endcard chip (Subscribe · series). "
             "No Follow/Siga/waitlist/Cloud/SMY. No Subscribe on any beat before the last "
             "endcard. Endcard after the claim, not on frame0. "
             "CRAFT GATE (PASS/FAIL before publish): "
@@ -1213,10 +1213,11 @@ def _last_sentence(script: str) -> str:
 def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short") -> None:
     """Shorts: lock the last card to the series chip. Longs: punch + CTA ban.
 
-    Subscribe is a Rodrigo/CoS exception on the *spoken* endcard VO only
-    (``ensure_series_endcard_vo``). This sanitizer does NOT invert the global
-    Follow/waitlist/Cloud ban — chip text is ``· {series}``, never Follow or
-    Subscribe. Long-form cards still reject Follow/Subscribe verbs.
+    Subscribe is a Rodrigo/CoS exception on the series endcard
+    (``ensure_series_endcard_vo`` + chip ``Subscribe · {series}``). This
+    sanitizer does NOT invert the global Follow/waitlist/Cloud ban.
+    Mid-video / title / Follow-tomorrow stay sanitized. Long-form cards
+    still reject Follow/Subscribe verbs.
     """
     from app.services import craft
     banned_verbs = {theme.fold(v) for v in _FOLLOW_VERBS.values()} | {"subscribe", "inscreva"}
@@ -1264,10 +1265,13 @@ def _strip_mid_subscribe_beats(beats) -> None:
     for i, b in enumerate(beats):
         last_endcard = i == n - 1 and b.get("type") == "cta" and b.get("endcard")
         if last_endcard:
-            # Chip/micro must stay Subscribe-free; cue may match the VO words.
-            for key in ("text", "sub"):
-                if craft.contains_subscribe_cta(b.get(key) or ""):
-                    b[key] = craft.strip_subscribe_cta(b.get(key) or "")
+            # Chip may be the YPP#5 template `Subscribe · {series}`.
+            # Micro stays Subscribe-free. Cue may match the VO words.
+            text = b.get("text") or ""
+            if craft.contains_subscribe_cta(text) and not craft.is_endcard_chip(text):
+                b["text"] = craft.strip_subscribe_cta(text)
+            if craft.contains_subscribe_cta(b.get("sub") or ""):
+                b["sub"] = craft.strip_subscribe_cta(b.get("sub") or "")
             continue
         for key, val in list(b.items()):
             if key in ("type", "start", "dur", "w", "endcard"):
