@@ -997,12 +997,12 @@ ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
    "compose does NOT force Follow/Siga (CTA ban) and overwrites 'Try it'")
-ok("cta-chip" in html and "· Copilot Credits" in html,
+ok("cta-chip" in html and "Subscribe · Copilot Credits" in html,
    "compose shorts lock the OS default series chip")
 ok("same series" in html, "compose shorts emit the same-series micro")
 ok('class="cta-box"' not in html, "shorts endcard is a chip, not the punch box")
-ok("Subscribe" not in html.split('class="beat cta"', 1)[-1],
-   "Subscribe is VO-only — not painted on the chip")
+ok("Subscribe · Copilot Credits" in html.split('class="beat cta"', 1)[-1],
+   "endcard chip paints Subscribe · {series}")
 ok(len(calls) == 1 and calls[0]["max_tokens"] == 1500,
    "happy path is a single llm call at max_tokens=1500")
 ok("Video title: Test video" in calls[0]["user"],
@@ -1030,7 +1030,7 @@ rr_html = _compose(
     subject="Você lotou a VRAM. · IA 175",
     brand="rr",
 )
-ok("cta-chip" in rr_html and "· IA" in rr_html,
+ok("cta-chip" in rr_html and "Subscribe · IA" in rr_html,
    "RR compose locks the IA series chip")
 ok("Copilot Credits" not in rr_html,
    "RR chip does not invent the OS series label")
@@ -1165,7 +1165,7 @@ ok("Subscribe now" not in sub_mid,
 hook_mid = sub_mid.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
 ok("Subscribe" not in hook_mid,
    "frame0 / mid beats do not carry Subscribe (endcard VO only)")
-ok("cta-chip" in sub_mid and "· Copilot Credits" in sub_mid,
+ok("cta-chip" in sub_mid and "Subscribe · Copilot Credits" in sub_mid,
    "endcard chip still renders after a mid-Subscribe scrub")
 
 # validate-fail → even-space rescue, then success

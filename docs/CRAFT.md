@@ -71,7 +71,7 @@ Maker craft gate below. YPP #5 runtime pins the series endcard.
 
 YPP #5 is Rodrigo YES (locked): Subscribe is allowed **only** on the series
 endcard template — **visual + final VO** (`Subscribe — next {series} {noun}.`
-+ chip `· {series}`). `_sanitize_cta` stays on mid-video / title /
++ chip `Subscribe · {series}`). `_sanitize_cta` stays on mid-video / title /
 Follow-tomorrow / waitlist / Cloud. Do **not** invert the global CTA ban.
 Generic description still appends Subscribe/Inscreva-se; that is not the
 endcard.
@@ -139,7 +139,7 @@ trap | receipt | bill | drop (default **trap**). Other series only swap those
 two fields — no invented extra CTA.
 
 - **VO** (1 line, ≤8 words): `Subscribe — next {series} {noun}.`
-- **Chip** (1 line): `· {series}`
+- **Chip** (1 line): `Subscribe · {series}`
 - **Micro** (optional, only if it fits): `same series`
 
 Pinned in `craft.series_endcard` / `ensure_series_endcard_vo` (script) and
@@ -154,7 +154,8 @@ from the mid-short (miolo): no Subscribe text, VO, or chip before the last beat.
 ### Hard bans on the endcard
 
 Follow / Follow tomorrow / amanhã / waitlist / owera.com / Cloud /
-“part 2 coming” / SMY / emoji 💸 / neon. Subscribe is VO-only — not on the chip.
+“part 2 coming” / SMY / emoji 💸 / neon. Subscribe on the chip is only
+`Subscribe · {series}` — not a Follow button or a mid-card CTA.
 
 ## CTA ban
 

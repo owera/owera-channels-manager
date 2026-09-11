@@ -73,7 +73,7 @@ repeating, or does it just stop?
 **Signal:** ending retention, rewatches.
 
 ### R7 — Call to action  ·  PRIORITY 8
-**Good:** series endcard after the claim — spoken `Subscribe — next {series} {noun}.` (≤8 words) + on-screen chip `· {series}` (optional micro `same series` if it fits). Subscribe is ALLOWED only on that last slot. ZERO Subscribe text/VO/chip in the mid-short. ZERO Follow / Follow-tomorrow / Siga / amanhã / waitlist / owera.com / Cloud / “part 2 coming” / SMY / 💸 / neon on the card. Must not compete with frame0. Hold ≤4.0s.
+**Good:** series endcard after the claim — spoken `Subscribe — next {series} {noun}.` (≤8 words) + on-screen chip `Subscribe · {series}` (optional micro `same series` if it fits). Subscribe is ALLOWED only on that last slot. ZERO Subscribe text/VO/chip in the mid-short. ZERO Follow / Follow-tomorrow / Siga / amanhã / waitlist / owera.com / Cloud / “part 2 coming” / SMY / 💸 / neon on the card. Must not compete with frame0. Hold ≤4.0s.
 **Controls:** `storyboard` cta beat (`_sanitize_cta`, `_cap_endcard`), `worker._generate_script` (`ensure_series_endcard_vo`), `app/services/craft.py`.
 **Self-review:** last spoken line is the Subscribe VO; last card is the series chip, not a Follow ask or a second hook.
 **Signal:** subscribers_gained.
