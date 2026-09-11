@@ -78,7 +78,7 @@
       "handle": "linkedin:company",
       "caption_first_line_is_spoken": true,
       "format": {
-        "kind": "native_video",
+        "kind": "video",
         "ratio": "4:5",
         "size": "1080×1350",
         "teaser_duration": "~30–45s",
@@ -92,7 +92,7 @@
       "handle": "@owerasoftware",
       "caption_first_line_is_spoken": true,
       "format": {
-        "kind": "native_video",
+        "kind": "video",
         "ratio": "16:9",
         "size": "1920×1080",
         "teaser_duration": "~15–30s",

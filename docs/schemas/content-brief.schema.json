@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://owera.com/schemas/content-brief.schema.json",
   "title": "ContentBrief",
-  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only. Per-network format matrix is locked: YT Short 9:16, IG Reel 9:16, LI native video 1:1 (alt 4:5), X native video 16:9. LI is not still 1.91:1. X is not still 1:1.",
+  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only. Per-network format matrix is locked: youtube_os kind=short 9:16, instagram kind=reel 9:16, linkedin kind=video 1:1 (alt 4:5), x kind=video 16:9. linkedin/x kind enum is video — NEVER image or still. Stills are review placeholders only, not the publication kind.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -195,7 +195,12 @@
           "const": 0,
           "description": "Default 0 for newly materialized networks. Do not raise live YT budgets here."
         },
-        "format": { "$ref": "#/definitions/nativeFormat" }
+        "format": { "$ref": "#/definitions/nativeFormat" },
+        "review_still": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional Designer review placeholder frame. NOT the publication kind. linkedin/x format.kind stays video; never image or still."
+        }
       },
       "allOf": [
         {
@@ -255,8 +260,8 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["short", "reel", "native_video"],
-          "description": "Table: Short / Reel / native video. Not story. Not still+caption."
+          "enum": ["short", "reel", "video"],
+          "description": "youtube_os=short, instagram=reel, linkedin/x=video. NEVER image or still. Stills are review placeholders only, not the publication kind."
         },
         "ratio": {
           "type": "string",
@@ -322,13 +327,13 @@
     },
     "linkedinFormat": {
       "type": "object",
-      "description": "Native video. Not still 1.91:1. Primary 1:1 / 1080×1080; alt 4:5 / 1080×1350.",
+      "description": "kind=video. NEVER image or still. Not still 1.91:1. Primary 1:1 / 1080×1080; alt 4:5 / 1080×1350. Stills are review placeholders only.",
       "properties": {
         "format": {
           "type": "object",
           "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
           "properties": {
-            "kind": { "const": "native_video" },
+            "kind": { "const": "video" },
             "ratio": { "enum": ["1:1", "4:5"] },
             "teaser_duration": { "const": "~30–45s" },
             "reuse_generic_cut": { "const": false }
@@ -359,13 +364,13 @@
     },
     "xFormat": {
       "type": "object",
-      "description": "Native video 16:9. Not still 1:1.",
+      "description": "kind=video 16:9. NEVER image or still. Not still 1:1. Stills are review placeholders only.",
       "properties": {
         "format": {
           "type": "object",
           "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
           "properties": {
-            "kind": { "const": "native_video" },
+            "kind": { "const": "video" },
             "ratio": { "const": "16:9" },
             "size": { "const": "1920×1080" },
             "teaser_duration": { "const": "~15–30s" },

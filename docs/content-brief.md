@@ -44,8 +44,8 @@ ContentBrief
   ├─ art                    ONE object on the brief root (not a second art root)
   └─ Publication[]          one per target network; native format lives here
        ├─ instagram         → Reel 9:16 — Social Ops after Rodrigo yes
-       ├─ linkedin          → native video 1:1 (alt 4:5) — Social Ops after Rodrigo yes
-       ├─ x                 → native video 16:9 — Social Ops after Rodrigo yes
+       ├─ linkedin          → video 1:1 (alt 4:5) — Social Ops after Rodrigo yes
+       ├─ x                 → video 16:9 — Social Ops after Rodrigo yes
        └─ youtube_os        → Short 9:16 — handoff to existing Video (Channels ops)
 ```
 
@@ -141,20 +141,26 @@ CMO + Designer lock. This table **replaces** any earlier LI/X still proposal
 (LI is **not** still 1.91:1; X is **not** still 1:1). Use **only** this matrix.
 Each publication declares its own native cut. Do not reuse one generic cut.
 
+`linkedin` and `x` publication `format.kind` is **`video`**. Enum is `video`.
+**NEVER** `image` or `still` (or `still+caption` / `native_video`). A still may
+exist only as a **review placeholder** (Designer sample / teaser frame) — it is
+not the publication kind.
+
 | network | kind | ratio | size | teaser duration |
 | --- | --- | --- | --- | --- |
-| youtube_os | Short | 9:16 | 1080×1920 | ~30–45s (≤60s) |
-| instagram | Reel | 9:16 | 1080×1920 | ~15–30s |
-| linkedin | native video | 1:1 (alt 4:5) | 1080×1080 (alt 1080×1350) | ~30–45s |
-| x | native video | 16:9 | 1920×1080 | ~15–30s |
+| youtube_os | short | 9:16 | 1080×1920 | ~30–45s (≤60s) |
+| instagram | reel | 9:16 | 1080×1920 | ~15–30s |
+| linkedin | video | 1:1 (alt 4:5) | 1080×1080 (alt 1080×1350) | ~30–45s |
+| x | video | 16:9 | 1920×1080 | ~15–30s |
 
 Schema field map on `publications[].format`:
 
 | Table | Schema |
 | --- | --- |
-| kind Short | `kind: short` |
-| kind Reel | `kind: reel` |
-| kind native video | `kind: native_video` |
+| kind short | `kind: short` (`youtube_os` only) |
+| kind reel | `kind: reel` (`instagram` only) |
+| kind video | `kind: video` (`linkedin` and `x` only) |
+| forbidden kinds | `image`, `still`, `still+caption`, `native_video` |
 | ratio / size / teaser duration | `ratio`, `size`, `teaser_duration` — exact strings from the table |
 | LinkedIn alt | `ratio: 4:5` pairs with `size: 1080×1350`; primary is `1:1` / `1080×1080` |
 
@@ -197,18 +203,20 @@ beat, not a random crop of the YT short.
 `skip_gate` lives on the Publication (default `false`). Do not inherit ch1’s
 YouTube skip-gate.
 
-### `linkedin` — native video 1:1 (alt 4:5)
+### `linkedin` — video 1:1 (alt 4:5)
 
 Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
 
-`format.kind=native_video`. Primary `1:1` / `1080×1080`. Alt `4:5` /
-`1080×1350`. Teaser `~30–45s`. **Not** a 1.91:1 still.
+`format.kind=video` (never `image` / `still`). Primary `1:1` / `1080×1080`.
+Alt `4:5` / `1080×1350`. Teaser `~30–45s`. **Not** a 1.91:1 still. A still
+is a review placeholder only.
 
-### `x` — native video 16:9 1920×1080 ~15–30s
+### `x` — video 16:9 1920×1080 ~15–30s
 
 Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
 
-`format.kind=native_video`. `16:9` / `1920×1080`. **Not** a 1:1 still.
+`format.kind=video` (never `image` / `still`). `16:9` / `1920×1080`. **Not**
+a 1:1 still. A still is a review placeholder only.
 
 ### `youtube_os` — reference the live short pipeline, do not re-spec it
 
