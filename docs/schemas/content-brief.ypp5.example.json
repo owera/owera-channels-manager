@@ -1,0 +1,68 @@
+{
+  "id": "brief-ypp5-endcard-example",
+  "objective": "ypp_click_watch_sub",
+  "target_networks": ["youtube_os", "instagram", "linkedin", "x"],
+  "angle": "YPP#5 series close — watch the last short, then subscribe",
+  "voz": {
+    "language": "en",
+    "register": "spoken_builder",
+    "first_line_is_spoken": true,
+    "cadence": "rodrigo_simple"
+  },
+  "hard_nos": [
+    "Aquila",
+    "TCE",
+    "Agenda internals",
+    "Cloud-as-if-ready",
+    "walkthrough",
+    "IP/VPN",
+    "client names",
+    "invented metrics",
+    "spend"
+  ],
+  "art": {
+    "must_illustrate_copy": true,
+    "generic_o_lockup": false,
+    "designer_brief": "Endcard object is the series claim, not the O lockup."
+  },
+  "cta": {
+    "url": "https://owera.com",
+    "kind": "waitlist",
+    "natural_only": true,
+    "never_on_youtube_title_or_script": true
+  },
+  "status": "cmo",
+  "publications": [
+    {
+      "network": "youtube_os",
+      "skip_gate": false,
+      "handoff": "video_short",
+      "channel_scope": "os_only",
+      "subscribe_endcard": {
+        "allow_subscribe": true,
+        "series": "ypp5"
+      }
+    },
+    {
+      "network": "instagram",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "@owerasoftware",
+      "caption_first_line_is_spoken": true
+    },
+    {
+      "network": "linkedin",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "linkedin:company",
+      "caption_first_line_is_spoken": true
+    },
+    {
+      "network": "x",
+      "skip_gate": false,
+      "daily_budget": 0,
+      "handle": "@owerasoftware",
+      "caption_first_line_is_spoken": true
+    }
+  ]
+}
