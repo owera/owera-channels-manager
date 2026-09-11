@@ -128,6 +128,11 @@ def topic_name(topic_id):
         return s.get(Topic, topic_id).name
 
 
+def topic_weight(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).weight
+
+
 def draft_count(topic_id):
     with Session(engine) as s:
         return s.exec(select(func.count(Video.id)).where(
@@ -379,6 +384,75 @@ try:
        "create canonical long persisted "
        "(_canonical_format('short') constant would write short)")
     ok(topic_format(r.json()["id"]) == "long", "create canonical long row is long")
+
+    print("PATCH /api/topics/{id}: weight floor (null/bool/negative 400; 0 parks)")
+    # Topic 1 is parked weight=0; topic 2 is live weight=1; topic 3 is heavy weight=2.
+    ok(topic_weight(1) == 0, "precondition: topic 1 is parked at weight=0")
+    ok(topic_weight(2) == 1, "precondition: topic 2 is live at weight=1")
+    ok(topic_weight(3) == 2, "precondition: topic 3 is heavy at weight=2")
+    gen_src = inspect.getsource(topics_router.generate_videos)
+    ok("t.weight if t.weight is not None else 1" in gen_src,
+       "generate still treats weight is None as 1 (null PATCH would unpark)")
+
+    r = patch_topic(2, weight=3)
+    ok(r.status_code == 200, "PATCH weight=3 is 200")
+    ok(topic_weight(2) == 3, "weight=3 persisted")
+    ok(topic_weight(1) == 0, "weight PATCH on topic 2 left parked sibling at 0")
+    r = patch_topic(2, weight=0)
+    ok(r.status_code == 200, "PATCH weight=0 is 200 (legal park)")
+    ok(topic_weight(2) == 0, "weight=0 persisted (legal park)")
+    r = patch_topic(2, weight=1)
+    ok(r.status_code == 200, "restore topic 2 to weight=1")
+    ok(topic_weight(2) == 1, "topic 2 restored to 1")
+
+    before_name = topic_name(1)
+    r = patch_topic(1, weight=None)
+    ok(r.status_code == 400, "PATCH weight=null on a parked topic is 400")
+    ok("weight" in r.text.lower(), "null-weight 400 names the field")
+    ok(topic_weight(1) == 0,
+       "null PATCH on parked weight=0 writes nothing "
+       "(setattr None then None->1 would unpark)")
+    with Session(engine) as s:
+        ok(s.get(Topic, 1).weight is not None,
+           "null PATCH did not persist SQL NULL into weight")
+    ok(topic_name(1) == before_name, "null-weight 400 left the name")
+
+    r = patch_topic(2, weight=None)
+    ok(r.status_code == 400, "PATCH weight=null on a live topic is 400")
+    ok(topic_weight(2) == 1, "null PATCH on live weight=1 writes nothing")
+
+    r = patch_topic(2, weight=-1)
+    ok(r.status_code == 400, "PATCH weight=-1 is 400")
+    ok(topic_weight(2) == 1, "negative weight writes nothing")
+    ok(topic_weight(3) == 2, "negative-weight 400 left sibling weight")
+
+    r = patch_topic(2, weight=False)
+    ok(r.status_code in (400, 422),
+       "PATCH weight=false is 4xx (must not coerce to 0 park)")
+    ok(topic_weight(2) == 1, "false did not persist a 0 park")
+
+    r = patch_topic(1, weight=True)
+    ok(r.status_code in (400, 422),
+       "PATCH weight=true is 4xx (must not coerce to 1 unpark)")
+    ok(topic_weight(1) == 0, "true did not persist a 1 unpark on a parked topic")
+
+    r = patch_topic(2, name="Live-smuggle", weight=-1)
+    ok(r.status_code == 400, "mixed name + weight=-1 is 400")
+    ok(topic_name(2) != "Live-smuggle",
+       "mixed 400 writes none of the fields (name not smuggled)")
+    ok(topic_weight(2) == 1, "mixed 400 left live weight=1")
+
+    r = patch_topic(2, name=topic_name(2))
+    ok(r.status_code == 200, "name-only PATCH (weight omitted) is 200")
+    ok(topic_weight(2) == 1,
+       "name-only PATCH left weight (exclude_unset; always-floor would 400)")
+
+    upd_src = inspect.getsource(topics_router.update_topic)
+    ok("_require_int" in upd_src,
+       "update_topic floors weight through _require_int")
+    ok(upd_src.index("_require_int") < upd_src.index("setattr"),
+       "_require_int runs before setattr "
+       "(setattr-then-400 would smuggle other fields if the session committed)")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()

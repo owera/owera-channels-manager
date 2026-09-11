@@ -1409,19 +1409,25 @@ flag the operator step in the commit body.
   `"short"`; canonical `"long"` stays long; name-only PATCH leaves
   format; sibling untouched.
 
-### 39. PATCH /api/topics rejects null/bool weight — normal
+### 39. ✅ DONE (code shipped to main 2026-09-11) PATCH /api/topics rejects null/bool weight — normal
+- **resolution (2026-09-11):** `_require_int` is the choke point on
+  PATCH `weight` (`>= 0`) before setattr. JSON null / below-0 ints
+  400. JSON bool is rejected earlier by
+  `TopicUpdate._reject_bool_weight` (`mode="before"`) because lax
+  `Optional[int]` would coerce `false→0` (silent park) / `true→1`
+  (silent unpark). 0 still parks. A 400 mixed body writes none of
+  the fields. Generate still treats `weight is None` as 1 (pinned).
+  Suite: `tests/verify_topics.py` 99 → 131. Isolated commit; #38's
+  format gate untouched. SPA does not send weight — this is the
+  growth-agent / curl floor.
 - **why (found 2026-09-11 shipping #38, not bundled):** PATCH
   `setattr`s `TopicUpdate.weight` (Optional[int]) straight onto a
   NOT NULL `int` column. JSON null persists SQL NULL, and
   `weight is None -> 1` then treats it as unparked — undoing a park.
   Lax Optional[int] coerces JSON `false→0` (silent park) / `true→1`
-  (silent unpark). Same class as #36 on channel budgets. Growth-agent
-  / curl still reach this path; the SPA does not send weight.
-- **approach:** `_require_int` (or the channels.py equivalent) on
-  PATCH weight `>= 0`? Weight `-1` is already parked (`<= 0`), so
-  either allow negatives as park or 400 them. Null/bool must 400
-  before setattr. 0 still parks. Mixed 400 writes nothing.
-- **caution:** normal (`topics.py` PATCH only). Isolated commit +
-  extend `tests/verify_topics.py`.
+  (silent unpark). Same class as #36 on channel budgets.
+- **caution:** normal (`topics.py` PATCH + `TopicUpdate`; not a
+  money-path file). Isolated commit + regression tests.
 - **acceptance:** PATCH weight=null / false is 4xx and leaves the
-  row unchanged; weight=0 still parks; weight=2 still persists.
+  row unchanged; weight=true does not unpark; weight=0 still parks;
+  weight=3 still persists; mixed 400 writes nothing.

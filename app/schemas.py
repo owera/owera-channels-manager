@@ -85,6 +85,15 @@ class TopicUpdate(BaseModel):
     active: Optional[bool] = None
     weight: Optional[int] = None             # growth-agent steering (see Topic.weight)
 
+    @field_validator("weight", mode="before")
+    @classmethod
+    def _reject_bool_weight(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # 0 is a legal park, so false would silently park; true would unpark.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer >= 0, not a boolean")
+        return v
+
 
 class GenerateBody(BaseModel):
     count: int = 8

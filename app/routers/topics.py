@@ -14,6 +14,22 @@ from app.services import quota, video_gen, youtube
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
 
+def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
+    """Reject JSON null / bool / below-floor ints before they hit the DB.
+
+    ``Topic.weight`` is NOT NULL. ``setattr(..., None)`` persists SQL NULL,
+    and generate/autofill/overflow treat ``weight is None`` as 1 — a null
+    PATCH would unpark. JSON bools are rejected earlier by TopicUpdate
+    (lax int would coerce false→0 / true→1); the bool check here is
+    defense in depth for non-HTTP callers.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, int) or isinstance(v, bool) or v < minimum:
+        raise HTTPException(400, hint)
+
+
 def _canonical_format(fmt) -> str:
     """Same == "long" / else-short gate as render/issues/publish/autofill.
 
@@ -83,6 +99,10 @@ def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(ge
     fields = body.model_dump(exclude_unset=True)
     if "content_format" in fields:
         fields["content_format"] = _canonical_format(fields["content_format"])
+    _require_int(fields, "weight", 0,
+                 "weight must be >= 0 "
+                 "(null is treated as 1 and would unpark: "
+                 "weight is None -> 1)")
     for k, v in fields.items():
         setattr(t, k, v)
     t.updated_at = utcnow()
