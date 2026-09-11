@@ -768,7 +768,10 @@ xss_html, _ = storyboard.render_hook(
     dict(_CTX, dur=2.0))
 ok("<script>" not in xss_html and "&lt;script&gt;" in xss_html,
    "hook text is HTML-escaped (theme.esc)")
-ok("&lt;x&gt;" in xss_html, "hook emoji is HTML-escaped")
+ok("hemoji" not in xss_html and "💸" not in xss_html,
+   "hook does not render emoji as the object (Designer hard FAIL)")
+ok('class="obj ' in xss_html and "data-kind=" in xss_html,
+   "hook always emits an object widget (typography-only is a hard FAIL)")
 w3_html, w3_tw = storyboard.render_statement(
     {"text": "Key point", "w": 3, "start": 0.0, "dur": 2}, dict(_CTX, dur=2.0))
 ok("calc(var(--fs)*1.3)" in w3_html and "var(--accent)" in w3_html,
@@ -901,6 +904,9 @@ ok("Long-form" in storyboard._user_prompt("t", "s", "long"),
    "long format asks for more beats / richer visuals")
 ok("CRAFT GATE" not in storyboard._user_prompt("t", "s", "long"),
    "longs do not carry the Shorts A+B+C gate in the prompt")
+ok("Opening object" in storyboard._user_prompt("t", "Copilot billed the cancelled run.", "short")
+   and "BILL" in storyboard._user_prompt("t", "Copilot billed the cancelled run.", "short"),
+   "user prompt injects the concrete opening object (BILL) from the spoken phrase")
 ok("Video title: My Subject" in storyboard._user_prompt("My Subject", "narration", "short"),
    "user prompt leads with the real subject (not a constant)")
 
@@ -977,8 +983,16 @@ ok(pt_opener[0]["emoji"] == "" and pt_opener[0]["type"] == "hook",
    "lock forces hook type and strips emoji")
 keep_obj = [{"type": "hook", "text": "old", "object": "receipt", "emoji": "x"}]
 storyboard._lock_opening_hook(keep_obj, "Your RAG reads junk. Then we fix it.", "s")
-ok(keep_obj[0]["text"].startswith("Your RAG") and keep_obj[0]["object"] == "receipt",
-   "Decolar lock keeps hook.object (does not reopen curiosity-gap / wipe the prop)")
+ok(keep_obj[0]["text"].startswith("Your RAG") and keep_obj[0]["object"] == "RAG",
+   "Decolar lock stamps the spoken noun (RAG), not a leftover receipt prop")
+ok(pt_opener[0].get("object") == "RAG" and pt_opener[0].get("object_kind") == "object",
+   "lock stamps RAG as the opening object (echoes the spoken phrase)")
+ok(pt_opener[0].get("object_spec", {}).get("label") == "RAG",
+   "lock keeps the full object spec for the widget renderer")
+ok('data-object="ALPHA"' in hook_html and 'class="hobj"' in hook_html,
+   "compose frame0 object echoes the first spoken token (alpha), not RECEIPT/emoji")
+ok(hook_html.find("hobj") < hook_html.find("htext"),
+   "object is above the hook type (does not cover line 1)")
 ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
@@ -1201,5 +1215,46 @@ ok(long_beats[-1].get("endcard") is False, "long-form is not the series endcard"
 ok("Follow" not in (long_beats[-1].get("sub") or "")
    and "Subscribe" not in (long_beats[-1].get("sub") or ""),
    "long-form still strips Follow/Subscribe from the card")
+
+# ---------------------------------------------------------------------------
+print("nonsense diagrams / oars gated (shorts demote; long keeps a real topology)")
+
+oars = {"type": "diagram", "cue": "flow here",
+        "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"},
+                  {"id": "c", "label": "oar"}],
+        "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "c"}]}
+ok(storyboard._diagram_is_nonsense(oars),
+   "generic A/B/oar boxes with unlabeled edges are nonsense")
+ok(storyboard._diagram_is_nonsense(
+    {"nodes": [{"label": "step 1"}, {"label": "step 2"}], "edges": []}),
+   "step-N nodes with no labeled edges are nonsense")
+ok(not storyboard._diagram_is_nonsense({
+    "nodes": [{"label": "retriever"}, {"label": "rerank"}, {"label": "llm"},
+              {"label": "answer"}],
+    "edges": [{"from": "r", "to": "k", "label": "top-k"},
+              {"from": "k", "to": "l", "label": "scores"}],
+}), "labeled real topology is not nonsense")
+
+short_oars = [dict(oars)]
+storyboard._demote_nonsense_diagrams(short_oars, "short")
+ok(short_oars[0]["type"] == "statement" and short_oars[0].get("emoji") == "",
+   "shorts demote oar diagrams to a statement (no emoji soup)")
+# shorts demote EVERY diagram, even a labeled one — 9:16 prefers code/command
+real = [{"type": "diagram", "cue": "the pipeline",
+         "nodes": [{"id": "a", "label": "retriever"}, {"id": "b", "label": "rerank"}],
+         "edges": [{"from": "a", "to": "b", "label": "top-k"}]}]
+storyboard._demote_nonsense_diagrams(real, "short")
+ok(real[0]["type"] == "statement",
+   "shorts demote even a labeled diagram (prefer code/command on 9:16)")
+keep = [{"type": "diagram", "cue": "the pipeline",
+         "nodes": [{"id": "a", "label": "retriever"}, {"id": "b", "label": "rerank"}],
+         "edges": [{"from": "a", "to": "b", "label": "top-k"}]}]
+storyboard._demote_nonsense_diagrams(keep, "long")
+ok(keep[0]["type"] == "diagram",
+   "long-form keeps a labeled real topology")
+long_oars = [dict(oars)]
+storyboard._demote_nonsense_diagrams(long_oars, "long")
+ok(long_oars[0]["type"] == "statement",
+   "long-form still demotes generic oars")
 
 print(f"\nALL {_checks} CHECKS PASSED")

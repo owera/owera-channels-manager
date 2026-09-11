@@ -80,6 +80,66 @@ ok(craft.claim_aligned("Reranking in 5 lines", "Reranking in 5 lines · Copilot 
 ok(not craft.claim_aligned("The Cache Is Lying", "Reranking in 5 lines"),
    "curiosity-gap slogan does NOT align (the old thumbnail brief)")
 
+# ---------------------------------------------------------------------------
+print("Decolar: opening object echoes the spoken first phrase")
+
+ok(craft.opening_object("Copilot billed the cancelled run")["label"] == "BILL",
+   "billed title → BILL (object of the angle, not a generic COPILOT badge)")
+ok(craft.opening_object("Copilot billed the cancelled run")["kind"] == "bill",
+   "billed title is a bill UI (invoice / credit counter)")
+ok(craft.opening_object("Copilot billed $58 when the model timed out")["amount"] == "$58",
+   "spoken $58 lands on the credit counter")
+ok(craft.opening_object("Your RAG is slow and still wrong")["label"] == "RAG",
+   "RAG title → RAG chrome")
+ok(craft.opening_object("Sua RAG busca lixo e você culpa o modelo")["label"] == "RAG",
+   "PT RAG opener → RAG (fold + lexicon)")
+ok(craft.opening_object("Memory died between chats")["label"] == "MEMORY",
+   "memory title → MEMORY")
+ok(craft.opening_object("Toda ferramenta nova vira mais uma integração")["label"] == "MCP",
+   "PT integração → MCP")
+ok(craft.opening_object("mcp tools list in one server")["label"] == "MCP",
+   "mcp command title → MCP")
+ok(craft.opening_object("Paste this into the terminal")["kind"] == "terminal",
+   "terminal title → terminal widget")
+ok(craft.opening_object("VRAM 24GB batch died")["kind"] == "gpu",
+   "GPU/VRAM/batch → gpu meter (not 💸)")
+ok(craft.opening_object("Chrome ate the tab")["kind"] == "app"
+   and craft.opening_object("Chrome ate the tab")["label"] == "CHROME",
+   "Chrome → named app icon")
+ok(craft.opening_object("Ollama na RTX ainda cabe")["kind"] == "terminal"
+   and craft.opening_object("Ollama na RTX ainda cabe")["prompt"] == "$ ollama run",
+   "Ollama → terminal / Ollama prompt (noun of the phrase)")
+ok(craft.opening_object("The API is now a paid product")["kind"] == "receipt",
+   "API/paid/product → receipt / API stub")
+ok(craft.opening_object("Hello Hook")["label"] == "HELLO",
+   "unkeyed copy mines the first distinctive noun (not OBJECT/RECEIPT)")
+ok(craft.opening_object("")["label"] == "OBJECT",
+   "empty copy falls back to OBJECT (never an emoji)")
+ok("💸" not in craft.object_markup(craft.opening_object("VRAM 24GB"))
+   and "🔥" not in craft.object_markup(craft.opening_object("Copilot billed $58")),
+   "object markup never uses 💸/🔥")
+ok('data-kind="bill"' in craft.object_markup(craft.opening_object("Copilot billed $58")),
+   "bill markup is a widget, not typography-only")
+ok(craft.object_echoes("BILL", "Copilot billed $27 when the model timed out"),
+   "BILL echoes a billed spoken phrase")
+ok(craft.object_echoes("RAG", "Sua RAG busca lixo e você culpa o modelo"),
+   "RAG echoes the PT spoken opener")
+ok(not craft.object_echoes("OARS", "Your RAG is slow and still wrong"),
+   "generic oars do NOT echo a RAG spoken phrase")
+ok(not craft.object_echoes("💸", "Copilot billed the cancelled run"),
+   "emoji label does not echo a billed claim")
+ok(craft.emoji_first("💸 Copilot billed"),
+   "emoji-first hook is flagged")
+ok(not craft.emoji_first("Copilot billed 💸 later"),
+   "trailing emoji alone is not emoji-first")
+ok(craft.emoji_soup("💸🔥"),
+   "emoji soup (two+ emoji, no words) is flagged")
+ok(not craft.emoji_soup("Copilot billed the cancelled run"),
+   "plain spoken claim is not emoji soup")
+ok("concrete object" in craft.CRAFT_RULES_SHORT.lower()
+   or "receipt" in craft.CRAFT_RULES_SHORT.lower(),
+   "idea/script craft addendum names the object-on-frame0 rule")
+
 
 # ---------------------------------------------------------------------------
 print("banned CTA scan/strip")
@@ -328,8 +388,10 @@ for bad in theme.OS_FORBIDDEN_HEX:
 ok("#1a1a1a" in os_l, "OS still has the cold glow")
 ok("#4a1528" in rr_l and "#2a0a14" in rr_l, "RR still has the burgundy upper-corner glow")
 ok("#c41e5a" in rr_l, "RR still uses #C41E5A as object stroke")
-ok("linear-gradient(90deg" not in os_l and "linear-gradient(90deg" not in rr_l,
+ok("linear-gradient(90deg,#" not in os_l and "linear-gradient(90deg,#" not in rr_l,
    "no rainbow neon-bar top gradient on branded stills")
+ok("repeating-linear-gradient(90deg" in os_l,
+   "receipt/bill tear is a serration, not the neon identity bar")
 ok(os_html != rr_html, "OS and RR storyboard HTML are not identical")
 
 os_thumb = thumbnail._thumbnail_html("Cache billed the cancelled run", brand="os")
@@ -345,6 +407,16 @@ ok("#1a1a1a" in os_thumb.lower(), "OS thumb cold glow is present")
 for tok in theme.RR_FORBIDDEN_MARKS:
     ok(tok not in rr_thumb.lower(), f"RR thumb has no {tok!r}")
 ok(os_thumb != rr_thumb, "OS and RR thumbs are not identical")
+ok("obj-bill" in os_html and "obj-bill" in rr_html,
+   "billed spoken noun renders a bill widget on both brands")
+ok("--obj-accent:var(--stroke)" in os_html and "--obj-accent:var(--stroke)" in rr_html,
+   "frame0 object widgets inherit brand --stroke (OS gray / RR burgundy)")
+ok("obj-bill" in os_thumb and "obj-bill" in rr_thumb,
+   "billed thumb uses the bill widget, not a generic RECEIPT slab")
+ok("--obj-accent:#c41e5a" in rr_thumb.lower(),
+   "RR thumb object is themed burgundy")
+ok("#c41e5a" not in os_thumb.lower(),
+   "OS thumb object is not painted RR burgundy")
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +467,17 @@ ok("Subscribe" not in cta_html,
 m = re.search(r'class="beat cta"[^>]*data-duration="([0-9.]+)"', html)
 ok(m and float(m.group(1)) <= craft.ENDCARD_MAX_S + 1e-6,
    "compose endcard hold is ≤4.0s")
+ok('data-object="RAG"' in hook_html and 'data-kind="object"' in hook_html,
+   "frame0 object is the spoken noun (RAG), not a generic RECEIPT/emoji")
+ok('class="hobj"' in hook_html and 'class="htext"' in hook_html,
+   "frame0 keeps hook type under the object (object does not cover line 1)")
+ok(hook_html.find("hobj") < hook_html.find("htext"),
+   "object is above the type block")
+ok("💸" not in hook_html and "🔥" not in hook_html,
+   "frame0 does not use 💸/🔥 as the object")
+ok(craft.object_hard_fail(hook_html, "Your RAG reads junk",
+                          "Your RAG reads junk. Then we fix the embed path.") is None,
+   "composed frame0 passes the Designer hard-FAIL gate")
 
 
 # ---------------------------------------------------------------------------
