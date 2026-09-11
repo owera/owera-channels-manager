@@ -37,19 +37,25 @@ Ops park leftover pré-pattern items via **reject**. Do **not** mass-retitle.
 thumbnail to echo the spoken claim. Repeating the title is required.
 Curiosity-gap / “don’t reuse the title’s words” is inverted.
 
+The opening visual is a **concrete object** on frame0 AND the thumb
+(`craft.opening_object`) that echoes that spoken phrase — receipt, bill,
+terminal, RAG index, the named tool. Nonsense diagrams (generic A→B oars),
+emoji soup, and generic slides are gated / demoted. Object widgets inherit
+the live OS/RR stroke (cold gray + O mark / burgundy, no Owera mark) — not a
+generic slab that collapses the brand split.
+
 Live clips (not the same number):
 
 - Frame 0: first spoken **script** sentence, safety-clipped to **12 words**
   (`_lock_opening_hook`). Approve does not re-check the HTML.
-- Thumb: **title before `·`**, compressed to **≤8 words**. Custom thumb is
-  best-effort at publish and always paints a generic `RECEIPT` slab — it is
-  not the claim noun as a still.
+- Thumb: **title before `·`**, compressed to **≤8 words**, native 9:16 for shorts.
+  Custom thumb is best-effort at publish.
 
 Happy-path OS/RR palettes are live (`theme.resolve(brand=)`). Fallback
 composition ignores brand and Decolar (kinetic title cards).
 
 YPP #3 (object 0–3s / beats ≤3s / no mid-video spoken list) is the Video
-Maker craft gate below. YPP #5 runtime (this PR) pins the series endcard.
+Maker craft gate below. YPP #5 runtime pins the series endcard.
 
 YPP #5 is Rodrigo YES (locked): Subscribe is allowed **only** on the series
 endcard template — **visual + final VO** (`Subscribe — next {series} {noun}.`

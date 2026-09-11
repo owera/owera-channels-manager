@@ -226,6 +226,16 @@ with patch.object(thumbnail, "_llm", return_value=_sixty_one):
     ok(thumbnail._hook_text("s", "Alpha Beta") == "Alpha Beta",
        "61 chars even with valid word count → title fallback")
 
+# emoji-first / emoji-soup LLM punch → spoken-claim fallback (object lock)
+with patch.object(thumbnail, "_llm", return_value="💸 billed already"):
+    ok(thumbnail._hook_text("s", "Copilot billed the cancelled run")
+       == "Copilot billed the cancelled run",
+       "emoji-first LLM hook is rejected; fallback is the spoken title")
+with patch.object(thumbnail, "_llm", return_value="🔥💡"):
+    ok(thumbnail._hook_text("s", "Your RAG is slow and still wrong")
+       == "Your RAG is slow and still wrong",
+       "emoji-soup LLM hook is rejected; fallback is the spoken title")
+
 # LLM exception → fallback
 with patch.object(thumbnail, "_llm", side_effect=RuntimeError("llm down")):
     out = thumbnail._hook_text("s", "Title Case Words Here Extra")
@@ -286,8 +296,20 @@ ok('id="hook"' in html_evil and "&lt;img" in html_evil,
 html_default = thumbnail._thumbnail_html("Default")
 ok("#5b8cff" in html_default and "#1b2a6b" in html_default,
    "default accent/bg match palette[0] (blue brand)")
-ok('id="slab"' in html_default and "RECEIPT" in html_default,
-   "object-of-angle receipt/terminal chrome (not a generic emoji punch)")
+ok('id="slab"' in html_default and 'id="chrome"' in html_default,
+   "object-of-angle slab/chrome present (not a generic emoji punch)")
+ok('data-object="DEFAULT"' in html_default and "DEFAULT" in html_default,
+   "unkeyed hook mines a concrete noun from the copy (not a hardcoded RECEIPT)")
+ok("💸" not in html_default, "default thumb is not an emoji punch")
+html_bill = thumbnail._thumbnail_html("Copilot billed the cancelled run")
+ok('data-object="BILL"' in html_bill and "BILL" in html_bill,
+   "billed spoken phrase → BILL chrome (echoes the title, not generic RECEIPT)")
+html_rag = thumbnail._thumbnail_html("Sua RAG busca lixo e você culpa o modelo")
+ok('data-object="RAG"' in html_rag,
+   "PT RAG spoken phrase → RAG chrome on the thumb")
+html_forced = thumbnail._thumbnail_html("ignored slogan", obj={"label": "TERMINAL"})
+ok('data-object="TERMINAL"' in html_forced,
+   "explicit obj overrides hook-text mining (frame0/thumb share one object)")
 ok("#a36bff" not in html_default and "#ff5bb0" not in html_default,
    "rainbow accent bar (#a36bff/#ff5bb0) is gone")
 
@@ -489,6 +511,8 @@ with tempfile.TemporaryDirectory() as td:
        "work dir gets a copy of gsap.min.js (HyperFrames requires it)")
     ok("Hook Words Here" in _captured["index_html"],
        "index.html embeds the hook from _hook_text")
+    ok('data-object="CACHES"' in _captured["index_html"],
+       "thumb chrome is mined from the spoken title (Caches), not hardcoded RECEIPT")
     ok(CYAN in _captured["index_html"] and CYAN_BG in _captured["index_html"],
        f"topic_id=0 + hello → subject-hash cyan/bg ({CYAN}/{CYAN_BG}), not palette[0]")
     ok(BLUE not in _captured["index_html"] and BLUE_BG not in _captured["index_html"],

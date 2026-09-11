@@ -80,6 +80,49 @@ ok(craft.claim_aligned("Reranking in 5 lines", "Reranking in 5 lines · Copilot 
 ok(not craft.claim_aligned("The Cache Is Lying", "Reranking in 5 lines"),
    "curiosity-gap slogan does NOT align (the old thumbnail brief)")
 
+# ---------------------------------------------------------------------------
+print("Decolar: opening object echoes the spoken first phrase")
+
+ok(craft.opening_object("Copilot billed the cancelled run")["label"] == "BILL",
+   "billed title → BILL (object of the angle, not a generic COPILOT badge)")
+ok(craft.opening_object("Copilot billed the cancelled run")["kind"] == "receipt",
+   "billed title is a receipt-kind still")
+ok(craft.opening_object("Your RAG is slow and still wrong")["label"] == "RAG",
+   "RAG title → RAG chrome")
+ok(craft.opening_object("Sua RAG busca lixo e você culpa o modelo")["label"] == "RAG",
+   "PT RAG opener → RAG (fold + lexicon)")
+ok(craft.opening_object("Memory died between chats")["label"] == "MEMORY",
+   "memory title → MEMORY")
+ok(craft.opening_object("Toda ferramenta nova vira mais uma integração")["label"] == "MCP",
+   "PT integração → MCP")
+ok(craft.opening_object("mcp tools list in one server")["label"] == "MCP",
+   "mcp command title → MCP")
+ok(craft.opening_object("Paste this into the terminal")["label"] == "TERMINAL",
+   "terminal title → TERMINAL")
+ok(craft.opening_object("Hello Hook")["label"] == "HELLO",
+   "unkeyed copy mines the first distinctive noun (not OBJECT/RECEIPT)")
+ok(craft.opening_object("")["label"] == "OBJECT",
+   "empty copy falls back to OBJECT (never an emoji)")
+ok(craft.object_echoes("BILL", "Copilot billed $27 when the model timed out"),
+   "BILL echoes a billed spoken phrase")
+ok(craft.object_echoes("RAG", "Sua RAG busca lixo e você culpa o modelo"),
+   "RAG echoes the PT spoken opener")
+ok(not craft.object_echoes("OARS", "Your RAG is slow and still wrong"),
+   "generic oars do NOT echo a RAG spoken phrase")
+ok(not craft.object_echoes("💸", "Copilot billed the cancelled run"),
+   "emoji label does not echo a billed claim")
+ok(craft.emoji_first("💸 Copilot billed"),
+   "emoji-first hook is flagged")
+ok(not craft.emoji_first("Copilot billed 💸 later"),
+   "trailing emoji alone is not emoji-first")
+ok(craft.emoji_soup("💸🔥"),
+   "emoji soup (two+ emoji, no words) is flagged")
+ok(not craft.emoji_soup("Copilot billed the cancelled run"),
+   "plain spoken claim is not emoji soup")
+ok("concrete object" in craft.CRAFT_RULES_SHORT.lower()
+   or "receipt" in craft.CRAFT_RULES_SHORT.lower(),
+   "idea/script craft addendum names the object-on-frame0 rule")
+
 
 # ---------------------------------------------------------------------------
 print("banned CTA scan/strip")
@@ -395,6 +438,8 @@ ok("Subscribe" not in cta_html,
 m = re.search(r'class="beat cta"[^>]*data-duration="([0-9.]+)"', html)
 ok(m and float(m.group(1)) <= craft.ENDCARD_MAX_S + 1e-6,
    "compose endcard hold is ≤4.0s")
+ok('data-object="RAG"' in hook_html and "hobject" in hook_html,
+   "frame0 object is the spoken noun (RAG), not a generic RECEIPT/emoji")
 
 
 # ---------------------------------------------------------------------------

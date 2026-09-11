@@ -480,11 +480,11 @@ def _base_css(width: int, height: int, th: dict) -> str:
         "align-items:center;justify-content:center;gap:.4em;padding:0 var(--pad);box-sizing:border-box;"
         "text-align:center;opacity:0}"
         ".word{display:inline-block}"
-        # hook
+        # hook — spoken-noun object above type (YPP1). Stroke from brand tokens (YPP2).
         ".hook .htext{font-size:calc(var(--fs)*1.28);font-weight:800;line-height:1.12;letter-spacing:-1px;"
-        "text-shadow:0 4px 24px rgba(0,0,0,.7)}.hook .hemoji{font-size:calc(var(--fs)*1.1);line-height:1}"
+        "text-shadow:0 4px 24px rgba(0,0,0,.7)}"
         ".hook .hobject{font-size:calc(var(--fs)*.42);font-weight:800;letter-spacing:.12em;"
-        "text-transform:uppercase;color:var(--accent);border:2px solid var(--accent);"
+        "text-transform:uppercase;color:var(--stroke);border:2px solid var(--stroke);"
         "padding:.18em .55em;border-radius:10px;margin-bottom:.35em}"
         # statement
         ".stmt .stext{font-size:var(--fs);font-weight:800;line-height:1.3;letter-spacing:-.5px;"
@@ -602,15 +602,12 @@ def _wrap(i: int, ctx: dict, base_tweens: list[str]) -> list[str]:
 def render_hook(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
-    obj = (b.get("object") or "").strip()
-    obj_html = ('<div class="hobject">' + theme.esc(obj) + "</div>") if obj else ""
-    emoji = ('<div class="hemoji">' + theme.esc(b["emoji"]) + "</div>") if b.get("emoji") else ""
-    inner = obj_html + emoji + '<div class="htext">' + _words_html(b["text"]) + "</div>"
-    tw = []
-    if obj:
-        tw.append(_from(bid + " .hobject", s, "opacity:0,y:-12", "opacity:1,y:0", dur=0.2))
-    if b.get("emoji"):
-        tw.append(_from(bid + " .hemoji", s, "opacity:0,scale:0.4", "opacity:1,scale:1", dur=0.2, ease="back.out(2)"))
+    from app.services import craft
+    obj = (b.get("object") or "").strip() or craft.opening_object(b.get("text"))["label"]
+    obj_html = '<div class="hobject">' + theme.esc(obj) + "</div>"
+    # Hook emoji is not the object (YPP1 hard FAIL) — never render 💸/🔥 as a punch.
+    inner = obj_html + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    tw = [_from(bid + " .hobject", s, "opacity:0,y:-12", "opacity:1,y:0", dur=0.2)]
     tw.append(_from(bid + " .word", s + 0.05, "opacity:0,y:30", "opacity:1,y:0", dur=0.3, stagger=0.045))
     return _shell(i, b, "hook", inner), _wrap(i, ctx, tw)
 
@@ -998,8 +995,9 @@ def build_index_html(beats, th, resolution, width, height, duration,
 _TYPE_DOCS = {
     "hook": 'hook: {"cue","text"(≤8w),"object"?} — DECOLAR LOCK: text MUST equal the first spoken sentence '
             '(the title hook) or a faithful ≤8-word compression of that SAME claim. Repeating the '
-            'title is REQUIRED. No emoji, no second slogan, no curiosity gap. Exactly one, first. '
-            '"object" is the Decolar prop of the angle (receipt, terminal, API bill) — never an emoji.',
+            'title is REQUIRED. Frame 0 visual is the concrete OBJECT of that phrase (receipt / '
+            'terminal / bill / the named tool) — no emoji, no abstract diagram, no generic slide. '
+            'Exactly one, first. "object" is the Decolar prop of the angle — never an emoji.',
     "statement": 'statement: {"cue","text"(≤8w),"w":1|2|3} — an emphasized line (w=3 = the single key point). Not a second hook.',
     "stat": 'stat: {"cue","value","unit"?,"label"(≤6w)} — a number/percentage that animates (e.g. value "300", unit "ms").',
     "compare": 'compare: {"cue","title"?,"left":{"title","items"(≤3)},"right":{"title","items"(≤3)}} — A vs B.',
@@ -1047,7 +1045,9 @@ def _system_prompt(allowed: list[str]) -> str:
         "4. Structure: EXACTLY one `hook` first, then 4-9 varied explanatory beats, EXACTLY one "
         "`cta` last. 6-11 beats total, in chronological order.\n"
         "4b. DECOLAR LOCK: the hook `text` IS the first spoken sentence (or a faithful ≤8-word "
-        "compression of that same claim / the title). Repeating the title is REQUIRED. Forbidden: "
+        "compression of that same claim / the title). Repeating the title is REQUIRED. The opening "
+        "visual is a concrete OBJECT that echoes that spoken phrase (receipt, terminal, bill, "
+        "the named tool) — never an abstract diagram, emoji soup, or generic slide. Forbidden: "
         "a curiosity-gap headline, a second typographic hook, a different slogan, a hook emoji "
         "used as a second punch. Beat 2 must add information (stat/code/command/list), not another "
         "headline.\n"
@@ -1087,6 +1087,7 @@ def _system_prompt(allowed: list[str]) -> str:
 def _user_prompt(subject: str, script: str, content_format: str) -> str:
     from app.services import craft
     first = craft.first_spoken_sentence(script) or subject
+    obj = craft.opening_object(first)["label"]
     pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
             "visuals (terminal/receipt/code), then the series endcard chip (· series). "
             "No Follow/Siga/waitlist/Cloud/SMY. No Subscribe on any beat before the last "
@@ -1105,7 +1106,9 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
             "to sustain a longer narration. Still: frame 0 = first spoken sentence.")
     return ("Video title: " + subject + "\n"
             "First spoken sentence (THIS is frame 0 — repeat or compress to ≤8 words, "
-            "do NOT replace with a curiosity gap): " + first + "\n" +
+            "do NOT replace with a curiosity gap): " + first + "\n"
+            "Opening object (frame 0 AND thumb chrome — echo this, do not swap for a "
+            "diagram or emoji): " + obj + "\n" +
             pace + "\n\nNarration script:\n" + script +
             "\n\nReturn the storyboard JSON now.")
 
@@ -1165,6 +1168,9 @@ def _lock_opening_hook(beats, script, subject) -> None:
     clip dropped PT objects (e.g. 'Sua RAG busca lixo e você culpa o' without
     'modelo') so frame0 diverged from spoken/title. The opener is already ~10
     words; 12 is a wrap-safe ceiling, not a compression slogan.
+
+    Also stamps a concrete ``object`` on beat 0 so render_hook / the thumb share
+    the same chrome (receipt, terminal, named tool) instead of emoji or oars.
     """
     from app.services import craft
     claim = craft.spoken_hook_source(None, script, subject)
@@ -1174,13 +1180,14 @@ def _lock_opening_hook(beats, script, subject) -> None:
         hook = craft.compress_claim(craft.spoken_hook_source(subject, None, subject), 12)
     if not beats or not hook:
         return
+    derived = craft.opening_object(claim or hook)
     b0 = beats[0]
-    obj = b0.get("object") or ""
     b0["type"] = "hook"
     b0["text"] = hook
     b0["emoji"] = ""
-    if obj:
-        b0["object"] = obj
+    # YPP1: object is the noun of the spoken first phrase (not a leftover LLM prop).
+    b0["object"] = derived["label"]
+    b0["object_kind"] = derived["kind"]
     if len(beats) > 1:
         b1 = beats[1]
         b1["emoji"] = ""

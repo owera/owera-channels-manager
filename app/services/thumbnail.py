@@ -62,6 +62,7 @@ def _hook_text(subject: str, title: str | None,
             "the object of the claim: receipt, terminal, bill). "
             "Prefer naming the object of the angle (receipt, terminal, invoice) "
             "when it is already in the title; never swap in a generic 💸 emoji punch. "
+            "No emoji-first hook, no emoji soup. "
             "Return ONLY the compressed hook."
         )
         prompt = (
@@ -72,7 +73,8 @@ def _hook_text(subject: str, title: str | None,
         out = _llm(prompt, system=system, max_tokens=100).strip()
         out = re.sub(r'^["\'`]+|["\'`]+$', "", out).splitlines()[0].strip()
         words = out.split()
-        if 2 <= len(words) <= 8 and len(out) <= 60 and craft.claim_aligned(out, spoken):
+        if (2 <= len(words) <= 8 and len(out) <= 60 and craft.claim_aligned(out, spoken)
+                and not craft.emoji_first(out) and not craft.emoji_soup(out)):
             return out
     except Exception as e:
         logger.info("thumbnail hook LLM failed, using spoken claim: %s", e)
@@ -81,14 +83,23 @@ def _hook_text(subject: str, title: str | None,
 
 def _thumbnail_html(hook: str, accent: str = "#5b8cff",
                     bg_deep: str = "#1b2a6b", brand: str | None = None,
-                    th: dict | None = None) -> str:
-    """Static claim card. Object-of-angle still (receipt / terminal chrome), not a
-    generic emoji hook. Brand: os = B&W + O mark; rr = burgundy glow, no logo;
+                    th: dict | None = None,
+                    obj: dict | str | None = None) -> str:
+    """Static claim card. Object-of-angle still (receipt / terminal / named tool),
+    not a generic emoji hook. Chrome label echoes the spoken first phrase.
+    Brand: os = B&W + O mark; rr = burgundy glow, no logo;
     else legacy (keeps the solid accent bar so unbranded tests stay pinned)."""
+    from app.services import craft
     if brand and not th:
         tokens = theme_mod.resolve(None, hook, brand=brand)
     else:
         tokens = th or {}
+    if isinstance(obj, dict) and obj.get("label"):
+        label = str(obj["label"])
+    elif isinstance(obj, str) and obj.strip():
+        label = obj.strip()
+    else:
+        label = craft.opening_object(hook)["label"]
     pad = int(_W * 0.07)
     font = int(_W * 0.078)
     fg = tokens.get("fg") or "#ffffff"
@@ -154,7 +165,7 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
        data-start="0" data-duration="1">
     {bar_html}
     <div id="slab" class="clip" data-start="0" data-duration="1" data-track-index="0"></div>
-    <div id="chrome">RECEIPT</div>
+    <div id="chrome" data-object="{_esc(label)}">{_esc(label)}</div>
     {mark_html}
     <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
   </div>
@@ -203,9 +214,13 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         work.mkdir(parents=True, exist_ok=True)
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
         theme_mod.stage_brand_assets(work, brand)
+        from app.services import craft
         hook = _hook_text(subject, title, content_format=content_format)
+        spoken = craft.spoken_hook_source(title, None, subject)
+        obj = craft.opening_object(spoken or hook)
         (work / "index.html").write_text(
-            _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand, th=tokens))
+            _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand,
+                            th=tokens, obj=obj))
         _render(work, work / "thumb.mp4")
         _extract_frame(work / "thumb.mp4", out_png)
         return out_png

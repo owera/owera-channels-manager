@@ -2,7 +2,9 @@
 
 Decolar lock: the first spoken sentence IS the title hook. Frame 0 and the
 thumbnail must repeat that claim (or a faithful ≤8-word compression) — never a
-second typographic hook or curiosity gap.
+second typographic hook or curiosity gap. The opening visual is a concrete
+OBJECT on frame0 AND the thumb that echoes that same spoken phrase — not an
+abstract diagram, emoji soup, or generic slide.
 
 Spoken-title suffix (shorts): `· <series> <nn>` with series in
 Copilot Credits | Agent memory | CrewAI | IA | Local | Claude Code.
@@ -130,6 +132,8 @@ BANNED_RE = re.compile("|".join(_BANNED_PHRASES), re.IGNORECASE)
 # Idea / script / metadata prompt addenda — enforced in code, not only theme_prompt.
 CRAFT_RULES_SHORT = (
     "CRAFT (enforced): first spoken sentence IS the title hook. "
+    "Frame 0 and the thumbnail show a concrete object that echoes that phrase "
+    "(receipt, terminal, bill, the named tool) — not a diagram, emoji soup, or generic slide. "
     "No Follow/Siga/'follow for more'/Siga-amanhã/Follow-tomorrow. No waitlist, "
     "owera.com, Owera Cloud-as-product, SMY, 'part 2 coming', Instagram or LinkedIn. "
     "Subscribe is ALLOWED only as the LAST spoken line of the series endcard "
@@ -197,6 +201,99 @@ def claim_aligned(hook: str | None, spoken: str | None) -> bool:
     if not hw or not sw:
         return False
     return bool(hw & sw)
+
+
+# Opening visual: a concrete noun that echoes the spoken title, not 💸 / A→B oars.
+# First matching hint wins — billed/invoice before copilot so "Copilot billed $27"
+# becomes BILL (the object of the angle), not a generic COPILOT badge.
+_OBJECT_HINTS = (
+    (r"\b(recibo|receipt)\b", "RECEIPT", "receipt"),
+    (r"\b(invoice|fatura)\b", "INVOICE", "receipt"),
+    (r"\b(billed|billing|bill|cobr(?:ou|ar|anca)|credits?|creditos?)\b",
+     "BILL", "receipt"),
+    (r"\b(terminal|cli|shell|stdout|stderr)\b", "TERMINAL", "terminal"),
+    (r"\b(comando|command)\b", "TERMINAL", "terminal"),
+    (r"\b(config|\.env\b|yaml|toml)\b", "CONFIG", "terminal"),
+    (r"\b(mcp|integra(?:cao|coes)|connector|conector)\b", "MCP", "terminal"),
+    (r"\b(rag|retriev|chunk|embed|rerank)\b", "RAG", "object"),
+    (r"\b(memor(?:y|ia)|forget|amnesia|session|sessao)\b", "MEMORY", "object"),
+    (r"\b(traceback|stack trace)\b", "TRACEBACK", "terminal"),
+    (r"\b(ollama|rtx|e?gpu)\b", "LOCAL", "object"),
+    (r"\bcrew(?:ai)?\b", "CREW", "object"),
+    (r"\bclaude\b", "CLAUDE", "terminal"),
+    (r"\bcopilot\b", "COPILOT", "receipt"),
+)
+
+# Extra folds dropped when mining a fallback noun (title grammar, not the object).
+_OBJECT_STOP = STOPWORDS | {
+    "about", "how", "why", "what", "when", "title", "video", "watch", "here",
+    "there", "then", "than", "into", "over", "after", "before", "porque",
+    "quando", "onde", "como", "para", "mais", "muito", "ainda", "voce",
+    "its", "are", "was", "were", "been", "have", "has", "had", "will", "can",
+    "not", "nao", "sem", "only", "just", "very",
+}
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FAFF"
+    "\U00002700-\U000027BF"
+    "\U00002600-\U000026FF"
+    "\U0000FE00-\U0000FE0F"
+    "\U0001F1E0-\U0001F1FF"
+    "]+"
+)
+
+
+def opening_object(text: str | None) -> dict:
+    """Concrete object chrome for frame0 + thumb, grounded in the spoken phrase.
+
+    Returns ``{"label": str, "kind": "receipt"|"terminal"|"object"}``. Label is
+    a short uppercase noun (RECEIPT / BILL / RAG / …). Kind only picks the
+    chrome treatment — not an OS/RR brand split.
+    """
+    folded = theme.fold(text or "")
+    for pat, label, kind in _OBJECT_HINTS:
+        if re.search(pat, folded):
+            return {"label": label, "kind": kind}
+    words = [w for w in re.findall(r"[A-Za-zÀ-ÿ0-9$]+", text or "")
+             if theme.fold(w) not in _OBJECT_STOP and len(w) >= 3]
+    if words:
+        long_enough = [w for w in words if len(w) >= 4]
+        pick = (long_enough[0] if long_enough else words[0])
+        return {"label": pick.upper()[:16], "kind": "object"}
+    return {"label": "OBJECT", "kind": "object"}
+
+
+def object_echoes(label: str | None, spoken: str | None) -> bool:
+    """True when chrome label is grounded in the spoken first phrase."""
+    if not label or not spoken:
+        return False
+    derived = opening_object(spoken)["label"]
+    if theme.fold(label) == theme.fold(derived):
+        return True
+    return claim_aligned(label, spoken)
+
+
+def emoji_first(text: str | None) -> bool:
+    raw = (text or "").lstrip()
+    return bool(raw) and bool(_EMOJI_RE.match(raw))
+
+
+def emoji_soup(text: str | None) -> bool:
+    """Two+ emoji, or the whole string is emoji — generic 💸 punch, not an object."""
+    raw = text or ""
+    bits = _EMOJI_RE.findall(raw)
+    if len(bits) >= 2:
+        return True
+    rest = _EMOJI_RE.sub("", raw).strip()
+    return bool(bits) and not rest
 
 
 def scan_banned(text: str | None) -> list[str]:

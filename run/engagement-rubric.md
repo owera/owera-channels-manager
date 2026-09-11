@@ -27,7 +27,7 @@ For a small channel, discovery is gated by **CTR** and the **first 3 seconds**. 
 ## The levers
 
 ### R1 — Hook (0–2 seconds)  ·  PRIORITY 1
-**Good:** the very first frame shows the hook beat at t=0, and that on-screen text IS the first spoken sentence (the title hook) or a faithful ≤8-word compression of that same claim — Decolar lock. Repeating the title is required. No second typographic hook, no curiosity-gap slogan, no hook emoji as a second punch. The spoken line still voices the viewer's pain. No "In this video / Today / Welcome".
+**Good:** the very first frame shows the hook beat at t=0, and that on-screen text IS the first spoken sentence (the title hook) or a faithful ≤8-word compression of that same claim — Decolar lock. Repeating the title is required. The opening visual is a concrete object that echoes that spoken phrase (receipt, terminal, bill, the named tool) — not an abstract diagram, emoji soup, or generic slide. No second typographic hook, no curiosity-gap slogan, no hook emoji as a second punch. The spoken line still voices the viewer's pain. No "In this video / Today / Welcome".
 **Controls:** `app/services/engines/worker.py` `_generate_script` (opening line);
 `app/services/engines/storyboard.py` `_lock_opening_hook` + `_system_prompt`; `app/services/thumbnail.py`
 `_hook_text`; titles in `app/services/metadata.py` / `app/services/video_gen.py`.
@@ -79,7 +79,7 @@ repeating, or does it just stop?
 **Signal:** subscribers_gained.
 
 ### R8 — Thumbnail + title CTR  ·  PRIORITY 2
-**Good:** thumbnail IS the title hook (first spoken sentence, or ≤8-word compression of that same claim). Repeating the title is required — no curiosity gap, no second slogan. Prefer the object of the angle (receipt, terminal, bill) over generic emoji. Title leads with the viewer's problem and carries `· <series> <nn>`.
+**Good:** thumbnail IS the title hook (first spoken sentence, or ≤8-word compression of that same claim). Repeating the title is required — no curiosity gap, no second slogan. The thumb chrome IS the object of the spoken phrase (receipt, terminal, bill, named tool) — not a hardcoded generic or emoji-first punch. Title leads with the viewer's problem and carries `· <series> <nn>`.
 **Controls:** `app/services/thumbnail.py`, `app/services/metadata.py`, `app/services/craft.py` title gate.
 **Self-review:** read thumb + title together — same claim?
 **Signal:** CTR, impressions (once measured).
