@@ -129,6 +129,10 @@ Pinned in `craft.series_endcard` / `ensure_series_endcard_vo` (script) and
 Subscribe is **FORBIDDEN** in the mid-short / body / miolo (no Subscribe
 text, VO, or chip before the endcard).
 
+Subscribe is **ALLOWED only on this endcard** (final VO + last visual slot).
+`strip_mid_subscribe` / `_strip_mid_subscribe_beats` drop Subscribe / Inscreva
+from the mid-short (miolo): no Subscribe text, VO, or chip before the last beat.
+
 ### Hard bans on the endcard
 
 Follow / Follow tomorrow / amanhã / waitlist / owera.com / Cloud /

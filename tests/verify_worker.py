@@ -240,7 +240,7 @@ ok("Subscribe —" not in lng,
 def _dirty_mid(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
-        "Your RAG reads junk. Follow tomorrow for the rest. "
+        "Subscribe for more. Your RAG reads junk. Follow tomorrow for the rest. "
         "Join the waitlist. Owera Cloud is live. " + " ".join(["word"] * 50)
     )
 
@@ -258,6 +258,8 @@ ok("Follow" not in stripped and "waitlist" not in stripped.lower()
    "worker strip_banned still kills Follow-tomorrow/waitlist/Cloud mid-script")
 ok(stripped.startswith("Your RAG reads junk."),
    "Decolar opener survives the mid-script CTA strip")
+ok(stripped.count("Subscribe") == 1 and stripped.endswith("trap."),
+   "mid-script Subscribe is stripped; only the endcard VO remains")
 
 
 # ---------------------------------------------------------------------------

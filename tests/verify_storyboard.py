@@ -1139,6 +1139,21 @@ ok(_compose(already_has_code_llm, allowed_types=PHASE_A + ["code"]) is not None
    and n_has[0] == 1,
    "draft that already has a code beat does not retry")
 
+sub_mid = _compose(
+    lambda *a, **k: _board(extra=[{
+        "type": "statement", "cue": "echo foxtrot", "text": "Subscribe now",
+    }]),
+    script="alpha bravo charlie delta echo foxtrot golf hotel. Subscribe — next Copilot Credits trap.",
+    subject="alpha bravo charlie · Copilot Credits 1",
+)
+ok("Subscribe now" not in sub_mid,
+   "compose strips Subscribe from a mid-body statement")
+hook_mid = sub_mid.split('class="beat hook"', 1)[1].split('class="beat ', 1)[0]
+ok("Subscribe" not in hook_mid,
+   "frame0 / mid beats do not carry Subscribe (endcard VO only)")
+ok("cta-chip" in sub_mid and "· Copilot Credits" in sub_mid,
+   "endcard chip still renders after a mid-Subscribe scrub")
+
 # validate-fail → even-space rescue, then success
 _real_val = storyboard.validate_storyboard
 n_val = [0]

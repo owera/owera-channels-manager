@@ -177,6 +177,38 @@ ok(not craft.endcard_clean({"vo": os_card["vo"], "chip": os_card["chip"],
 ok("Subscribe" in os_card["vo"] and craft.endcard_clean(os_card),
    "endcard VO may contain Subscribe (Rodrigo/CoS exception — not Follow-tomorrow)")
 
+miolo = (
+    "Subscribe for more RAG fixes. Your RAG reads junk. "
+    "Se inscreve amanhã. Then we fix the embed. "
+    "Subscribe — next Copilot Credits trap."
+)
+ok(craft.contains_subscribe_cta("Subscribe for more RAG fixes."),
+   "mid-body Subscribe CTA is detected")
+ok(craft.mid_body_has_subscribe(miolo),
+   "Subscribe before the endcard VO is a mid-body leak")
+ok(not craft.mid_body_has_subscribe(
+    "Your RAG reads junk. Subscribe — next Copilot Credits trap."),
+   "Subscribe only as the trailing endcard VO is not a leak")
+stripped_miolo = craft.strip_mid_subscribe(miolo)
+ok("Subscribe for more" not in stripped_miolo
+   and "Se inscreve" not in stripped_miolo,
+   "strip_mid_subscribe drops mid-short Subscribe / Inscreva")
+ok(stripped_miolo.endswith("Subscribe — next Copilot Credits trap."),
+   "strip_mid_subscribe keeps the trailing endcard VO")
+ok("Your RAG reads junk" in stripped_miolo and "Then we fix the embed" in stripped_miolo,
+   "miolo lesson sentences survive the Subscribe strip")
+pinned_leak = craft.ensure_series_endcard_vo(
+    "Subscribe now. Your RAG reads junk. Inscreva-se já.",
+    "Your RAG reads junk · Copilot Credits 1",
+    brand="os",
+)
+ok(not craft.mid_body_has_subscribe(pinned_leak),
+   "ensure strips mid Subscribe then pins the endcard VO")
+ok(pinned_leak.startswith("Your RAG reads junk."),
+   "Decolar opener survives a Subscribe-first LLM draft")
+ok(pinned_leak.count("Subscribe") == 1,
+   "exactly one Subscribe remains — the endcard VO")
+
 
 # ---------------------------------------------------------------------------
 print("global sanitize stays: mid-script / title / description")
@@ -219,7 +251,7 @@ ok(not craft.contains_banned("Copilot billed the cancelled run · Copilot Credit
 from app.services import metadata
 dirty_meta = metadata._sanitize_meta({
     "title": "Follow tomorrow the chunking fix · Copilot Credits 1",
-    "description": "Join the waitlist. Owera Cloud is live. See owera.com.",
+    "description": "Join the waitlist. Owera Cloud is live. See owera.com. Subscribe now.",
     "tags": ["x"],
 })
 ok("Follow" not in (dirty_meta["title"] or ""),
@@ -230,6 +262,9 @@ ok("waitlist" not in (dirty_meta["description"] or "").lower()
    and "Cloud" not in (dirty_meta["description"] or "")
    and "owera.com" not in (dirty_meta["description"] or ""),
    "description body is stripped of waitlist / Cloud / owera.com")
+ok("Subscribe" not in (dirty_meta["description"] or "")
+   and "Subscribe" not in (dirty_meta["title"] or ""),
+   "generic title/description still cannot carry a mid-body Subscribe CTA")
 
 
 # ---------------------------------------------------------------------------

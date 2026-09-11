@@ -58,8 +58,20 @@ ENDCARD_MAX_S = 4.0
 
 # Spoken series endcard. 1 line, ≤8 words. Subscribe is the YT ask — not Follow.
 #   Subscribe — next {series} {noun}.
+# ALLOWED only as the last spoken line / last visual slot. Mid-short (miolo)
+# Subscribe CTAs are stripped — this is not a global invert of Follow/waitlist.
 _ENDCARD_VO_RE = re.compile(
     r"subscribe\s*[—–-]\s*next\s+.+\s+(?:trap|receipt|bill|drop)\.?\s*$",
+    re.IGNORECASE,
+)
+
+# Subscribe / Inscreva CTAs. Never added to BANNED_RE (that would strip the
+# endcard VO). Use strip_mid_subscribe / contains_subscribe_cta instead.
+SUBSCRIBE_CTA_RE = re.compile(
+    r"\bsubscribe\b"
+    r"|\binscreva(?:-se)?"
+    r"|\binscreve(?:-se)?"
+    r"|\bse\s+inscreve\b",
     re.IGNORECASE,
 )
 
@@ -120,9 +132,10 @@ CRAFT_RULES_SHORT = (
     "CRAFT (enforced): first spoken sentence IS the title hook. "
     "No Follow/Siga/'follow for more'/Siga-amanhã/Follow-tomorrow. No waitlist, "
     "owera.com, Owera Cloud-as-product, SMY, 'part 2 coming', Instagram or LinkedIn. "
-    "Shorts close on the series endcard: VO 'Subscribe — next {series} {noun}.' "
-    "(noun = trap|receipt|bill|drop) + on-screen chip '· {series}' (optional micro "
-    "'same series' only if it fits — no extra CTA). "
+    "Subscribe is ALLOWED only as the LAST spoken line of the series endcard "
+    "('Subscribe — next {series} {noun}.') + chip '· {series}'. FORBIDDEN in the "
+    "mid-short / body / miolo: no Subscribe text, VO, or chip before the endcard. "
+    "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
     "Title suffix must be '· <series> <nn>' with series one of: "
     + " | ".join(SERIES_LABELS) + "."
 )
@@ -196,6 +209,60 @@ def contains_banned(text: str | None) -> bool:
     return bool(scan_banned(text))
 
 
+def is_endcard_vo(text: str | None) -> bool:
+    """True when text is the series endcard spoken closer (trailing match)."""
+    return bool(_ENDCARD_VO_RE.search((text or "").strip()))
+
+
+def contains_subscribe_cta(text: str | None) -> bool:
+    return bool(SUBSCRIBE_CTA_RE.search(text or ""))
+
+
+def strip_subscribe_cta(text: str | None) -> str:
+    """Drop subscribe-CTA sentences. Does not protect the endcard VO — use
+    strip_mid_subscribe for scripts that may already carry the closer."""
+    raw = (text or "").strip()
+    if not raw or not contains_subscribe_cta(raw):
+        return raw
+    parts = re.split(r"(?<=[.!?…])\s+", raw)
+    kept = [p for p in parts if p.strip() and not contains_subscribe_cta(p)]
+    if kept:
+        return " ".join(kept).strip()
+    cleaned = SUBSCRIBE_CTA_RE.sub("", raw)
+    return re.sub(r"\s{2,}", " ", cleaned).strip(" -—,;:→")
+
+
+def strip_mid_subscribe(script: str | None) -> str:
+    """Ban Subscribe in the miolo. Keep only a trailing endcard VO, if present."""
+    raw = (script or "").strip()
+    if not raw:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    if not parts:
+        return ""
+    out: list[str] = []
+    last = len(parts) - 1
+    for i, p in enumerate(parts):
+        if i == last and is_endcard_vo(p):
+            out.append(p)
+            continue
+        if contains_subscribe_cta(p):
+            continue
+        out.append(p)
+    return " ".join(out).strip()
+
+
+def mid_body_has_subscribe(script: str | None) -> bool:
+    """True if Subscribe appears before a trailing endcard VO (or anywhere if none)."""
+    raw = (script or "").strip()
+    if not raw or not contains_subscribe_cta(raw):
+        return False
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    if parts and is_endcard_vo(parts[-1]):
+        return any(contains_subscribe_cta(p) for p in parts[:-1])
+    return True
+
+
 def strip_banned(text: str | None) -> str:
     """Drop sentences that carry a banned CTA. Keeps the rest (never raises)."""
     raw = (text or "").strip()
@@ -239,12 +306,8 @@ _BEAT_SNAP_KEYS = (
     "type", "start", "dur", "cue", "text", "sub", "object", "prop", "emoji",
     "items", "value", "unit", "label", "title", "lines", "command", "nodes",
 )
-# Subscribe CTA is legal only on the trailing cta/endcard series (Rodrigo CoS).
-# Word-boundary so "subscribers" (analytics copy) does not trip.
-SUBSCRIBE_CTA_RE = re.compile(
-    r"\bsubscribe\b|\binscreva(?:-se)?\b",
-    re.IGNORECASE,
-)
+# Subscribe CTA regex lives above (never in BANNED_RE). Gate C uses it via
+# _subscribe_hits — legal only on the trailing cta/endcard series.
 _BEATS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="storyboard-beats">(.*?)</script>',
     re.DOTALL,
@@ -695,10 +758,10 @@ def ensure_series_endcard_vo(script: str | None, subject: str | None,
     one appended (or replaced) English line. Long-form callers should skip this."""
     card = series_endcard(subject, script, brand, noun)
     vo = card["vo"]
-    raw = (script or "").strip()
+    raw = strip_mid_subscribe(script)
     if not raw:
         return vo
-    if _ENDCARD_VO_RE.search(raw):
+    if is_endcard_vo(raw):
         parts = [p for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
         if parts:
             parts[-1] = vo

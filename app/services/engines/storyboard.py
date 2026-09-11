@@ -1011,7 +1011,9 @@ _TYPE_DOCS = {
            'only if it fits — no extra CTA. Spoken VO (not on the chip): '
            '"Subscribe — next {series} {noun}." ≤8 words; noun ∈ trap|receipt|bill|drop. '
            'FORBIDDEN on the card: Follow, Follow tomorrow, amanhã, waitlist, owera.com, '
-           'Cloud, "part 2 coming", SMY, 💸, neon. Must not compete with frame0. Hold ≤4.0s.',
+           'Cloud, "part 2 coming", SMY, 💸, neon. Subscribe text is FORBIDDEN on every '
+           'beat before this last card (no mid-short Subscribe VO/chip). '
+           'Must not compete with frame0. Hold ≤4.0s.',
     "code": 'code: {"cue","lang","lines":[str](≤8 lines, each ≤~30 chars — abbreviate to fit a phone screen; PRESERVE indentation as literal leading spaces, 2 per level, so a line inside a `def`/`if`/`for`/`class` block is visibly indented — never flush-left under its header),"highlight":[int]} — a short snippet; highlight key line indices. Prefer a real receipt / API bill / config dump over a toy.',
     "command": 'command: {"cue","prompt":"$","command"(≤~34 chars),"output":[str](≤4, each ≤~34 chars)} — a REAL terminal / UI still. Prefer this over diagrams on 9:16.',
     "diagram": 'diagram: {"cue","layout":"pipeline"|"request_response"|"fanout","nodes":[{"id","label"(≤3w)}](≤5),"edges":[{"from","to","label"?}]} — boxes and arrows that CARRY THE CLAIM (labeled edges, real topology). Forbidden on vertical shorts when the boxes would be generic oars/A-B-C. layout MUST match the real topology: "pipeline" only when each node feeds the NEXT in a chain; "fanout" when ONE hub serves/connects ALL the others.',
@@ -1087,7 +1089,8 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
     first = craft.first_spoken_sentence(script) or subject
     pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
             "visuals (terminal/receipt/code), then the series endcard chip (· series). "
-            "No Follow/Siga/waitlist/Cloud/SMY. Endcard after the claim, not on frame0. "
+            "No Follow/Siga/waitlist/Cloud/SMY. No Subscribe on any beat before the last "
+            "endcard. Endcard after the claim, not on frame0. "
             "CRAFT GATE (PASS/FAIL before publish): "
             "(A) first 3.0s MUST show a real object — a code/command/diagram/compare/stat beat "
             "starting before t=3, OR hook.object (receipt/terminal/bill; emoji is NOT an object). "
@@ -1166,6 +1169,9 @@ def _lock_opening_hook(beats, script, subject) -> None:
     from app.services import craft
     claim = craft.spoken_hook_source(None, script, subject)
     hook = craft.compress_claim(claim, 12) or craft.compress_claim(subject, 12)
+    # Frame0 is the claim — never the endcard Subscribe VO or a mid-body ask.
+    if hook and (craft.contains_subscribe_cta(hook) or craft.is_endcard_vo(hook)):
+        hook = craft.compress_claim(craft.spoken_hook_source(subject, None, subject), 12)
     if not beats or not hook:
         return
     b0 = beats[0]
@@ -1222,6 +1228,36 @@ def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short
             if craft.contains_banned(b["sub"]) or theme.fold(b["sub"]) in banned_verbs:
                 b["sub"] = ""
             b["endcard"] = False
+
+
+def _strip_mid_subscribe_beats(beats) -> None:
+    """No Subscribe text/chip/cue on any beat before the last endcard."""
+    from app.services import craft
+
+    def _scrub(value):
+        if isinstance(value, str):
+            if craft.contains_subscribe_cta(value) and not craft.is_endcard_vo(value):
+                return craft.strip_subscribe_cta(value)
+            return value
+        if isinstance(value, list):
+            return [_scrub(x) for x in value]
+        if isinstance(value, dict):
+            return {k: _scrub(v) for k, v in value.items()}
+        return value
+
+    n = len(beats)
+    for i, b in enumerate(beats):
+        last_endcard = i == n - 1 and b.get("type") == "cta" and b.get("endcard")
+        if last_endcard:
+            # Chip/micro must stay Subscribe-free; cue may match the VO words.
+            for key in ("text", "sub"):
+                if craft.contains_subscribe_cta(b.get(key) or ""):
+                    b[key] = craft.strip_subscribe_cta(b.get(key) or "")
+            continue
+        for key, val in list(b.items()):
+            if key in ("type", "start", "dur", "w", "endcard"):
+                continue
+            b[key] = _scrub(val)
 
 
 def _cap_endcard(beats, duration: float) -> None:
@@ -1370,6 +1406,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _lock_opening_hook(beats, script, subject)
     _demote_nonsense_diagrams(beats, content_format)
     _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
+    _strip_mid_subscribe_beats(beats)
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
