@@ -72,7 +72,7 @@ plus `failed` / `rejected`.
 
 ## 2. Craft / YPP locks — code vs intent
 
-Legend: **SHIPPED** matches intent · **PARTIAL** intent exists but leaks · **WIP** named, not enforced · **CONFLICT** upcoming intent fights a shipped lock.
+Legend: **SHIPPED** matches intent · **PARTIAL** intent exists but leaks · **WIP** named, not enforced · **DECIDED** policy yes'd, code not in this tree · **CONFLICT** upcoming intent fights a shipped lock.
 
 ### 2.1 Decolar — frame0 / thumb echo the spoken title hook (PR #17)
 
@@ -144,7 +144,7 @@ Legend: **SHIPPED** matches intent · **PARTIAL** intent exists but leaks · **W
 
 **Verdict:** gate is SHIPPED and correctly harsh. Pattern **minting** is a CMO/ops convention sitting in the live DB, not a code lock.
 
-### 2.4 Upcoming (WIP) — verify absence
+### 2.4 Upcoming — verify absence (YPP#5 policy is decided; code still absent)
 
 | Lock | Code today | Status |
 |---|---|---|
@@ -152,7 +152,7 @@ Legend: **SHIPPED** matches intent · **PARTIAL** intent exists but leaks · **W
 | **OS vs RR visual split** | `craft.brand_of(slug, name)` → `theme.resolve(..., brand=)`. `os`: B&W palettes + scan/overlay. `rr`: rust/ink/kraft. Unbranded unit tests keep neon. Wired at render submit and custom thumb. | **SHIPPED** (not WIP) |
 | **Beats ≤3s** | `_MID_MIN=1.8`, `_MID_MAX=7.5`, `_LIST_MAX=6.0`, last-beat CTA **uncapped**. Prompt still says "8+ seconds is a DRAG". Rubric reviews routinely score mid beats at 5–7s as a 2. | **WIP** — current policy is "no 8s mid drag", not "≤3s" |
 | **No spoken list-slides mid-video** | `list` is a first-class allowed type. Prompts **encourage** lists for steps/reasons. Variety retry can introduce a list. Cap is 6s hold, not a ban. | **WIP** — opposite of current R2 variety pressure |
-| **Series endcard `Subscribe — next {Series} {noun}`** | On-screen CTA is a **builder punch**. `_sanitize_cta` forces last spoken sentence (≤4w) and treats `subscribe` / `inscreva` / Follow / Siga as banned. Rubric R7: ZERO subscribe ask on Shorts. Description **does** append `Subscribe for daily…` / `Inscreva-se` at publish (`metadata.finalize_description`). First comment is "what would you change?" + playlist link. | **WIP / CONFLICT** with shipped R7 |
+| **YPP#5 series endcard `Subscribe — next {series} {noun}`** | **Policy DECIDED** (Rodrigo YES via CoS + CMO cut): allow `Subscribe` **only** on the series endcard template — visual chip `· {series}` + final VO `Subscribe — next {series} {noun}.` Mid-video `_sanitize_cta` / CTA ban **stays**: spoken mid-video, title, Follow-tomorrow, waitlist, Cloud, `owera.com` in the YT script. Channel About waitlist branding is a separate surface. This is **not** a global sanitize invert. **Code today:** last card is still a builder punch; `_sanitize_cta` still strips `subscribe` / `inscreva` / Follow / Siga. Description still appends generic `Subscribe for daily…` / `Inscreva-se` at publish (`metadata.finalize_description`) — that is not the endcard. Endcard **code** lands in the separate **move-5** PR, not this docs patch. Live `docs/CRAFT.md` / rubric R7 still describe the shipped mid-video ban (they did not have an open A-vs-B); update them with the template in move-5. | **DECIDED** (policy) / **WIP** (code, move-5) |
 
 ---
 
@@ -243,7 +243,7 @@ The app is one console. Roles are **lenses on the same pipeline**, not products.
 
 **Owns:** topic `theme_prompt` (live DB — not in git), idea patterns in `video_gen.py`, script prompts in `worker._generate_script`, `CRAFT_RULES_SHORT`, banned-phrase list, description subscribe block, first-comment copy, series labels in `craft.SERIES_LABELS`.
 
-**Gap:** episode numbers and series nouns are a convention in prompts, not a counter. CMO decides whether `Subscribe — next {Series} {noun}` is a **description/endcard** exception to R7 or a reversal of R7. That decision is not encoded.
+**Gap:** episode numbers and series nouns are a convention in prompts, not a counter. **YPP#5 is decided** (not an open CMO A-vs-B): Subscribe is an **endcard-template exception** (visual chip `· {series}` + final VO `Subscribe — next {series} {noun}.`), not a reversal of R7 / `_sanitize_cta`. Mid-video sanitize stays. Policy-only until the **move-5** PR ships the template.
 
 ### Designer (visual)
 
@@ -279,15 +279,12 @@ No implementation in this PR. Do not raise budgets/concurrency. Do not mass-reti
 2. **Fallback is a craft miss.** `_fallback_composition` should still lock frame0 to the claim (and brand tokens). Better: `used_fallback=true` Shorts stay `review` with a hard error (Video Maker gate), same class as title-pattern. Kinetic neon must not auto-approve through skip-gate.
 3. **Mint the series suffix in code** (or refuse the idea). If `theme_prompt` / autofill returns a Short without `· <label> <nn>`, either append the topic's series+next-n or drop the idea. Today's "hope the prompt remembered 76" is how v1249 happened.
 
-### P1 — upcoming craft, without fighting R7
+### P1 — upcoming craft (YPP#5 is no longer an open R7 fight)
 
 4. **Object on frame0.** New hook renderer: claim text **plus** a typed still (`receipt` / `terminal` / `bill` / `vram`) chosen from the claim words, not a hardcoded `RECEIPT` on every thumb. Keep typography as the lock; the object is the second channel, not a second slogan.
 5. **Beat cap ≤3s (Shorts only).** Drop `_MID_MAX` 7.5 → 3.0 for `content_format != long`; keep CTA uncapped or cap at ~4s. Expect R2 pressure (more beats, more `code`/`command`, fewer `list`/`statement`). Re-score the golden set before shipping — this will move R4.
 6. **Ban mid-video spoken list-slides on Shorts.** Allow `list` only if it is not a narrator-read slide (or demote `list` → `command`/`stat` in `_coerce_beat` for shorts). Conflicts with current variety prompt; change the prompt in the same commit.
-7. **Series endcard — decide the conflict first.** Options:
-   - **A (compatible with R7):** keep on-screen punch; put `Subscribe — next {Series} {noun}` only in description + first comment (description already has Subscribe).
-   - **B (new lock):** last beat is an endcard, spoken or silent, and R7 is narrowed to "no Follow/Siga/waitlist" while Subscribe-next is allowed. Update `docs/CRAFT.md`, rubric R7, `_sanitize_cta`, and `verify_craft` together.
-   Do not ship B as a prompt-only tweak — `_sanitize_cta` will strip it.
+7. **YPP#5 series endcard — decided.** Rodrigo YES (via CoS + CMO cut): allow `Subscribe` **only** on the series endcard template — visual chip `· {series}` + final VO `Subscribe — next {series} {noun}.` Keep `_sanitize_cta` / CTA ban on spoken mid-video, title, Follow-tomorrow, waitlist, Cloud, `owera.com` in the YT script. Channel About waitlist branding is separate. **Not** a global sanitize invert. Options A vs B are **closed** — do not treat "decide A vs B before touching code" as still open. Endcard **code** (template + last-beat exception, without loosening mid-video sanitize) lands in the separate **move-5** PR, not this docs patch. Do not ship as a prompt-only tweak — live `_sanitize_cta` will still strip Subscribe until move-5.
 
 ### P2 — hygiene / future
 
@@ -306,7 +303,7 @@ No implementation in this PR. Do not raise budgets/concurrency. Do not mass-reti
 3. P0.3 suffix mint — needs a series/counter on `Topic` (schema). GATED if you want it operator-configured per topic.
 4. P1.5 + P1.6 together (pacing + list ban) — one golden-set rubric run, not two.
 5. P1.4 object hook — Designer + Video Maker.
-6. P1.7 endcard — **after** CMO writes A vs B. Do not guess.
+6. P1.7 / YPP#5 endcard **code** — separate **move-5** PR. Policy is already yes'd (endcard exception; mid-video sanitize stays). Do not re-litigate A vs B.
 
 ---
 
@@ -326,7 +323,7 @@ Ran the lock-bearing `tests/verify_*.py` files against the tree the doc describe
 | `verify_render.py` | 137 | Skip-gate + pré-pattern stays REVIEW; blank finalize fails |
 | `verify_issues.py` | 115 | `title_pattern_blocked` informational |
 
-These prove the **shipped** locks. They do not prove object-on-frame0, beats ≤3s, list-slide ban, or the Subscribe endcard — those have no pins because they are not in code.
+These prove the **shipped** locks. They do not prove object-on-frame0, beats ≤3s, list-slide ban, or the YPP#5 Subscribe endcard — those have no pins because they are not in code. YPP#5 is **policy-decided**; the pins land with the move-5 PR.
 
 ## 8. Sources
 
