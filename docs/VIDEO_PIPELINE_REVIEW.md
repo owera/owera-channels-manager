@@ -310,7 +310,25 @@ No implementation in this PR. Do not raise budgets/concurrency. Do not mass-reti
 
 ---
 
-## 7. Sources
+## 7. Suite pins (this review, `main` @ `b670c9d`)
+
+Ran the lock-bearing `tests/verify_*.py` files against the tree the doc describes. All green:
+
+| Suite | Checks | What it pins for this review |
+|---|---|---|
+| `verify_craft.py` | 56 | Allowlist `· <series> <nn>`, longs exempt, Decolar claim align, curiosity-gap slogan rejected, CTA strip, `brand_of`, frame0 overwrite, thumb fallback, publish bounce |
+| `verify_theme.py` | 101 | OS B&W / RR warm / legacy neon; topic_id palette keying |
+| `verify_metadata.py` | 74 | `_lock_decolar_title` (patterned subject verbatim, unpatterned → first spoken, longs exempt) |
+| `verify_thumbnail.py` | 107 | Thumb compresses THIS claim; curiosity-gap LLM discarded |
+| `verify_storyboard.py` | 243 | Hook overwrite, 12w PT object (`modelo`), Follow/Siga not forced |
+| `verify_worker.py` | 207 | `asplit=2` + `[voice]`/`[sc]`; rejects `[n]`-reuse; GrokCLIError not swallowed into fallback |
+| `verify_publish.py` | 232 | Title gate on `_publish_one`; drip / windows / mix |
+| `verify_render.py` | 137 | Skip-gate + pré-pattern stays REVIEW; blank finalize fails |
+| `verify_issues.py` | 115 | `title_pattern_blocked` informational |
+
+These prove the **shipped** locks. They do not prove object-on-frame0, beats ≤3s, list-slide ban, or the Subscribe endcard — those have no pins because they are not in code.
+
+## 8. Sources
 
 - PRs: [#17](https://github.com/owera/owera-channels-manager/pull/17) Decolar invert (merged 2026-09-09), [#18](https://github.com/owera/owera-channels-manager/pull/18) `asplit` duck (merged 2026-09-09)
 - Follow-ups on `main`: `fae2dc7` title lock, `407198b` hook 12w
