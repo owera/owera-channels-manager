@@ -24,7 +24,13 @@
   "art": {
     "must_illustrate_copy": true,
     "generic_o_lockup": false,
-    "designer_brief": "Show the cancelled-run receipt, not the O lockup."
+    "teaser_not_walkthrough": true,
+    "teaser_not_final_ui": true,
+    "channels_manager_coming_soon": true,
+    "os_rr_split_every_aspect": true,
+    "decolar_object_every_aspect": true,
+    "widget_text_color": "#fff",
+    "designer_brief": "Show the cancelled-run receipt as a coming-soon teaser, not a final UI or O lockup."
   },
   "cta": {
     "url": "https://owera.com",
@@ -39,21 +45,34 @@
       "skip_gate": false,
       "daily_budget": 0,
       "handle": "@owerasoftware",
-      "caption_first_line_is_spoken": true
+      "caption_first_line_is_spoken": true,
+      "kind": "reel",
+      "aspect": "9:16",
+      "size": "1080x1920",
+      "duration_s_max": 30,
+      "cut": "object_beat_0_3s"
     },
     {
       "network": "linkedin",
       "skip_gate": false,
       "daily_budget": 0,
       "handle": "linkedin:company",
-      "caption_first_line_is_spoken": true
+      "caption_first_line_is_spoken": true,
+      "kind": "video",
+      "aspect": "1:1",
+      "size": "1080x1080",
+      "duration_s_max": 45
     },
     {
       "network": "x",
       "skip_gate": false,
       "daily_budget": 0,
       "handle": "@owerasoftware",
-      "caption_first_line_is_spoken": true
+      "caption_first_line_is_spoken": true,
+      "kind": "video",
+      "aspect": "16:9",
+      "size": "1920x1080",
+      "duration_s_max": 30
     },
     {
       "network": "youtube_os",
@@ -63,7 +82,11 @@
       "subscribe_endcard": {
         "allow_subscribe": false,
         "series": null
-      }
+      },
+      "kind": "short",
+      "aspect": "9:16",
+      "size": "1080x1920",
+      "duration_s_max": 60
     }
   ]
 }
