@@ -1,4 +1,5 @@
-"""Regression checks for POST /api/topics/{id}/generate.
+"""Regression checks for POST /api/topics/{id}/generate and PATCH
+``content_format``.
 
 The 2026-08-24 overflow skip left a residual: generate still used
 ``t.weight or 1``, so a parked (weight=0) topic could be hand-filled up
@@ -7,11 +8,19 @@ growth agent's Feed-winners call (``POST /api/topics/{id}/generate``).
 These checks pin that generate uses the same ``weight <= 0`` gate as
 autofill / overflow, and that live topics still generate.
 
+#23–#26 mopped leftover formats (empty / ``"LONG"`` / ``"medium"``) at
+every consumer via ``== "long"`` else-short. Create already writes that
+gate; PATCH ``setattr``s the raw body, so a growth-agent / curl leftover
+is how those formats enter the DB. These checks pin PATCH to the same
+gate: leftovers persist as ``"short"``, canonical ``"long"`` stays long,
+omitted format stays put, a sibling is untouched.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
 first failed assertion.
 """
+import inspect
 import sys
 from pathlib import Path
 
@@ -103,6 +112,20 @@ topics_router.video_gen.generate_ideas = fake_ideas
 def post_generate(topic_id, count=8):
     return client.post(f"/api/topics/{topic_id}/generate", auth=auth,
                        json={"count": count})
+
+
+def patch_topic(topic_id, **body):
+    return client.patch(f"/api/topics/{topic_id}", auth=auth, json=body)
+
+
+def topic_format(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).content_format
+
+
+def topic_name(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).name
 
 
 def draft_count(topic_id):
@@ -209,6 +232,153 @@ try:
 
     r = client.post("/api/topics/2/generate", json={"count": 1})
     ok(r.status_code == 401, "generate still requires auth")
+
+    print("PATCH /api/topics/{id}: leftover formats persist as short (create's gate)")
+    # Topic 2 is Live / short; topic 3 is Heavy / long.
+    ok(topic_format(2) == "short", "precondition: topic 2 is canonical short")
+    ok(topic_format(3) == "long", "precondition: topic 3 is canonical long")
+
+    sibling_before = topic_format(3)
+    name_before = topic_name(2)
+
+    r = patch_topic(2, content_format="LONG")
+    ok(r.status_code == 200, "PATCH content_format=LONG is 200")
+    ok(r.json().get("content_format") == "short",
+       "LONG leftover response is short (create would write short; "
+       ".lower()=='long' would persist long)")
+    ok(topic_format(2) == "short",
+       "LONG leftover persisted as short, not LONG")
+    ok(topic_format(3) == sibling_before,
+       "PATCH format on topic 2 left sibling topic 3 untouched")
+
+    r = patch_topic(2, content_format="")
+    ok(r.status_code == 200, "PATCH content_format='' is 200")
+    ok(topic_format(2) == "short",
+       "empty-format leftover persisted as short")
+
+    r = patch_topic(2, content_format="medium")
+    ok(r.status_code == 200, "PATCH content_format=medium is 200")
+    ok(topic_format(2) == "short",
+       "medium leftover persisted as short "
+       "(an allowlist of short+empty+LONG would miss this)")
+
+    r = patch_topic(2, content_format=None)
+    ok(r.status_code == 200, "PATCH content_format=null is 200")
+    ok(r.json().get("content_format") == "short",
+       "null leftover response is short, not None")
+    ok(topic_format(2) == "short",
+       "null leftover persisted as short, not SQL NULL")
+    with Session(engine) as s:
+        ok(s.get(Topic, 2).content_format is not None,
+           "null PATCH did not persist SQL NULL into content_format")
+
+    print("PATCH /api/topics/{id}: canonical long/short still persist")
+    r = patch_topic(2, content_format="long")
+    ok(r.status_code == 200, "PATCH content_format=long is 200")
+    ok(topic_format(2) == "long",
+       "canonical long persisted (always-short mutant dies here)")
+    ok(topic_format(3) == "long", "canonical long PATCH left sibling long")
+
+    r = patch_topic(2, content_format="short")
+    ok(r.status_code == 200, "PATCH content_format=short is 200")
+    ok(topic_format(2) == "short",
+       "canonical short persisted (always-long mutant dies here)")
+
+    r = patch_topic(3, content_format="short")
+    ok(r.status_code == 200, "PATCH long topic down to short is 200")
+    ok(topic_format(3) == "short", "canonical short overwrites a long")
+    r = patch_topic(3, content_format="long")
+    ok(r.status_code == 200, "restore topic 3 to long is 200")
+    ok(topic_format(3) == "long", "topic 3 restored to long")
+
+    print("PATCH /api/topics/{id}: omitted format stays put; mixed body writes both")
+    r = patch_topic(2, name="Live-renamed")
+    ok(r.status_code == 200, "name-only PATCH is 200")
+    ok(topic_name(2) == "Live-renamed", "name-only PATCH persisted the name")
+    ok(topic_format(2) == "short",
+       "name-only PATCH left content_format (exclude_unset)")
+    ok(topic_format(3) == "long", "name-only PATCH left sibling format")
+
+    r = patch_topic(2, name=name_before, content_format="LONG")
+    ok(r.status_code == 200, "mixed name + LONG leftover is 200")
+    ok(topic_name(2) == name_before, "mixed PATCH restored the original name")
+    ok(topic_format(2) == "short",
+       "mixed PATCH still canonicalized LONG → short")
+
+    # Vacuous-pin class: name-only / null on a topic that is ALREADY short
+    # cannot kill always-_canonical_format(fields.get(...)) (omitted → short)
+    # or skip-None (null leaves long). Drive both against canonical long.
+    heavy_name = topic_name(3)
+    ok(topic_format(3) == "long", "precondition: topic 3 is still canonical long")
+    r = patch_topic(3, name="Heavy-renamed")
+    ok(r.status_code == 200, "name-only PATCH on a long topic is 200")
+    ok(topic_name(3) == "Heavy-renamed", "name-only PATCH on long persisted the name")
+    ok(topic_format(3) == "long",
+       "name-only PATCH on a long topic left content_format long "
+       "(always _canonical_format(fields.get(...)) clobbers omitted to short)")
+
+    r = patch_topic(3, content_format=None)
+    ok(r.status_code == 200, "PATCH content_format=null on a long topic is 200")
+    ok(r.json().get("content_format") == "short",
+       "null leftover on a long topic response is short")
+    ok(topic_format(3) == "short",
+       "null leftover on a long topic persisted as short "
+       "(skip-None / exclude_none leaves long)")
+    ok(topic_name(3) == "Heavy-renamed",
+       "null-format PATCH on long left the renamed name")
+
+    r = patch_topic(3, name=heavy_name, content_format="LONG")
+    ok(r.status_code == 200, "mixed name + LONG leftover on a long topic is 200")
+    ok(topic_name(3) == heavy_name, "mixed PATCH on long restored the original name")
+    ok(topic_format(3) == "short",
+       "mixed PATCH on a long topic canonicalized LONG → short "
+       "(dropping content_format from the mixed body would leave long)")
+    r = patch_topic(3, content_format="long")
+    ok(r.status_code == 200, "restore topic 3 to long after leftover pins")
+    ok(topic_format(3) == "long", "topic 3 restored to long")
+
+    print("PATCH /api/topics/{id}: 404 / auth")
+    r = patch_topic(99999, content_format="short")
+    ok(r.status_code == 404, "PATCH missing topic is 404")
+    r = client.patch("/api/topics/2", json={"content_format": "short"})
+    ok(r.status_code == 401, "PATCH still requires auth")
+
+    ok(topics_router._canonical_format("long") == "long",
+       "_canonical_format(long) is long")
+    ok(topics_router._canonical_format("short") == "short",
+       "_canonical_format(short) is short")
+    ok(topics_router._canonical_format("LONG") == "short",
+       "_canonical_format(LONG) is short (.lower()==long would return long)")
+    ok(topics_router._canonical_format("") == "short",
+       "_canonical_format('') is short")
+    ok(topics_router._canonical_format(None) == "short",
+       "_canonical_format(None) is short")
+    ok(topics_router._canonical_format("medium") == "short",
+       "_canonical_format(medium) is short")
+    ok("_canonical_format" in inspect.getsource(topics_router.update_topic),
+       "update_topic canonicalizes through _canonical_format "
+       "(setattr of the raw body is how leftovers enter the DB)")
+    ok("_canonical_format" in inspect.getsource(topics_router.create_topic),
+       "create_topic canonicalizes through _canonical_format "
+       "(a PATCH-only helper would let create drift)")
+
+    print("POST /api/topics: leftover formats persist as short (helper wiring)")
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateLeftover", "content_format": "LONG"})
+    ok(r.status_code == 201, "create LONG leftover is 201")
+    ok(r.json().get("content_format") == "short",
+       "create LONG leftover persisted as short "
+       "(helper name in source with unused/constant call would write LONG)")
+    create_id = r.json()["id"]
+    ok(topic_format(create_id) == "short", "create LONG leftover row is short")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateLong", "content_format": "long"})
+    ok(r.status_code == 201, "create canonical long is 201")
+    ok(r.json().get("content_format") == "long",
+       "create canonical long persisted "
+       "(_canonical_format('short') constant would write short)")
+    ok(topic_format(r.json()["id"]) == "long", "create canonical long row is long")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()

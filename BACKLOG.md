@@ -1389,3 +1389,39 @@ flag the operator step in the commit body.
   true/false is 4xx and writes nothing; 0 still persists; omitted
   budgets still 6/6; duplicate slug still 409; sibling channels
   untouched.
+
+### 38. ✅ DONE (code shipped to main 2026-09-11) PATCH /api/topics canonicalizes content_format — normal
+- **resolution (2026-09-11):** `_canonical_format` is the choke point
+  (`"long" if fmt == "long" else "short"`). Create already wrote that
+  gate inline; PATCH `setattr`d the raw body, so empty / `"LONG"` /
+  `"medium"` / null leftovers were how the leftover-format class
+  (#23–#26 mopped at every consumer) entered the DB. Both create and
+  PATCH now go through the helper. Canonical `"long"` / `"short"`
+  unchanged; omitted format stays put; a sibling topic is untouched.
+  Suite: `tests/verify_topics.py` 40 → 99. Isolated commit; no
+  money-path files. Discovered follow-up (not bundled): PATCH still
+  `setattr`s `weight=null` into a NOT NULL int (None→1 unparks).
+- **why (found 2026-09-11 ranking remaining setattr after #37):**
+  create and trend-adopt already canonicalize; PATCH was the open
+  write. Live topics are canonical (latent until a bad PATCH).
+- **caution:** normal (`topics.py` only; not a money-path file).
+- **acceptance:** PATCH `"LONG"` / `""` / `"medium"` / null persist as
+  `"short"`; canonical `"long"` stays long; name-only PATCH leaves
+  format; sibling untouched.
+
+### 39. PATCH /api/topics rejects null/bool weight — normal
+- **why (found 2026-09-11 shipping #38, not bundled):** PATCH
+  `setattr`s `TopicUpdate.weight` (Optional[int]) straight onto a
+  NOT NULL `int` column. JSON null persists SQL NULL, and
+  `weight is None -> 1` then treats it as unparked — undoing a park.
+  Lax Optional[int] coerces JSON `false→0` (silent park) / `true→1`
+  (silent unpark). Same class as #36 on channel budgets. Growth-agent
+  / curl still reach this path; the SPA does not send weight.
+- **approach:** `_require_int` (or the channels.py equivalent) on
+  PATCH weight `>= 0`? Weight `-1` is already parked (`<= 0`), so
+  either allow negatives as park or 400 them. Null/bool must 400
+  before setattr. 0 still parks. Mixed 400 writes nothing.
+- **caution:** normal (`topics.py` PATCH only). Isolated commit +
+  extend `tests/verify_topics.py`.
+- **acceptance:** PATCH weight=null / false is 4xx and leaves the
+  row unchanged; weight=0 still parks; weight=2 still persists.

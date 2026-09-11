@@ -14,6 +14,15 @@ from app.services import quota, video_gen, youtube
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
 
+def _canonical_format(fmt) -> str:
+    """Same == "long" / else-short gate as render/issues/publish/autofill.
+
+    Create already wrote this; PATCH setattr of the raw body is how
+    empty/"LONG"/"medium"/null leftovers entered the DB.
+    """
+    return "long" if fmt == "long" else "short"
+
+
 def _topic_out(session: Session, t: Topic) -> dict:
     counts = dict(session.exec(
         select(Video.status, func.count(Video.id))
@@ -45,7 +54,7 @@ def create_topic(body: TopicCreate, session: Session = Depends(get_session)):
     mx = session.exec(select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
     topic = Topic(
         channel_id=ch.id, name=body.name.strip(), theme_prompt=body.theme_prompt,
-        content_format="long" if body.content_format == "long" else "short",
+        content_format=_canonical_format(body.content_format),
         render_profile_id=body.render_profile_id, position=(mx or 0) + 1,
     )
     # Optionally link an existing playlist; otherwise the topic's playlist is
@@ -71,7 +80,10 @@ def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(ge
     t = session.get(Topic, topic_id)
     if not t:
         raise HTTPException(404, "topic not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    if "content_format" in fields:
+        fields["content_format"] = _canonical_format(fields["content_format"])
+    for k, v in fields.items():
         setattr(t, k, v)
     t.updated_at = utcnow()
     session.add(t)
