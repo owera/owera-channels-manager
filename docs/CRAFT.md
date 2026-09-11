@@ -105,7 +105,12 @@ PASS:
 - Prefer code/command/diagram/compare/stat in the middle
 
 FAIL: ≥2 `statement` **or** a list with >3 items **or** list/statement that
-only re-displays narration without a rich type.
+only re-displays narration without a rich type **or** mid-short copy
+contains Subscribe/subscribe (or PT Inscreva) CTA text.
+
+Subscribe is **only** allowed on the trailing `cta` / `endcard` series
+(Rodrigo YES via CoS). The endcard itself is not blocked. `subscribers`
+(the noun) does not trip.
 
 Pré-gate inventory with no beat snapshot fail-opens (do not mass-reject).
 Kinetic-text fallback (`used_fallback`) fails A+C.

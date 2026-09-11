@@ -428,6 +428,52 @@ ge = craft.video_maker_gate(c_echo)
 ok(ge["checks"]["C"] == "FAIL" and "re-displays narration" in ge["reasons"][0],
    "C FAIL: statement only re-displays narration without a rich type")
 
+# C — Subscribe CTA on mid cards (legal only on trailing cta/endcard)
+c_sub = _pass_beats()
+c_sub[1] = {"type": "statement", "start": 2.0, "dur": 2.4, "text": "Subscribe now",
+            "cue": "stay"}
+c_sub[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "40", "cue": "forty"}
+gs = craft.video_maker_gate(c_sub)
+ok(gs["checks"]["C"] == "FAIL" and "Subscribe CTA" in gs["reasons"][0],
+   "C FAIL: mid statement 'Subscribe now' (endcard-only)")
+ok("beat[1]" in gs["reasons"][0] and "endcard" in gs["reasons"][0],
+   "Subscribe fail reason names the mid beat and that only the endcard may say it")
+
+c_sub_lcase = _pass_beats()
+c_sub_lcase[1] = {"type": "list", "start": 2.0, "dur": 2.4,
+                  "items": [{"text": "please subscribe"}], "cue": "list"}
+c_sub_lcase[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok("subscribe" in craft.video_maker_gate(c_sub_lcase)["reasons"][0].lower(),
+   "C FAIL: lowercase subscribe on a mid list item")
+
+c_end = _pass_beats()
+c_end[-1] = {"type": "cta", "start": 7.0, "dur": 3.5, "text": "Subscribe",
+             "sub": "for the series", "cue": "go"}
+ok(craft.video_maker_gate(c_end)["result"] == "PASS",
+   "C PASS: Subscribe on the final cta/endcard is allowed (Rodrigo CoS)")
+
+c_series = _pass_beats()
+c_series.append({"type": "endcard", "start": 10.5, "dur": 3.0,
+                 "text": "Subscribe", "sub": "next short tomorrow"})
+# last pre-endcard cta span becomes 10.5-7.0=3.5 ≤4; endcard 3.0 ≤4
+ok(craft.video_maker_gate(c_series)["result"] == "PASS",
+   "C PASS: Subscribe on a trailing endcard after cta is not blocked")
+
+c_noun = _pass_beats()
+c_noun[1] = {"type": "statement", "start": 2.0, "dur": 2.4,
+             "text": "subscribers churn", "cue": "churn"}
+c_noun[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok(craft.video_maker_gate(c_noun)["result"] == "PASS",
+   "C PASS: the noun 'subscribers' is not a Subscribe CTA")
+
+c_pt = _pass_beats()
+c_pt[1] = {"type": "statement", "start": 2.0, "dur": 2.4,
+           "text": "Inscreva-se agora", "cue": "agora"}
+c_pt[2] = {"type": "stat", "start": 4.5, "dur": 2.4, "value": "1", "cue": "one"}
+ok("Inscreva" in craft.video_maker_gate(c_pt)["reasons"][0]
+   or "inscreva" in craft.video_maker_gate(c_pt)["reasons"][0].lower(),
+   "C FAIL: PT Inscreva-se on a mid card is the same CTA")
+
 # Longs exempt; fallback FAIL; legacy fail-open
 ok(craft.video_maker_gate(typo, content_format="long")["result"] == "PASS",
    "longs are exempt from A+B+C")

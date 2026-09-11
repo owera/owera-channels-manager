@@ -184,8 +184,14 @@ LIST_STAGGER_MAX_S = 0.6
 LIST_REVEAL_PAD_S = 0.8  # matches storyboard.render_list win = dur - 0.8
 
 _BEAT_SNAP_KEYS = (
-    "type", "start", "dur", "cue", "text", "object", "prop", "emoji",
-    "items", "value", "unit", "label", "lines", "command", "nodes",
+    "type", "start", "dur", "cue", "text", "sub", "object", "prop", "emoji",
+    "items", "value", "unit", "label", "title", "lines", "command", "nodes",
+)
+# Subscribe CTA is legal only on the trailing cta/endcard series (Rodrigo CoS).
+# Word-boundary so "subscribers" (analytics copy) does not trip.
+SUBSCRIBE_CTA_RE = re.compile(
+    r"\bsubscribe\b|\binscreva(?:-se)?\b",
+    re.IGNORECASE,
 )
 _BEATS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="storyboard-beats">(.*?)</script>',
@@ -296,6 +302,43 @@ def _list_stagger(beat: dict, span: float) -> float:
         return 0.0
     win = max(0.0, span - LIST_REVEAL_PAD_S)
     return min(win / n, LIST_STAGGER_MAX_S)
+
+
+def _endcard_series_start(board: list[dict]) -> int:
+    """Index of the trailing cta/endcard series. len(board) if the last beat is not one."""
+    i = len(board)
+    while i > 0 and (board[i - 1].get("type") or "") in CTA_TYPES:
+        i -= 1
+    return i
+
+
+def _visible_copy(beat: dict) -> str:
+    """On-screen copy only (not cue). Subscribe on a mid card is a CTA, not a sync word."""
+    parts: list[str] = []
+    for k in ("text", "sub", "title", "label"):
+        v = beat.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    for it in _list_items(beat):
+        if isinstance(it, dict):
+            t = it.get("text")
+            if t:
+                parts.append(str(t))
+        elif it:
+            parts.append(str(it))
+    for side in ("left", "right"):
+        col = beat.get(side)
+        if not isinstance(col, dict):
+            continue
+        if col.get("title"):
+            parts.append(str(col["title"]))
+        for x in col.get("items") or []:
+            parts.append(str(x))
+    return " ".join(parts)
+
+
+def _subscribe_hits(text: str) -> list[str]:
+    return [m.group(0) for m in SUBSCRIBE_CTA_RE.finditer(text or "")]
 
 
 def _echoes_narration(beat: dict) -> bool:
@@ -442,6 +485,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             "list/statement mid-board with no code/command/diagram/compare/stat "
             "(spoken-slide spam)"
         )
+    # Subscribe CTA is only legal on the trailing cta/endcard series.
+    end_i = _endcard_series_start(board)
+    for i, b in enumerate(board[:end_i]):
+        hits = _subscribe_hits(_visible_copy(b))
+        if hits:
+            shown = "/".join(dict.fromkeys(hits))
+            c_hits.append(
+                f"beat[{i}] type={b.get('type') or '?'} has Subscribe CTA "
+                f"({shown!r}) — Subscribe is only allowed on the series "
+                "endcard, never on a mid card"
+            )
     if c_hits:
         checks["C"] = "FAIL"
         reasons.append("[C] Spoken list/slide spam: FAIL — " + "; ".join(c_hits))

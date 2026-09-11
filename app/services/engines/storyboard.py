@@ -1069,7 +1069,9 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
             "(B) every mid beat ≤3.0s (next cue − this cue); cta/endcard ≤4.0s. "
             "(C) at most ONE statement in the whole short; list discouraged — if used: max 1 list, "
             "≤3 items, beat ≤3.0s, item stagger ≤0.6s. Prefer code/command/diagram/compare/stat "
-            "in the middle. Do not re-display narration as statement/list."
+            "in the middle. Do not re-display narration as statement/list. "
+            "Subscribe/Inscreva CTA text is FORBIDDEN on any mid beat — only the final "
+            "cta/endcard series may say Subscribe."
             if content_format != "long" else
             "Long-form video: use more beats and richer visuals (code, terminal, comparisons) "
             "to sustain a longer narration. Still: frame 0 = first spoken sentence.")
