@@ -385,7 +385,7 @@ def object_markup(obj: dict | str | None) -> str:
 OBJECT_CSS = (
     ".obj{display:flex;flex-direction:column;align-items:stretch;justify-content:center;"
     "gap:.28em;width:100%;box-sizing:border-box;border:3px solid var(--obj-accent,#888);"
-    "background:rgba(0,0,0,.45);border-radius:10px;padding:.55em .7em;text-align:left}"
+    "background:rgba(0,0,0,.45);color:#fff;border-radius:10px;padding:.55em .7em;text-align:left}"
     ".obj-head,.obj-cap,.obj-name,.obj-stub,.obj-prompt{font-family:var(--obj-mono,ui-monospace,Menlo,Consolas,monospace);"
     "font-size:clamp(14px,2.1vw,22px);letter-spacing:.1em;opacity:.85;font-weight:700}"
     ".obj-amt{font-weight:900;font-size:clamp(42px,8vw,92px);line-height:.95;letter-spacing:-2px}"

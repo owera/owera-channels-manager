@@ -411,6 +411,8 @@ ok("obj-bill" in os_html and "obj-bill" in rr_html,
    "billed spoken noun renders a bill widget on both brands")
 ok("--obj-accent:var(--stroke)" in os_html and "--obj-accent:var(--stroke)" in rr_html,
    "frame0 object widgets inherit brand --stroke (OS gray / RR burgundy)")
+ok("color:#fff" in craft.OBJECT_CSS,
+   "object widget CSS sets color:#fff (white on dark stills, not inherited black)")
 ok("obj-bill" in os_thumb and "obj-bill" in rr_thumb,
    "billed thumb uses the bill widget, not a generic RECEIPT slab")
 ok("--obj-accent:#c41e5a" in rr_thumb.lower(),
