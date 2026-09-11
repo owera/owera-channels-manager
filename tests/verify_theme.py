@@ -103,12 +103,18 @@ ok(theme.MONO_STACK == (
 ok(theme._SANS_STACK == "-apple-system,Segoe UI,Helvetica,Arial,sans-serif",
    "_SANS_STACK is the system-ui sans fallback list")
 
-KEYS = {"accent", "bg_deep", "bg_base", "fg", "fg_dim", "mono", "sans", "bg_variant"}
+KEYS = {"accent", "bg_deep", "bg_base", "fg", "fg_dim", "mono", "sans", "bg_variant",
+        "brand", "glow", "glow2", "stroke", "logo"}
 th = theme.resolve(1, HELLO)
+ok(set(theme.RESOLVE_KEYS) == KEYS, "RESOLVE_KEYS matches the pinned shape")
 ok(set(th) == KEYS, f"resolve dict keys are exactly {sorted(KEYS)}")
 ok(th["bg_base"] == "#0b0b16", "bg_base is the fixed near-black canvas")
 ok(th["fg"] == "#ffffff", "fg is white")
 ok(th["fg_dim"] == "#c9d2ff", "fg_dim is the lavender secondary")
+ok(th["brand"] is None, "unbranded resolve.brand is None (legacy neon)")
+ok(th["logo"] == "", "unbranded resolve carries no logo filename")
+ok(th["glow"] == th["bg_deep"], "unbranded glow tracks bg_deep")
+ok(th["stroke"] == th["accent"], "unbranded stroke tracks accent")
 ok(th["mono"] == theme.MONO_STACK, "resolve.mono is MONO_STACK (not a copy drift)")
 ok(th["sans"] == theme._SANS_STACK, "resolve.sans is _SANS_STACK")
 
@@ -411,6 +417,89 @@ ok(storyboard.theme.esc is theme.esc,
    "storyboard beat renderers call the same esc object")
 ok(storyboard.theme.fold is theme.fold,
    "storyboard cue-match calls the same fold object")
+
+
+# ---------------------------------------------------------------------------
+# OS vs RR visual split (YPP craft move #2) — mute-scroll must diverge
+# ---------------------------------------------------------------------------
+print("OS vs RR: channel_id/slug, tokens, forbidden hex, logo staging")
+
+ok(theme.infer_brand(1) == "os", "channel_id=1 → os")
+ok(theme.infer_brand(2) == "rr", "channel_id=2 → rr")
+ok(theme.infer_brand("1") == "os", "channel_id='1' → os")
+ok(theme.infer_brand(9, "owera-software") == "os", "owera slug wins over unknown id")
+ok(theme.infer_brand(1, "rodrigo-recio") == "rr", "recio slug wins over id=1")
+ok(theme.infer_brand(None, "ch1") == "os", "ch1 slug → os")
+ok(theme.infer_brand(None, "other") is None, "unknown slug stays unbranded")
+ok(theme.resolve(1, HELLO, channel_id=1)["brand"] == "os",
+   "resolve infers os from channel_id when brand is omitted")
+ok(theme.resolve(1, HELLO, channel_id=2)["brand"] == "rr",
+   "resolve infers rr from channel_id when brand is omitted")
+ok(theme.resolve(1, HELLO, brand="os", channel_id=2)["brand"] == "os",
+   "explicit brand wins over channel_id")
+ok(theme.resolve(1, HELLO, channel_slug="ch2")["brand"] == "rr",
+   "resolve infers rr from channel_slug")
+
+os_th = theme.resolve(1, HELLO, brand="os")
+ok(os_th["bg_base"] == "#000000" and os_th["fg"] == "#ffffff",
+   "OS canvas is black / white")
+ok(os_th["fg_dim"] == "#6b6b6b", "OS secondary is #6B6B6B")
+ok(os_th["glow"] == "#1a1a1a" and os_th["glow2"] == "#0a0a0a",
+   "OS glow is cold gray (no magenta)")
+ok(os_th["logo"] == theme.OS_LOGO_FILE, "OS resolve points at the O crop")
+ok((theme._ASSETS_DIR / theme.OS_LOGO_FILE).is_file(),
+   "03-owera-o-avatar.png is bundled next to gsap")
+ok(os_th["logo"].startswith("03-owera") or "wordmark" in os_th["logo"],
+   "OS mark uses the preferred 03-owera / wordmark filename")
+
+def _gray_cap(c: str) -> bool:
+    h = c.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return r == g == b and r <= 0x9A
+
+ok(all(_gray_cap(p[0]) for p in theme._OS_PALETTE),
+   "every OS accent is gray and ≤ #9A9A9A")
+ok(_gray_cap(os_th["accent"]) and _gray_cap(os_th["stroke"]),
+   "resolved OS accent/stroke stay in the gray cap")
+os_blob = " ".join(str(v).lower() for v in os_th.values())
+for bad in theme.OS_FORBIDDEN_HEX:
+    ok(bad not in os_blob, f"OS tokens do not carry forbidden {bad}")
+
+rr_th = theme.resolve(1, HELLO, brand="rr")
+ok(rr_th["bg_base"] == "#000000" and rr_th["fg"] == "#ffffff",
+   "RR canvas is black / white (burgundy lives in the glow)")
+ok(rr_th["accent"] == "#c41e5a" and rr_th["stroke"] == "#c41e5a",
+   "RR accent/stroke is the thin #C41E5A highlight")
+ok(rr_th["glow"].lower() in {"#4a1528", "#2a0a14", "#3a101e", "#35121c",
+                             "#421424", "#2e0c16"},
+   "RR glow is burgundy (upper-corner family)")
+ok(rr_th["logo"] == "", "RR resolve carries ZERO logo filename")
+ok("owera" not in rr_th["logo"].lower(), "RR logo field has no Owera path")
+ok(os_th["glow"] != rr_th["glow"], "OS cold glow ≠ RR burgundy glow")
+ok(os_th["accent"] != rr_th["accent"], "OS gray accent ≠ RR #C41E5A")
+
+ok(theme.logo_filename("os") == theme.OS_LOGO_FILE, "logo_filename(os) is the O crop")
+ok(theme.logo_filename("rr") == "", "logo_filename(rr) is empty")
+ok(theme.logo_filename(None) == "", "logo_filename(None) is empty")
+ok(theme.logo_height_px(1920) == 64, "logo is 64px tall on 1080×1920")
+ok(48 <= theme.logo_height_px(1920) <= 72, "logo height in the 48–72px band")
+ok(theme.logo_height_px(1920) <= int(1920 * 0.08), "logo ≤8% of frame height")
+ok(theme.mark_inset_px(1080, 1920) >= 48, "portrait inset ≥48px from edges")
+ok(theme.mark_inset_px(1920, 1080) >= 72, "landscape thumb inset survives 2/3 downscale")
+
+import tempfile as _tf
+from pathlib import Path as _P
+with _tf.TemporaryDirectory() as td:
+    dest = _P(td)
+    theme.stage_brand_assets(dest, "os")
+    ok((dest / theme.OS_LOGO_FILE).is_file(), "stage_brand_assets copies the OS mark")
+    dest2 = dest / "rr"
+    dest2.mkdir()
+    theme.stage_brand_assets(dest2, "rr")
+    ok(not (dest2 / theme.OS_LOGO_FILE).exists(),
+       "RR staging writes ZERO Owera logo files")
+    theme.stage_brand_assets(dest2, None)
+    ok(list(dest2.iterdir()) == [], "unbranded staging writes nothing")
 
 
 print()

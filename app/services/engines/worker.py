@@ -321,17 +321,21 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
 
         # 3. Composition (typed storyboard, with a deterministic fallback) -> index.html (+ gsap)
         (job_dir / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
+        brand = params.get("brand") or theme.infer_brand(
+            params.get("channel_id"), params.get("channel_slug"))
+        theme.stage_brand_assets(job_dir, brand)
         from app.services.video_gen import language_from_voice
         html = _generate_composition(
             subject, script, words, resolution, width, height, duration,
             topic_id=params.get("topic_id"),
             content_format=params.get("content_format") or "short",
             language=language_from_voice(params.get("voice_name")),
-            brand=params.get("brand"),
+            brand=brand,
         )
         used_fallback = False
         if not _looks_valid(html):
-            html = _fallback_composition(subject, script, resolution, width, height, duration)
+            html = _fallback_composition(subject, script, resolution, width, height, duration,
+                                         brand=brand, topic_id=params.get("topic_id"))
             used_fallback = True
         (job_dir / "index.html").write_text(html)
         _status(handle, progress=45)
@@ -342,7 +346,8 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             _render(job_dir, silent)
         except Exception as e:
             (job_dir / "render-error.txt").write_text(str(e))
-            html = _fallback_composition(subject, script, resolution, width, height, duration)
+            html = _fallback_composition(subject, script, resolution, width, height, duration,
+                                         brand=brand, topic_id=params.get("topic_id"))
             used_fallback = True
             (job_dir / "index.html").write_text(html)
             _render(job_dir, silent)
@@ -352,7 +357,8 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         # deterministic fallback and re-render once — accepted unconditionally (no loop).
         if not _has_visible_frames(silent):
             (job_dir / "blank-detected.txt").write_text("post-render frames blank; rebuilt with fallback")
-            html = _fallback_composition(subject, script, resolution, width, height, duration)
+            html = _fallback_composition(subject, script, resolution, width, height, duration,
+                                         brand=brand, topic_id=params.get("topic_id"))
             used_fallback = True
             (job_dir / "index.html").write_text(html)
             _render(job_dir, silent)
@@ -660,11 +666,13 @@ def _looks_valid(html: str) -> bool:
 
 
 def _fallback_composition(subject: str, script: str, resolution: str,
-                          width: int, height: int, duration: float) -> str:
+                          width: int, height: int, duration: float,
+                          brand: str | None = None, topic_id=None) -> str:
     """A guaranteed-valid, NON-OVERLAPPING composition: one centered focal area that
     shows the title, then one key line at a time. Each block fades fully out before the
     next fades in, so two text blocks are never on screen together. Used when the LLM
     output is malformed or its render fails."""
+    th = theme.resolve(topic_id, subject, brand=brand)
     k = max(4, min(8, int(duration // 18)))            # more reveals for longer videos
     lines = _key_lines(script, k=k)
     pad = max(60, int(width * 0.08))
@@ -694,23 +702,43 @@ def _fallback_composition(subject: str, script: str, resolution: str,
                 f'{round(start + seg_len - fade, 2)});'
             )
 
+    glow = th.get("glow") or th["bg_deep"]
+    glow2 = th.get("glow2") or th["bg_base"]
+    brand_attr = f' data-brand="{th["brand"]}"' if th.get("brand") else ""
+    mark = ""
+    mark_css = ""
+    if th.get("brand") == "os" and th.get("logo"):
+        inset = theme.mark_inset_px(width, height)
+        logo_h = theme.logo_height_px(height)
+        mark = f'<img id="brand-mark" src="{_esc(th["logo"])}" alt="" />'
+        mark_css = (f"#brand-mark{{position:absolute;left:{inset}px;bottom:{inset}px;"
+                    f"height:{logo_h}px;width:auto;opacity:.9;z-index:5;pointer-events:none}}")
+    if th.get("brand") == "rr":
+        bg = (f"radial-gradient(110% 80% at 82% 0%,{glow} 0%,{glow2} 28%,{th['bg_base']} 62%)")
+    elif th.get("brand") == "os":
+        bg = f"radial-gradient(120% 90% at 18% 0%,{glow} 0%,{th['bg_base']} 64%)"
+    else:
+        bg = th["bg_base"]
+
     return f"""<!doctype html>
-<html lang="en" data-resolution="{resolution}">
+<html lang="en" data-resolution="{resolution}"{brand_attr}>
 <head><meta charset="UTF-8"/>
 <script src="gsap.min.js"></script>
 <style>
-  html,body{{margin:0;padding:0;width:{width}px;height:{height}px;background:#0b0b16;
-    overflow:hidden;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}}
+  html,body{{margin:0;padding:0;width:{width}px;height:{height}px;background:{bg};
+    overflow:hidden;font-family:{th["sans"]}}}
   #root{{width:{width}px;height:{height}px;position:relative}}
+  {mark_css}
   /* every segment fills the same centered focal box; only one is ever visible (opacity) */
   .clip{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    padding:0 {pad}px;box-sizing:border-box;text-align:center;color:#fff;opacity:0}}
+    padding:0 {pad}px;box-sizing:border-box;text-align:center;color:{th["fg"]};opacity:0}}
   .seg-title{{font-size:{int(width*0.07)}px;font-weight:800;line-height:1.08;letter-spacing:-1px}}
-  .seg-line{{font-size:{int(width*0.05)}px;font-weight:600;color:#c9d2ff;line-height:1.2}}
+  .seg-line{{font-size:{int(width*0.05)}px;font-weight:600;color:{th["fg_dim"]};line-height:1.2}}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="{width}" data-height="{height}"
        data-start="0" data-duration="{duration}">
+    {mark}
     {''.join(els)}
   </div>
   <script>

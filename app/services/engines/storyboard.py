@@ -402,6 +402,46 @@ def validate_storyboard(beats: list[dict], duration: float) -> bool:
 
 # --------------------------------------------------------------------------- CSS
 
+def _brand_css(width: int, height: int, th: dict) -> str:
+    """OS vs RR mute-scroll split. Legacy neon keeps the accent-fill identity."""
+    brand = th.get("brand")
+    inset = theme.mark_inset_px(width, height)
+    logo_h = theme.logo_height_px(height)
+    if brand == "os":
+        return (
+            "html,body{background:radial-gradient(120% 90% at 18% 0%,var(--glow) 0%,var(--bg) 64%)}"
+            "#bg-motion{opacity:.5;background:radial-gradient(ellipse at 78% 8%,#1a1a1a 0%,transparent 58%)}"
+            ".cta .cta-box{background:#fff;color:#000}"
+            ".cmp .cmp-col{background:rgba(255,255,255,.03);border:2px solid var(--stroke);"
+            "border-top:2px solid var(--stroke)}"
+            ".cmp .cmp-vs{background:#fff;color:#000}"
+            ".stat .stat-num,.stat .stat-unit,.term .term-word{color:#fff}"
+            ".term .term-rule{background:var(--stroke)}"
+            ".code,.cmd{background:#0a0a0a;border:1px solid #2a2a2a;color:#fff}"
+            ".code .ln.hl{border-left-color:var(--stroke)}"
+            ".diagram .node rect{fill:#0a0a0a;stroke:var(--stroke)}"
+            ".lst .lst-bullet{color:var(--stroke)}"
+            "#brand-mark{position:absolute;left:" + str(inset) + "px;bottom:" + str(inset) + "px;"
+            "height:" + str(logo_h) + "px;width:auto;opacity:.9;z-index:5;pointer-events:none}"
+        )
+    if brand == "rr":
+        return (
+            "html,body{background:radial-gradient(110% 80% at 82% 0%,var(--glow) 0%,var(--glow2) 28%,var(--bg) 62%)}"
+            "#bg-motion{opacity:.55;background:radial-gradient(ellipse at 84% 4%,#4a1528 0%,#2a0a14 40%,transparent 64%)}"
+            ".cta .cta-box{background:transparent;color:var(--fg);border:2px solid var(--stroke)}"
+            ".cmp .cmp-col{background:transparent;border:2px solid var(--stroke);"
+            "border-top:2px solid var(--stroke)}"
+            ".cmp .cmp-vs{background:transparent;color:var(--fg);border:2px solid var(--stroke)}"
+            ".stat .stat-num,.stat .stat-unit,.term .term-word{color:var(--fg)}"
+            ".term .term-rule{background:var(--stroke);height:2px}"
+            ".code,.cmd{background:#0a0a0a;border:2px solid var(--stroke);color:#fff}"
+            ".code .ln.hl{border-left:2px solid var(--stroke)}"
+            ".diagram .node rect{fill:#0a0a0a;stroke:var(--stroke);stroke-width:2}"
+            ".lst .lst-bullet{color:var(--stroke)}"
+        )
+    return ""
+
+
 def _base_css(width: int, height: int, th: dict) -> str:
     fs = max(32, int(width * 0.065))
     body_fs = max(28, int(width * 0.045))
@@ -417,6 +457,8 @@ def _base_css(width: int, height: int, th: dict) -> str:
     return (
         ":root{--accent:" + th["accent"] + ";--bg:" + th["bg_base"] + ";--bg-deep:" + th["bg_deep"] +
         ";--fg:" + th["fg"] + ";--fg-dim:" + th["fg_dim"] + ";--mono:" + th["mono"] +
+        ";--glow:" + th.get("glow", th["bg_deep"]) + ";--glow2:" + th.get("glow2", th["bg_base"]) +
+        ";--stroke:" + th.get("stroke", th["accent"]) +
         ";--fs:" + str(fs) + "px;--body-fs:" + str(body_fs) + "px;--pad:" + str(pad) + "px}"
         "html,body{margin:0;padding:0;width:" + str(width) + "px;height:" + str(height) + "px;overflow:hidden;"
         "background:radial-gradient(120% 120% at 20% 0%,var(--bg-deep) 0%,var(--bg) 62%);"
@@ -496,6 +538,7 @@ def _base_css(width: int, height: int, th: dict) -> str:
             ".cmp .cmp-col{flex:none;max-width:88%;width:88%;box-sizing:border-box}"
             ".cmp .cmp-vs{position:static;transform:none;flex:none}")
            if height >= width else "")
+        + _brand_css(width, height, th)
     )
 
 
@@ -879,13 +922,23 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
         tweens.extend(tw)
     bg_tween = _from("#bg-motion", 0, "opacity:0.2,scale:1", "opacity:0.4,scale:1.08",
                      dur=duration, ease="sine.inOut")
+    brand = th.get("brand") or ""
+    brand_attr = (' data-brand="' + brand + '"') if brand else ""
+    logo = th.get("logo") or ""
+    # OS signature mark only. RR must never get an Owera asset path or #brand-mark.
+    mark = ""
+    if brand == "os" and logo:
+        mark = ('    <img id="brand-mark" src="' + theme.esc(logo) +
+                '" alt="" />\n')
     return (
-        "<!doctype html>\n<html lang=\"en\" data-resolution=\"" + resolution + "\">\n"
+        "<!doctype html>\n<html lang=\"en\" data-resolution=\"" + resolution +
+        "\"" + brand_attr + ">\n"
         "<head><meta charset=\"UTF-8\"/>\n<script src=\"gsap.min.js\"></script>\n<style>\n" +
         _base_css(width, height, th) + "\n</style></head>\n<body>\n"
         "  <div id=\"root\" data-composition-id=\"master\" data-width=\"" + str(width) +
         "\" data-height=\"" + str(height) + "\" data-start=\"0\" data-duration=\"" + _r(duration) + "\">\n"
-        "    <div id=\"bg-motion\"></div>\n    " + "\n    ".join(body) + "\n  </div>\n"
+        "    <div id=\"bg-motion\"></div>\n" + mark +
+        "    " + "\n    ".join(body) + "\n  </div>\n"
         "  <script>\n  window.__timelines = window.__timelines || {};\n"
         "  const tl = gsap.timeline({paused:true});\n  " + bg_tween + "\n  " +
         "\n  ".join(tweens) + "\n  window.__timelines[\"master\"] = tl;\n  </script>\n</body></html>"
@@ -1124,7 +1177,7 @@ def _cap_list_holds(beats) -> None:
 
 def compose(*, subject, script, words, duration, resolution, width, height,
             topic_id=None, content_format="short", allowed_types=None, language=None,
-            llm, brand=None) -> str | None:
+            llm, brand=None, channel_id=None, channel_slug=None) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -1132,7 +1185,8 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     importing worker)."""
     allowed = list(allowed_types or ["hook", "statement", "stat", "compare", "list",
                                       "term_define", "quote", "cta"])
-    th = theme.resolve(topic_id, subject, brand=brand)
+    th = theme.resolve(topic_id, subject, brand=brand,
+                       channel_id=channel_id, channel_slug=channel_slug)
     system = _system_prompt(allowed)
     user = _user_prompt(subject, script, content_format)
 

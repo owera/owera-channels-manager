@@ -108,6 +108,10 @@ ok(craft.brand_of("owera-software", "Owera Software") == "os", "owera slug → o
 ok(craft.brand_of("ch2") == "rr", "ch2 → rr")
 ok(craft.brand_of("rodrigo-recio") == "rr", "recio slug → rr")
 ok(craft.brand_of("other") is None, "unknown slug stays unbranded (legacy palette)")
+ok(craft.brand_of(None, None, 1) == "os", "channel_id=1 → os")
+ok(craft.brand_of(None, None, 2) == "rr", "channel_id=2 → rr")
+ok(craft.brand_of("mystery", None, 1) == "os", "id=1 fills in when slug has no token")
+ok(craft.brand_of("rodrigo-recio", None, 1) == "rr", "recio slug wins over id=1")
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +123,61 @@ ok(os_th["bg_base"] == "#000000" and os_th["fg"] == "#ffffff",
 ok(os_th["accent"].lower() in {p[0] for p in theme._OS_PALETTE},
    "OS accent stays in the B&W family")
 ok("#5b8cff" not in os_th["accent"], "OS does not use the neon blue")
+ok(os_th["logo"] == theme.OS_LOGO_FILE, "OS carries the O crop filename")
 rr_th = theme.resolve(1, "hello", brand="rr")
-ok(rr_th["bg_base"] == "#14110e", "RR canvas is warm personal, not #0b0b16 neon")
+ok(rr_th["bg_base"] == "#000000", "RR canvas is black, not #0b0b16 neon")
+ok(rr_th["accent"] == "#c41e5a", "RR accent is burgundy #C41E5A")
+ok(rr_th["logo"] == "", "RR carries no Owera logo")
 ok(rr_th["accent"] != os_th["accent"], "OS and RR are distinct systems")
+ok(rr_th["glow"] != os_th["glow"], "OS cold glow ≠ RR burgundy glow")
 legacy = theme.resolve(1, "hello")
 ok(legacy["accent"] == "#00c9a7" and legacy["fg_dim"] == "#c9d2ff",
    "unbranded resolve keeps the legacy palette (unit tests / leftover templates)")
+
+
+# ---------------------------------------------------------------------------
+print("mute-scroll stills: OS vs RR HTML diverge in glow + logo")
+
+_HOOK = [{"type": "hook", "cue": "", "text": "Cache billed the cancelled run",
+          "emoji": "", "start": 0.0, "dur": 3.0}]
+os_html = storyboard.build_index_html(
+    _HOOK, theme.resolve(1, "hello", brand="os"), "portrait", 1080, 1920, 3.0)
+rr_html = storyboard.build_index_html(
+    _HOOK, theme.resolve(1, "hello", brand="rr"), "portrait", 1080, 1920, 3.0)
+ok('data-brand="os"' in os_html, "OS composition is tagged data-brand=os")
+ok('data-brand="rr"' in rr_html, "RR composition is tagged data-brand=rr")
+ok('id="brand-mark"' in os_html and theme.OS_LOGO_FILE in os_html,
+   "OS frame0 carries the O crop")
+ok("height:64px" in os_html and "opacity:.9" in os_html,
+   "OS mark is ~64px / 90% opacity on 1080×1920")
+ok("left:48px" in os_html and "bottom:48px" in os_html,
+   "OS mark sits ≥48px from edges")
+ok('id="brand-mark"' not in rr_html, "RR frame0 has no brand-mark node")
+for tok in theme.RR_FORBIDDEN_MARKS:
+    ok(tok not in rr_html.lower(), f"RR HTML has no {tok!r}")
+os_l, rr_l = os_html.lower(), rr_html.lower()
+for bad in theme.OS_FORBIDDEN_HEX:
+    ok(bad not in os_l, f"OS HTML has no forbidden {bad}")
+ok("#1a1a1a" in os_l, "OS still has the cold glow")
+ok("#4a1528" in rr_l and "#2a0a14" in rr_l, "RR still has the burgundy upper-corner glow")
+ok("#c41e5a" in rr_l, "RR still uses #C41E5A as object stroke")
+ok("linear-gradient(90deg" not in os_l and "linear-gradient(90deg" not in rr_l,
+   "no rainbow neon-bar top gradient on branded stills")
+ok(os_html != rr_html, "OS and RR storyboard HTML are not identical")
+
+os_thumb = thumbnail._thumbnail_html("Cache billed the cancelled run", brand="os")
+rr_thumb = thumbnail._thumbnail_html("Cache billed the cancelled run", brand="rr")
+ok(theme.OS_LOGO_FILE in os_thumb and 'id="brand-mark"' in os_thumb,
+   "OS thumb carries the O crop")
+ok('id="brand-mark"' not in rr_thumb, "RR thumb has no brand-mark")
+ok('id="accent"' not in os_thumb and 'id="accent"' not in rr_thumb,
+   "branded thumbs drop the neon-bar identity")
+ok("#4a1528" in rr_thumb.lower() and "#c41e5a" in rr_thumb.lower(),
+   "RR thumb glow + stroke are burgundy")
+ok("#1a1a1a" in os_thumb.lower(), "OS thumb cold glow is present")
+for tok in theme.RR_FORBIDDEN_MARKS:
+    ok(tok not in rr_thumb.lower(), f"RR thumb has no {tok!r}")
+ok(os_thumb != rr_thumb, "OS and RR thumbs are not identical")
 
 
 # ---------------------------------------------------------------------------

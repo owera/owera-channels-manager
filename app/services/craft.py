@@ -157,11 +157,10 @@ def strip_banned(text: str | None) -> str:
     return re.sub(r"\s{2,}", " ", cleaned).strip(" -—,;:→")
 
 
-def brand_of(slug: str | None, name: str | None = None) -> str | None:
-    """os = Owera Software B&W; rr = Rodrigo Recio personal. None = legacy neon."""
-    blob = f"{slug or ''} {name or ''}".lower()
-    if any(tok in blob for tok in ("recio", "rodrigo", "ch2")):
-        return "rr"
-    if any(tok in blob for tok in ("owera", "ch1")):
-        return "os"
-    return None
+def brand_of(slug: str | None, name: str | None = None, channel_id=None) -> str | None:
+    """os = Owera Software B&W; rr = Rodrigo Recio burgundy. None = legacy neon.
+
+    Delegates to ``theme.infer_brand`` so storyboard/thumbnail/render share one map:
+    slug/name tokens win; live-fleet ids 1/2 are the fallback.
+    """
+    return theme.infer_brand(channel_id, slug, name)

@@ -304,6 +304,36 @@ s.commit()
 ok(len(by_status(s, ch, VideoStatus.RENDERING)) == 3,
    "single tick with concurrency 8 submits only budget (3)")
 
+print("submit_new: brand + channel_id/slug wired into worker params")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, slug="ch1", name="Owera Software", daily_render_budget=1)
+t = make_topic(s, ch, content_format="short")
+make_video(s, ch, t, status=VideoStatus.QUEUED)
+captured = {}
+
+
+class CaptureEngine:
+    def submit(self, video, params):
+        captured.update(params)
+        return "task-brand"
+
+render_loop.get_engine = lambda name: CaptureEngine()
+render_loop._submit_new(s)
+ok(captured.get("brand") == "os", "ch1 submit params.brand is os")
+ok(captured.get("channel_id") == ch.id, "channel_id forwarded to the worker")
+ok(captured.get("channel_slug") == "ch1", "channel_slug forwarded to the worker")
+s = fresh_session()
+set_concurrency(s, 1)
+ch = make_channel(s, slug="ch2", name="Rodrigo Recio", daily_render_budget=1)
+t = make_topic(s, ch, content_format="short")
+make_video(s, ch, t, status=VideoStatus.QUEUED)
+captured.clear()
+render_loop._submit_new(s)
+ok(captured.get("brand") == "rr", "ch2 submit params.brand is rr")
+ok(captured.get("channel_slug") == "ch2", "ch2 slug forwarded")
+render_loop.get_engine = lambda name: FakeEngine()
+
 # Long-first when the approved long buffer is empty (2026-08-07 ch2): auto_produce
 # queues a long, but FIFO by id let earlier short ids burn the 5/day budget first,
 # so publish found 11 approved shorts / 0 longs. Prefer the queued long on submit.

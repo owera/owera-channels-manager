@@ -449,7 +449,9 @@ def _submit_new(session: Session) -> None:
         params["content_format"] = fmt
         params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
         from app.services.craft import brand_of
-        params["brand"] = brand_of(channel.slug, channel.name)
+        params["brand"] = brand_of(channel.slug, channel.name, channel_id=channel.id)
+        params["channel_id"] = channel.id
+        params["channel_slug"] = channel.slug
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:

@@ -44,9 +44,20 @@ Shorts close on builder/confiança, not a subscribe ask.
 
 ## Visual systems
 
-- **os** (Owera Software / ch1): B&W
-- **rr** (Rodrigo Recio / ch2): personal warm ink
+- **os** (Owera Software / ch1): bg `#0A0A0A` → `#000000`, optional cold glow
+  `#1A1A1A`. text `#FFFFFF` / secondary `#6B6B6B`. Accent B&W + gray max `#9A9A9A`.
+  Signature thumb+frame0: `03-owera-o-avatar.png` (white O crop), bottom corner,
+  48–72px on 1080×1920 (≤8% frame height), ~90% opacity, ≥48px from edges/YT UI.
+  Forbidden: `#FF2D55` / magenta / burgundy / rainbow neon. No tagline/.com/Cloud
+  on the mark.
+- **rr** (Rodrigo Recio / ch2): bg `#0A0A0A` → `#000000` with burgundy glow
+  `#4A1528` / `#2A0A14` (upper corner). text `#FFFFFF`. Accent `#C41E5A` as a
+  thin highlight/stroke on boxes/objects only. Logo: NONE — zero O, zero "Owera",
+  zero Owera asset paths.
 - Unbranded unit tests keep the legacy neon palette
+- Banner OS CMO v2 is frozen — do not change YouTube channel banner assets
+- Mute-scroll (~0.3s) stills of OS vs RR must be distinguishable. No neon-bar
+  top gradient rainbow and no glass boxes as identity.
 
 ## Audio
 
