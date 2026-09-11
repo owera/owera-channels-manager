@@ -143,8 +143,8 @@ Each publication declares its own native cut. Do not reuse one generic cut.
 
 `linkedin` and `x` publication `format.kind` is **`video`**. Enum is `video`.
 **NEVER** `image` or `still` (or `still+caption` / `native_video`). A still may
-exist only as a **review placeholder** (Designer sample / teaser frame) — it is
-not the publication kind.
+exist only as a **review placeholder** (`publications[].review_still` — Designer
+sample / teaser frame). It is **not** `format.kind`.
 
 | network | kind | ratio | size | teaser duration |
 | --- | --- | --- | --- | --- |
