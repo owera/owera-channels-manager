@@ -148,8 +148,7 @@ Locked exception: Subscribe is allowed **only** on the series endcard template,
 Subscribe — next {series} {noun}.
 ```
 
-plus chip `· {series}` on that card. Nowhere else. This is not an unresolved
-CMO/CoS fork.
+plus chip `· {series}` on that card. Nowhere else.
 
 `_sanitize_cta` **stays** on mid-video / title / Follow-tomorrow / waitlist /
 Cloud. Do **not** invert the global ban. Do **not** punch a hole in
