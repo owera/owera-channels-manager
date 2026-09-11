@@ -473,6 +473,8 @@ try:
     ok(cc["bgm_volume"] == 0.4, "explicit bgm_volume forwarded")
     ok(cc["script_words"] == 4 and cc["duration"] == 12.5, "script_words + duration")
     ok(cc["used_fallback"] is True, "used_fallback forwarded")
+    ok(cc["craft_gate"]["result"] == "PASS",
+       "longs are exempt — craft_gate is PASS even on used_fallback")
     ok(cc["composition_version"] == "sentinel-ver",
        "composition_version comes from settings (not a hardcoded 'storyboard')")
 finally:

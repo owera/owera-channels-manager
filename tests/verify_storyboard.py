@@ -223,6 +223,8 @@ ok(not hasattr(storyboard, "_TAIL_MAX"),
    "finite last-beat tail cap is gone (08-28 residual: 8s CTA blocked the dump)")
 ok(storyboard._ROW_STEP_MAX == 1.1,
    "list row-step cap is 1.1s (ce46b43: last item must not land 7s in)")
+ok(storyboard._ROW_STEP_SHORTS == 0.6,
+   "Shorts list stagger cap is 0.6s (Video Maker craft gate C)")
 ok(storyboard._DRIFT_MIN == 5.5,
    "long-hold drift kicks in above 5.5s (70f5320 R4 frozen-card)")
 ok(set(storyboard._RENDERERS) == set(storyboard._BEAT_SPECS),
@@ -280,6 +282,19 @@ hook = storyboard._coerce_beat(
     set(ALL_TYPES))
 ok(hook["text"] == "w0 w1 w2 w3 w4 w5 w6 w7" and hook["emoji"] == "🔥x",
    "hook text clipped to 8 words; emoji clipped to 2 chars (flag+variant ok)")
+ok(hook.get("object") == "", "hook without object/prop stores empty object")
+hook_obj = storyboard._coerce_beat(
+    {"type": "hook", "text": "Your RAG reads junk", "object": "API bill"},
+    set(ALL_TYPES))
+ok(hook_obj["object"] == "API bill", "hook.object is kept (Decolar prop)")
+hook_prop = storyboard._coerce_beat(
+    {"type": "hook", "text": "Your RAG reads junk", "prop": "terminal"},
+    set(ALL_TYPES))
+ok(hook_prop["object"] == "terminal", "hook.prop aliases to object")
+hook_emo_obj = storyboard._coerce_beat(
+    {"type": "hook", "text": "Your RAG reads junk", "object": "💸🔥"},
+    set(ALL_TYPES))
+ok(hook_emo_obj["object"] == "", "emoji-only hook.object is stripped (not an object)")
 
 stmt = storyboard._coerce_beat({"type": "statement", "text": "hi", "w": 0}, set(ALL_TYPES))
 ok(stmt["w"] == 1, "statement w=0 clamps to 1")
@@ -699,6 +714,13 @@ _, ttw = storyboard.render_list(
 row2t = [t for t in ttw if "#b0r2" in t]
 ok(any(t.endswith(",1.05);") for t in row2t),
    "tight 2s / 3-item list uses win/n=0.4 (cap does not bind); last row at 1.05s")
+_, stw = storyboard.render_list(
+    {"title": "Steps", "items": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
+     "start": 0.0, "dur": 11.29},
+    dict(_CTX, content_format="short"))
+row2s = [t for t in stw if "#b0r2" in t]
+ok(any(t.endswith(",1.45);") for t in row2s),
+   "Shorts 11.29s / 3-item list reveals last row at 0.25+2*0.6=1.45s (stagger ≤0.6)")
 ol_html, _ = storyboard.render_list(
     {"items": [{"text": "a"}, {"text": "b"}], "ordered": True, "start": 0.0, "dur": 3},
     dict(_CTX, dur=3.0))
@@ -816,6 +838,10 @@ ok(storyboard._variety_ok([
     {"type": "hook"}, {"type": "statement"}, {"type": "statement"},
     {"type": "stat"}, {"type": "list"}, {"type": "cta"}
 ]), "two statements + two rich types still passes (≤2 statements)")
+ok(not storyboard._variety_ok([
+    {"type": "hook"}, {"type": "statement"}, {"type": "statement"},
+    {"type": "stat"}, {"type": "list"}, {"type": "cta"}
+], "short"), "shorts variety tightens statement cap to 1")
 sys_code = storyboard._system_prompt(["hook", "cta", "code", "stat"])
 ok("2b." in sys_code and "`code` or `command`" in sys_code,
    "system prompt includes rule 2b when a Phase-B type is allowed")
@@ -862,6 +888,8 @@ ok("do NOT replace with a curiosity gap" in storyboard._user_prompt("t", "s", "s
    "user prompt forbids a curiosity-gap replacement hook")
 ok("Long-form" in storyboard._user_prompt("t", "s", "long"),
    "long format asks for more beats / richer visuals")
+ok("CRAFT GATE" not in storyboard._user_prompt("t", "s", "long"),
+   "longs do not carry the Shorts A+B+C gate in the prompt")
 ok("Video title: My Subject" in storyboard._user_prompt("My Subject", "narration", "short"),
    "user prompt leads with the real subject (not a constant)")
 
@@ -936,6 +964,10 @@ ok(pt_opener[0]["text"] == "Sua RAG busca lixo e você culpa o modelo",
    "Decolar: 9-word PT opener keeps the object (8w clip used to drop 'modelo')")
 ok(pt_opener[0]["emoji"] == "" and pt_opener[0]["type"] == "hook",
    "lock forces hook type and strips emoji")
+keep_obj = [{"type": "hook", "text": "old", "object": "receipt", "emoji": "x"}]
+storyboard._lock_opening_hook(keep_obj, "Your RAG reads junk. Then we fix it.", "s")
+ok(keep_obj[0]["text"].startswith("Your RAG") and keep_obj[0]["object"] == "receipt",
+   "Decolar lock keeps hook.object (does not reopen curiosity-gap / wipe the prop)")
 ok("Hook" not in hook_html,
    "LLM curiosity-gap hook text is overwritten")
 ok("Follow" not in html and "Siga" not in html and "Try it" not in html,
@@ -948,6 +980,12 @@ ok("First spoken sentence" in calls[0]["user"],
    "compose injects the spoken sentence into the user prompt")
 ok("2b." not in (calls[0]["system"] or ""),
    "default allowlist has no Phase-B types so rule 2b is absent")
+ok("CRAFT GATE" in calls[0]["user"] and "hook.object" in calls[0]["user"],
+   "shorts user prompt carries the A+B+C craft gate")
+ok('id="storyboard-beats"' in html, "compose embeds the beat snapshot for the craft gate")
+ok('"object"' in html.split('id="storyboard-beats"', 1)[1].split("</script>", 1)[0]
+   or "stat" in html,
+   "embedded snapshot is JSON beats (gate evaluates post-compose)")
 ok(worker._looks_valid(html), "composed HTML passes the worker validity guard")
 
 pt_html = _compose(lambda *a, **k: _board(), language="Brazilian Portuguese")

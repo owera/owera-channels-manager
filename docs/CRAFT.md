@@ -48,15 +48,67 @@ Live clips (not the same number):
 Happy-path OS/RR palettes are live (`theme.resolve(brand=)`). Fallback
 composition ignores brand and Decolar (kinetic title cards).
 
-YPP items **yesed but not in this code** (object-on-frame0, beats ≤3s / no
-mid-video spoken list, series endcard): see `docs/PIPELINE_REVIEW.md`.
+YPP items **yesed but not in this code** (object-on-frame0 as a still,
+series endcard runtime): see `docs/PIPELINE_REVIEW.md`. YPP #3 (object
+0–3s / beats ≤3s / no mid-video spoken list) is the Video Maker craft
+gate below.
 
 YPP #5 is Rodrigo YES (locked): Subscribe is allowed **only** on the series
 endcard template — **visual + final VO** (`Subscribe — next {series} {noun}.`
 + chip `· {series}`). `_sanitize_cta` stays on mid-video / title /
 Follow-tomorrow / waitlist / Cloud. Do **not** invert the global CTA ban.
-Runtime does not ship the endcard yet (this PR is docs-only). Generic
-description still appends Subscribe/Inscreva-se; that is not the endcard.
+Runtime does not ship the endcard yet (docs #26). Generic description
+still appends Subscribe/Inscreva-se; that is not the endcard.
+
+## Video Maker craft gate (Shorts A+B+C)
+
+Automatic PASS/FAIL on the storyboard/render path (post-compose, before
+publish). Long-form is exempt. No TTS / budget / concurrency change.
+
+Evaluated from aligned beats (embedded in `index.html` as
+`#storyboard-beats`, snapshotted on `creation_config.craft_gate`).
+
+The gate refuses the same surfaces as the spoken-title lock:
+
+- `POST /api/videos/{id}/approve` (409 + reason)
+- skip-gate auto-approve (stays `review` with `error` set)
+- `POST /api/videos/{id}/retry` when the artifact would re-enter `approved`
+- `publish_loop._publish_one` (returns the row to `review`, does not upload)
+
+`GET /api/agent/issues` exposes `craft_gate_blocked` (informational).
+
+### A — Object 0–3s
+
+PASS: in the first 3.0s of the timeline (beat 0 cue until t=3), ≥1 beat with
+type ∈ {code, command, diagram, compare, stat} **or** the hook has a non-empty
+`object` field (Decolar prop: receipt / terminal / bill).
+
+FAIL: only hook/statement with text+emoji (typography-only) until t=3.
+Emoji does **not** count as an object.
+
+### B — Beats ≤3s
+
+PASS: for every beat except the final `cta` / endcard series, duration =
+`next_cue_start − cue_start` (last pre-cta: `cta_cue − cue`) ≤ 3.0s.
+
+FAIL: any mid card/slide >3.0s.
+
+cta/endcard series: max 4.0s (not a Follow-tomorrow hold).
+
+### C — Kill spoken list/slide spam
+
+PASS:
+
+- `statement` ≤ 1 in the whole short (tightened from the old tolerance of 2)
+- `list` forbidden, **or** if kept: max 1 list, ≤3 items, beat ≤3.0s, item
+  stagger ≤0.6s
+- Prefer code/command/diagram/compare/stat in the middle
+
+FAIL: ≥2 `statement` **or** a list with >3 items **or** list/statement that
+only re-displays narration without a rich type.
+
+Pré-gate inventory with no beat snapshot fail-opens (do not mass-reject).
+Kinetic-text fallback (`used_fallback`) fails A+C.
 
 ## CTA ban
 

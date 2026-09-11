@@ -40,6 +40,7 @@ _MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard m
 # blocked that dump whenever the CTA was already at 8s (08-28 residual: ch2-code
 # list 8.72s / CTA 8.00s).
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
+_ROW_STEP_SHORTS = 0.6  # Shorts craft gate C: item stagger ≤0.6s
 _LIST_MAX = 6.0      # empty list dumps >6s are a retention hole — see _cap_list_holds
 
 
@@ -139,6 +140,12 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
         if not text:
             return None
         b = {"type": btype, "cue": cue, "text": text, "emoji": emoji}
+        if btype == "hook":
+            # Decolar prop (receipt/terminal/bill). Emoji is not an object.
+            obj = _words_clip(raw.get("object") or raw.get("prop") or "", 4)
+            if obj and not re.search(r"[A-Za-z0-9À-ÿ]", obj):
+                obj = ""
+            b["object"] = obj
         if btype == "statement":
             try:
                 b["w"] = max(1, min(3, int(raw.get("w", 1))))
@@ -472,6 +479,9 @@ def _base_css(width: int, height: int, th: dict) -> str:
         # hook
         ".hook .htext{font-size:calc(var(--fs)*1.28);font-weight:800;line-height:1.12;letter-spacing:-1px;"
         "text-shadow:0 4px 24px rgba(0,0,0,.7)}.hook .hemoji{font-size:calc(var(--fs)*1.1);line-height:1}"
+        ".hook .hobject{font-size:calc(var(--fs)*.42);font-weight:800;letter-spacing:.12em;"
+        "text-transform:uppercase;color:var(--accent);border:2px solid var(--accent);"
+        "padding:.18em .55em;border-radius:10px;margin-bottom:.35em}"
         # statement
         ".stmt .stext{font-size:var(--fs);font-weight:800;line-height:1.3;letter-spacing:-.5px;"
         "text-shadow:0 3px 18px rgba(0,0,0,.6)}.stmt .semoji{font-size:calc(var(--fs)*.9);line-height:1}"
@@ -547,8 +557,14 @@ def _base_css(width: int, height: int, th: dict) -> str:
 # tl.set it visible at start and fade it out before the next beat (unless last).
 
 def _shell(i: int, b: dict, cls: str, inner: str) -> str:
+    extra = ""
+    if b.get("object"):
+        extra += ' data-object="' + theme.esc(str(b["object"])) + '"'
+    if (b.get("type") or cls) == "list" or cls == "lst":
+        extra += ' data-items="' + str(len(b.get("items") or [])) + '"'
     return ('<div class="beat ' + cls + '" id="b' + str(i) + '" data-start="' + _r(b["start"]) +
-            '" data-duration="' + _r(b["dur"]) + '" data-track-index="' + str(i) + '">' + inner + "</div>")
+            '" data-duration="' + _r(b["dur"]) + '" data-track-index="' + str(i) + '"' + extra +
+            ">" + inner + "</div>")
 
 
 # Beats held past this get a slow zoom so the frame never fully freezes (R4 drag):
@@ -575,9 +591,13 @@ def _wrap(i: int, ctx: dict, base_tweens: list[str]) -> list[str]:
 def render_hook(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
+    obj = (b.get("object") or "").strip()
+    obj_html = ('<div class="hobject">' + theme.esc(obj) + "</div>") if obj else ""
     emoji = ('<div class="hemoji">' + theme.esc(b["emoji"]) + "</div>") if b.get("emoji") else ""
-    inner = emoji + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    inner = obj_html + emoji + '<div class="htext">' + _words_html(b["text"]) + "</div>"
     tw = []
+    if obj:
+        tw.append(_from(bid + " .hobject", s, "opacity:0,y:-12", "opacity:1,y:0", dur=0.2))
     if b.get("emoji"):
         tw.append(_from(bid + " .hemoji", s, "opacity:0,scale:0.4", "opacity:1,scale:1", dur=0.2, ease="back.out(2)"))
     tw.append(_from(bid + " .word", s + 0.05, "opacity:0,y:30", "opacity:1,y:0", dur=0.3, stagger=0.045))
@@ -672,7 +692,8 @@ def render_list(b, ctx):
     # beats and completes the card early on long ones.
     n = len(b["items"])
     win = max(0.0, ctx["dur"] - 0.8)
-    step = min(win / n, _ROW_STEP_MAX) if n else 0
+    cap = _ROW_STEP_SHORTS if ctx.get("content_format") == "short" else _ROW_STEP_MAX
+    step = min(win / n, cap) if n else 0
     tw = []
     if b.get("title"):
         tw.append(_from(bid + " .lst-title", s, "opacity:0,y:-10", "opacity:1,y:0", dur=0.25))
@@ -906,7 +927,9 @@ _RENDERERS = {
 
 # --------------------------------------------------------------------------- assembly
 
-def build_index_html(beats, th, resolution, width, height, duration) -> str:
+def build_index_html(beats, th, resolution, width, height, duration,
+                     content_format: str = "short") -> str:
+    from app.services import craft
     body, tweens = [], []
     for i, b in enumerate(beats):
         renderer = _RENDERERS.get(b["type"])
@@ -916,7 +939,8 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
                  "w": 2, "start": b["start"], "dur": b["dur"]}
             renderer = render_statement
         ctx = {"i": i, "start": b["start"], "dur": b["dur"],
-               "is_last": i == len(beats) - 1, "width": width, "height": height, "duration": duration}
+               "is_last": i == len(beats) - 1, "width": width, "height": height,
+               "duration": duration, "content_format": content_format}
         html, tw = renderer(b, ctx)
         body.append(html)
         tweens.extend(tw)
@@ -930,6 +954,8 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
     if brand == "os" and logo:
         mark = ('    <img id="brand-mark" src="' + theme.esc(logo) +
                 '" alt="" />\n')
+    snap = json.dumps(craft.snapshot_beats(beats), ensure_ascii=False).replace("</", "<\\/")
+    embed = '<script type="application/json" id="storyboard-beats">' + snap + "</script>\n"
     return (
         "<!doctype html>\n<html lang=\"en\" data-resolution=\"" + resolution +
         "\"" + brand_attr + ">\n"
@@ -939,6 +965,7 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
         "\" data-height=\"" + str(height) + "\" data-start=\"0\" data-duration=\"" + _r(duration) + "\">\n"
         "    <div id=\"bg-motion\"></div>\n" + mark +
         "    " + "\n    ".join(body) + "\n  </div>\n"
+        "  " + embed +
         "  <script>\n  window.__timelines = window.__timelines || {};\n"
         "  const tl = gsap.timeline({paused:true});\n  " + bg_tween + "\n  " +
         "\n  ".join(tweens) + "\n  window.__timelines[\"master\"] = tl;\n  </script>\n</body></html>"
@@ -948,9 +975,10 @@ def build_index_html(beats, th, resolution, width, height, duration) -> str:
 # --------------------------------------------------------------------------- LLM prompt
 
 _TYPE_DOCS = {
-    "hook": 'hook: {"cue","text"(≤8w)} — DECOLAR LOCK: text MUST equal the first spoken sentence '
+    "hook": 'hook: {"cue","text"(≤8w),"object"?} — DECOLAR LOCK: text MUST equal the first spoken sentence '
             '(the title hook) or a faithful ≤8-word compression of that SAME claim. Repeating the '
-            'title is REQUIRED. No emoji, no second slogan, no curiosity gap. Exactly one, first.',
+            'title is REQUIRED. No emoji, no second slogan, no curiosity gap. Exactly one, first. '
+            '"object" is the Decolar prop of the angle (receipt, terminal, API bill) — never an emoji.',
     "statement": 'statement: {"cue","text"(≤8w),"w":1|2|3} — an emphasized line (w=3 = the single key point). Not a second hook.',
     "stat": 'stat: {"cue","value","unit"?,"label"(≤6w)} — a number/percentage that animates (e.g. value "300", unit "ms").',
     "compare": 'compare: {"cue","title"?,"left":{"title","items"(≤3)},"right":{"title","items"(≤3)}} — A vs B.',
@@ -1034,7 +1062,14 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
     from app.services import craft
     first = craft.first_spoken_sentence(script) or subject
     pace = ("Short vertical video: favor the spoken hook on frame 0, 1-2 claim-carrying "
-            "visuals (terminal/receipt/code), and a builder close. No Follow/Siga CTA."
+            "visuals (terminal/receipt/code), and a builder close. No Follow/Siga CTA. "
+            "CRAFT GATE (PASS/FAIL before publish): "
+            "(A) first 3.0s MUST show a real object — a code/command/diagram/compare/stat beat "
+            "starting before t=3, OR hook.object (receipt/terminal/bill; emoji is NOT an object). "
+            "(B) every mid beat ≤3.0s (next cue − this cue); cta/endcard ≤4.0s. "
+            "(C) at most ONE statement in the whole short; list discouraged — if used: max 1 list, "
+            "≤3 items, beat ≤3.0s, item stagger ≤0.6s. Prefer code/command/diagram/compare/stat "
+            "in the middle. Do not re-display narration as statement/list."
             if content_format != "long" else
             "Long-form video: use more beats and richer visuals (code, terminal, comparisons) "
             "to sustain a longer narration. Still: frame 0 = first spoken sentence.")
@@ -1052,11 +1087,16 @@ def _rich_types(beats) -> set:
     return {b["type"] for b in beats if b["type"] not in ("hook", "cta", "statement")}
 
 
-def _variety_ok(beats) -> bool:
+def _variety_ok(beats, content_format=None) -> bool:
     """A storyboard is varied enough when it isn't mostly plain statements and uses at
-    least two distinct explanatory beat types (the whole point of the redesign)."""
+    least two distinct explanatory beat types (the whole point of the redesign).
+
+    Shorts tighten statement ≤1 (Video Maker craft gate C). Default/long keep the
+    historical ≤2 so existing callers and long-form drafts stay valid.
+    """
+    stmt_cap = 1 if content_format == "short" else 2
     mid = [b["type"] for b in beats if b["type"] not in ("hook", "cta")]
-    return bool(mid) and mid.count("statement") <= 2 and len(_rich_types(beats)) >= 2
+    return bool(mid) and mid.count("statement") <= stmt_cap and len(_rich_types(beats)) >= 2
 
 
 def _code_ok(beats, allowed) -> bool:
@@ -1102,9 +1142,12 @@ def _lock_opening_hook(beats, script, subject) -> None:
     if not beats or not hook:
         return
     b0 = beats[0]
+    obj = b0.get("object") or ""
     b0["type"] = "hook"
     b0["text"] = hook
     b0["emoji"] = ""
+    if obj:
+        b0["object"] = obj
     if len(beats) > 1:
         b1 = beats[1]
         b1["emoji"] = ""
@@ -1202,16 +1245,17 @@ def compose(*, subject, script, words, duration, resolution, width, height,
 
     # Quality guard: if the model leaned on plain statements (echoing the audio), push
     # once for the varied explanatory types and keep whichever draft is richer.
-    if not _variety_ok(beats):
+    if not _variety_ok(beats, content_format):
+        stmt_n = "one" if content_format != "long" else "two"
         retry = llm(
             user + "\n\nYour draft relied on plain 'statement' beats that just repeat the spoken "
-            "words. Redo it: use AT MOST two 'statement' beats and convert the rest into "
+            "words. Redo it: use AT MOST " + stmt_n + " 'statement' beat(s) and convert the rest into "
             "stat / compare / list / term_define" +
             ("/ code / command / diagram" if any(t in allowed for t in ("code", "command", "diagram")) else "") +
             ". Exactly one hook first and one cta last. Hook text = first spoken sentence.",
             system=system, max_tokens=1500).strip()
         rb = parse_storyboard(retry, allowed)
-        if rb and (_variety_ok(rb) or len(_rich_types(rb)) > len(_rich_types(beats))):
+        if rb and (_variety_ok(rb, content_format) or len(_rich_types(rb)) > len(_rich_types(beats))):
             beats = rb
 
     # R2: if code/command is allowed but the draft has neither, push once for a snippet.
@@ -1219,7 +1263,9 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     if not _code_ok(beats, allowed):
         retry = llm(
             user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
-            "cta-last, keep variety (at most two statement beats), and include EXACTLY one "
+            "cta-last, keep variety (at most " +
+            ("one" if content_format != "long" else "two") +
+            " statement beat(s)), and include EXACTLY one "
             "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
             "that shows the thing the narration only describes (terminal, receipt, API bill).",
             system=system, max_tokens=1500).strip()
@@ -1239,4 +1285,5 @@ def compose(*, subject, script, words, duration, resolution, width, height,
         if not validate_storyboard(beats, duration):
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None
-    return build_index_html(beats, th, resolution, width, height, duration)
+    return build_index_html(beats, th, resolution, width, height, duration,
+                            content_format=content_format)

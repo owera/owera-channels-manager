@@ -380,16 +380,23 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
     growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
     raises (a bad snapshot must not fail a render)."""
     try:
+        from app.services import craft
         th = theme.resolve(params.get("topic_id"), subject, brand=params.get("brand"))
-        beats = re.findall(r'class="beat ([a-z_]+)"', html)
+        beat_types = re.findall(r'class="beat ([a-z_]+)"', html)
+        fmt = params.get("content_format") or "short"
+        beats = craft.beats_from_html(html)
+        gate = craft.video_maker_gate(beats, content_format=fmt,
+                                      used_fallback=used_fallback)
         return {
             "composition_version": settings.composition_version,
-            "content_format": params.get("content_format") or "short",
+            "content_format": fmt,
             "resolution": resolution,
             "voice": _voice(params),
             "theme": {"accent": th["accent"], "bg_variant": th["bg_variant"]},
-            "beat_types": beats,
-            "beat_count": len(beats),
+            "beat_types": beat_types,
+            "beat_count": len(beat_types),
+            "beats": beats or None,
+            "craft_gate": gate,
             "bgm": (bgm.name if bgm else None),
             "bgm_volume": float(params.get("bgm_volume") or 0.2),
             "script_words": len(script.split()),
