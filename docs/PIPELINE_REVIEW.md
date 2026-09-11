@@ -137,19 +137,27 @@ Shipped pacing (`storyboard.py`):
 
 No first-3s gate. No ≤3s beat ceiling. Script prompt does not forbid mid-video enumeration.
 
-### YPP (5) — series endcard `Subscribe — next {Series} {noun}` — **opposite of live craft**
+### YPP (5) — series endcard `Subscribe — next {series} {noun}` — **CMO voice cut (not in code)**
 
-Spoken/on-screen close is a **builder/confiança punch**. `_sanitize_cta` overwrites the card from the last spoken sentence and strips Follow/Siga/subscribe. Script + storyboard prompts forbid a subscribe ask. `docs/CRAFT.md`: “Shorts close on builder/confiança, not a subscribe ask.”
+CMO: Subscribe is allowed **only** on the series endcard template:
 
-What *does* subscribe:
+```
+Subscribe — next {series} {noun}.
+```
 
-- `metadata.finalize_description` appends `🔔 Subscribe` / `Inscreva-se` + channel URL at publish
+plus chip `· {series}` on that card. Nowhere else.
+
+Live `_sanitize_cta` stays the global rule for **mid-video / title / generic description**. Do **not** invert it, do **not** punch a hole in `craft.contains_banned` / script prompts for a generic “subscribe”. A later endcard renderer is a template exception, not a CTA-ban rollback.
+
+What ships today (unchanged):
+
+- `_sanitize_cta` overwrites the last card from the last spoken sentence and strips Follow/Siga/subscribe
+- Script + storyboard prompts forbid a subscribe ask
+- `metadata.finalize_description` still appends `🔔 Subscribe` / `Inscreva-se` + channel URL (generic description — keep sanitize; this is not the endcard template)
 - Author first comment is an engagement seed, not a series endcard
-- Series identity lives only in the title suffix `· Copilot Credits 14` — **no series chip** on frame0/thumb/endcard
+- Series identity lives only in the title suffix `· Copilot Credits 14` — **no endcard chip**
 
-This is a CoS/CMO policy fork, not a missing if-statement. Shipping (5) without inverting R7/`_sanitize_cta`/`CRAFT.md` would fight the live ban.
-
-Playbook `run/daily-agent-playbook.md` directive 3 still says reference the next episode in the close (“Part N tomorrow”). That sentence is also banned in generation (`Siga-amanhã` / follow-for-more). Stale vs PR #17.
+Playbook `run/daily-agent-playbook.md` directive 3 still says “Part N tomorrow” in the close. That remains banned mid-video (`Siga-amanhã` / follow-for-more). Stale vs this cut.
 
 ### TTS — deferred, as locked
 
@@ -168,26 +176,28 @@ Skip-gate on a patterned title means the artifact never stops for a human. That 
 | Agent | Should gate | What the app does today |
 |---|---|---|
 | **Channels (ops)** | Budgets, produce, reject leftovers, claw0 restart | Dashboard + growth agent (`run/daily-agent-playbook.md`) via REST. Issues digest. Auto-produce fills budget. **No craft sample.** |
-| **CMO (voice/funnel)** | Hook language, series promise, subscribe vs builder close | Prompt strings + `CRAFT_RULES_SHORT`. Description subscribe is automatic; spoken subscribe is banned. **No voice review.** Funnel = YouTube only. |
+| **CMO (voice/funnel)** | Hook language, series promise, endcard-only Subscribe | Prompt strings + `CRAFT_RULES_SHORT`. Spoken subscribe banned globally; generic description still auto-appends Subscribe/Inscreva-se. Endcard template is the only yesed hole (not built). **No voice review.** Funnel today = YouTube only. |
 | **Designer (visual)** | Frame0/thumb object, OS vs RR | Palettes automated. Thumb is a template. **No sample gate.** Fallback can ship neon kinetic text. |
 | **Video Maker (craft)** | Frame0=spoken, object, beat length, endcard, no mid-list | **Title-pattern gate only.** Compose locks are render-time; approve does not re-read HTML/frames. Rubric review is a growth-agent batch (`run/rubric_review.py`), not a per-video gate. |
 | **CTO (infra)** | grok OIDC, hyperframes pin, ffmpeg, quotas | Transient retries, blank-frame check, publish stall cap. `DEFAULT_ENGINE="mpt"` is a footgun if a profile is missing. |
-| **Social Ops** | IG / LinkedIn / GitHub / TabNews / reddit | `run/seeding/YYYY-MM-DD.md` kits. Operator posts. Instagram/LinkedIn **banned in YT copy**. No adapters, no Publication rows. |
+| **Social Ops** | Hub: YouTube + Instagram + LinkedIn + X | `run/seeding/YYYY-MM-DD.md` kits (operator posts). Instagram/LinkedIn **banned in YT copy**. No adapters, no Publication rows. GitHub / Community is **out of this app** (Community stays on-call, separate). Personal channels stay out of the hub. |
 | **CoS** | Volume, spend, YPP yeses, ch1 pause | Not in the app. Growth/code agents commit to `main` inside playbook caps. ch1 pause is still a report recommendation (14 < 15), not a code gate. |
 
-Suggested **additive** gates (do not build here): a `craft_audit` JSON on the video at finalize (`frame0_text`, `thumb_text`, `title`, `cta_text`, `beat_durs`, `has_list`, `brand`, `used_fallback`) and a Video Maker 409 if any lock fails — even when skip-gate is on. Designer sample = refuse publish when `used_fallback` or thumb chrome is generic. CMO = spoken close policy as a single enum (`builder` \| `series_endcard`), not two contradictory prompts.
+Skip-gate + patterned title remains the collaboration hole. Designer has no sample (fallback can ship neon). Video Maker has no frame0/beat/object re-check. Do **not** open a `craft_audit` workstream in this track.
 
 ---
 
 ## 4. Multi-network architecture (design only)
 
-Keep the YouTube HyperFrames pipeline as the canonical **short renderer**. Do not pretend Cloud-as-if-ready. Other networks start as **publications of an already-approved YouTube package**, then grow adapters.
+Keep the YouTube HyperFrames pipeline as the canonical **short renderer**. Do not pretend Cloud-as-if-ready. Hub surface is **YouTube + Instagram + LinkedIn + X only**. GitHub / `github_discussion` / Community-as-hub is **out of Channels Manager** — Community stays on-call, separate. Personal channels stay out of the hub.
+
+Other hub networks start as **publications of an already-approved YouTube package**, then grow adapters.
 
 ### Phase A — YouTube harden (this repo)
 
 Priority order if CoS still wants the yesed YPP set:
 
-1. Resolve the **close policy** (builder punch vs series endcard). One enum. Update CRAFT, rubric R7, `_sanitize_cta`, script prompt, playbook directive 3 together.
+1. Series **endcard template** (YPP #5 CMO cut): `Subscribe — next {series} {noun}.` + chip `· {series}` on that card only. Keep live `_sanitize_cta` on mid-video / title / generic description. Do **not** invert global sanitize, R7, or script bans.
 2. Point frame0 lock at the **same claim source as the title** (title-before-`·`, or rewrite script sentence 0 to match). Align thumb clip with frame0 (12 vs 8).
 3. Replace hardcoded `RECEIPT` with a claim-noun still (or at least label). Typography-only is the live CTR miss vs Designer intent.
 4. Beat ceiling / first-3s / no mid-video spoken list — new aligner rules + script ban. Current 7.5s mid cap is the opposite shape.
@@ -198,7 +208,7 @@ TTS stays edge-tts until a paid yes.
 
 ### Phase B — adapters (additive)
 
-Do **not** widen `Channel` into a social graph. Channel stays a YouTube identity (OAuth, quotas, playlists).
+Do **not** widen `Channel` into a social graph. Channel stays a YouTube identity (OAuth, quotas, playlists). Hub networks only:
 
 ```
 Channel (existing, YT)
@@ -206,25 +216,24 @@ Channel (existing, YT)
         claim, series, episode_n, brand, language
         script, title_hook, frame0_text
         assets: video_mp4, thumb_png, captions
-        craft_audit
         └── Publication[]      # one row per network attempt
-              network: youtube_short | instagram_reel | linkedin_post | github_discussion
+              network: youtube_short | instagram_reel | linkedin_post | x_post
               adapter_payload_json
               status: draft | review | approved | publishing | published | failed
               gates: cmo_voice | designer_sample | video_maker_craft | cos_volume
-NetworkAccount                # IG/LI/GH credentials, daily_budget default 0
+NetworkAccount                # IG/LI/X credentials, daily_budget default 0
   channel_id, network, handle, credentials_ref
 ```
 
-Adapters (interface only): `submit(package) -> handle`, `poll`, `public_url`. YouTube adapter **is** today’s `publish_loop`. LinkedIn + GitHub start as “copy out of seeding kit into `Publication.body`” — same human-post rule as today. Instagram reel = crop/repost of the YT short, no extra render budget without CoS. Each adapter owns its CTA rules so a LinkedIn post can say LinkedIn while the YT script cannot.
+Adapters (interface only): `submit(package) -> handle`, `poll`, `public_url`. YouTube adapter **is** today’s `publish_loop`. LinkedIn + X start as “copy out of seeding kit into `Publication.body`” — same human-post rule as today. Instagram reel = crop/repost of the YT short, no extra render budget without CoS. Each adapter owns its CTA rules so a LinkedIn/X post can name that network while the YT script cannot.
 
-Approval: skip-gate becomes **per Publication**, not per Channel. YT skip-gate today would otherwise blast every network.
+Approval: skip-gate becomes **per Publication**, not per Channel. YT skip-gate today would otherwise blast every hub network.
 
 ### Phase C — CMO console
 
-One board: packages on the X axis, networks on the Y axis. Existing `/review/:id` becomes the YouTube cell. CMO sees voice variants; Designer sees frame0/thumb; Video Maker sees `craft_audit`; Social Ops sees non-YT cells; CoS sees budget=0 cells until yesed. Growth agent keeps writing seeding kits until Phase B publications exist — then it should open `Publication` drafts instead of markdown-only.
+One board: packages on the X axis, hub networks (YouTube, Instagram, LinkedIn, X) on the Y axis. Existing `/review/:id` becomes the YouTube cell. CMO sees voice variants; Designer sees frame0/thumb; Video Maker sees the live craft locks; Social Ops sees non-YT hub cells; CoS sees budget=0 cells until yesed. Growth agent keeps writing seeding kits until Phase B publications exist — then it should open `Publication` drafts instead of markdown-only.
 
-Out of scope until yesed: posting automation, paid APIs, extra daily volume, Cloud-as-product mentions, TTS upgrade.
+Out of scope until yesed: posting automation, paid APIs, extra daily volume, Cloud-as-product mentions, TTS upgrade, GitHub/Community, personal-channel adapters, `craft_audit`.
 
 ---
 

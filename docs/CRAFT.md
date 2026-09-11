@@ -49,10 +49,13 @@ Happy-path OS/RR palettes are live (`theme.resolve(brand=)`). Fallback
 composition ignores brand and Decolar (kinetic title cards).
 
 YPP items **yesed but not in this code** (object-on-frame0, beats ≤3s / no
-mid-video spoken list, series endcard `Subscribe — next {Series} {noun}`):
-see `docs/PIPELINE_REVIEW.md`. Spoken close is still a builder punch; the
-description block still appends Subscribe/Inscreva-se. Do not implement those
-inverts in a growth-agent cycle without CoS.
+mid-video spoken list, series endcard): see `docs/PIPELINE_REVIEW.md`.
+
+CMO voice cut on YPP #5: Subscribe is allowed **only** on the series endcard
+template (`Subscribe — next {series} {noun}.` + chip `· {series}`). Keep live
+`_sanitize_cta` on mid-video / title / generic description. Do **not** invert
+the global CTA ban. Generic description still appends Subscribe/Inscreva-se
+today; that is not the endcard.
 
 ## CTA ban
 
