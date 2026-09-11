@@ -18,6 +18,8 @@ Machine-readable copy: [`schemas/content-brief.schema.json`](schemas/content-bri
 Review instances: news+social [`content-brief.example.json`](schemas/content-brief.example.json); YPP#5 Subscribe-fork [`content-brief.ypp5.example.json`](schemas/content-brief.ypp5.example.json).
 
 `publications[].network` must be the same set as `target_networks` (exactly one adapter each).
+Each publication **must** declare its own native `format` (kind + ratio + size +
+teaser duration). Do **not** reuse one generic cut across networks.
 
 ---
 
@@ -39,11 +41,12 @@ and not a `Topic`:
 
 ```
 ContentBrief
-  └─ Publication[]          one per target network
-       ├─ instagram         → Social Ops after Rodrigo yes
-       ├─ linkedin          → Social Ops after Rodrigo yes
-       ├─ x                 → Social Ops after Rodrigo yes
-       └─ youtube_os        → handoff to existing Video (Channels ops)
+  ├─ art                    ONE object on the brief root (not a second art root)
+  └─ Publication[]          one per target network; native format lives here
+       ├─ instagram         → Reel 9:16 — Social Ops after Rodrigo yes
+       ├─ linkedin          → native video 1:1 (alt 4:5) — Social Ops after Rodrigo yes
+       ├─ x                 → native video 16:9 — Social Ops after Rodrigo yes
+       └─ youtube_os        → Short 9:16 — handoff to existing Video (Channels ops)
 ```
 
 `youtube_os` is optional: only when the brief marks it. It is a pointer into the
@@ -104,10 +107,10 @@ defaults off.
 | `angle` | pillar / angle. `source_url` **required** when `objective=news_angle_social` |
 | `voz` | **CMO delta.** EN spoken/builder. First line **is** spoken (1ª linha falada). Company English. Simple spoken cadence like Rodrigo — not a corporate teaser. |
 | `hard_nos` | locked set below (always in force; extras allowed, removals forbidden) |
-| `art` | must illustrate **this** copy, not a generic O lockup. `asset_path` **or** Designer brief |
+| `art` | **ONE** object on the brief root. Must illustrate **this** copy, not a generic O lockup. `asset_path` **or** Designer brief. Adaptations live on `publications[].format` — **not** a second art root. |
 | `cta` | `https://owera.com` waitlist **only if natural**. **Never** in YouTube title or script |
 | `status` | machine above |
-| `publications` | one adapter object per target network |
+| `publications` | one adapter object per target network; each declares native `format` |
 
 `voz` is the voice field. Do not add a second “copy tone” knob that can drift.
 
@@ -132,16 +135,80 @@ and `app/services/craft.py`).
 
 ---
 
+## Per-network format (locked — Rodrigo YES)
+
+CMO + Designer lock. This table **replaces** any earlier LI/X still proposal
+(LI is **not** still 1.91:1; X is **not** still 1:1). Use **only** this matrix.
+Each publication declares its own native cut. Do not reuse one generic cut.
+
+| network | kind | ratio | size | teaser duration |
+| --- | --- | --- | --- | --- |
+| youtube_os | Short | 9:16 | 1080×1920 | ~30–45s (≤60s) |
+| instagram | Reel | 9:16 | 1080×1920 | ~15–30s |
+| linkedin | native video | 1:1 (alt 4:5) | 1080×1080 (alt 1080×1350) | ~30–45s |
+| x | native video | 16:9 | 1920×1080 | ~15–30s |
+
+Schema field map on `publications[].format`:
+
+| Table | Schema |
+| --- | --- |
+| kind Short | `kind: short` |
+| kind Reel | `kind: reel` |
+| kind native video | `kind: native_video` |
+| ratio / size / teaser duration | `ratio`, `size`, `teaser_duration` — exact strings from the table |
+| LinkedIn alt | `ratio: 4:5` pairs with `size: 1080×1350`; primary is `1:1` / `1080×1080` |
+
+`reuse_generic_cut` is `false` on every publication.
+
+`youtube_os` is the live Short pipeline, OS only (`channel_scope: os_only`).
+Do not re-spec generate / render / publish.
+
+### Designer nits (required)
+
+1. **Teaser, not walkthrough.** Frames are a teaser of the coming-soon product.
+   **NEVER** a final UI / walkthrough-as-if-ready. Hard no walkthrough /
+   Cloud-as-if-ready already locked. Feature videos of Channels Manager are
+   teasers for a future launch (CM still in development), not a product
+   walkthrough.
+2. **Tokens in every aspect.** OS/RR split tokens + Decolar object + widget
+   text `color:#fff` apply in **every** aspect (YT 9:16, IG 9:16, LI 1:1/4:5,
+   X 16:9) — even frames cropped from the teaser.
+3. **IG Reel cut.** The Instagram Reel is the **object beat 0–3s**, not a
+   random crop of the YouTube short.
+
+Art stays **one** object on the brief root (`must_illustrate_copy`, no generic
+O). Those nits are fields on that same `art` object. Per-network adaptations
+(`format.kind` / `ratio` / `size` / `teaser_duration` / IG `cut`) live on
+`publications[]` only.
+
+---
+
 ## Publication adapters
 
-### `instagram` / `linkedin` / `x`
+### `instagram` — Reel 9:16 1080×1920 ~15–30s
 
 Social Ops after `rodrigo_yes`. Company English. Caption follows `voz` (first
 line spoken). Art illustrates the copy. CTA = owera.com waitlist only if the
 sentence would exist without the link.
 
+`format.kind=reel` (not story). `format.cut=object_beat_0_3s` — the object
+beat, not a random crop of the YT short.
+
 `skip_gate` lives on the Publication (default `false`). Do not inherit ch1’s
 YouTube skip-gate.
+
+### `linkedin` — native video 1:1 (alt 4:5)
+
+Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
+
+`format.kind=native_video`. Primary `1:1` / `1080×1080`. Alt `4:5` /
+`1080×1350`. Teaser `~30–45s`. **Not** a 1.91:1 still.
+
+### `x` — native video 16:9 1920×1080 ~15–30s
+
+Social Ops after `rodrigo_yes`. Same voice / art / CTA rules as Instagram.
+
+`format.kind=native_video`. `16:9` / `1920×1080`. **Not** a 1:1 still.
 
 ### `youtube_os` — reference the live short pipeline, do not re-spec it
 
@@ -151,9 +218,11 @@ brief must satisfy:
 
 | Invariant | Live seat | This spec |
 | --- | --- | --- |
+| native format | live Short 9:16 1080×1920 | `kind=short`, `ratio=9:16`, `size=1080×1920`, teaser `~30–45s (≤60s)` |
 | frame0 = spoken `· <series> <nn>` | title gate + Decolar | same; first line **is** the spoken line |
-| Decolar object | `_lock_opening_hook` / `_hook_text` — frame0/thumb = title-before-`·` or that claim | same |
+| Decolar object | `_lock_opening_hook` / `_hook_text` — frame0/thumb = title-before-`·` or that claim | same; also on every other publication aspect |
 | OS vs RR | `craft.brand_of` → `os` (B&W) vs `rr` (warm ink) | this hub is **OS only**; RR is out |
+| widget text | live `color:#fff` on object widgets | same in every aspect |
 | beats ≤ 3s | live `align_storyboard` uses other caps (`_MID_MAX=7.5`) | **spec invariant for brief-driven YT**; do **not** retune live align in this PR |
 | CTA | waitlist / owera.com **never** in title or script | same |
 
@@ -192,6 +261,7 @@ Do not implement endcard or sanitize changes here.
 - `Settings.render_concurrency = 1`
 - Live generate / render / publish / spend / deploy
 - Personal channels, GitHub/Community
+- Budget raise, auto-publish, intake UI
 
 ---
 

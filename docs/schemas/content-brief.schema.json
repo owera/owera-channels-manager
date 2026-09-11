@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://owera.com/schemas/content-brief.schema.json",
   "title": "ContentBrief",
-  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only.",
+  "description": "DESIGN-ONLY CMO brief v2 contract. Not imported by the app. Implementation needs a separate Rodrigo yes. Hub networks are youtube_os, instagram, linkedin, x only. Per-network format matrix is locked: YT Short 9:16, IG Reel 9:16, LI native video 1:1 (alt 4:5), X native video 16:9. LI is not still 1.91:1. X is not still 1:1.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -49,7 +49,8 @@
     "publications": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/definitions/publication" }
+      "items": { "$ref": "#/definitions/publication" },
+      "description": "Exactly one adapter per target_networks entry. Native format lives here, not on a second art root."
     }
   },
   "if": {
@@ -111,12 +112,46 @@
     "art": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["must_illustrate_copy", "generic_o_lockup"],
+      "description": "ONE object on the brief root. Adaptations are publications[].format, not a second art root.",
+      "required": [
+        "must_illustrate_copy",
+        "generic_o_lockup",
+        "teaser_not_walkthrough",
+        "teaser_not_final_ui",
+        "channels_manager_coming_soon",
+        "os_rr_split_every_aspect",
+        "decolar_object_every_aspect",
+        "widget_text_color"
+      ],
       "properties": {
         "must_illustrate_copy": { "const": true },
         "generic_o_lockup": {
           "const": false,
           "description": "Generic O lockup is forbidden."
+        },
+        "teaser_not_walkthrough": {
+          "const": true,
+          "description": "Teaser of the coming-soon product. NEVER a walkthrough or Cloud-as-if-ready."
+        },
+        "teaser_not_final_ui": {
+          "const": true,
+          "description": "Never a final UI / walkthrough-as-if-ready frame."
+        },
+        "channels_manager_coming_soon": {
+          "const": true,
+          "description": "Channels Manager is still in development. Feature videos are teasers for a future launch, not a product walkthrough."
+        },
+        "os_rr_split_every_aspect": {
+          "const": true,
+          "description": "OS/RR split tokens apply in every publication aspect, including stills/frames cropped from the teaser."
+        },
+        "decolar_object_every_aspect": {
+          "const": true,
+          "description": "Decolar object applies in every publication aspect."
+        },
+        "widget_text_color": {
+          "const": "#fff",
+          "description": "Object widget text color:#fff in every aspect."
         },
         "asset_path": { "type": "string", "minLength": 1 },
         "designer_brief": { "type": "string", "minLength": 1 }
@@ -147,7 +182,7 @@
     },
     "publication": {
       "type": "object",
-      "required": ["network", "skip_gate"],
+      "required": ["network", "skip_gate", "format"],
       "properties": {
         "network": { "$ref": "#/definitions/network" },
         "skip_gate": {
@@ -159,7 +194,8 @@
           "type": "integer",
           "const": 0,
           "description": "Default 0 for newly materialized networks. Do not raise live YT budgets here."
-        }
+        },
+        "format": { "$ref": "#/definitions/nativeFormat" }
       },
       "allOf": [
         {
@@ -167,16 +203,177 @@
             "properties": { "network": { "const": "youtube_os" } },
             "required": ["network"]
           },
-          "then": { "$ref": "#/definitions/youtubeOsAdapter" }
+          "then": {
+            "allOf": [
+              { "$ref": "#/definitions/youtubeOsAdapter" },
+              { "$ref": "#/definitions/youtubeOsFormat" }
+            ]
+          }
         },
         {
           "if": {
-            "properties": { "network": { "enum": ["instagram", "linkedin", "x"] } },
+            "properties": { "network": { "const": "instagram" } },
             "required": ["network"]
           },
-          "then": { "$ref": "#/definitions/socialAdapter" }
+          "then": {
+            "allOf": [
+              { "$ref": "#/definitions/socialAdapter" },
+              { "$ref": "#/definitions/instagramFormat" }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "network": { "const": "linkedin" } },
+            "required": ["network"]
+          },
+          "then": {
+            "allOf": [
+              { "$ref": "#/definitions/socialAdapter" },
+              { "$ref": "#/definitions/linkedinFormat" }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "network": { "const": "x" } },
+            "required": ["network"]
+          },
+          "then": {
+            "allOf": [
+              { "$ref": "#/definitions/socialAdapter" },
+              { "$ref": "#/definitions/xFormat" }
+            ]
+          }
         }
       ]
+    },
+    "nativeFormat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["short", "reel", "native_video"],
+          "description": "Table: Short / Reel / native video. Not story. Not still+caption."
+        },
+        "ratio": {
+          "type": "string",
+          "enum": ["9:16", "1:1", "4:5", "16:9"],
+          "description": "Native aspect. Do not reuse one generic cut."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["1080×1920", "1080×1080", "1080×1350", "1920×1080"],
+          "description": "Native pixel size. Multiplication sign ×, not x."
+        },
+        "teaser_duration": {
+          "type": "string",
+          "enum": ["~30–45s (≤60s)", "~15–30s", "~30–45s"],
+          "description": "Exact teaser-duration strings from the locked table."
+        },
+        "reuse_generic_cut": {
+          "const": false,
+          "description": "Each network gets its own native cut."
+        },
+        "cut": {
+          "type": "string",
+          "description": "Instagram only: object_beat_0_3s."
+        }
+      }
+    },
+    "youtubeOsFormat": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "object",
+          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
+          "properties": {
+            "kind": { "const": "short" },
+            "ratio": { "const": "9:16" },
+            "size": { "const": "1080×1920" },
+            "teaser_duration": { "const": "~30–45s (≤60s)" },
+            "reuse_generic_cut": { "const": false }
+          },
+          "not": { "required": ["cut"] }
+        }
+      }
+    },
+    "instagramFormat": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "object",
+          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut", "cut"],
+          "properties": {
+            "kind": { "const": "reel" },
+            "ratio": { "const": "9:16" },
+            "size": { "const": "1080×1920" },
+            "teaser_duration": { "const": "~15–30s" },
+            "reuse_generic_cut": { "const": false },
+            "cut": {
+              "const": "object_beat_0_3s",
+              "description": "IG Reel is the object beat 0–3s, not a random crop of the YT short."
+            }
+          }
+        }
+      }
+    },
+    "linkedinFormat": {
+      "type": "object",
+      "description": "Native video. Not still 1.91:1. Primary 1:1 / 1080×1080; alt 4:5 / 1080×1350.",
+      "properties": {
+        "format": {
+          "type": "object",
+          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
+          "properties": {
+            "kind": { "const": "native_video" },
+            "ratio": { "enum": ["1:1", "4:5"] },
+            "teaser_duration": { "const": "~30–45s" },
+            "reuse_generic_cut": { "const": false }
+          },
+          "not": { "required": ["cut"] },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "ratio": { "const": "1:1" } },
+                "required": ["ratio"]
+              },
+              "then": {
+                "properties": { "size": { "const": "1080×1080" } }
+              }
+            },
+            {
+              "if": {
+                "properties": { "ratio": { "const": "4:5" } },
+                "required": ["ratio"]
+              },
+              "then": {
+                "properties": { "size": { "const": "1080×1350" } }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "xFormat": {
+      "type": "object",
+      "description": "Native video 16:9. Not still 1:1.",
+      "properties": {
+        "format": {
+          "type": "object",
+          "required": ["kind", "ratio", "size", "teaser_duration", "reuse_generic_cut"],
+          "properties": {
+            "kind": { "const": "native_video" },
+            "ratio": { "const": "16:9" },
+            "size": { "const": "1920×1080" },
+            "teaser_duration": { "const": "~15–30s" },
+            "reuse_generic_cut": { "const": false }
+          },
+          "not": { "required": ["cut"] }
+        }
+      }
     },
     "youtubeOsAdapter": {
       "type": "object",
