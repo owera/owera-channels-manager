@@ -34,7 +34,7 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
-_MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — see align_storyboard max-hold
+_MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — MUST equal craft.MID_BEAT_MAX_S
 # Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
 # claim. Surplus stays on the payoff / earlier mids — never back on frame0
 # and never a long neon Follow card. Mid-body still dumps into the CTA first

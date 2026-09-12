@@ -389,7 +389,7 @@ def detect(session: Session) -> dict:
             craft_gate_blocked.append({
                 "id": v.id, "channel_id": v.channel_id, "title": v.title,
                 "status": v.status,
-                "suggested_action": "requeue (Video Maker craft gate — fix object 0–3s / beat ≤3s / statement≤1)",
+                "suggested_action": "requeue (Video Maker craft gate — fix object 0–3s / beat ≤ mid-hold / statement≤1)",
                 "auto": False,
                 "detail": reason,
             })

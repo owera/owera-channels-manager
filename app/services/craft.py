@@ -543,7 +543,13 @@ OBJECT_BEAT_TYPES = frozenset({"code", "command", "diagram", "compare", "stat"})
 TYPOGRAPHY_ONLY_TYPES = frozenset({"hook", "statement"})
 CTA_TYPES = frozenset({"cta", "endcard"})
 OPENING_WINDOW_S = 3.0
-MID_BEAT_MAX_S = 3.0
+# Gate B measures *aligned* cue-spans (next_cue − cue), the same quantity
+# align_storyboard caps. The YPP prompt still asks for ~3s cards; the fail
+# line must match storyboard._MID_MAX (7.5s, R4 DRAG). Shipping 3.0 here
+# before the aligner could emit 3s 100%-failed overnight shorts (v1251/v1253
+# 2026-09-12). Do not retune to 3.0 without a gated R4 experiment that also
+# drops _MID_MAX.
+MID_BEAT_MAX_S = 7.5
 CTA_BEAT_MAX_S = 4.0
 STATEMENT_MAX_SHORTS = 1
 LIST_MAX_PER_SHORT = 1
@@ -793,8 +799,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     if b_hits:
         checks["B"] = "FAIL"
         reasons.append(
-            "[B] Beats ≤3s: FAIL — " + "; ".join(b_hits) +
-            ". Mid cards/slides must be ≤3.0s; cta/endcard series ≤4.0s "
+            f"[B] Beats ≤{MID_BEAT_MAX_S:.0f}s: FAIL — " + "; ".join(b_hits) +
+            f". Mid cards/slides must be ≤{MID_BEAT_MAX_S:.1f}s; "
+            f"cta/endcard series ≤{CTA_BEAT_MAX_S:.1f}s "
             "(not a Follow-tomorrow hold)."
         )
 

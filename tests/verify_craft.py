@@ -569,7 +569,7 @@ def _pass_beats(*_a, **_k):
 
 g = craft.video_maker_gate(_pass_beats())
 ok(g["result"] == "PASS" and g["checks"] == {"A": "PASS", "B": "PASS", "C": "PASS"},
-   "golden short: object hook + code in 0–3s, mid ≤3s, cta ≤4s, 0 statements")
+   "golden short: object hook + code in 0–3s, mid ≤7.5s, cta ≤4s, 0 statements")
 ok(g["reasons"] == [], "PASS carries no fail reasons")
 ok(craft.video_maker_gate_reason({"beats": _pass_beats()}, "short") is None,
    "video_maker_gate_reason is None on PASS")
@@ -609,18 +609,18 @@ a_obj = [
 ]
 ok(craft.video_maker_gate(a_obj)["checks"]["A"] == "PASS",
    "A PASS: hook.object=terminal counts even if the rich beat starts after t=3")
-ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "FAIL",
-   "B still FAILs that 3.2s hook (next_cue − cue > 3.0) — letters are independent")
+ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "PASS",
+   "B PASSes a 3.2s hook (under the 7.5s aligner cap) — letters stay independent")
 
-# B — mid >3s
+# B — mid over the aligner cap (storyboard._MID_MAX / craft.MID_BEAT_MAX_S)
 b_mid = _pass_beats()
-b_mid[1] = {"type": "code", "start": 2.0, "dur": 4.5, "lines": ["x"], "cue": "slow"}
-b_mid[2] = {"type": "stat", "start": 6.6, "dur": 2.0, "value": "1", "cue": "one"}
-b_mid[3] = {"type": "cta", "start": 8.6, "dur": 3.0, "text": "Go", "cue": "go"}
+b_mid[1] = {"type": "code", "start": 2.0, "dur": 8.0, "lines": ["x"], "cue": "slow"}
+b_mid[2] = {"type": "stat", "start": 10.1, "dur": 2.0, "value": "1", "cue": "one"}
+b_mid[3] = {"type": "cta", "start": 12.2, "dur": 3.0, "text": "Go", "cue": "go"}
 gb = craft.video_maker_gate(b_mid)
 ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
-   "B FAIL: mid code held 4.60s (6.6 − 2.0)")
-ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
+   "B FAIL: mid code held 8.10s (10.1 − 2.0)")
+ok("7.5" in gb["reasons"][0], "B fail reason cites the 7.5s mid cap")
 
 # B — CTA >4s
 b_cta = _pass_beats()

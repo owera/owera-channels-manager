@@ -102,12 +102,16 @@ type ∈ {code, command, diagram, compare, stat} **or** the hook has a non-empty
 FAIL: only hook/statement with text+emoji (typography-only) until t=3.
 Emoji does **not** count as an object.
 
-### B — Beats ≤3s
+### B — Beats ≤ mid-hold (`craft.MID_BEAT_MAX_S`, live **7.5s**)
 
 PASS: for every beat except the final `cta` / endcard series, duration =
-`next_cue_start − cue_start` (last pre-cta: `cta_cue − cue`) ≤ 3.0s.
+`next_cue_start − cue_start` (last pre-cta: `cta_cue − cue`) ≤
+`MID_BEAT_MAX_S`. That constant **must equal** `storyboard._MID_MAX`
+(the aligner cap). The prompt still asks for ~3s cards; the fail line is
+the aligned hold, not the prompt target. Do not drop this to 3.0s until
+a gated R4 experiment also drops `_MID_MAX`.
 
-FAIL: any mid card/slide >3.0s.
+FAIL: any mid card/slide > `MID_BEAT_MAX_S`.
 
 cta/endcard series: max 4.0s (not a Follow-tomorrow hold).
 
@@ -116,8 +120,8 @@ cta/endcard series: max 4.0s (not a Follow-tomorrow hold).
 PASS:
 
 - `statement` ≤ 1 in the whole short (tightened from the old tolerance of 2)
-- `list` forbidden, **or** if kept: max 1 list, ≤3 items, beat ≤3.0s, item
-  stagger ≤0.6s
+- `list` forbidden, **or** if kept: max 1 list, ≤3 items, beat ≤
+  `MID_BEAT_MAX_S`, item stagger ≤0.6s
 - Prefer code/command/diagram/compare/stat in the middle
 
 FAIL: ≥2 `statement` **or** a list with >3 items **or** list/statement that
