@@ -709,12 +709,13 @@ _CTX = {"i": 0, "start": 0.0, "dur": 11.29, "is_last": True,
 _, ltw = storyboard.render_list(
     {"title": "Steps", "items": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
      "start": 0.0, "dur": 11.29},
-    _CTX)
+    dict(_CTX, content_format="long"))
 row2 = [t for t in ltw if "#b0r2" in t]
 ok(row2, "third list row emits a tween targeting #b0r2")
 ok(any(t.endswith(",2.45);") for t in row2),
    "long 11.29s / 3-item list reveals last row at 0.25+2*1.1=2.45s "
-   "(uncapped would be ~7.24s — the 07-29 incomplete-card bug)")
+   "(uncapped would be ~7.24s — the 07-29 incomplete-card bug; "
+   "content_format=long is explicit so missing/leftover cannot hide here)")
 tight_ctx = dict(_CTX, dur=2.0, duration=2.0)
 _, ttw = storyboard.render_list(
     {"items": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
@@ -730,6 +731,43 @@ _, stw = storyboard.render_list(
 row2s = [t for t in stw if "#b0r2" in t]
 ok(any(t.endswith(",1.45);") for t in row2s),
    "Shorts 11.29s / 3-item list reveals last row at 0.25+2*0.6=1.45s (stagger ≤0.6)")
+
+# Defect: render_list used content_format == "short" for the 0.6s stagger,
+# so empty/"LONG"/"medium"/missing leftovers (treated as shorts by
+# _sanitize_cta / _demote / the retry prompt via != "long") used the
+# 1.1s long-form cap. Same class as BACKLOG 23–26 / #38.
+print("render_list: leftover formats use the Shorts stagger (!= long)")
+_LIST3 = {"title": "Steps", "items": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
+          "start": 0.0, "dur": 11.29}
+_MISSING = object()
+
+
+def _last_row_at(fmt):
+    ctx = dict(_CTX) if fmt is _MISSING else dict(_CTX, content_format=fmt)
+    _, tw = storyboard.render_list(_LIST3, ctx)
+    row = [t for t in tw if "#b0r2" in t]
+    return any(t.endswith(",1.45);") for t in row)
+
+ok(_last_row_at(""),
+   "empty-format leftover list last-row at 1.45s "
+   "(== 'short' would use the 1.1s long cap → 2.45s)")
+ok(_last_row_at("LONG"),
+   "'LONG' leftover list last-row at 1.45s "
+   "(case-sensitive == 'long' only; == 'short' used 2.45s)")
+ok(_last_row_at("medium"),
+   "'medium' leftover list last-row at 1.45s "
+   "(allowlist short+empty+LONG would still miss this)")
+ok(_last_row_at(None),
+   "content_format=None list last-row at 1.45s "
+   "(== 'short' treated None as long-form 2.45s)")
+ok(_last_row_at(_MISSING),
+   "missing content_format key list last-row at 1.45s "
+   "(ctx.get defaulted to the long cap)")
+ok(_last_row_at("short"),
+   "canonical short still 1.45s after leftover pins")
+_, long_tw = storyboard.render_list(_LIST3, dict(_CTX, content_format="long"))
+ok(any(t.endswith(",2.45);") for t in long_tw if "#b0r2" in t),
+   "canonical long still 2.45s (leftover gate does not invert longs)")
 ol_html, _ = storyboard.render_list(
     {"items": [{"text": "a"}, {"text": "b"}], "ordered": True, "start": 0.0, "dur": 3},
     dict(_CTX, dur=3.0))
@@ -846,14 +884,33 @@ ok(not storyboard._variety_ok([{"type": "hook"}, {"type": "cta"}]),
    "hook+cta only (no mid) fails variety")
 ok(not storyboard._variety_ok([{"type": "hook"}, {"type": "stat"}, {"type": "cta"}]),
    "a single rich type fails the ≥2 floor")
-ok(storyboard._variety_ok([
+_TWO_STMT = [
     {"type": "hook"}, {"type": "statement"}, {"type": "statement"},
     {"type": "stat"}, {"type": "list"}, {"type": "cta"}
-]), "two statements + two rich types still passes (≤2 statements)")
-ok(not storyboard._variety_ok([
-    {"type": "hook"}, {"type": "statement"}, {"type": "statement"},
-    {"type": "stat"}, {"type": "list"}, {"type": "cta"}
-], "short"), "shorts variety tightens statement cap to 1")
+]
+ok(storyboard._variety_ok(_TWO_STMT, "long"),
+   "long-form allows two statements + two rich types (≤2 statements)")
+ok(not storyboard._variety_ok(_TWO_STMT, "short"),
+   "shorts variety tightens statement cap to 1")
+
+# Defect: _variety_ok used content_format == "short" for the cap-1 gate,
+# so empty/"LONG"/"medium"/None leftovers (the retry prompt, _sanitize_cta,
+# and _demote all use != "long") kept the long-form ≤2 cap. Craft gate C
+# wants ≤1 statement on leftover shorts. Same class as BACKLOG 23–26 / #38.
+print("_variety_ok: leftover formats use the shorts statement cap (!= long)")
+ok(not storyboard._variety_ok(_TWO_STMT, ""),
+   "empty-format leftover is cap-1 "
+   "(== 'short' would allow two statements)")
+ok(not storyboard._variety_ok(_TWO_STMT, "LONG"),
+   "'LONG' leftover is cap-1 (case-sensitive == 'long' only)")
+ok(not storyboard._variety_ok(_TWO_STMT, "medium"),
+   "'medium' leftover is cap-1 "
+   "(allowlist short+empty+LONG would still miss this)")
+ok(not storyboard._variety_ok(_TWO_STMT, None),
+   "content_format=None is cap-1 "
+   "(== 'short' treated None as the historical ≤2 default)")
+ok(storyboard._variety_ok(_TWO_STMT, "long"),
+   "canonical long still allows two statements after leftover pins")
 sys_code = storyboard._system_prompt(["hook", "cta", "code", "stat"])
 ok("2b." in sys_code and "`code` or `command`" in sys_code,
    "system prompt includes rule 2b when a Phase-B type is allowed")

@@ -1431,3 +1431,24 @@ flag the operator step in the commit body.
 - **acceptance:** PATCH weight=null / false is 4xx and leaves the
   row unchanged; weight=true does not unpark; weight=0 still parks;
   weight=3 still persists; mixed 400 writes nothing.
+
+### 40. ✅ DONE (code shipped to main 2026-09-12) storyboard leftover formats used the long-form variety/row-step — normal
+- **resolution (2026-09-12):** `_variety_ok` and `render_list` now use the same
+  `(content_format or "short") != "long"` gate as `_sanitize_cta`,
+  `_demote_nonsense_diagrams`, and the variety-retry prompt. Empty /
+  `"LONG"` / `"medium"` / None leftovers get the shorts statement cap
+  (≤1) and the 0.6s list stagger; canonical `"long"` keeps ≤2 and 1.1s.
+  The previous `== "short"` treated leftovers as long-form, so craft
+  gate C (≤1 statement, stagger ≤0.6s) was skipped on leftover shorts.
+  Suite: `tests/verify_storyboard.py` 293 → 305. Isolated commit;
+  no money-path files. Live topics remain canonical after #38 (latent
+  until a leftover reaches compose).
+- **why (found 2026-09-12 ranking remaining `== "short"` after #38):**
+  #38 closed the leftover-format write on PATCH /api/topics. The last
+  two `== "short"` consumers in the render pipeline still treated
+  leftovers as long-form while the rest of `storyboard.py` already used
+  `!= "long"`.
+- **caution:** normal (`storyboard.py` only; not a money-path file).
+- **acceptance:** empty/`LONG`/`medium`/None two-statement boards fail
+  `_variety_ok`; leftover lists last-row at 1.45s; canonical long still
+  2.45s / two statements.

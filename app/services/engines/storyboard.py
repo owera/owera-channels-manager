@@ -707,7 +707,11 @@ def render_list(b, ctx):
     # beats and completes the card early on long ones.
     n = len(b["items"])
     win = max(0.0, ctx["dur"] - 0.8)
-    cap = _ROW_STEP_SHORTS if ctx.get("content_format") == "short" else _ROW_STEP_MAX
+    # Same != "long" gate as _sanitize_cta / _demote / the retry prompt:
+    # empty/"LONG"/"medium"/missing leftovers are shorts (craft gate C stagger).
+    cap = (_ROW_STEP_SHORTS
+           if (ctx.get("content_format") or "short") != "long"
+           else _ROW_STEP_MAX)
     step = min(win / n, cap) if n else 0
     tw = []
     if b.get("title"):
@@ -1131,10 +1135,11 @@ def _variety_ok(beats, content_format=None) -> bool:
     """A storyboard is varied enough when it isn't mostly plain statements and uses at
     least two distinct explanatory beat types (the whole point of the redesign).
 
-    Shorts tighten statement ≤1 (Video Maker craft gate C). Default/long keep the
-    historical ≤2 so existing callers and long-form drafts stay valid.
+    Shorts tighten statement ≤1 (Video Maker craft gate C). Long-form keeps the
+    historical ≤2. Leftover formats (empty / "LONG" / "medium" / None) follow
+    the same != "long" gate as the retry prompt, _sanitize_cta, and _demote.
     """
-    stmt_cap = 1 if content_format == "short" else 2
+    stmt_cap = 1 if (content_format or "short") != "long" else 2
     mid = [b["type"] for b in beats if b["type"] not in ("hook", "cta")]
     return bool(mid) and mid.count("statement") <= stmt_cap and len(_rich_types(beats)) >= 2
 
