@@ -392,7 +392,11 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         quota.log(session, kind="retry", status="success", video_id=v.id,
                   channel_id=v.channel_id,
                   detail=f"retried via API: {v.status} -> approved (artifact kept, re-publish)")
-        return _set_status(session, video_id, VideoStatus.APPROVED, error=None, approved_at=utcnow())
+        # Reset the stuck-publish cap so an operator/agent retry after a diagnosed
+        # root cause (token parse, network) gets a full publish_max_retries budget
+        # instead of one hang and an immediate give-up (retry_count already at cap).
+        return _set_status(session, video_id, VideoStatus.APPROVED, error=None,
+                           approved_at=utcnow(), retry_count=0)
     quota.log(session, kind="retry", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"retried via API: {v.status} -> queued (re-render)")

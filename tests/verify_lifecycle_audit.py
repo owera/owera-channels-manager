@@ -70,7 +70,8 @@ with Session(engine) as s:
     s.add(Video(channel_id=1, topic_id=1, subject="upload failed",
                 status=VideoStatus.FAILED, error="upload 500",
                 video_path="storage/videos/5/video.mp4",
-                title="Hook · Copilot Credits 1"))         # id 6
+                title="Hook · Copilot Credits 1",
+                retry_count=5))                            # id 6
     s.add(Video(channel_id=1, topic_id=1, subject="render failed too",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 7
     s.commit()
@@ -188,6 +189,8 @@ ok(r.json().get("id") == 6 and r.json().get("status") == VideoStatus.APPROVED,
 with Session(engine) as s:
     ok(s.get(Video, 6).status == VideoStatus.APPROVED,
        "video 6 (has video_path) goes back to approved for re-publish")
+    ok(s.get(Video, 6).retry_count == 0,
+       "API retry resets retry_count so the stuck-publish cap does not immediately give up")
     rr = runs(s, "retry")
     ok(len(rr) == 1, "exactly one retry JobRun written")
     ok(rr[0].video_id == 6 and rr[0].channel_id == 1 and rr[0].status == "success",

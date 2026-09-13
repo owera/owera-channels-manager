@@ -313,6 +313,47 @@ os.makedirs(Path(_TMP) / "both", exist_ok=True)
 ok(youtube.has_token("both") is True, "token.json present -> has_token True")
 ok(youtube.has_client_secret("both") is True, "both files present")
 
+print("token.json trailing-data parse (the 2026-09-13 Extra data stall)")
+from datetime import datetime, timedelta, timezone
+_info = {
+    "token": "ya29.fake-access",
+    "refresh_token": "1//fake-refresh",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_id": "x.apps.googleusercontent.com",
+    "client_secret": "y",
+    "universe_domain": "googleapis.com",
+    "account": "",
+    "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"),
+}
+_clean, _trail = youtube._loads_token_info(json.dumps(_info))
+ok(_clean == _info and _trail is False, "clean token.json parses with no trailing flag")
+_raw_extra = json.dumps(_info) + 'token":"garbage"}'
+_parsed, _trail = youtube._loads_token_info(_raw_extra)
+ok(_parsed == _info and _trail is True,
+   "trailing bytes after a valid object are ignored (json.loads would Extra data)")
+ok(youtube._loads_token_info("{not json") == (None, False),
+   "broken JSON returns (None, False) not an exception")
+ok(youtube._loads_token_info("") == (None, False), "empty body returns (None, False)")
+ok(youtube._loads_token_info("[1,2]") == (None, False),
+   "a JSON array is not a token object")
+
+os.makedirs(Path(_TMP) / "trailing", exist_ok=True)
+(Path(_TMP) / "trailing" / "client_secret.json").write_text("{}")
+(Path(_TMP) / "trailing" / "token.json").write_text(_raw_extra)
+_creds = youtube._load_creds("trailing")
+ok(_creds is not None and _creds.valid,
+   "_load_creds returns valid creds from a trailing-garbage token.json")
+_healed = (Path(_TMP) / "trailing" / "token.json").read_text()
+ok(json.loads(_healed)["refresh_token"] == "1//fake-refresh",
+   "trailing-garbage token.json is rewritten as clean JSON on a valid load")
+try:
+    json.loads(_healed)
+    _healed_ok = True
+except json.JSONDecodeError:
+    _healed_ok = False
+ok(_healed_ok, "healed token.json is json.loads-clean")
+
 
 # ---------------------------------------------------------------------------
 # Fake Data API service

@@ -28,6 +28,7 @@ regress:
 Uses an in-memory SQLite DB and stubs the YouTube calls — no network, no creds.
 Exits non-zero on the first failed assertion.
 """
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -146,6 +147,29 @@ publish_loop._publish_one(s, ch, v)
 ok(ch.oauth_status == OAuthStatus.EXPIRED, "revoked token flips the channel to EXPIRED")
 ok(v.status == VideoStatus.APPROVED, "video returns to approved, not stranded in publishing")
 youtube.has_token = _ORIG_HAS
+
+# --- publish_one: get_service crash must not leave PUBLISHING (2026-09-13) ---
+print("publish_one: get_service crash reverts to approved")
+
+
+def _raise_json_extra(slug):
+    raise json.JSONDecodeError("Extra data", "{...}x", 5)
+
+
+youtube.get_service = _raise_json_extra
+s = fresh_session()
+ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+               title="T · Copilot Credits 1")
+publish_loop._publish_one(s, ch, v)
+ok(v.status == VideoStatus.APPROVED,
+   "JSONDecodeError from get_service returns the video to approved (not PUBLISHING)")
+ok(ch.oauth_status == OAuthStatus.CONNECTED,
+   "a parse error does not flip oauth (the token may still be healable)")
+gs_runs = s.exec(select(JobRun).where(JobRun.video_id == v.id, JobRun.kind == "publish")).all()
+ok(any("get_service failed" in (r.detail or "") for r in gs_runs),
+   "get_service crash is logged as a publish error")
+youtube.get_service = _ORIG_GET
 
 # --- publish_one: upload stall retry-then-fail -------------------------------
 print("publish_one: upload stall retry-then-fail")

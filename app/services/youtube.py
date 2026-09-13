@@ -8,6 +8,7 @@ Generalizes channel/upload.py to:
 """
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -29,6 +30,8 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from app.config import settings
+
+logger = logging.getLogger("manager.youtube")
 
 # Full youtube scope so we can manage playlists, not just upload. Analytics read is
 # requested only at CONSENT time. The Data-API path (get_service) loads creds with NO
@@ -152,12 +155,37 @@ def has_token(slug: str) -> bool:
     return token_path(slug).exists()
 
 
+def _loads_token_info(raw: str) -> tuple[Optional[dict], bool]:
+    """Parse a token.json body. Returns ``(info, had_trailing_data)``.
+
+    ``json.loads`` rejects a valid object with trailing bytes (``JSONDecodeError:
+    Extra data``). That exact shape stranded ch1 uploads in PUBLISHING on
+    2026-09-12/13: ``get_service`` raised after the row was already committed
+    to PUBLISHING, ``tick()`` rolled back nothing, recovery re-queued 5×900s,
+    then failed the videos. Take the first JSON object and ignore the tail.
+    """
+    if not raw or not str(raw).strip():
+        return None, False
+    try:
+        info, end = json.JSONDecoder().raw_decode(raw)
+    except json.JSONDecodeError:
+        return None, False
+    if not isinstance(info, dict):
+        return None, False
+    return info, bool(raw[end:].strip())
+
+
 def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credentials]:
     tp = token_path(slug)
     if not tp.exists():
         return None
     raw = tp.read_text()
-    info = json.loads(raw)
+    info, trailing = _loads_token_info(raw)
+    if info is None:
+        return None
+    if trailing:
+        logger.warning("token.json for %s has trailing data after the first "
+                       "JSON object — using the first object", slug)
     if scopes is None:
         # Unpinned load (see SCOPES note): drop the stored scopes field too —
         # from_authorized_user_info falls back to it, and tokens persisted by the
@@ -165,6 +193,9 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
         info.pop("scopes", None)
     creds = Credentials.from_authorized_user_info(info, scopes)
     if creds and creds.valid:
+        if trailing:
+            # Heal the on-disk file so the next load is a clean json.loads.
+            _write_atomic(tp, creds.to_json())
         return creds
     if creds and creds.expired and creds.refresh_token:
         try:
@@ -194,7 +225,12 @@ def get_service(slug: str):
     never opens a browser here (that only happens in connect_interactive)."""
     if not has_client_secret(slug):
         raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
-    creds = _load_creds(slug)
+    try:
+        creds = _load_creds(slug)
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        raise NeedsConnect(
+            f"token unreadable for channel '{slug}' — reconnect required ({e})"
+        ) from e
     if creds is None:
         raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
     return build("youtube", "v3", credentials=creds)

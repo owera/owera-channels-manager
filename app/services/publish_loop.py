@@ -307,6 +307,18 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   channel_id=channel.id, detail=f"needs reconnect: {e}")
         notify.mark_dead_committed(session, channel, str(e))
         return
+    except Exception as e:
+        # JSONDecodeError / unexpected get_service crash used to propagate out of
+        # _publish_one AFTER this function had already committed PUBLISHING;
+        # tick() then rolled back nothing and the video sat publishing until the
+        # 900s recovery cap (ch1 v1251/v1252 on 2026-09-12/13). Revert to
+        # approved so the drip is not blocked; the next tick retries.
+        video.status = VideoStatus.APPROVED
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=f"get_service failed: {e}")
+        logger.exception("get_service failed for channel %s video %s",
+                         channel.slug, video.id)
+        return
 
     # Ensure the topic playlist BEFORE upload so the description can link it.
     # NOTE: never pre-judge a stored playlist id by its shape — YouTube returns more
