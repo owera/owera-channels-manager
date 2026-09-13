@@ -32,6 +32,9 @@ Pins:
     Empty-blur ``Number("") === 0`` would silently halt publish/render;
     ``Number("x") === NaN`` → JSON ``null`` setattr TypeErrors the tick.
     Restore + skip PATCH; typed 0 still PATCHes (min=0).
+  * Channels.tsx generate-count still ``Number()``d. After #41 that 0 is
+    a 400 instead of a fake-full 200. Restore default 8 and skip the
+    POST; typed ``2`` still generates. min=1 (0 is not legal).
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db,
 no network, lifespan/scheduler never started). The blur helper is driven
@@ -403,8 +406,8 @@ ok('from "../intFromBlur"' in channels_tsx,
    "Channels.tsx imports intFromBlur (not an inlined copy)")
 ok("intFromBlur(e.target.value, 0)" in channels_tsx,
    "budget blur uses intFromBlur with min=0 (typed 0 is still legal)")
-ok("intFromBlur(e.target.value, 1)" not in channels_tsx,
-   "budget blur does not reuse the concurrency min=1 (0 must PATCH)")
+ok("const n = intFromBlur(e.target.value, 0);" in channels_tsx,
+   "commitBudget binds min=0 (typed 0 still PATCHes; generate may use min=1)")
 ok("if (n === null) { e.target.value = String(channel[key]); return; }" in channels_tsx,
    "null restores the current budget AND returns (does not PATCH)")
 ok("updateChannel.mutate({ id: channel.id, body: { [key]: n } })" in channels_tsx,
@@ -417,5 +420,23 @@ ok("valueAsNumber" not in channels_tsx,
    "Channels.tsx does not use valueAsNumber (empty is 0, same class as Number(''))")
 ok("+e.target.value" not in channels_tsx,
    "Channels.tsx does not coerce with unary-plus")
+
+print("Channels.tsx generate-count skips mutate instead of Number('')===0")
+# After #41, count=0 is a 400. Empty Number("")===0 then Generate still
+# POSTs 0. Same choke point as budget, min=1 (0 is not legal).
+ok("setCount(Number(e.target.value))" not in channels_tsx,
+   "generate-count onChange does not Number() (Number('')===0 is now a 400)")
+ok("intFromBlur(el.value, 1)" in channels_tsx,
+   "generate-count uses intFromBlur(el.value, 1) (min=1; 0 is not legal)")
+ok('el.value = "8"' in channels_tsx,
+   "null generate-count restores default 8 (not 0, not the budget restore)")
+ok("generateVideos.mutate({ id: topic.id, count: n })" in channels_tsx,
+   "valid int still POSTs generate with the parsed n")
+ok("generateVideos.mutate({ id: topic.id, count })" not in channels_tsx,
+   "generate click does not send raw count state (0 from Number(''))")
+ok("ref={countRef}" in channels_tsx and "countRef.current" in channels_tsx,
+   "generate input is wired to countRef (an unwired ref skips every generate)")
+ok("intFromBlur(e.target.value, 1)" in channels_tsx,
+   "generate-count blur also floors min=1 (click-only would leave 0 visible)")
 
 print(f"ALL {_checks} CHECKS PASSED")

@@ -1464,7 +1464,7 @@ flag the operator step in the commit body.
   drafts / JobRun / generate_ideas call. Suite: `tests/verify_topics.py`
   131 → 160. Isolated commit; no money-path files. Discovered follow-up
   (not bundled): `Channels.tsx` generate-count still `Number()`s, so
-  empty-blur is now a 400 instead of a fake-full 200.
+  empty-blur is now a 400 instead of a fake-full 200 — closed as #42.
 - **why (found 2026-09-13 ranking remaining `Number()` after #35):**
   `count = max(0, min(body.count, ceiling - current_drafts))` then
   `if count == 0: return {generated:0, reason:"idea ceiling reached"}`.
@@ -1477,3 +1477,21 @@ flag the operator step in the commit body.
   under-ceiling live topic; JSON true/false is 4xx; omitted count still
   defaults to 8; count=1 still generates; at-ceiling count=8 still 200
   with `idea ceiling reached`.
+
+### 42. ✅ DONE (code shipped to main 2026-09-13) Generate-count empty restores 8 instead of POSTing 0 — normal
+- **resolution (2026-09-13):** TopicCard generate-count is now an
+  uncontrolled `defaultValue={8}` input. `intFromBlur(..., 1)` is the
+  choke point: empty / 0 / NaN / non-int restore `"8"` and skip the
+  POST; a typed `2` still `generateVideos.mutate({count: n})`. Same
+  helper as #34/#35; min=1 because 0 is a 400 after #41. Budget blur
+  still min=0 (typed 0 is the legal stall). Suite:
+  `tests/verify_settings.py` 112 → 119. Isolated commit; `topics.py`
+  / `GenerateBody` untouched.
+- **why (found 2026-09-13 shipping #41, not bundled):** the API floor
+  turned empty-blur `Number("") === 0` into a 400 instead of a fake
+  "idea ceiling reached". Clearing the count and clicking Generate
+  now fails the save.
+- **caution:** normal (SPA only; not a money-path file). Isolated
+  commit + regression tests.
+- **acceptance:** empty/0/invalid generate-count does not POST;
+  field restores to 8; a typed `2` still generates.

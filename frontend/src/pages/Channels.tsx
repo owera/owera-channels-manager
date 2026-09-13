@@ -14,7 +14,7 @@ const OAUTH_HEX: Record<string, string> = {
 // ---------- Topics (content themes) ----------
 function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
   const m = useMut();
-  const [count, setCount] = useState(8);
+  const countRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(topic.name);
   const [prompt, setPrompt] = useState(topic.theme_prompt ?? "");
@@ -61,10 +61,16 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
       </div>
 
       <div className="flex items-center gap-2 mt-4">
-        <input type="number" className="input !w-16 !py-1.5 text-center" value={count} min={1} max={20}
-          onChange={(e) => setCount(Number(e.target.value))} />
+        <input ref={countRef} type="number" className="input !w-16 !py-1.5 text-center" defaultValue={8} min={1} max={20}
+          onBlur={(e) => { const n = intFromBlur(e.target.value, 1); if (n === null) e.target.value = "8"; }} />
         <button className="btn btn-signal !py-1.5 flex-1 justify-center" disabled={m.generateVideos.isPending}
-          onClick={() => m.generateVideos.mutate({ id: topic.id, count })}>
+          onClick={() => {
+            const el = countRef.current;
+            if (!el) return;
+            const n = intFromBlur(el.value, 1);
+            if (n === null) { el.value = "8"; return; }
+            m.generateVideos.mutate({ id: topic.id, count: n });
+          }}>
           {m.generateVideos.isPending ? "generating…" : "generate ideas"}
         </button>
         <Link to={`/board/${channel.id}?topic=${topic.id}`} className="btn !py-1.5">view queue →</Link>
