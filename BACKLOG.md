@@ -1452,3 +1452,28 @@ flag the operator step in the commit body.
 - **acceptance:** empty/`LONG`/`medium`/None two-statement boards fail
   `_variety_ok`; leftover lists last-row at 1.45s; canonical long still
   2.45s / two statements.
+
+### 41. ✅ DONE (code shipped to main 2026-09-13) POST /api/topics/{id}/generate rejects count<=0 — normal
+- **resolution (2026-09-13):** `_require_int` is now also the choke point
+  on generate `count` (`>= 1`) after the parked gate and before the
+  idea-column clamp. JSON 0 / below-0 ints 400. JSON bool is rejected
+  earlier by `GenerateBody._reject_bool_count` (`mode="before"`) because
+  lax `int` coerces `false→0` (fake "topic is full") / `true→1` (one
+  unwanted idea). Null is already 422 (required `int`). Omitted count
+  still defaults to 8 and clamps to remaining seats. A 400 writes no
+  drafts / JobRun / generate_ideas call. Suite: `tests/verify_topics.py`
+  131 → 160. Isolated commit; no money-path files. Discovered follow-up
+  (not bundled): `Channels.tsx` generate-count still `Number()`s, so
+  empty-blur is now a 400 instead of a fake-full 200.
+- **why (found 2026-09-13 ranking remaining `Number()` after #35):**
+  `count = max(0, min(body.count, ceiling - current_drafts))` then
+  `if count == 0: return {generated:0, reason:"idea ceiling reached"}`.
+  Empty-blur `Number("") === 0` (and a typed 0 / negative / `false`)
+  on an empty live topic looked like the idea column was full. Growth-
+  agent / curl still reach this path; the SPA min={1} does not.
+- **caution:** normal (`topics.py` generate + `GenerateBody`; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** count=0 / -1 is 400 and writes nothing on an
+  under-ceiling live topic; JSON true/false is 4xx; omitted count still
+  defaults to 8; count=1 still generates; at-ceiling count=8 still 200
+  with `idea ceiling reached`.

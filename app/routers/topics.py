@@ -15,11 +15,14 @@ router = APIRouter(prefix="/api/topics", tags=["topics"])
 
 
 def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
-    """Reject JSON null / bool / below-floor ints before they hit the DB.
+    """Reject JSON null / bool / below-floor ints before they hit the DB
+    or a generate.
 
     ``Topic.weight`` is NOT NULL. ``setattr(..., None)`` persists SQL NULL,
     and generate/autofill/overflow treat ``weight is None`` as 1 — a null
-    PATCH would unpark. JSON bools are rejected earlier by TopicUpdate
+    PATCH would unpark. Generate ``count<=0`` used to look like the
+    idea-column cap (``max(0, min(count, remaining))`` then generated:0).
+    JSON bools are rejected earlier by TopicUpdate / GenerateBody
     (lax int would coerce false→0 / true→1); the bool check here is
     defense in depth for non-HTTP callers.
     """
@@ -135,6 +138,11 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     weight = t.weight if t.weight is not None else 1
     if weight <= 0:
         return {"generated": 0, "reason": "topic is parked (weight <= 0)"}
+    # Empty-blur Number("")===0 (and a typed 0 / negative) used to look like
+    # the idea-column cap: max(0, min(count, remaining)) then generated:0.
+    _require_int({"count": body.count}, "count", 1,
+                 "count must be >= 1 "
+                 "(0 is a silent no-op that looked like the topic was full)")
     # Bound the IDEAS column: don't let a single click push this topic's draft count
     # past the same ceiling autofill respects (target × weight multiplier).
     cfg = app_settings(session)

@@ -15,6 +15,13 @@ is how those formats enter the DB. These checks pin PATCH to the same
 gate: leftovers persist as ``"short"``, canonical ``"long"`` stays long,
 omitted format stays put, a sibling is untouched.
 
+#35 noted the generate-count input still ``Number()``s. Empty-blur is
+``Number("") === 0``; ``max(0, min(body.count, remaining))`` then returns
+``generated: 0, reason: "idea ceiling reached"`` even on an empty live
+topic. JSON bool (lax ``int`` coerces ``false→0`` / ``true→1``) is the
+same class as #37/#39. These checks pin count ``<= 0`` / bool as 4xx
+before any generate_ideas, and that omitted count still defaults to 8.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -33,6 +40,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import topics as topics_router
+from app.schemas import GenerateBody
 
 _checks = 0
 
@@ -71,6 +79,8 @@ with Session(engine) as s:
                 weight=-1, content_format="short"))         # id 4
     s.add(Topic(channel_id=1, name="Full", theme_prompt="full theme",
                 weight=1, content_format="short"))          # id 5
+    s.add(Topic(channel_id=1, name="Room", theme_prompt="room theme",
+                weight=1, content_format="short"))          # id 6
     s.commit()
     for i in range(6):
         s.add(Video(channel_id=1, topic_id=5, subject=f"full-draft-{i}",
@@ -158,6 +168,13 @@ try:
     ok(draft_count(1) == 0, "parked topic still has zero drafts")
     ok(generate_runs() == [], "parked generate writes no JobRun")
 
+    r = post_generate(1, count=0)
+    ok(r.status_code == 200, "parked count=0 is 200 (floor sits after the parked return)")
+    ok("parked" in (r.json().get("reason") or "").lower(),
+       "parked count=0 names the park, not a 400 and not the idea-column cap")
+    ok(calls == [], "parked count=0 never called generate_ideas")
+    ok(draft_count(1) == 0, "parked count=0 still writes no drafts")
+
     r = post_generate(4, count=8)
     ok(r.status_code == 200, "weight=-1 generate returns 200")
     body = r.json()
@@ -237,6 +254,74 @@ try:
 
     r = client.post("/api/topics/2/generate", json={"count": 1})
     ok(r.status_code == 401, "generate still requires auth")
+
+    print("POST /api/topics/{id}/generate: count<=0 is 400, not a fake ceiling")
+    # Room (id 6) is live weight=1 with zero drafts — under the 6-seat
+    # ceiling — so a count=0 200 with reason='idea ceiling reached' is
+    # the pre-fix max(0, min(count, remaining)) path, not a real ceiling.
+    topics_router.video_gen.generate_ideas = fake_ideas
+    n_before = len(calls)
+    runs_before = len(generate_runs())
+    r = post_generate(6, count=0)
+    ok(r.status_code == 400, "count=0 on an under-ceiling live topic is 400")
+    ok("count" in r.text.lower() and "ceiling" not in r.text.lower(),
+       "count=0 400 names the field, not 'idea ceiling reached'")
+    ok(len(calls) == n_before, "count=0 never called generate_ideas")
+    ok(len(generate_runs()) == runs_before, "count=0 writes no JobRun")
+    ok(draft_count(6) == 0, "count=0 left Room empty")
+
+    r = post_generate(6, count=-1)
+    ok(r.status_code == 400, "count=-1 is 400")
+    ok(draft_count(6) == 0, "negative count writes nothing")
+    ok(len(calls) == n_before, "count=-1 never called generate_ideas")
+
+    r = client.post("/api/topics/6/generate", auth=auth, json={"count": False})
+    ok(r.status_code in (400, 422),
+       "count=false is 4xx (must not coerce to 0 fake-ceiling)")
+    ok(draft_count(6) == 0, "false did not persist a 0 generate")
+    ok(len(calls) == n_before, "count=false never called generate_ideas")
+
+    r = client.post("/api/topics/6/generate", auth=auth, json={"count": True})
+    ok(r.status_code in (400, 422),
+       "count=true is 4xx (must not coerce to 1 and generate)")
+    ok(draft_count(6) == 0, "true did not generate one idea")
+    ok(len(calls) == n_before, "count=true never called generate_ideas")
+
+    r = client.post("/api/topics/6/generate", auth=auth, json={"count": None})
+    ok(r.status_code in (400, 422), "count=null is 4xx")
+    ok(draft_count(6) == 0, "null count writes nothing")
+
+    r = post_generate(6, count=1)
+    ok(r.status_code == 200, "count=1 on Room is 200")
+    ok(r.json().get("generated") == 1, "count=1 generated exactly one idea")
+    ok(len(calls) == n_before + 1, "count=1 called generate_ideas once")
+    ok(calls[-1]["n"] == 1 and calls[-1]["topic_name"] == "Room",
+       "generate_ideas asked for n=1 on Room")
+    ok(draft_count(6) == 1, "Room now has one draft")
+
+    n_before = len(calls)
+    r = client.post("/api/topics/6/generate", auth=auth, json={})
+    ok(r.status_code == 200, "omitted count still 200 (GenerateBody default 8)")
+    # remaining seats = 6-1 = 5; default 8 clamps to remaining, not 400.
+    ok(r.json().get("generated") == 5,
+       "omitted count defaults to 8 and clamps to remaining 5, not 400")
+    ok(len(calls) == n_before + 1, "omitted count called generate_ideas")
+    ok(calls[-1]["n"] == 5, "omitted count asked for remaining 5")
+    ok(draft_count(6) == 6, "Room filled to the 1× ceiling via omitted default")
+
+    gen_src = inspect.getsource(topics_router.generate_videos)
+    ok("_require_int" in gen_src,
+       "generate_videos floors count through _require_int")
+    ok(gen_src.index("_require_int") < gen_src.index("max(0, min(body.count"),
+       "_require_int runs before max(0, min(count, remaining)) "
+       "(a late floor after the ceiling return would still 200 count=0)")
+    ok(gen_src.index("topic is parked") < gen_src.index("_require_int"),
+       "parked return runs before the count floor "
+       "(floor-first would 400 parked+count=0)")
+    body_src = inspect.getsource(GenerateBody)
+    ok('_reject_bool_count' in body_src and 'mode="before"' in body_src,
+       "GenerateBody._reject_bool_count is mode=before "
+       "(a comment containing 'before' is not the decorator)")
 
     print("PATCH /api/topics/{id}: leftover formats persist as short (create's gate)")
     # Topic 2 is Live / short; topic 3 is Heavy / long.

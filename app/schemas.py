@@ -98,6 +98,15 @@ class TopicUpdate(BaseModel):
 class GenerateBody(BaseModel):
     count: int = 8
 
+    @field_validator("count", mode="before")
+    @classmethod
+    def _reject_bool_count(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # 0 then looked like the idea-column cap (generated:0, "full").
+        if isinstance(v, bool):
+            raise ValueError("must be an integer >= 1, not a boolean")
+        return v
+
 
 # ---- Videos (produced units) ----
 class VideoCreate(BaseModel):
