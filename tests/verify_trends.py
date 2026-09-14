@@ -1,16 +1,19 @@
-"""Regression checks for POST /api/trends/{id}/adopt board-horizon guard.
+"""Regression checks for POST /api/trends/{id}/adopt.
 
-The 2026-08-25 flood: 10 watching trends were adopted in 21s against an already
-full ch2 bench (pending 10 → 90) because adopt created a new topic + 8 ideas
-with no cap, unlike POST /topics/{id}/generate and autofill which both stop at
-``daily_render_budget × board_horizon_days``. These checks pin that adopt 409s
-when the bench is full (no topic, no videos, trend stays watching) and that
-under-capacity adopts still seed, clamping idea_count to remaining seats.
+Board-horizon guard (2026-08-25 flood): adopt 409s when the bench is full
+(no topic, no videos, trend stays watching) and under-capacity adopts still
+seed, clamping idea_count to remaining seats.
+
+idea_count floor (backlog #43): ``max(1, body.idea_count)`` turned 0 /
+negative into a one-idea adopt. Generate already 400s count<=0 (#41); adopt
+is the same growth-agent path. produce_count 0 is legal (drafts only);
+negative / bool 4xx.
 
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network,
 no LLM). ``video_gen.generate_ideas`` is stubbed. Exits non-zero on the first
 failed assertion.
 """
+import inspect
 import sys
 from pathlib import Path
 
@@ -24,6 +27,7 @@ from app.db import get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal,
                         TrendStatus, Video, VideoStatus)
 from app.routers import trends as trends_router
+from app.schemas import TrendAdoptBody
 
 _checks = 0
 
@@ -67,6 +71,12 @@ with Session(engine) as s:
     s.add(TrendSignal(term="Already In", term_norm="already in",
                       channel_id=1, status=TrendStatus.ADOPTED, score=70,
                       adopted_topic_id=1, description="already adopted"))
+    s.add(TrendSignal(term="Count Floor", term_norm="count floor",
+                      channel_id=1, status=TrendStatus.WATCHING, score=60,
+                      description="idea_count floor"))
+    s.add(TrendSignal(term="Omitted Count", term_norm="omitted count",
+                      channel_id=1, status=TrendStatus.WATCHING, score=55,
+                      description="default idea_count"))
     s.commit()
 
 
@@ -209,6 +219,137 @@ try:
 
     r = client.post("/api/trends/3/adopt", json={"idea_count": 1})
     ok(r.status_code == 401, "adopt still requires auth")
+
+    print("POST /api/trends/{id}/adopt: idea_count<=0 is 400 (not a silent 1-idea adopt)")
+    # Defect: idea_count = max(1, body.idea_count) turned 0 / negative into a
+    # one-idea adopt (topic + generate_ideas(n=1) + optional produce). Generate
+    # already 400s count<=0 (#41); adopt is the same growth-agent path.
+    n_before = len(calls)
+    pending_before = pending()
+    topics_before = topic_count()
+    runs_before = len(adopt_runs())
+    r = adopt(5, {"idea_count": 0, "produce_count": 0})
+    ok(r.status_code == 400, "idea_count=0 on an under-ceiling watching trend is 400")
+    ok(">= 1" in r.text, "400 names the idea_count floor")
+    ok(len(calls) == n_before, "idea_count=0 never called generate_ideas")
+    ok(topic_count() == topics_before, "idea_count=0 creates no topic")
+    ok(pending() == pending_before, "idea_count=0 writes no videos")
+    t = trend_row(5)
+    ok(t.status == TrendStatus.WATCHING and t.adopted_topic_id is None,
+       "idea_count=0 left Count Floor watching")
+    ok(len(adopt_runs()) == runs_before, "idea_count=0 writes no JobRun")
+
+    r = adopt(5, {"idea_count": -1, "produce_count": 0})
+    ok(r.status_code == 400, "idea_count=-1 is 400")
+    ok(len(calls) == n_before, "idea_count=-1 never called generate_ideas")
+    ok(topic_count() == topics_before, "negative idea_count creates no topic")
+
+    r = client.post("/api/trends/5/adopt", auth=auth, json={"idea_count": False})
+    ok(r.status_code in (400, 422),
+       "idea_count=false is 4xx (must not coerce to 0 then max(1,0)=1)")
+    ok(len(calls) == n_before, "idea_count=false never called generate_ideas")
+    ok(topic_count() == topics_before, "false did not create a topic")
+
+    r = client.post("/api/trends/5/adopt", auth=auth, json={"idea_count": True})
+    ok(r.status_code in (400, 422),
+       "idea_count=true is 4xx (must not coerce to 1 and generate)")
+    ok(len(calls) == n_before, "idea_count=true never called generate_ideas")
+    ok(topic_count() == topics_before, "true did not create a one-idea topic")
+
+    r = client.post("/api/trends/5/adopt", auth=auth, json={"idea_count": None})
+    ok(r.status_code in (400, 422), "idea_count=null is 4xx")
+    ok(len(calls) == n_before, "idea_count=null never called generate_ideas")
+
+    r = adopt(4, {"idea_count": 0, "produce_count": 0})
+    ok(r.status_code == 409, "already-adopted + idea_count=0 is still 409 (not 400)")
+    ok("already adopted" in r.text, "already-adopted wins over the count floor")
+    ok(len(calls) == n_before, "already-adopted + count=0 never called generate_ideas")
+
+    r = adopt(5, {"idea_count": 1, "produce_count": -1})
+    ok(r.status_code == 400, "produce_count=-1 is 400 (0 is legal; negative is not)")
+    ok(len(calls) == n_before, "produce_count=-1 never called generate_ideas")
+    ok(topic_count() == topics_before, "negative produce_count creates no topic")
+    t = trend_row(5)
+    ok(t.status == TrendStatus.WATCHING, "produce_count=-1 left Count Floor watching")
+
+    r = client.post("/api/trends/5/adopt", auth=auth,
+                    json={"idea_count": 1, "produce_count": False})
+    ok(r.status_code in (400, 422),
+       "produce_count=false is 4xx (must not coerce to 0)")
+    ok(len(calls) == n_before, "produce_count=false never called generate_ideas")
+
+    r = client.post("/api/trends/5/adopt", auth=auth,
+                    json={"idea_count": 1, "produce_count": True})
+    ok(r.status_code in (400, 422),
+       "produce_count=true is 4xx (must not coerce to 1 and auto-produce)")
+    ok(len(calls) == n_before, "produce_count=true never called generate_ideas")
+
+    r = adopt(5, {"idea_count": 1, "produce_count": 0})
+    ok(r.status_code == 200, "idea_count=1 is 200")
+    ok(r.json().get("ideas") == 1, "idea_count=1 seeded exactly one idea")
+    ok(r.json().get("producing") == 0, "produce_count=0 queued nothing")
+    ok(len(calls) == n_before + 1, "idea_count=1 called generate_ideas once")
+    ok(calls[-1]["n"] == 1, "generate_ideas asked for n=1")
+    t = trend_row(5)
+    ok(t.status == TrendStatus.ADOPTED and t.adopted_topic_id is not None,
+       "idea_count=1 adopted Count Floor")
+
+    # idea_count=1 left 9 pending / 1 seat — ideas==1 would pass a default of 1.
+    # Leave 5 seats (not 1, not 8) so omitted {} must be default 8 clamped to 5,
+    # and producing must be min(3, 5)=3 (a default of 0 would produce 0).
+    with Session(engine) as s:
+        extras = s.exec(select(Video).where(
+            Video.channel_id == 1,
+            Video.status.in_([VideoStatus.DRAFT, VideoStatus.QUEUED]))).all()
+        for v in extras[: max(0, len(extras) - 5)]:
+            s.delete(v)
+        s.commit()
+    ok(pending() == 5, "setup left 5 pending / 5 seats for omitted-default pin")
+
+    r = client.post("/api/trends/6/adopt", auth=auth, json={})
+    ok(r.status_code == 200, "omitted counts still 200 (TrendAdoptBody defaults)")
+    ok(r.json().get("ideas") == 5,
+       "omitted idea_count defaults to 8 and clamps to remaining 5, not 400 "
+       "(remaining=1 made a default of 1 look like 8)")
+    ok(r.json().get("producing") == 3,
+       "omitted produce_count defaults to 3 (min(3, remaining 5)); "
+       "a default of 0 would produce 0")
+    ok(len(calls) == n_before + 2, "omitted counts called generate_ideas")
+    ok(calls[-1]["n"] == 5, "omitted idea_count asked for remaining 5")
+    t = trend_row(6)
+    ok(t.status == TrendStatus.ADOPTED, "omitted-count trend is adopted")
+    ok(pending() == 10, "omitted fill lands on the horizon")
+    ok(TrendAdoptBody.model_fields["idea_count"].default == 8,
+       "TrendAdoptBody.idea_count default is 8")
+    ok(TrendAdoptBody.model_fields["produce_count"].default == 3,
+       "TrendAdoptBody.produce_count default is 3")
+
+    n_before = len(calls)
+    r = adopt(1, {"idea_count": 0, "produce_count": 0})
+    ok(r.status_code == 400,
+       "full-board + idea_count=0 is 400 (count floor before horizon 409)")
+    ok(">= 1" in r.text, "full-board count=0 names the floor, not capacity")
+    ok(len(calls) == n_before, "full-board count=0 never called generate_ideas")
+    t = trend_row(1)
+    ok(t.status == TrendStatus.WATCHING, "full-board count=0 left trend 1 watching")
+
+    adopt_src = inspect.getsource(trends_router.adopt_trend)
+    ok("_require_int" in adopt_src,
+       "adopt_trend floors idea_count through _require_int")
+    ok(adopt_src.index("already adopted") < adopt_src.index("_require_int"),
+       "already-adopted 409 runs before the count floor "
+       "(floor-first would 400 already-adopted+count=0)")
+    ok("max(1, body.idea_count)" not in adopt_src,
+       "idea_count is no longer max(1, ...) (that is the silent-1 defect)")
+    ok(adopt_src.index("_require_int") < adopt_src.index("board at capacity"),
+       "_require_int runs before the horizon clamp "
+       "(a late floor after 409 would 409 count=0 on a full board)")
+    ok(adopt_src.index("_require_int") < adopt_src.index("generate_ideas"),
+       "_require_int runs before generate_ideas")
+    body_src = inspect.getsource(TrendAdoptBody)
+    ok('_reject_bool_count' in body_src and 'mode="before"' in body_src,
+       "TrendAdoptBody._reject_bool_count is mode=before "
+       "(a comment containing 'before' is not the decorator)")
 finally:
     trends_router.video_gen.generate_ideas = _orig_ideas
     trends_router.video_gen.channel_language = _orig_lang

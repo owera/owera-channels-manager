@@ -168,6 +168,16 @@ class TrendAdoptBody(BaseModel):
     produce_count: int = 3                    # how many to auto-produce (queue to render)
     theme_prompt: Optional[str] = None        # override the auto-derived theme prompt
 
+    @field_validator("idea_count", "produce_count", mode="before")
+    @classmethod
+    def _reject_bool_count(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # idea_count 0 then became a silent one-idea adopt; produce_count
+        # true would auto-produce one.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class SettingsUpdate(BaseModel):
     render_concurrency: Optional[int] = None

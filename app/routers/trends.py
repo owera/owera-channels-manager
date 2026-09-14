@@ -17,6 +17,21 @@ router = APIRouter(prefix="/api/trends", tags=["trends"])
 _ACTIVE = (TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED)
 
 
+def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
+    """Reject JSON null / bool / below-floor ints before they hit generate.
+
+    Adopt ``idea_count<=0`` used to coerce 0 to 1 before generate.
+    JSON bools are rejected earlier by TrendAdoptBody (lax int would
+    coerce false→0 / true→1); the bool check here is defense in depth
+    for non-HTTP callers.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, int) or isinstance(v, bool) or v < minimum:
+        raise HTTPException(400, hint)
+
+
 def _norm(term: str) -> str:
     return " ".join((term or "").strip().lower().split())
 
@@ -111,6 +126,14 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     if not ch:
         raise HTTPException(404, "channel not found")
 
+    # Empty/typed 0 used to coerce to a one-idea adopt before generate.
+    # Generate already 400s count<=0; same growth-agent path.
+    _require_int({"idea_count": body.idea_count}, "idea_count", 1,
+                 "idea_count must be >= 1 "
+                 "(0 is a silent one-idea adopt)")
+    _require_int({"produce_count": body.produce_count}, "produce_count", 0,
+                 "produce_count must be >= 0")
+
     fmt = body.content_format or t.content_format or "short"
     fmt = "long" if fmt == "long" else "short"
     theme = body.theme_prompt or t.description or f"Trending topic: {t.term}"
@@ -120,7 +143,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     # ch2 bench (10 pending → 90) because adopt created a new topic + 8 ideas
     # with no cap. Refuse when the bench is full so the caller must displace
     # first (playbook net-zero rule); clamp idea_count to remaining seats otherwise.
-    idea_count = max(1, body.idea_count)
+    idea_count = body.idea_count
     cfg = app_settings(session)
     if cfg.board_horizon_days > 0:
         pending = session.exec(
@@ -135,7 +158,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
             raise HTTPException(
                 409, "board at capacity (horizon reached) — displace drafts first")
         idea_count = min(idea_count, board_space)
-    produce_count = min(max(0, body.produce_count), idea_count)
+    produce_count = min(body.produce_count, idea_count)
 
     # 1. Topic (same construction as topics.create_topic).
     mx_pos = session.exec(

@@ -1495,3 +1495,28 @@ flag the operator step in the commit body.
   commit + regression tests.
 - **acceptance:** empty/0/invalid generate-count does not POST;
   field restores to 8; a typed `2` still generates.
+
+### 43. ✅ DONE (code shipped to main 2026-09-14) POST /api/trends/{id}/adopt rejects idea_count<=0 — normal
+- **resolution (2026-09-14):** `_require_int` is now the choke point on
+  adopt `idea_count` (`>= 1`) and `produce_count` (`>= 0`) after the
+  already-adopted / channel gates and before the horizon clamp.
+  JSON 0 / below-0 idea_count 400 (was a silent one-idea adopt via
+  `max(1, body.idea_count)`). JSON bool is rejected earlier by
+  `TrendAdoptBody._reject_bool_count` (`mode="before"`) because lax
+  `int` coerces `false→0` (then 1 idea) / `true→1`. Null is 422
+  (required `int`). Omitted still defaults to 8/3 and clamps to
+  remaining seats. `produce_count=0` still seeds drafts only.
+  Suite: `tests/verify_trends.py` 29 → 84. Isolated commit; no
+  money-path files. Discovered follow-up (not bundled): PATCH
+  `/api/trends/{id}` still setattr leftover `content_format` (adopt
+  already canonicalizes when creating the topic).
+- **why (found 2026-09-14 ranking remaining `max(1, count)` after
+  #41):** generate 400s count<=0; adopt coerced 0 to 1 and created a
+  topic + one idea + optional produce. Growth-agent / curl still
+  reach this path; the playbook hardcodes `idea_count:8`.
+- **caution:** normal (`trends.py` adopt + `TrendAdoptBody`; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** idea_count=0 / -1 is 400 and writes nothing on an
+  under-ceiling watching trend; JSON true/false is 4xx; omitted still
+  defaults to 8; idea_count=1 still adopts; produce_count=0 still
+  drafts-only; already-adopted + 0 is still 409.
