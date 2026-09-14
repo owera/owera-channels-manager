@@ -425,6 +425,52 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
     return 50, 140
 
 
+# Grok -p sometimes prefixes the VO with coding-agent CoT (09-13/09-14 golden-set
+# flake: "I'll check the workspace for series naming…"). Frame0/title lock that
+# garbage onto the video. Strip leading assistant-planning sentences only —
+# a real @workspace / Copilot hook is not first-person planning.
+_PREAMBLE_START = re.compile(
+    r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
+    r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
+    r"The prompt|Vou |Deixa eu |Deixe-me )\b",
+    re.I,
+)
+_PREAMBLE_BODY = re.compile(
+    r"\b(video-worker|voiceover conventions|series naming|"
+    r"endcard matches|closer line|spoken script only|"
+    r"check the workspace)\b",
+    re.I,
+)
+
+
+def _is_script_preamble(sentence: str) -> bool:
+    s = (sentence or "").strip()
+    if not s:
+        return True
+    return bool(_PREAMBLE_START.match(s) or _PREAMBLE_BODY.search(s))
+
+
+def _strip_script_preamble(text: str) -> str:
+    """Drop grok CoT / meta sentences before the first spoken claim.
+
+    Splits on sentence end even when the next capital has no space
+    (``format.The prompt`` / ``exact.Your AI`` glue from grok).
+    If every sentence looks like preamble, keep the original so the
+    word-count retry still has something to replace.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])(?=\s|[A-Z])", raw) if p.strip()]
+    i = 0
+    while i < len(parts) and _is_script_preamble(parts[i]):
+        i += 1
+    kept = parts[i:]
+    if not kept:
+        return raw
+    return " ".join(kept)
+
+
 def _generate_script(subject: str, params: dict) -> str:
     n = int(params.get("paragraph_number") or 2)
     if (params.get("content_format") or "short") == "long":
@@ -477,6 +523,7 @@ def _generate_script(subject: str, params: dict) -> str:
                    f"title's language — this channel narrates exclusively in {lang}.")
     text = _llm(prompt, max_tokens=max_tokens).strip()
     text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
+    text = _strip_script_preamble(text)
 
     # Word-count guard: if far outside the target range, retry once with an explicit hint.
     lo, hi = _word_count_bounds(params)
@@ -489,6 +536,7 @@ def _generate_script(subject: str, params: dict) -> str:
             max_tokens=max_tokens,
         ).strip()
         retry = re.sub(r"^[\"'`]+|[\"'`]+$", "", retry).strip()
+        retry = _strip_script_preamble(retry)
         if retry:
             text = retry
 

@@ -263,6 +263,55 @@ ok(stripped.count("Subscribe") == 1 and stripped.endswith("trap."),
 
 
 # ---------------------------------------------------------------------------
+# _strip_script_preamble — grok CoT prefix (09-13/09-14 R1 flake)
+# ---------------------------------------------------------------------------
+print("_strip_script_preamble: CoT prefix, glue, clean scripts, @workspace hook")
+
+_FLAKE = (
+    "I'll check the workspace for series naming and voiceover conventions "
+    "so the script matches the channel's format.The prompt matches the "
+    "video-worker template. I'll pull series naming and example scripts so "
+    "the closer line is exact.Your AI agent forgets everything between chats. "
+    "That's by design, not a bug."
+)
+cleaned = worker._strip_script_preamble(_FLAKE)
+ok(cleaned.startswith("Your AI agent forgets everything between chats."),
+   "09-14 ch1-concept flake drops three CoT sentences including glued caps")
+ok("I'll check" not in cleaned and "video-worker" not in cleaned,
+   "stripped CoT does not leak I'll-check / video-worker into the VO")
+ok("That's by design, not a bug." in cleaned,
+   "spoken claim after the CoT prefix is kept")
+
+ok(worker._strip_script_preamble("Your RAG is slow and still wrong. Rank what you found.")
+   == "Your RAG is slow and still wrong. Rank what you found.",
+   "clean pain-first opener is unchanged")
+ok(worker._strip_script_preamble(
+    "You Used @workspace on a One-Line Fix. Copilot billed the search."
+) == "You Used @workspace on a One-Line Fix. Copilot billed the search.",
+   "@workspace in a real Copilot hook is NOT treated as grok CoT")
+ok(worker._strip_script_preamble("I'll check the workspace for series naming.")
+   == "I'll check the workspace for series naming.",
+   "all-preamble script is kept so the word-count retry still has text")
+
+def _cot_then_claim(_prompt, system=None, max_tokens=2000):
+    _llm_calls.append({"prompt": _prompt})
+    return _FLAKE + " " + " ".join(["word"] * 50)
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_cot_then_claim):
+    gated = worker._generate_script(
+        "Why Your AI Agent Forgets Everything Between Chats",
+        {"content_format": "short"},
+    )
+ok(gated.startswith("Your AI agent forgets everything between chats."),
+   "_generate_script strips the CoT prefix before the endcard VO")
+ok(gated.endswith("Subscribe — next Copilot Credits trap."),
+   "endcard VO still appends after preamble strip")
+ok("I'll check" not in gated,
+   "I'll-check CoT does not survive _generate_script")
+
+
+# ---------------------------------------------------------------------------
 # _pick_template
 # ---------------------------------------------------------------------------
 print("_pick_template: deterministic subject-hash")
