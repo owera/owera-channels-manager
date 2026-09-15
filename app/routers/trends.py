@@ -32,6 +32,16 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
         raise HTTPException(400, hint)
 
 
+def _canonical_format(fmt) -> str:
+    """Same == "long" / else-short gate as topics/render/issues/publish.
+
+    Adopt already wrote this onto the topic it creates; PATCH setattr of
+    the raw body is how empty/"LONG"/"medium"/null leftovers entered the
+    trend row (and the dashboard label). POST upsert is the same write.
+    """
+    return "long" if fmt == "long" else "short"
+
+
 def _norm(term: str) -> str:
     return " ".join((term or "").strip().lower().split())
 
@@ -61,6 +71,8 @@ def upsert_trend(body: TrendCreate, session: Session = Depends(get_session)):
     existing = session.exec(
         select(TrendSignal).where(TrendSignal.term_norm == norm)).first()
     data = body.model_dump(exclude_unset=True)
+    if "content_format" in data:
+        data["content_format"] = _canonical_format(data["content_format"])
     if existing:
         # Don't clobber an adoption decision with a fresh sighting.
         for k, v in data.items():
@@ -98,7 +110,10 @@ def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(ge
     t = session.get(TrendSignal, trend_id)
     if not t:
         raise HTTPException(404, "trend not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    if "content_format" in fields:
+        fields["content_format"] = _canonical_format(fields["content_format"])
+    for k, v in fields.items():
         setattr(t, k, v)
     t.updated_at = utcnow()
     session.add(t)
@@ -135,7 +150,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
                  "produce_count must be >= 0")
 
     fmt = body.content_format or t.content_format or "short"
-    fmt = "long" if fmt == "long" else "short"
+    fmt = _canonical_format(fmt)
     theme = body.theme_prompt or t.description or f"Trending topic: {t.term}"
 
     # Same board-horizon guard as POST /topics/{id}/generate and autofill.

@@ -1,4 +1,5 @@
-"""Regression checks for POST /api/trends/{id}/adopt.
+"""Regression checks for POST /api/trends/{id}/adopt and PATCH
+``content_format``.
 
 Board-horizon guard (2026-08-25 flood): adopt 409s when the bench is full
 (no topic, no videos, trend stays watching) and under-capacity adopts still
@@ -8,6 +9,13 @@ idea_count floor (backlog #43): ``max(1, body.idea_count)`` turned 0 /
 negative into a one-idea adopt. Generate already 400s count<=0 (#41); adopt
 is the same growth-agent path. produce_count 0 is legal (drafts only);
 negative / bool 4xx.
+
+Leftover-format write (backlog #44): adopt already canonicalizes
+``"long" if fmt == "long" else "short"`` onto the topic it creates, but
+PATCH ``setattr``s the raw body, so a growth-agent / curl leftover
+(empty / ``"LONG"`` / ``"medium"`` / null) lands on the trend row and
+the dashboard label. Same class as #38 on topics. These checks pin PATCH
+(and POST upsert) to the same gate.
 
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network,
 no LLM). ``video_gen.generate_ideas`` is stubbed. Exits non-zero on the first
@@ -77,6 +85,14 @@ with Session(engine) as s:
     s.add(TrendSignal(term="Omitted Count", term_norm="omitted count",
                       channel_id=1, status=TrendStatus.WATCHING, score=55,
                       description="default idea_count"))
+    s.add(TrendSignal(term="Patch Short", term_norm="patch short",
+                      channel_id=1, status=TrendStatus.WATCHING, score=40,
+                      description="canonical short for PATCH",
+                      content_format="short"))                 # id 7
+    s.add(TrendSignal(term="Patch Long", term_norm="patch long",
+                      channel_id=1, status=TrendStatus.WATCHING, score=41,
+                      description="canonical long for PATCH",
+                      content_format="long"))                  # id 8
     s.commit()
 
 
@@ -120,6 +136,20 @@ trends_router.video_gen.channel_language = fake_lang
 def adopt(trend_id, body=None):
     return client.post(f"/api/trends/{trend_id}/adopt", auth=auth,
                        json=body or {"idea_count": 8, "produce_count": 3})
+
+
+def patch_trend(trend_id, **body):
+    return client.patch(f"/api/trends/{trend_id}", auth=auth, json=body)
+
+
+def trend_format(tid):
+    with Session(engine) as s:
+        return s.get(TrendSignal, tid).content_format
+
+
+def trend_desc(tid):
+    with Session(engine) as s:
+        return s.get(TrendSignal, tid).description
 
 
 def pending():
@@ -350,6 +380,182 @@ try:
     ok('_reject_bool_count' in body_src and 'mode="before"' in body_src,
        "TrendAdoptBody._reject_bool_count is mode=before "
        "(a comment containing 'before' is not the decorator)")
+
+    print("PATCH /api/trends/{id}: leftover formats persist as short (adopt's gate)")
+    # Trend 7 is Patch Short / short; trend 8 is Patch Long / long.
+    ok(trend_format(7) == "short", "precondition: trend 7 is canonical short")
+    ok(trend_format(8) == "long", "precondition: trend 8 is canonical long")
+
+    sibling_before = trend_format(8)
+    desc_before = trend_desc(7)
+
+    r = patch_trend(7, content_format="LONG")
+    ok(r.status_code == 200, "PATCH content_format=LONG is 200")
+    ok(r.json().get("content_format") == "short",
+       "LONG leftover response is short (adopt would write short; "
+       ".lower()=='long' would persist long)")
+    ok(trend_format(7) == "short",
+       "LONG leftover persisted as short, not LONG")
+    ok(trend_format(8) == sibling_before,
+       "PATCH format on trend 7 left sibling trend 8 untouched")
+
+    r = patch_trend(7, content_format="")
+    ok(r.status_code == 200, "PATCH content_format='' is 200")
+    ok(trend_format(7) == "short",
+       "empty-format leftover persisted as short")
+
+    r = patch_trend(7, content_format="medium")
+    ok(r.status_code == 200, "PATCH content_format=medium is 200")
+    ok(trend_format(7) == "short",
+       "medium leftover persisted as short "
+       "(an allowlist of short+empty+LONG would miss this)")
+
+    r = patch_trend(7, content_format=None)
+    ok(r.status_code == 200, "PATCH content_format=null is 200")
+    ok(r.json().get("content_format") == "short",
+       "null leftover response is short, not None")
+    ok(trend_format(7) == "short",
+       "null leftover persisted as short, not SQL NULL")
+    with Session(engine) as s:
+        ok(s.get(TrendSignal, 7).content_format is not None,
+           "null PATCH did not persist SQL NULL into content_format")
+
+    print("PATCH /api/trends/{id}: canonical long/short still persist")
+    r = patch_trend(7, content_format="long")
+    ok(r.status_code == 200, "PATCH content_format=long is 200")
+    ok(trend_format(7) == "long",
+       "canonical long persisted (always-short mutant dies here)")
+    ok(trend_format(8) == "long", "canonical long PATCH left sibling long")
+
+    r = patch_trend(7, content_format="short")
+    ok(r.status_code == 200, "PATCH content_format=short is 200")
+    ok(trend_format(7) == "short",
+       "canonical short persisted (always-long mutant dies here)")
+
+    r = patch_trend(8, content_format="short")
+    ok(r.status_code == 200, "PATCH long trend down to short is 200")
+    ok(trend_format(8) == "short", "canonical short overwrites a long")
+    r = patch_trend(8, content_format="long")
+    ok(r.status_code == 200, "restore trend 8 to long is 200")
+    ok(trend_format(8) == "long", "trend 8 restored to long")
+
+    print("PATCH /api/trends/{id}: omitted format stays put; mixed body writes both")
+    r = patch_trend(7, description="Patch Short-renamed")
+    ok(r.status_code == 200, "description-only PATCH is 200")
+    ok(trend_desc(7) == "Patch Short-renamed",
+       "description-only PATCH persisted the description")
+    ok(trend_format(7) == "short",
+       "description-only PATCH left content_format (exclude_unset)")
+    ok(trend_format(8) == "long", "description-only PATCH left sibling format")
+
+    r = patch_trend(7, description=desc_before, content_format="LONG")
+    ok(r.status_code == 200, "mixed description + LONG leftover is 200")
+    ok(trend_desc(7) == desc_before,
+       "mixed PATCH restored the original description")
+    ok(trend_format(7) == "short",
+       "mixed PATCH still canonicalized LONG → short")
+
+    # Vacuous-pin class: description-only / null on a trend that is ALREADY
+    # short cannot kill always-_canonical_format(fields.get(...))
+    # (omitted → short) or skip-None (null leaves long). Drive both
+    # against canonical long.
+    long_desc = trend_desc(8)
+    ok(trend_format(8) == "long", "precondition: trend 8 is still canonical long")
+    r = patch_trend(8, description="Patch Long-renamed")
+    ok(r.status_code == 200, "description-only PATCH on a long trend is 200")
+    ok(trend_desc(8) == "Patch Long-renamed",
+       "description-only PATCH on long persisted the description")
+    ok(trend_format(8) == "long",
+       "description-only PATCH on a long trend left content_format long "
+       "(always _canonical_format(fields.get(...)) clobbers omitted to short)")
+
+    r = patch_trend(8, content_format=None)
+    ok(r.status_code == 200, "PATCH content_format=null on a long trend is 200")
+    ok(r.json().get("content_format") == "short",
+       "null leftover on a long trend response is short")
+    ok(trend_format(8) == "short",
+       "null leftover on a long trend persisted as short "
+       "(skip-None / exclude_none leaves long)")
+    ok(trend_desc(8) == "Patch Long-renamed",
+       "null-format PATCH on long left the renamed description")
+
+    r = patch_trend(8, description=long_desc, content_format="LONG")
+    ok(r.status_code == 200, "mixed description + LONG leftover on a long trend is 200")
+    ok(trend_desc(8) == long_desc,
+       "mixed PATCH on long restored the original description")
+    ok(trend_format(8) == "short",
+       "mixed PATCH on a long trend canonicalized LONG → short "
+       "(dropping content_format from the mixed body would leave long)")
+    r = patch_trend(8, content_format="long")
+    ok(r.status_code == 200, "restore trend 8 to long after leftover pins")
+    ok(trend_format(8) == "long", "trend 8 restored to long")
+
+    print("PATCH /api/trends/{id}: 404 / auth")
+    r = patch_trend(99999, content_format="short")
+    ok(r.status_code == 404, "PATCH missing trend is 404")
+    r = client.patch("/api/trends/7", json={"content_format": "short"})
+    ok(r.status_code == 401, "PATCH still requires auth")
+
+    ok(trends_router._canonical_format("long") == "long",
+       "_canonical_format(long) is long")
+    ok(trends_router._canonical_format("short") == "short",
+       "_canonical_format(short) is short")
+    ok(trends_router._canonical_format("LONG") == "short",
+       "_canonical_format(LONG) is short (.lower()==long would return long)")
+    ok(trends_router._canonical_format("") == "short",
+       "_canonical_format('') is short")
+    ok(trends_router._canonical_format(None) == "short",
+       "_canonical_format(None) is short")
+    ok(trends_router._canonical_format("medium") == "short",
+       "_canonical_format(medium) is short")
+    ok("_canonical_format" in inspect.getsource(trends_router.update_trend),
+       "update_trend canonicalizes through _canonical_format "
+       "(setattr of the raw body is how leftovers enter the DB)")
+    ok("_canonical_format" in inspect.getsource(trends_router.upsert_trend),
+       "upsert_trend canonicalizes through _canonical_format "
+       "(a PATCH-only helper would let POST upsert drift)")
+    ok("_canonical_format" in inspect.getsource(trends_router.adopt_trend),
+       "adopt_trend canonicalizes through _canonical_format "
+       "(the inline gate must not drift from PATCH/POST)")
+
+    print("POST /api/trends: leftover formats persist as short (helper wiring)")
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "CreateLeftover", "content_format": "LONG"})
+    ok(r.status_code == 201, "create LONG leftover is 201")
+    ok(r.json().get("content_format") == "short",
+       "create LONG leftover persisted as short "
+       "(helper name in source with unused/constant call would write LONG)")
+    create_id = r.json()["id"]
+    ok(trend_format(create_id) == "short", "create LONG leftover row is short")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "CreateLong", "content_format": "long"})
+    ok(r.status_code == 201, "create canonical long is 201")
+    ok(r.json().get("content_format") == "long",
+       "create canonical long persisted "
+       "(_canonical_format('short') constant would write short)")
+    long_create_id = r.json()["id"]
+    ok(trend_format(long_create_id) == "long", "create canonical long row is long")
+
+    # Upsert-by-term: re-POST the leftover term with another leftover must
+    # still land short (the existing-row setattr path, not the create path).
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "CreateLeftover", "content_format": "medium"})
+    ok(r.status_code == 201, "upsert medium leftover is 201 (decorator is always 201)")
+    ok(r.json().get("id") == create_id, "upsert hit the existing leftover row")
+    ok(r.json().get("content_format") == "short",
+       "upsert medium leftover persisted as short "
+       "(create-only helper leaves the existing-row setattr raw)")
+    ok(trend_format(create_id) == "short", "upsert leftover row is still short")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "CreateLong", "description": "refreshed, format omitted"})
+    ok(r.status_code == 201, "upsert description-only on a long trend is 201")
+    ok(r.json().get("content_format") == "long",
+       "upsert omitting content_format left canonical long "
+       "(always _canonical_format(data.get(...)) clobbers omitted to short)")
+    ok(trend_format(long_create_id) == "long",
+       "upsert-omit left the long create row long")
 finally:
     trends_router.video_gen.generate_ideas = _orig_ideas
     trends_router.video_gen.channel_language = _orig_lang

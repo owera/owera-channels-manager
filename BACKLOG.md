@@ -1520,3 +1520,21 @@ flag the operator step in the commit body.
   under-ceiling watching trend; JSON true/false is 4xx; omitted still
   defaults to 8; idea_count=1 still adopts; produce_count=0 still
   drafts-only; already-adopted + 0 is still 409.
+
+### 44. ✅ DONE (code shipped to main 2026-09-15) PATCH /api/trends canonicalizes content_format — normal
+- **resolution (2026-09-15):** `_canonical_format` is the choke point
+  (`"long" if fmt == "long" else "short"`). Adopt already wrote that
+  gate onto the topic it creates; PATCH `setattr`d the raw body, so
+  empty / `"LONG"` / `"medium"` / null leftovers landed on the trend
+  row (and the dashboard label). POST upsert is the same write.
+  PATCH, POST upsert, and adopt now go through the helper. Canonical
+  `"long"` / `"short"` unchanged; omitted format stays put; a sibling
+  trend is untouched. Suite: `tests/verify_trends.py` 84 → 151.
+  Isolated commit; no money-path files.
+- **why (found 2026-09-14 shipping #43, not bundled):** adopt
+  canonicalizes when creating the topic; PATCH was the open write.
+  Same leftover-format class #38 closed on topics.
+- **caution:** normal (`trends.py` only; not a money-path file).
+- **acceptance:** PATCH `"LONG"` / `""` / `"medium"` / null persist as
+  `"short"`; canonical `"long"` stays long; description-only PATCH
+  leaves format; sibling untouched; POST upsert leftover is short.
