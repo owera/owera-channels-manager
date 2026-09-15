@@ -148,7 +148,10 @@ CRAFT_RULES_SHORT = (
     "mid-short / body / miolo: no Subscribe text, VO, or chip before the endcard. "
     "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
     "Title suffix must be '· <series> <nn>' with series one of: "
-    + " | ".join(SERIES_LABELS) + "."
+    + " | ".join(SERIES_LABELS) + ". "
+    "Keep dollar stakes as numerals on title/frame0/thumb (e.g. $79) — "
+    "NEVER expand to 'seventy-nine dollars'. Credits/IA pre-approve needs "
+    "spoken phrase + ($N or concrete noun) + ·nn."
 )
 
 STOPWORDS = {
@@ -163,13 +166,119 @@ def spoken_title_ok(title: str | None) -> bool:
     return bool(SPOKEN_TITLE_RE.search(title or ""))
 
 
+# Credits / IA pre-approve lock (new queue only — never mass-retitle the catalog).
+_CREDITS_IA_SERIES_RE = re.compile(
+    r"·\s*(Copilot Credits|IA)\s+\d+\b",
+    re.IGNORECASE,
+)
+_SPELLED_DOLLAR_RE = re.compile(
+    r"\b(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+    r"(?:[\s-]+(?:one|two|three|four|five|six|seven|eight|nine))?|"
+    r"(?:eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|ten|one|two|three|four|five|six|seven|eight|nine))"
+    r"\s+dollars?\b",
+    re.IGNORECASE,
+)
+TITLE_BANNED_REASON = (
+    "title carries banned YT CTA (Follow / Follow-tomorrow / Siga / "
+    "Siga-amanhã / waitlist / owera.com) — new-queue Credits/IA lock"
+)
+TITLE_CLAIM_REASON = (
+    "Credits/IA title must carry (a) a useful spoken first phrase, "
+    "(b) a $N numeral OR concrete noun, and (c) · series nn — "
+    "do not mass-retitle the catalog; park leftovers via reject"
+)
+
+
+def dollar_numerals(text: str | None) -> list[str]:
+    """Dollar amounts kept as numerals (e.g. $79). Never spelled-out words."""
+    out: list[str] = []
+    for m in _AMOUNT_RE.finditer(text or ""):
+        raw = m.group(0) or ""
+        n = (m.group(1) or m.group(2) or "").replace(",", ".")
+        if not n:
+            continue
+        folded = theme.fold(raw)
+        if "$" in raw or folded.startswith("r$"):
+            out.append("$" + n)
+        else:
+            out.append(n)
+    return out
+
+
+def spelled_dollar_amount(text: str | None) -> bool:
+    """True when copy expands a stake to words (e.g. 'seventy-nine dollars')."""
+    return bool(_SPELLED_DOLLAR_RE.search(text or ""))
+
+
+def preserves_dollar_numerals(spoken: str | None, shown: str | None) -> bool:
+    """Frame0 / thumb must keep the same $N as the spoken claim — never expand."""
+    amounts = dollar_numerals(spoken)
+    if not amounts:
+        return not spelled_dollar_amount(shown)
+    if spelled_dollar_amount(shown):
+        return False
+    shown_l = theme.fold(shown or "")
+    for a in amounts:
+        token = theme.fold(a)
+        bare = token.lstrip("$")
+        if token in shown_l or (bare and bare in shown_l):
+            continue
+        return False
+    return True
+
+
+def _useful_spoken_phrase(title: str | None) -> bool:
+    head = ((title or "").split("·", 1)[0] or "").strip()
+    if len(head) < 12:
+        return False
+    words = [w for w in re.findall(r"[A-Za-zÀ-ÿ0-9$]+", head)
+             if theme.fold(w) not in STOPWORDS]
+    return len(words) >= 3
+
+
+def _has_claim_stake(title: str | None) -> bool:
+    """(b) $N numeral OR concrete noun grounded in the spoken head."""
+    head = ((title or "").split("·", 1)[0] or "").strip()
+    if dollar_numerals(head):
+        return True
+    if spelled_dollar_amount(head):
+        return False
+    obj = opening_object(head)
+    label = (obj.get("label") or "").strip().upper()
+    return bool(label) and label != "OBJECT"
+
+
+def credits_ia_title_ok(title: str | None) -> bool:
+    """Pre-approve lock for Credits/IA series (new queue). Other series unchanged."""
+    raw = title or ""
+    if not _CREDITS_IA_SERIES_RE.search(raw):
+        return True  # not a Credits/IA patterned title — leave to spoken_title_ok
+    if contains_banned(raw):
+        return False
+    if not _useful_spoken_phrase(raw):
+        return False
+    if not _has_claim_stake(raw):
+        return False
+    return True
+
+
 def title_gate_reason(title: str | None, content_format: str | None = "short") -> str | None:
-    """None = allowed to leave review toward publish. Longs are exempt (no series suffix)."""
+    """None = allowed to leave review toward publish. Longs are exempt (no series suffix).
+
+    New-queue only: does not rewrite / mass-retitle the catalog. Credits/IA
+    titles also need a useful spoken phrase + ($N | concrete noun); Follow /
+    waitlist / owera.com CTAs fail.
+    """
     if (content_format or "short") == "long":
         return None
-    if spoken_title_ok(title):
-        return None
-    return TITLE_GATE_REASON
+    if contains_banned(title):
+        return TITLE_BANNED_REASON
+    if not spoken_title_ok(title):
+        return TITLE_GATE_REASON
+    if not credits_ia_title_ok(title):
+        return TITLE_CLAIM_REASON
+    return None
 
 
 def first_spoken_sentence(script: str | None) -> str:
@@ -536,21 +645,22 @@ def brand_of(slug: str | None, name: str | None = None, channel_id=None) -> str 
 
 
 # ---------------------------------------------------------------------------
-# Video Maker craft gate (Shorts only) — A object 0–3s / B beats ≤3s / C spam
+# Video Maker craft gate (Shorts only) — A object 0–3s / B miolo ≤3s (hook exempt) / C spam
 # ---------------------------------------------------------------------------
 
 OBJECT_BEAT_TYPES = frozenset({"code", "command", "diagram", "compare", "stat"})
 TYPOGRAPHY_ONLY_TYPES = frozenset({"hook", "statement"})
 CTA_TYPES = frozenset({"cta", "endcard"})
 OPENING_WINDOW_S = 3.0
-# Gate B measures the *visual hold* (`dur`), which align_storyboard caps at
-# _MID_MAX. Cue-to-cue (next.start − start) is 0.12s longer because of the
-# inter-beat fade (_GAP). Using raw cue-span 100%-failed any mid sitting on
-# the cap (v1258 2026-09-15: quote dur=7.5, next−start=7.62 → REVIEW, ch2
-# would have missed the 14:00 slot). The YPP prompt still asks for ~3s cards;
-# the fail line must match storyboard._MID_MAX (7.5s, R4 DRAG). Do not retune
-# to 3.0 without a gated R4 experiment that also drops _MID_MAX.
-MID_BEAT_MAX_S = 7.5
+# Gate B measures the *visual hold* (`dur`) of mid (miolo) beats only —
+# AFTER the opening hook, BEFORE cta/endcard. Hook / beat type=hook is EXEMPT
+# (Gate A already covers object 0–3s). Cue-to-cue is 0.12s longer because of
+# the inter-beat fade (_GAP) — never count the fade as hold (v1258). Rodrigo
+# YES via CoS 2026-09-15: Gate B HARD at 3.0s for new-queue Shorts miolo
+# (closes the ~5–5.8s command-beat auto-approve hole). MUST equal
+# storyboard._MID_MAX.
+MID_BEAT_MAX_S = 3.0
+
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
@@ -654,8 +764,8 @@ def _cue_span(beats: list[dict], i: int) -> float:
 
     Prefer stored ``dur`` (GSAP tween length). Fall back to next.start − start
     minus the 0.12s inter-beat fade, then to raw next−start, then to dur.
-    Never count the fade as hold: that is how a 7.5s-capped quote failed B
-    at 7.62s (v1258).
+    Never count the fade as hold: that is how a capped quote failed B
+    when cue-span included the 0.12s fade (v1258).
     """
     try:
         dur = max(0.0, float(beats[i].get("dur") or 0.0))
@@ -798,11 +908,14 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             "or a non-empty hook.object Decolar prop (receipt/terminal/bill)."
         )
 
-    # --- B: mid beats ≤3.0s; cta/endcard series ≤4.0s ----------------------
+    # --- B: miolo mid ≤3.0s; cta/endcard ≤4.0s; hook EXEMPT ----------------
     b_hits = []
     for i, b in enumerate(board):
-        span = _cue_span(board, i)
         btype = b.get("type") or "?"
+        # Opening hook is Gate A territory (object 0–3s) — not Gate B.
+        if btype == "hook":
+            continue
+        span = _cue_span(board, i)
         cap = CTA_BEAT_MAX_S if btype in CTA_TYPES else MID_BEAT_MAX_S
         if span > cap + 1e-9:
             label = "cta/endcard" if btype in CTA_TYPES else "mid"

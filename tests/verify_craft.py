@@ -52,8 +52,19 @@ ok(craft.title_gate_reason("nope", "short") == craft.TITLE_GATE_REASON,
    "shorts without the pattern get the parked-via-reject reason")
 ok(craft.title_gate_reason("nope", "long") is None,
    "longs are exempt from the series suffix")
-ok(craft.title_gate_reason("x · IA 1", "short") is None,
-   "matching short is allowed")
+ok(craft.title_gate_reason(
+        "Copilot billed $79 when the model timed out · Copilot Credits 80",
+        "short") is None,
+   "Credits title with spoken phrase + $N + ·nn is allowed")
+ok(craft.title_gate_reason("x · IA 1", "short") == craft.TITLE_CLAIM_REASON,
+   "Credits/IA ·nn alone without useful phrase/$N/noun is blocked")
+ok(craft.title_gate_reason(
+        "Follow tomorrow the chunking fix · Copilot Credits 1", "short")
+   == craft.TITLE_BANNED_REASON,
+   "Follow-tomorrow Credits title fails pre-approve ban")
+ok(craft.title_gate_reason(
+        "Memory died between chats · Agent memory 2", "short") is None,
+   "non-Credits/IA patterned series still only needs ·nn")
 ok("pré-pattern" in craft.TITLE_GATE_REASON and "reject" in craft.TITLE_GATE_REASON,
    "error text tells ops to park via reject, not mass-retitle")
 
@@ -89,6 +100,24 @@ ok(craft.opening_object("Copilot billed the cancelled run")["kind"] == "bill",
    "billed title is a bill UI (invoice / credit counter)")
 ok(craft.opening_object("Copilot billed $58 when the model timed out")["amount"] == "$58",
    "spoken $58 lands on the credit counter")
+ok(craft.opening_object("Copilot billed $79 before writing a single line")["amount"] == "$79",
+   "spoken $79 stays a numeral on the bill widget")
+ok(craft.dollar_numerals("Copilot billed $79 · Copilot Credits 80") == ["$79"],
+   "dollar_numerals extracts $79")
+ok(craft.preserves_dollar_numerals(
+        "Copilot billed $79 before writing a single line",
+        "Copilot billed $79"),
+   "frame0/thumb compression may shorten but must keep $79")
+ok(not craft.preserves_dollar_numerals(
+        "Copilot billed $79 before writing a single line",
+        "Copilot billed seventy-nine dollars"),
+   "spelled-out seventy-nine dollars is rejected on frame0/thumb")
+ok(craft.spelled_dollar_amount("seventy-nine dollars"),
+   "spelled_dollar_amount catches word forms")
+ok(craft.compress_claim("Copilot billed $79 before writing a single line today", 8)
+   == "Copilot billed $79 before writing a single line",
+   "compress_claim keeps $79 as a numeral token")
+
 ok(craft.opening_object("Your RAG is slow and still wrong")["label"] == "RAG",
    "RAG title → RAG chrome")
 ok(craft.opening_object("Sua RAG busca lixo e você culpa o modelo")["label"] == "RAG",
@@ -569,12 +598,14 @@ def _pass_beats(*_a, **_k):
 
 g = craft.video_maker_gate(_pass_beats())
 ok(g["result"] == "PASS" and g["checks"] == {"A": "PASS", "B": "PASS", "C": "PASS"},
-   "golden short: object hook + code in 0–3s, mid ≤7.5s, cta ≤4s, 0 statements")
+   "golden short: object hook + code in 0–3s, mid ≤3s, cta ≤4s, 0 statements")
 ok(g["reasons"] == [], "PASS carries no fail reasons")
 ok(craft.video_maker_gate_reason({"beats": _pass_beats()}, "short") is None,
    "video_maker_gate_reason is None on PASS")
-ok(craft.review_gate_reason("x · IA 1", "short", {"beats": _pass_beats()}) is None,
-   "review_gate_reason allows a patterned title + PASS board")
+ok(craft.review_gate_reason(
+        "Copilot billed $79 when the model timed out · Copilot Credits 80",
+        "short", {"beats": _pass_beats()}) is None,
+   "review_gate_reason allows a Credits $N title + PASS board")
 
 # A — FAIL typography-only (emoji is not an object)
 typo = [
@@ -610,34 +641,39 @@ a_obj = [
 ok(craft.video_maker_gate(a_obj)["checks"]["A"] == "PASS",
    "A PASS: hook.object=terminal counts even if the rich beat starts after t=3")
 ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "PASS",
-   "B PASSes a 3.2s hook (under the 7.5s aligner cap) — letters stay independent")
+   "B PASS: hook 3.2s is EXEMPT from Gate B (miolo-only; Gate A covers object 0–3s)")
 
-# B — mid over the aligner cap (storyboard._MID_MAX / craft.MID_BEAT_MAX_S)
+# B — mid over the HARD 3.0s cap (closes ~5–5.8s command auto-approve hole)
 b_mid = _pass_beats()
-b_mid[1] = {"type": "code", "start": 2.0, "dur": 8.0, "lines": ["x"], "cue": "slow"}
-b_mid[2] = {"type": "stat", "start": 10.1, "dur": 2.0, "value": "1", "cue": "one"}
-b_mid[3] = {"type": "cta", "start": 12.2, "dur": 3.0, "text": "Go", "cue": "go"}
+b_mid[1] = {"type": "command", "start": 2.0, "dur": 5.8, "command": "x", "cue": "slow"}
+b_mid[2] = {"type": "stat", "start": 7.9, "dur": 2.0, "value": "1", "cue": "one"}
+b_mid[3] = {"type": "cta", "start": 10.0, "dur": 3.0, "text": "Go", "cue": "go"}
 gb = craft.video_maker_gate(b_mid)
 ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
-   "B FAIL: mid code held 8.00s (stored dur over the 7.5s cap)")
-ok("7.5" in gb["reasons"][0], "B fail reason cites the 7.5s mid cap")
+   "B FAIL: mid command held 5.80s (over the 3.0s HARD cap)")
+ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
 
-# B — aligner-capped mid (dur=_MID_MAX, next.start = start+dur+_GAP) must PASS.
-# v1258 2026-09-15 failed B at 7.62s because gate measured cue-span including
-# the 0.12s fade. Visual hold is 7.5s; that is the fail line.
+# B — aligner-capped mid at 3.0 + fade must PASS (fade is not hold).
 b_cap = _pass_beats()
-b_cap[1] = {"type": "quote", "start": 37.44, "dur": 7.5,
-            "text": "Converter não é deploy.", "cue": "converter"}
-b_cap[2] = {"type": "cta", "start": 45.06, "dur": 4.0, "text": "Go", "cue": "go"}
-# drop the leftover 4th beat from _pass_beats so this is hook/quote/cta
-b_cap = [b_cap[0], b_cap[1], b_cap[2]]
+b_cap[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
+b_cap[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
+b_cap[3] = {"type": "cta", "start": 7.2, "dur": 3.0, "text": "Go", "cue": "go"}
 gcap = craft.video_maker_gate(b_cap)
 ok(gcap["checks"]["B"] == "PASS",
-   "B PASS: quote dur=7.5 with next.start 7.62 later (the 0.12s fade is not hold)")
+   "B PASS: code dur=3.0 with next.start 3.12 later (0.12s fade is not hold)")
 ok(gcap["result"] == "PASS",
-   "v1258-shaped board (quote on the 7.5s cap + 4.0s cta) is a full PASS")
+   "board sitting on the 3.0s mid cap + 3.0s cta is a full PASS")
 
-# Same board with no stored dur still PASSes via cue-span − GAP.
+# Legacy 7.5s quote shape must now FAIL Gate B (new queue HARD).
+b_old = _pass_beats()
+b_old[1] = {"type": "quote", "start": 37.44, "dur": 7.5,
+            "text": "Converter não é deploy.", "cue": "converter"}
+b_old[2] = {"type": "cta", "start": 45.06, "dur": 4.0, "text": "Go", "cue": "go"}
+b_old = [b_old[0], b_old[1], b_old[2]]
+ok(craft.video_maker_gate(b_old)["checks"]["B"] == "FAIL",
+   "B FAIL: former 7.5s aligner-cap quote is over the 3.0s HARD mid cap")
+
+# Same board with no stored dur still measures visual hold via cue-span − GAP.
 b_nodur = [
     {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook",
      "object": "bill", "cue": "h"},
@@ -645,8 +681,8 @@ b_nodur = [
      "cue": "converter"},
     {"type": "cta", "start": 45.06, "dur": 4.0, "text": "Go", "cue": "go"},
 ]
-ok(craft.video_maker_gate(b_nodur)["checks"]["B"] == "PASS",
-   "B PASS without dur: 45.06−37.44−0.12 = 7.50s visual hold")
+ok(craft.video_maker_gate(b_nodur)["checks"]["B"] == "FAIL",
+   "B FAIL without dur: 45.06−37.44−0.12 = 7.50s visual hold > 3.0")
 
 # B — CTA >4s
 b_cta = _pass_beats()
@@ -790,7 +826,9 @@ ok(reason.startswith("Video Maker craft gate FAIL:") and "[A]" in reason,
 ok(craft.review_gate_reason("nope", "short", {"beats": _pass_beats()})
    == craft.TITLE_GATE_REASON,
    "review_gate_reason: title pattern wins over a PASS board")
-ok("craft gate FAIL" in (craft.review_gate_reason("x · IA 1", "short", {"beats": typo}) or ""),
+ok("craft gate FAIL" in (craft.review_gate_reason(
+        "Your RAG reads junk and still wrong · IA 12", "short",
+        {"beats": typo}) or ""),
    "review_gate_reason: patterned title still blocked by A+B+C")
 
 # hook_object / snapshot / html parse

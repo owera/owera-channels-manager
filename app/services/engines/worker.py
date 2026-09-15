@@ -509,6 +509,7 @@ def _generate_script(subject: str, params: dict) -> str:
             "Follow, Follow tomorrow, Siga, Siga-amanhã, 'follow for more', waitlist, "
             "owera.com, Owera Cloud-as-product, 'part 2 coming', SMY, Instagram, LinkedIn. "
             "The FIRST sentence is the title hook — keep it short (≤10 words). "
+            "If the title has a dollar stake like $79, say $79 as numerals in the script — NEVER expand to seventy-nine dollars. "
             "Conversational, concrete, no filler, no headings, no stage directions, no emojis. "
             "Return ONLY the spoken words."
         )
