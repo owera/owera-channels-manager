@@ -34,7 +34,7 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
-_MID_MAX = 7.5   # mid-body visual-hold cap (R4 DRAG) — MUST equal craft.MID_BEAT_MAX_S
+_MID_MAX = 3.0   # mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S (Gate B HARD)
 # Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
 # claim. Surplus stays on the payoff / earlier mids — never back on frame0
 # and never a long neon Follow card. Mid-body still dumps into the CTA first
@@ -1192,6 +1192,9 @@ def _lock_opening_hook(beats, script, subject) -> None:
         hook = craft.compress_claim(craft.spoken_hook_source(subject, None, subject), 12)
     if not beats or not hook:
         return
+    if claim and hook and not craft.preserves_dollar_numerals(claim, hook):
+        # Frame0 must keep $79 as $79 — never "seventy-nine dollars".
+        hook = craft.compress_claim(claim, 12) or hook
     derived = craft.opening_object(claim or hook)
     b0 = beats[0]
     b0["type"] = "hook"

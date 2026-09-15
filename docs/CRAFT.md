@@ -31,6 +31,27 @@ Ops park leftover pré-pattern items via **reject**. Do **not** mass-retitle.
 `GET /api/agent/issues` exposes `title_pattern_blocked` (informational) with
 `suggested_action: reject (pré-pattern leftover — do not mass-retitle)`.
 
+
+## $N numeral lock (frame0 + thumb)
+
+Dollar stakes stay numerals on title / frame0 / thumb (e.g. `$79`).
+`opening_object` / `compress_claim` / thumbnail hook compression must
+**never** expand to "seventy-nine dollars". Same `$N` on thumb and frame0,
+aligned with the spoken title.
+
+## Credits / IA pre-approve title lock (new queue only)
+
+For titles matching `· Copilot Credits|IA <nn>`, approve / skip-gate /
+retry-to-approved / publish also require:
+
+1. a useful spoken first phrase (head before `·`)
+2. a `$N` numeral **or** concrete noun (bill / RAG / terminal / …)
+3. the `· series nn` suffix
+
+Regression FAIL: Follow, Follow-tomorrow, Siga, Siga-amanhã, waitlist,
+owera.com on the title. Does **not** mass-retitle the catalog — park
+pré-pattern leftovers via reject.
+
 ## Decolar lock (frame 0 + thumb)
 
 `storyboard._lock_opening_hook` and `thumbnail._hook_text` force frame 0 / the
@@ -102,18 +123,17 @@ type ∈ {code, command, diagram, compare, stat} **or** the hook has a non-empty
 FAIL: only hook/statement with text+emoji (typography-only) until t=3.
 Emoji does **not** count as an object.
 
-### B — Beats ≤ mid-hold (`craft.MID_BEAT_MAX_S`, live **7.5s**)
+### B — Beats ≤ mid-hold (`craft.MID_BEAT_MAX_S`, live **3.0s** HARD)
 
 PASS: for every beat except the final `cta` / endcard series, visual hold
 (`dur`, which `align_storyboard` caps at `_MID_MAX`) ≤ `MID_BEAT_MAX_S`.
-That constant **must equal** `storyboard._MID_MAX`. Cue-to-cue
-(`next.start − start`) is `_GAP` (0.12s) longer than `dur` — do **not**
-fail on the fade (v1258 2026-09-15: quote `dur=7.5`, cue-span `7.62` was
-a false B). The prompt still asks for ~3s cards; the fail line is the
-aligned hold, not the prompt target. Do not drop this to 3.0s until a
-gated R4 experiment also drops `_MID_MAX`.
+That constant **must equal** `storyboard._MID_MAX` (both **3.0s** — Rodrigo
+YES via CoS 2026-09-15; closes the ~5–5.8s command-beat auto-approve hole
+for **new queue**). Cue-to-cue (`next.start − start`) is `_GAP` (0.12s)
+longer than `dur` — do **not** fail on the fade (v1258 measured hold, not
+fade). Pré-gate inventory without a beats snapshot still fail-opens.
 
-FAIL: any mid card/slide > `MID_BEAT_MAX_S`.
+FAIL: any mid card/slide > `MID_BEAT_MAX_S` (3.0s).
 
 cta/endcard series: max 4.0s (not a Follow-tomorrow hold).
 

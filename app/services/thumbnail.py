@@ -66,6 +66,8 @@ def _hook_text(subject: str, title: str | None,
             "Prefer naming the object of the angle (receipt, terminal, invoice) "
             "when it is already in the title; never swap in a generic 💸 emoji punch. "
             "No emoji-first hook, no emoji soup. "
+            "Keep dollar amounts as numerals exactly as in the title (e.g. $79 stays $79) — "
+            "NEVER expand to seventy-nine dollars or any spelled-out money words. "
             "Return ONLY the compressed hook."
         )
         prompt = (
@@ -77,7 +79,8 @@ def _hook_text(subject: str, title: str | None,
         out = re.sub(r'^["\'`]+|["\'`]+$', "", out).splitlines()[0].strip()
         words = out.split()
         if (2 <= len(words) <= 8 and len(out) <= 60 and craft.claim_aligned(out, spoken)
-                and not craft.emoji_first(out) and not craft.emoji_soup(out)):
+                and not craft.emoji_first(out) and not craft.emoji_soup(out)
+                and craft.preserves_dollar_numerals(spoken, out)):
             return out
     except Exception as e:
         logger.info("thumbnail hook LLM failed, using spoken claim: %s", e)

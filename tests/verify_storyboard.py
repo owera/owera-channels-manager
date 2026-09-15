@@ -218,8 +218,8 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
    "inter-beat gap 0.12s + min duration 0.5s (matches worker clip tolerance)")
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
-ok(storyboard._MID_MAX == 7.5,
-   "align max-hold: mid-body 7.5s (penultimate dump still lands on the CTA first)")
+ok(storyboard._MID_MAX == 3.0,
+   "align max-hold: mid-body 3.0s (Gate B HARD; penultimate dump still lands on the CTA first)")
 ok(storyboard._MID_MAX == craft.MID_BEAT_MAX_S,
    "gate B mid-hold cap matches the aligner (do not fail-close below _MID_MAX)")
 ok(storyboard._GAP == craft.BEAT_GAP_S,
