@@ -640,8 +640,8 @@ a_obj = [
 ]
 ok(craft.video_maker_gate(a_obj)["checks"]["A"] == "PASS",
    "A PASS: hook.object=terminal counts even if the rich beat starts after t=3")
-ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "FAIL",
-   "B FAILs a 3.2s hook (over the 3.0s HARD mid cap) — letters stay independent")
+ok(craft.video_maker_gate(a_obj)["checks"]["B"] == "PASS",
+   "B PASS: hook 3.2s is EXEMPT from Gate B (miolo-only; Gate A covers object 0–3s)")
 
 # B — mid over the HARD 3.0s cap (closes ~5–5.8s command auto-approve hole)
 b_mid = _pass_beats()

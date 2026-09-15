@@ -645,19 +645,22 @@ def brand_of(slug: str | None, name: str | None = None, channel_id=None) -> str 
 
 
 # ---------------------------------------------------------------------------
-# Video Maker craft gate (Shorts only) — A object 0–3s / B beats ≤3s / C spam
+# Video Maker craft gate (Shorts only) — A object 0–3s / B miolo ≤3s (hook exempt) / C spam
 # ---------------------------------------------------------------------------
 
 OBJECT_BEAT_TYPES = frozenset({"code", "command", "diagram", "compare", "stat"})
 TYPOGRAPHY_ONLY_TYPES = frozenset({"hook", "statement"})
 CTA_TYPES = frozenset({"cta", "endcard"})
 OPENING_WINDOW_S = 3.0
-# Gate B measures the *visual hold* (`dur`), which align_storyboard caps at
-# _MID_MAX. Cue-to-cue (next.start − start) is 0.12s longer because of the
-# inter-beat fade (_GAP) — never count the fade as hold (v1258). Rodrigo YES
-# via CoS 2026-09-15: Gate B HARD at 3.0s for new-queue Shorts (closes the
-# ~5–5.8s command-beat auto-approve hole). MUST equal storyboard._MID_MAX.
+# Gate B measures the *visual hold* (`dur`) of mid (miolo) beats only —
+# AFTER the opening hook, BEFORE cta/endcard. Hook / beat type=hook is EXEMPT
+# (Gate A already covers object 0–3s). Cue-to-cue is 0.12s longer because of
+# the inter-beat fade (_GAP) — never count the fade as hold (v1258). Rodrigo
+# YES via CoS 2026-09-15: Gate B HARD at 3.0s for new-queue Shorts miolo
+# (closes the ~5–5.8s command-beat auto-approve hole). MUST equal
+# storyboard._MID_MAX.
 MID_BEAT_MAX_S = 3.0
+
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
@@ -905,11 +908,14 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             "or a non-empty hook.object Decolar prop (receipt/terminal/bill)."
         )
 
-    # --- B: mid beats ≤3.0s; cta/endcard series ≤4.0s ----------------------
+    # --- B: miolo mid ≤3.0s; cta/endcard ≤4.0s; hook EXEMPT ----------------
     b_hits = []
     for i, b in enumerate(board):
-        span = _cue_span(board, i)
         btype = b.get("type") or "?"
+        # Opening hook is Gate A territory (object 0–3s) — not Gate B.
+        if btype == "hook":
+            continue
+        span = _cue_span(board, i)
         cap = CTA_BEAT_MAX_S if btype in CTA_TYPES else MID_BEAT_MAX_S
         if span > cap + 1e-9:
             label = "cta/endcard" if btype in CTA_TYPES else "mid"
