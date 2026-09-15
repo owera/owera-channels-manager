@@ -543,13 +543,17 @@ OBJECT_BEAT_TYPES = frozenset({"code", "command", "diagram", "compare", "stat"})
 TYPOGRAPHY_ONLY_TYPES = frozenset({"hook", "statement"})
 CTA_TYPES = frozenset({"cta", "endcard"})
 OPENING_WINDOW_S = 3.0
-# Gate B measures *aligned* cue-spans (next_cue − cue), the same quantity
-# align_storyboard caps. The YPP prompt still asks for ~3s cards; the fail
-# line must match storyboard._MID_MAX (7.5s, R4 DRAG). Shipping 3.0 here
-# before the aligner could emit 3s 100%-failed overnight shorts (v1251/v1253
-# 2026-09-12). Do not retune to 3.0 without a gated R4 experiment that also
-# drops _MID_MAX.
+# Gate B measures the *visual hold* (`dur`), which align_storyboard caps at
+# _MID_MAX. Cue-to-cue (next.start − start) is 0.12s longer because of the
+# inter-beat fade (_GAP). Using raw cue-span 100%-failed any mid sitting on
+# the cap (v1258 2026-09-15: quote dur=7.5, next−start=7.62 → REVIEW, ch2
+# would have missed the 14:00 slot). The YPP prompt still asks for ~3s cards;
+# the fail line must match storyboard._MID_MAX (7.5s, R4 DRAG). Do not retune
+# to 3.0 without a gated R4 experiment that also drops _MID_MAX.
 MID_BEAT_MAX_S = 7.5
+# Must equal storyboard._GAP. Duplicated so craft does not import storyboard
+# (storyboard already imports craft).
+BEAT_GAP_S = 0.12
 CTA_BEAT_MAX_S = 4.0
 STATEMENT_MAX_SHORTS = 1
 LIST_MAX_PER_SHORT = 1
@@ -646,19 +650,29 @@ def _cue_start(beat: dict) -> float:
 
 
 def _cue_span(beats: list[dict], i: int) -> float:
-    """next_cue_start - cue_start. Last beat falls back to stored dur."""
+    """Visual hold of beat i — the quantity align_storyboard caps at _MID_MAX.
+
+    Prefer stored ``dur`` (GSAP tween length). Fall back to next.start − start
+    minus the 0.12s inter-beat fade, then to raw next−start, then to dur.
+    Never count the fade as hold: that is how a 7.5s-capped quote failed B
+    at 7.62s (v1258).
+    """
+    try:
+        dur = max(0.0, float(beats[i].get("dur") or 0.0))
+    except (TypeError, ValueError):
+        dur = 0.0
+    if dur > 0:
+        return dur
     start = _cue_start(beats[i])
     if i + 1 < len(beats):
         nxt = beats[i + 1].get("start")
         if nxt is not None:
             try:
-                return max(0.0, float(nxt) - start)
+                span = float(nxt) - start
+                return max(0.0, span - BEAT_GAP_S)
             except (TypeError, ValueError):
                 pass
-    try:
-        return max(0.0, float(beats[i].get("dur") or 0.0))
-    except (TypeError, ValueError):
-        return 0.0
+    return dur
 
 
 def _list_items(beat: dict) -> list:
@@ -794,7 +808,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             label = "cta/endcard" if btype in CTA_TYPES else "mid"
             b_hits.append(
                 f"beat[{i}] type={btype} {label} held {span:.2f}s "
-                f"(next_cue − cue; limit {cap:.1f}s)"
+                f"(visual dur; limit {cap:.1f}s)"
             )
     if b_hits:
         checks["B"] = "FAIL"

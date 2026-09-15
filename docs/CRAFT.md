@@ -104,12 +104,14 @@ Emoji does **not** count as an object.
 
 ### B — Beats ≤ mid-hold (`craft.MID_BEAT_MAX_S`, live **7.5s**)
 
-PASS: for every beat except the final `cta` / endcard series, duration =
-`next_cue_start − cue_start` (last pre-cta: `cta_cue − cue`) ≤
-`MID_BEAT_MAX_S`. That constant **must equal** `storyboard._MID_MAX`
-(the aligner cap). The prompt still asks for ~3s cards; the fail line is
-the aligned hold, not the prompt target. Do not drop this to 3.0s until
-a gated R4 experiment also drops `_MID_MAX`.
+PASS: for every beat except the final `cta` / endcard series, visual hold
+(`dur`, which `align_storyboard` caps at `_MID_MAX`) ≤ `MID_BEAT_MAX_S`.
+That constant **must equal** `storyboard._MID_MAX`. Cue-to-cue
+(`next.start − start`) is `_GAP` (0.12s) longer than `dur` — do **not**
+fail on the fade (v1258 2026-09-15: quote `dur=7.5`, cue-span `7.62` was
+a false B). The prompt still asks for ~3s cards; the fail line is the
+aligned hold, not the prompt target. Do not drop this to 3.0s until a
+gated R4 experiment also drops `_MID_MAX`.
 
 FAIL: any mid card/slide > `MID_BEAT_MAX_S`.
 

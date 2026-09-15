@@ -619,8 +619,34 @@ b_mid[2] = {"type": "stat", "start": 10.1, "dur": 2.0, "value": "1", "cue": "one
 b_mid[3] = {"type": "cta", "start": 12.2, "dur": 3.0, "text": "Go", "cue": "go"}
 gb = craft.video_maker_gate(b_mid)
 ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
-   "B FAIL: mid code held 8.10s (10.1 − 2.0)")
+   "B FAIL: mid code held 8.00s (stored dur over the 7.5s cap)")
 ok("7.5" in gb["reasons"][0], "B fail reason cites the 7.5s mid cap")
+
+# B — aligner-capped mid (dur=_MID_MAX, next.start = start+dur+_GAP) must PASS.
+# v1258 2026-09-15 failed B at 7.62s because gate measured cue-span including
+# the 0.12s fade. Visual hold is 7.5s; that is the fail line.
+b_cap = _pass_beats()
+b_cap[1] = {"type": "quote", "start": 37.44, "dur": 7.5,
+            "text": "Converter não é deploy.", "cue": "converter"}
+b_cap[2] = {"type": "cta", "start": 45.06, "dur": 4.0, "text": "Go", "cue": "go"}
+# drop the leftover 4th beat from _pass_beats so this is hook/quote/cta
+b_cap = [b_cap[0], b_cap[1], b_cap[2]]
+gcap = craft.video_maker_gate(b_cap)
+ok(gcap["checks"]["B"] == "PASS",
+   "B PASS: quote dur=7.5 with next.start 7.62 later (the 0.12s fade is not hold)")
+ok(gcap["result"] == "PASS",
+   "v1258-shaped board (quote on the 7.5s cap + 4.0s cta) is a full PASS")
+
+# Same board with no stored dur still PASSes via cue-span − GAP.
+b_nodur = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook",
+     "object": "bill", "cue": "h"},
+    {"type": "quote", "start": 37.44, "text": "Converter não é deploy.",
+     "cue": "converter"},
+    {"type": "cta", "start": 45.06, "dur": 4.0, "text": "Go", "cue": "go"},
+]
+ok(craft.video_maker_gate(b_nodur)["checks"]["B"] == "PASS",
+   "B PASS without dur: 45.06−37.44−0.12 = 7.50s visual hold")
 
 # B — CTA >4s
 b_cta = _pass_beats()

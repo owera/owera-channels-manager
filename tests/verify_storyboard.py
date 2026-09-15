@@ -222,6 +222,8 @@ ok(storyboard._MID_MAX == 7.5,
    "align max-hold: mid-body 7.5s (penultimate dump still lands on the CTA first)")
 ok(storyboard._MID_MAX == craft.MID_BEAT_MAX_S,
    "gate B mid-hold cap matches the aligner (do not fail-close below _MID_MAX)")
+ok(storyboard._GAP == craft.BEAT_GAP_S,
+   "gate B fade gap matches the aligner (do not count the 0.12s fade as hold)")
 ok(storyboard._ENDCARD_MAX == 4.0,
    "series endcard / last-cta hold ceiling is 4.0s")
 ok(storyboard._ENDCARD_MAX == craft.ENDCARD_MAX_S,
