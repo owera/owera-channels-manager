@@ -471,6 +471,32 @@ def _strip_script_preamble(text: str) -> str:
     return " ".join(kept)
 
 
+def _lock_patterned_opener(script: str, subject: str) -> str:
+    """Decolar: patterned shorts speak the title hook, including ``$N``.
+
+    ``metadata._lock_decolar_title`` keeps the YouTube title as the subject
+    verbatim, but grok expands ``$84`` → "eighty-four dollars" in sentence 1
+    (v1257 operator HOLD: frame0/spoken drifted from title/thumb). Frame0
+    follows the script, so the split is visible. When the subject already
+    carries ``· <series> <nn>``, replace the first spoken sentence with the
+    text before ``·``. Unpatterned subjects are unchanged (golden set).
+    """
+    from app.services import craft
+
+    if not craft.spoken_title_ok(subject):
+        return script
+    head = (subject or "").split("·", 1)[0].strip()
+    if not head:
+        return script
+    opener = head.rstrip(".!?…") + "."
+    text = (script or "").strip()
+    if not text:
+        return opener
+    parts = re.split(r"(?<=[.!?…])\s+", text, maxsplit=1)
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    return f"{opener} {rest}".strip() if rest else opener
+
+
 def _generate_script(subject: str, params: dict) -> str:
     n = int(params.get("paragraph_number") or 2)
     if (params.get("content_format") or "short") == "long":
@@ -543,6 +569,7 @@ def _generate_script(subject: str, params: dict) -> str:
 
     from app.services import craft
     text = craft.strip_banned(text) or text
+    text = _lock_patterned_opener(text, subject)
     # Shorts: pin the series endcard VO after the claim. No TTS overhaul — one
     # English line appended (or the last sentence replaced if it already matches).
     if (params.get("content_format") or "short") != "long":

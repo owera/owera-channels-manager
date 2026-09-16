@@ -312,6 +312,60 @@ ok("I'll check" not in gated,
 
 
 # ---------------------------------------------------------------------------
+# _lock_patterned_opener — $N spoken vs title (v1257 operator HOLD)
+# ---------------------------------------------------------------------------
+print("_lock_patterned_opener: $N glyph, patterned vs unpatterned")
+
+_V1257 = (
+    "Copilot billed eighty-four dollars on a failed agent. "
+    "Copilot Credits meter the run, not the result."
+)
+_V1257_SUBJ = "Copilot billed $84 on a failed agent. · Copilot Credits 79"
+locked = worker._lock_patterned_opener(_V1257, _V1257_SUBJ)
+ok(locked.startswith("Copilot billed $84 on a failed agent."),
+   "v1257-shaped opener keeps $84, not eighty-four dollars")
+ok("eighty-four dollars on a failed agent" not in locked.split(".")[0],
+   "sentence 1 no longer spells out $84")
+ok("Copilot Credits meter the run, not the result." in locked,
+   "body after the opener is kept")
+
+ok(worker._lock_patterned_opener(
+    "Copilot billed $84 on a failed agent. Rest here.",
+    _V1257_SUBJ,
+) == "Copilot billed $84 on a failed agent. Rest here.",
+   "already-matching $N opener is unchanged")
+
+ok(worker._lock_patterned_opener(
+    "Your RAG is slow because you stuff twenty chunks. Rank the hits.",
+    "Fix Your Slow RAG: Add a Reranking Step in Five Lines",
+) == "Your RAG is slow because you stuff twenty chunks. Rank the hits.",
+   "unpatterned golden subject is a no-op")
+
+ok(worker._lock_patterned_opener(
+    "Você ligou o Whisper e acha que é outra coisa. O resto.",
+    "Você ligou o Whisper na GPU e acha que é engenharia. · IA 180",
+) == "Você ligou o Whisper na GPU e acha que é engenharia. O resto.",
+   "PT patterned subject overwrites a drifted opener")
+
+def _expand_dollar(_prompt, system=None, max_tokens=2000):
+    _llm_calls.append({"prompt": _prompt})
+    return (
+        "Copilot billed eighty-four dollars on a failed agent. "
+        + " ".join(["word"] * 50)
+    )
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_expand_dollar):
+    gated_n = worker._generate_script(_V1257_SUBJ, {"content_format": "short"})
+ok(gated_n.startswith("Copilot billed $84 on a failed agent."),
+   "_generate_script locks $84 onto sentence 1 before the endcard VO")
+ok("eighty-four" not in gated_n.split(".")[0],
+   "spelled-out dollars do not survive _generate_script on a patterned title")
+ok(gated_n.endswith("Subscribe — next Copilot Credits trap."),
+   "endcard VO still appends after the $N lock")
+
+
+# ---------------------------------------------------------------------------
 # _pick_template
 # ---------------------------------------------------------------------------
 print("_pick_template: deterministic subject-hash")
