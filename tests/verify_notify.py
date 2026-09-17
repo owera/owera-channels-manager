@@ -34,6 +34,11 @@ from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
 from app.services import analytics_loop, metrics_loop, notify, publish_loop, youtube
 
+# Craft-gate B (8f9ed39): `_publish_one` bounces a failing Credits/IA title
+# to REVIEW before get_service. Fixtures must pass the pre-approve lock so
+# the revoked-token wiring pin still reaches NeedsConnect.
+_OK_TITLE = "Cache miss costs $79 · Copilot Credits 1"
+
 # Safety: the operator's .env may carry a REAL webhook URL. Kill it before any
 # alert can fire, so running this suite never pages anyone with fake alerts.
 settings.alert_webhook_url = ""
@@ -67,6 +72,7 @@ def make_channel(session, **kw):
 
 
 def make_video(session, channel, **kw):
+    kw.setdefault("title", _OK_TITLE)
     v = Video(channel_id=channel.id, topic_id=kw.pop("topic_id", 1),
               subject=kw.pop("subject", "Test subject"), **kw)
     session.add(v)
@@ -275,7 +281,7 @@ youtube.has_token = lambda slug: True
 s = fresh_session()
 ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
 v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
-               title="T · Copilot Credits 1")
+               title=_OK_TITLE)
 
 cap = CaptureAlerts()
 publish_loop._publish_one(s, ch, v)
@@ -287,7 +293,7 @@ ok(len(cap.records) == 1, "a repeat NeedsConnect on the dead channel adds no ale
 youtube.has_token = lambda slug: False   # the token *file* itself vanished
 ch3 = make_channel(s, slug="ch-gone")
 v3 = make_video(s, ch3, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
-                title="T · Copilot Credits 1")
+                title=_OK_TITLE)
 publish_loop._publish_one(s, ch3, v3)
 ok(ch3.oauth_status == OAuthStatus.DISCONNECTED,
    "token-file loss classifies as DISCONNECTED (not the old EXPIRED mislabel)")

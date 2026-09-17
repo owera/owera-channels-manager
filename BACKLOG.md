@@ -1538,3 +1538,51 @@ flag the operator step in the commit body.
 - **acceptance:** PATCH `"LONG"` / `""` / `"medium"` / null persist as
   `"short"`; canonical `"long"` stays long; description-only PATCH
   leaves format; sibling untouched; POST upsert leftover is short.
+
+### 45. ✅ DONE (code shipped to main 2026-09-17) Restore suites the craft-gate PR left red — normal
+- **resolution (2026-09-17):** tests-only. Craft-gate B (`8f9ed39` /
+  PR #30) added `craft.review_gate_reason` to approve and
+  `_publish_one` (title lock before get_service) and dumped surplus
+  into hook/mids with a 4s endcard cap. Fixture titles
+  `"T · Copilot Credits 1"` / `"Hook · Copilot Credits 1"` fail that
+  lock, so the revoked-token EXPIRED flip and the approve audit trail
+  never ran (409 / bounce-to-REVIEW). Passing titles keep a
+  discriminating token in the spoken head (`"{token} costs $79 ·
+  Copilot Credits 1"`) so tick() upload stubs still see
+  `paused-sched` / `stuck`. The storyboard halfway-interpolation pin
+  lifts `_MID_MAX` / `_ENDCARD_MAX` for that one check — after the
+  dump an unmatched mid lands at ~9.76 either way, so a min-space
+  mutant survived. Suites: `verify_publish.py` 237,
+  `verify_notify.py` 68, `verify_lifecycle_audit.py` 61,
+  `verify_storyboard.py` 307. Isolated commit; no app/**.
+- **why (found 2026-09-17 gating an unrelated music-count floor):**
+  four `verify_*.py` files were red on `main` after the craft PR, so
+  the code-agent gate could not ship anything.
+- **caution:** normal (tests only; not a money-path file). Isolated
+  commit. Production craft-gate order (title lock before oauth probe)
+  is unchanged — a follow-up if a channel with only craft-blocked
+  approved work would skip the publish-path silent-death flip
+  (metrics still catches it).
+- **acceptance:** the four suites print ALL n CHECKS PASSED; n does
+  not decrease; revoked-token still flips EXPIRED; approve from
+  review still 200 + JobRun; unmatched mid still interpolates to 2.0
+  with caps lifted.
+
+### 46. POST /api/music/generate rejects count<=0 — normal
+- **why (found 2026-09-17 ranking remaining `max(1, count)` after
+  #43):** generate topics and trend-adopt 400 count<=0; music still
+  `count = min(max(1, body.count), 20)` so 0 / negative silently
+  synthesises one track. JSON bool (lax `int` coerces `false→0` then
+  1 / `true→1`) is the same class. Growth-agent / curl still reach
+  this path; the playbook hardcodes a positive count. SPA does not
+  send count. Parked this cycle because the craft-gate suites had
+  to go green first.
+- **approach:** `_require_int` on generate `count` (`>= 1`) before
+  `_style_pool`; `GenerateBody._reject_bool_count` `mode="before"`;
+  omitted still defaults to 1; `count=21` still clamps to 20.
+  Extend `tests/verify_music.py`.
+- **caution:** normal (`music.py` generate + local `GenerateBody`;
+  not a money-path file). Isolated commit + regression tests.
+- **acceptance:** count=0 / -1 is 400 and writes nothing; JSON
+  true/false is 4xx; omitted count still defaults to 1; count=1
+  still generates; count=21 still clamps to 20.

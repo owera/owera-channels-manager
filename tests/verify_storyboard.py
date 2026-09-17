@@ -532,16 +532,27 @@ ok(bunched[-1]["start"] < 18.6 - 0.01,
    "CTA start is pulled EARLIER than its cue (steals slack, never later)")
 
 # Unmatched middle cue interpolates between neighboring anchors.
+# Gate B (8f9ed39) dumps surplus into hook/mids and caps the endcard at 4s,
+# which moves the unmatched mid to ~9.76 after align — the same place a
+# min-space-0.5 mutant lands after the dump. Lift the caps so the 2.0
+# halfway pin still discriminates interpolation from min-space.
 interp = [
     {"type": "hook", "cue": "open", "text": "A"},
     {"type": "stat", "cue": "nomatchzzz", "value": "1"},
     {"type": "statement", "cue": "mid", "text": "B"},
     {"type": "cta", "cue": "follow now", "text": "C"},
 ]
-storyboard.align_storyboard(interp, WORDS20, 20.0)
-ok(interp[0]["start"] == 0.0, "interpolated board still pins hook at 0")
-ok(abs(interp[1]["start"] - 2.0) < 1e-6,
-   "unmatched mid interpolates halfway between hook@0 and 'mid'@4 (not min-space 0.5)")
+_orig_mid_max, _orig_endcard = storyboard._MID_MAX, storyboard._ENDCARD_MAX
+storyboard._MID_MAX = 999.0
+storyboard._ENDCARD_MAX = 999.0
+try:
+    storyboard.align_storyboard(interp, WORDS20, 20.0)
+    ok(interp[0]["start"] == 0.0, "interpolated board still pins hook at 0")
+    ok(abs(interp[1]["start"] - 2.0) < 1e-6,
+       "unmatched mid interpolates halfway between hook@0 and 'mid'@4 (not min-space 0.5)")
+finally:
+    storyboard._MID_MAX = _orig_mid_max
+    storyboard._ENDCARD_MAX = _orig_endcard
 
 # Tiny clip: 6 beats in 4s — prefix floors (~10.8s) cannot fit, so we must
 # not invent a layout that fails validate. Word-sync + MIN_DUR only.
