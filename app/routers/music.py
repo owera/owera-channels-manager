@@ -4,7 +4,7 @@ import random
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.config import settings
 from app.services import music_gen
@@ -15,6 +15,30 @@ router = APIRouter(prefix="/api/music", tags=["music"])
 class GenerateBody(BaseModel):
     count: int = 1
     style: str | None = None  # optional style description to filter presets
+
+    @field_validator("count", mode="before")
+    @classmethod
+    def _reject_bool_count(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # 0 then became a silent one-track generate via max(1, count).
+        if isinstance(v, bool):
+            raise ValueError("must be an integer >= 1, not a boolean")
+        return v
+
+
+def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
+    """Reject JSON null / bool / below-floor ints before they hit generate.
+
+    Generate ``count<=0`` used to coerce 0 to 1 via ``max(1, body.count)``.
+    JSON bools are rejected earlier by GenerateBody (lax int would
+    coerce false→0 / true→1); the bool check here is defense in depth
+    for non-HTTP callers.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, int) or isinstance(v, bool) or v < minimum:
+        raise HTTPException(400, hint)
 
 
 def _style_pool(requested: str | None) -> list[dict]:
@@ -43,7 +67,14 @@ def generate_music(body: GenerateBody):
     Each track is ~30s of synthesised techno music saved as a WAV file in
     bgm_dir, where the render pipeline picks them up automatically.
     """
-    count = min(max(1, body.count), 20)
+    # Empty/typed 0 (and a typed negative) used to silently generate one
+    # track (the old floor coerced 0 up to 1, then capped at 20).
+    # Growth-agent / curl still reach this path; the playbook hardcodes
+    # a positive count.
+    _require_int({"count": body.count}, "count", 1,
+                 "count must be >= 1 "
+                 "(0 was a silent one-track generate via max(1, count))")
+    count = min(body.count, 20)
     bgm_dir = Path(settings.bgm_dir)
     pool = _style_pool(body.style)
 

@@ -1,4 +1,5 @@
-"""Regression checks for POST /api/music/generate style filtering.
+"""Regression checks for POST /api/music/generate style filtering
+and the count floor.
 
 This project has no pytest; run directly:
     PYTHONPATH=. uv run python tests/verify_music.py
@@ -7,6 +8,13 @@ Backlog #31: GenerateBody.style is documented as "optional style
 description to filter presets" but generate_music always
 ``random.choice(TECHNO_STYLES)`` and never reads ``body.style``. A
 dashboard (or growth-agent) pick is silently discarded.
+
+Backlog #45: ``count = min(max(1, body.count), 20)`` turned 0 /
+negative into a silent one-track generate (same class as #41/#43).
+JSON bool (lax ``int`` coerces ``false→0`` / ``true→1``) is the
+same silent-1. These checks pin count ``<= 0`` / bool as 4xx
+before any generate_and_save, and that omitted count still
+defaults to 1. The documented 20-per-call cap stays a clamp.
 
 Pins:
   - a known unique desc is the one generate_and_save is asked for, and
@@ -26,6 +34,7 @@ Exits non-zero on the first failed assertion.
 from __future__ import annotations
 
 import atexit
+import inspect
 import shutil
 import sys
 import tempfile
@@ -193,6 +202,92 @@ try:
     r = client.post("/api/music/generate", json={"count": 1, "style": KNOWN_DESC})
     ok(r.status_code == 401, "generate still requires auth")
     ok(len(calls) == n_before, "unauthenticated generate never called generate_and_save")
+
+    print("POST /api/music/generate: count<=0 is 400, not a silent one-track")
+    # Defect: count = min(max(1, body.count), 20) turned 0 / negative
+    # into a one-track generate. Generate topics already 400s count<=0
+    # (#41); music is the same growth-agent path.
+    n_before = len(calls)
+    files_before = list(_TMP.glob("techno_fake_*.wav"))
+    r = post_generate(count=0, style=KNOWN_DESC)
+    ok(r.status_code == 400, "count=0 is 400 (max(1, 0) would 200 and write 1)")
+    detail = str(r.json().get("detail") or r.text)
+    ok("count" in detail.lower() and ">= 1" in detail,
+       "count=0 400 names the field floor, not a style miss")
+    ok("unknown" not in detail.lower(),
+       "count=0 400 is the count floor, not a style 400")
+    ok(len(calls) == n_before, "count=0 never called generate_and_save")
+    ok(list(_TMP.glob("techno_fake_*.wav")) == files_before,
+       "count=0 writes no wav files")
+
+    r = post_generate(count=-1, style=KNOWN_DESC)
+    ok(r.status_code == 400, "count=-1 is 400")
+    ok(len(calls) == n_before, "count=-1 never called generate_and_save")
+    ok(list(_TMP.glob("techno_fake_*.wav")) == files_before,
+       "negative count writes no wav files")
+
+    r = client.post("/api/music/generate", auth=auth,
+                    json={"count": False, "style": KNOWN_DESC})
+    ok(r.status_code in (400, 422),
+       "count=false is 4xx (must not coerce to 0 then max(1,0)=1)")
+    ok(len(calls) == n_before, "count=false never called generate_and_save")
+
+    r = client.post("/api/music/generate", auth=auth,
+                    json={"count": True, "style": KNOWN_DESC})
+    ok(r.status_code in (400, 422),
+       "count=true is 4xx (must not coerce to 1 and generate)")
+    ok(len(calls) == n_before, "count=true never called generate_and_save")
+
+    r = client.post("/api/music/generate", auth=auth,
+                    json={"count": None, "style": KNOWN_DESC})
+    ok(r.status_code in (400, 422), "count=null is 4xx")
+    ok(len(calls) == n_before, "count=null never called generate_and_save")
+
+    r = post_generate(count=0, style="jazz fusion xyz 999")
+    ok(r.status_code == 400, "count=0 + unknown style is still 400")
+    ok("count" in str(r.json().get("detail") or r.text).lower(),
+       "count floor runs before the style pool "
+       "(style-first would 400 unknown-style and hide a missing floor)")
+    ok(len(calls) == n_before,
+       "count=0 + unknown style never called generate_and_save")
+
+    r = post_generate(count=1, style=KNOWN_DESC)
+    ok(r.status_code == 200, "count=1 still 200")
+    ok(r.json().get("generated") == 1, "count=1 generated exactly one track")
+    ok(len(calls) == n_before + 1, "count=1 called generate_and_save once")
+
+    n_before = len(calls)
+    r = client.post("/api/music/generate", auth=auth, json={"style": KNOWN_DESC})
+    ok(r.status_code == 200, "omitted count still 200 (GenerateBody default 1)")
+    ok(r.json().get("generated") == 1,
+       "omitted count defaults to 1, not 400")
+    ok(len(calls) == n_before + 1, "omitted count called generate_and_save once")
+    ok(music_router.GenerateBody.model_fields["count"].default == 1,
+       "GenerateBody.count default is 1")
+
+    n_before = len(calls)
+    r = post_generate(count=21, style=KNOWN_DESC)
+    ok(r.status_code == 200, "count=21 still 200 (cap is a clamp, not a 400)")
+    ok(r.json().get("generated") == 20,
+       "count=21 clamps to the documented 20-per-call cap")
+    ok(len(calls) == n_before + 20, "count=21 called generate_and_save 20 times")
+
+    gen_src = inspect.getsource(music_router.generate_music)
+    ok("_require_int" in gen_src,
+       "generate_music floors count through _require_int")
+    ok("max(1, body.count)" not in gen_src,
+       "count is no longer max(1, ...) (that is the silent-1 defect)")
+    ok(gen_src.index("_require_int") < gen_src.index("_style_pool"),
+       "_require_int runs before _style_pool "
+       "(style-first would 400 unknown-style on count=0)")
+    ok(gen_src.index("_require_int") < gen_src.index("generate_and_save"),
+       "_require_int runs before generate_and_save")
+    ok("min(body.count, 20)" in gen_src or "min(count, 20)" in gen_src,
+       "the 20-per-call cap is still a clamp (not dropped, not a 400)")
+    body_src = inspect.getsource(music_router.GenerateBody)
+    ok('_reject_bool_count' in body_src and 'mode="before"' in body_src,
+       "GenerateBody._reject_bool_count is mode=before "
+       "(a comment containing 'before' is not the decorator)")
 finally:
     music_gen.generate_and_save = _orig_save
     if _orig_router_save is not None:

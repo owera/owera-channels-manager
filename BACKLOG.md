@@ -1568,19 +1568,22 @@ flag the operator step in the commit body.
   review still 200 + JobRun; unmatched mid still interpolates to 2.0
   with caps lifted.
 
-### 46. POST /api/music/generate rejects count<=0 — normal
+### 46. ✅ DONE (code shipped to main 2026-09-17) POST /api/music/generate rejects count<=0 — normal
+- **resolution (2026-09-17):** `_require_int` is the choke point on
+  generate `count` (`>= 1`) before the style pool and the 20-per-call
+  clamp. JSON 0 / below-0 ints 400 (was a silent one-track generate via
+  `max(1, body.count)`). JSON bool is rejected earlier by
+  `GenerateBody._reject_bool_count` (`mode="before"`) because lax
+  `int` coerces `false→0` (then 1 track) / `true→1`. Null is 422
+  (required `int`). Omitted still defaults to 1. `count=21` still
+  clamps to 20. A 400 writes no wav / generate_and_save call.
+  Suite: `tests/verify_music.py` 38 → 71. Isolated commit; no
+  money-path files. SPA does not send count — this is the
+  growth-agent / curl floor.
 - **why (found 2026-09-17 ranking remaining `max(1, count)` after
-  #43):** generate topics and trend-adopt 400 count<=0; music still
-  `count = min(max(1, body.count), 20)` so 0 / negative silently
-  synthesises one track. JSON bool (lax `int` coerces `false→0` then
-  1 / `true→1`) is the same class. Growth-agent / curl still reach
-  this path; the playbook hardcodes a positive count. SPA does not
-  send count. Parked this cycle because the craft-gate suites had
-  to go green first.
-- **approach:** `_require_int` on generate `count` (`>= 1`) before
-  `_style_pool`; `GenerateBody._reject_bool_count` `mode="before"`;
-  omitted still defaults to 1; `count=21` still clamps to 20.
-  Extend `tests/verify_music.py`.
+  #43):** generate topics and trend-adopt 400 count<=0; music coerced
+  0 to 1 and synthesised a track. Parked one cycle so the craft-gate
+  suites (#45) could go green first.
 - **caution:** normal (`music.py` generate + local `GenerateBody`;
   not a money-path file). Isolated commit + regression tests.
 - **acceptance:** count=0 / -1 is 400 and writes nothing; JSON
