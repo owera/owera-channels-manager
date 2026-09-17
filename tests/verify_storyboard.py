@@ -1329,4 +1329,48 @@ storyboard._demote_nonsense_diagrams(long_oars, "long")
 ok(long_oars[0]["type"] == "statement",
    "long-form still demotes generic oars")
 
+print("Gate C statement cap (v1262: 3 statements → 1 quote-converted)")
+stmt_board = [
+    {"type": "hook", "cue": "h", "text": "H"},
+    {"type": "code", "cue": "c", "lines": ["x=1"]},
+    {"type": "compare", "cue": "k",
+     "left": {"title": "L", "items": ["a"]}, "right": {"title": "R", "items": ["b"]}},
+    {"type": "statement", "cue": "s1", "text": "one idea"},
+    {"type": "statement", "cue": "s2", "text": "two idea"},
+    {"type": "statement", "cue": "s3", "text": "three idea"},
+    {"type": "cta", "cue": "t", "text": "Subscribe · IA"},
+]
+storyboard._cap_statements(stmt_board, "short")
+ok(sum(1 for b in stmt_board if b["type"] == "statement") == 1,
+   "shorts keep exactly one statement (Gate C max)")
+ok(sum(1 for b in stmt_board if b["type"] == "quote") == 2,
+   "extra statements become quotes (not dropped)")
+ok(stmt_board[3]["type"] == "statement" and stmt_board[4]["type"] == "quote",
+   "first statement is kept; later ones convert")
+long_stmt = [
+    {"type": "hook", "text": "H"},
+    {"type": "statement", "text": "A", "cue": "a"},
+    {"type": "statement", "text": "B", "cue": "b"},
+    {"type": "cta", "text": "C"},
+]
+storyboard._cap_statements(long_stmt, "long")
+ok(sum(1 for b in long_stmt if b["type"] == "statement") == 2,
+   "long-form does not convert extra statements")
+v1262_types = [
+    {"type": "hook", "text": "H"},
+    {"type": "code", "lines": ["x=1"]},
+    {"type": "compare",
+     "left": {"title": "L", "items": ["a"]}, "right": {"title": "R", "items": ["b"]}},
+    {"type": "statement", "text": "one", "cue": "a"},
+    {"type": "statement", "text": "two", "cue": "b"},
+    {"type": "statement", "text": "three", "cue": "c"},
+    {"type": "quote", "text": "Q"},
+    {"type": "cta", "text": "Subscribe · IA"},
+]
+storyboard._cap_statements(v1262_types, "short")
+ok(sum(1 for b in v1262_types if b["type"] == "statement") == 1,
+   "v1262-shaped 3 statements collapse to 1")
+ok(craft.video_maker_gate(v1262_types, content_format="short")["checks"]["C"] == "PASS",
+   "Gate C PASS after the statement cap (was FAIL on 3 statements)")
+
 print(f"\nALL {_checks} CHECKS PASSED")

@@ -1333,6 +1333,31 @@ def _cap_endcard(beats, duration: float) -> None:
         prev["dur"] = round(max(_MIN_DUR, cur["start"] - _GAP - prev_start), 3)
 
 
+def _cap_statements(beats, content_format=None) -> None:
+    """Gate C backstop: Shorts keep ≤1 statement. Extra cards become quotes.
+
+    Variety retry is prompt-level and loses (v1262: 3 statements + code/cmp
+    still shipped FAIL C). Deterministic conversion after demote, before align.
+    Quotes keep the on-screen line; they are not statement-spam. Long-form
+    is unchanged (stmt cap 2, no Gate C).
+    """
+    from app.services import craft
+    if (content_format or "short") == "long":
+        return
+    cap = craft.STATEMENT_MAX_SHORTS
+    seen = 0
+    for b in beats:
+        if (b.get("type") or "") != "statement":
+            continue
+        seen += 1
+        if seen <= cap:
+            continue
+        cue = b.get("cue") or ""
+        text = _words_clip(b.get("text") or cue or "·", 8) or "·"
+        b.clear()
+        b.update({"type": "quote", "cue": cue, "text": text})
+
+
 def _diagram_is_nonsense(b: dict) -> bool:
     nodes = b.get("nodes") or []
     if len(nodes) < 2:
@@ -1434,6 +1459,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _demote_nonsense_diagrams(beats, content_format)
     _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
     _strip_mid_subscribe_beats(beats)
+    _cap_statements(beats, content_format)
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
