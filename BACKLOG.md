@@ -1589,3 +1589,29 @@ flag the operator step in the commit body.
 - **acceptance:** count=0 / -1 is 400 and writes nothing; JSON
   true/false is 4xx; omitted count still defaults to 1; count=1
   still generates; count=21 still clamps to 20.
+
+### 47. ✅ DONE (code shipped to main 2026-09-18) PATCH /api/videos rejects null/blank subject — normal
+- **resolution (2026-09-18):** `_require_str` is the choke point on
+  PATCH `subject` before setattr. JSON null / blank / whitespace-only
+  400. A valid subject is stripped (same as create). JSON bool is
+  already 422 (Optional[str] does not coerce). title / skip_gate /
+  render_profile_id stay nullable. A 400 mixed body writes none of
+  the fields. Suite: `tests/verify_videos.py` (49 checks). Isolated
+  commit; no money-path files. Board save still sends the textarea
+  as-is — empty-Save is now a 400 instead of wiping the row.
+- **why (found 2026-09-18 ranking remaining setattr after #39):**
+  `Video.subject` is NOT NULL. PATCH `setattr`s `VideoUpdate.subject`
+  (Optional[str]) straight onto it. JSON null persists SQL NULL, and
+  `metadata.generate(v.subject, …)` TypeErrors on
+  `(meta.get("title") or subject)[:100]`. Board.tsx save PATCHes the
+  textarea as-is, so clearing it and clicking Save sent `""`.
+- **caution:** normal (`videos.py` PATCH only; not a money-path file).
+  Isolated commit + regression tests.
+- **acceptance:** PATCH subject=null / `""` / `"   "` is 400 and
+  leaves the row unchanged; a typed subject still persists (stripped);
+  title-only PATCH leaves subject; sibling untouched.
+  Discovered follow-up (not bundled): Board empty-subject still
+  PATCHes `""` (now a 400 instead of a wipe — same class as #34
+  after the API floor); POST /api/videos create still persists
+  `subject.strip() == ""`; JSON bool `render_profile_id` still
+  coerces true→1 / false→0.

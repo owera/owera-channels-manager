@@ -18,6 +18,22 @@ from app.services.youtube import QUOTA_UPLOAD
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 
+def _require_str(fields: dict, key: str, hint: str) -> None:
+    """Reject JSON null / blank / non-str before they hit the DB.
+
+    ``Video.subject`` is NOT NULL. ``setattr(..., None)`` persists SQL NULL,
+    and ``metadata.generate(v.subject, …)`` TypeErrors on
+    ``(meta.get("title") or subject)[:100]``. Board save sends the textarea
+    as-is, so an empty Save PATCHes ``""``.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, str) or not v.strip():
+        raise HTTPException(400, hint)
+    fields[key] = v.strip()
+
+
 @router.get("")
 def list_videos(channel_id: int | None = None, topic_id: int | None = None,
                 status: str | None = None, session: Session = Depends(get_session)):
@@ -244,6 +260,10 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
     if not v:
         raise HTTPException(404, "video not found")
     data = body.model_dump(exclude_unset=True)
+    _require_str(data, "subject",
+                 "subject must be a non-empty string "
+                 "(null/blank TypeErrors metadata.generate: "
+                 "(title or subject)[:100])")
     if "overrides" in data:
         ov = data.pop("overrides")
         v.overrides_json = json.dumps(ov) if ov else None
