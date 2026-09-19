@@ -1597,8 +1597,8 @@ flag the operator step in the commit body.
   already 422 (Optional[str] does not coerce). title / skip_gate /
   render_profile_id stay nullable. A 400 mixed body writes none of
   the fields. Suite: `tests/verify_videos.py` (49 checks). Isolated
-  commit; no money-path files. Board save still sends the textarea
-  as-is — empty-Save is now a 400 instead of wiping the row.
+  commit; no money-path files. Empty-Save was a 400 until #48
+  restored the seeded subject in the SPA.
 - **why (found 2026-09-18 ranking remaining setattr after #39):**
   `Video.subject` is NOT NULL. PATCH `setattr`s `VideoUpdate.subject`
   (Optional[str]) straight onto it. JSON null persists SQL NULL, and
@@ -1610,8 +1610,30 @@ flag the operator step in the commit body.
 - **acceptance:** PATCH subject=null / `""` / `"   "` is 400 and
   leaves the row unchanged; a typed subject still persists (stripped);
   title-only PATCH leaves subject; sibling untouched.
-  Discovered follow-up (not bundled): Board empty-subject still
-  PATCHes `""` (now a 400 instead of a wipe — same class as #34
-  after the API floor); POST /api/videos create still persists
+  Follow-ups shipped separately: Board empty-subject restore (#48).
+  Remaining (not bundled): POST /api/videos create still persists
   `subject.strip() == ""`; JSON bool `render_profile_id` still
   coerces true→1 / false→0.
+
+### 48. ✅ DONE (code shipped to main 2026-09-19) Board empty-subject restores instead of PATCHing "" — normal
+- **resolution (2026-09-19):** VideoModal `save` trims the textarea;
+  empty / whitespace-only restores `video.subject` and returns
+  without `updateVideo.mutate` (modal stays open). A typed subject
+  still PATCHes the trimmed value. Same class as #34 after the API
+  floor: after #47 empty-Save was a 400 instead of a wipe. Suite:
+  `tests/verify_videos.py` 49 → 56 (save-slice pins: no raw
+  `subject,` PATCH, trim-before-gate, contiguous `if (!trimmed)`
+  restore+return, restore `video.subject`, restore+return before
+  mutate, valid save sends `subject: trimmed`).
+  Isolated commit; no money-path files.
+- **why (found shipping #47, not bundled):** Board.tsx save sent the
+  textarea as-is. Clearing it and clicking Save PATCHed `""`, which
+  #47 turned into a 400. The operator saw an error instead of the
+  subject coming back.
+- **caution:** normal (frontend only). Isolated commit + regression
+  tests. `npm run build` required.
+- **acceptance:** empty / whitespace-only Save restores the current
+  subject and does not PATCH; a typed subject still saves (stripped).
+  Remaining from #47 (not bundled): POST /api/videos create still
+  persists `subject.strip() == ""`; JSON bool `render_profile_id`
+  still coerces true→1 / false→0.

@@ -8,9 +8,10 @@ whatever ``exclude_unset`` forwards, so JSON null persists SQL NULL.
 ``metadata.generate(v.subject, …)`` then TypeErrors
 (``(meta.get("title") or subject)[:100]``) and the board title fallback
 ``v.title || v.subject`` goes blank. The live SPA path is Board.tsx
-save: the subject textarea is sent as-is, so clearing it and clicking
-Save PATCHes ``""`` (empty, not null). Growth-agent / curl still send
-null.
+save: after #47 an empty Save is a 400 instead of a wipe. Empty /
+whitespace-only restore ``video.subject`` and skip the PATCH (same
+class as #34 after the API floor). Growth-agent / curl still send
+null and still 400.
 
 title / description / privacy / skip_gate / render_profile_id stay
 nullable (null is inherit or "not yet generated"). A 400 mixed body
@@ -66,10 +67,31 @@ _vid_src = Path(videos_router.__file__).read_text()
 ok("metadata.generate(v.subject," in _vid_src,
    "POST /api/videos/{id}/metadata still forwards v.subject (None TypeErrors)")
 
-# Board save is the live SPA path: subject textarea is sent as-is.
+# Board save is the live SPA path. After #47 empty-Save is a 400
+# instead of a wipe; restore the seeded subject and skip PATCH
+# (same class as #34 after the API floor).
 _board = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Board.tsx").read_text()
-ok("body: { subject, render_profile_id:" in _board,
-   "Board.tsx save still PATCHes subject from the textarea (empty is \"\")")
+_save_start = _board.find("const save =")
+ok(_save_start >= 0, "Board.tsx VideoModal still has a save handler")
+_save_end = _board.find("return (", _save_start)
+_save = _board[_save_start:_save_end]
+ok("const save =" in _save and "updateVideo.mutate" in _save,
+   "save slice covers the handler through mutate (not a later return)")
+ok("body: { subject, render_profile_id:" not in _save,
+   "save does not PATCH the raw textarea (empty is \"\")")
+ok("subject.trim()" in _save,
+   "save trims before the empty gate (whitespace-only is also empty)")
+ok("if (!trimmed) {\n      setSubject(video.subject);\n      return;\n    }" in _save,
+   "empty/whitespace gate restores video.subject and returns (does not PATCH)")
+ok("setSubject(video.subject)" in _save,
+   "empty save restores video.subject (not \"\" / not a placeholder)")
+_restore = _save.find("setSubject(video.subject)")
+_ret = _save.find("return;", _restore)
+_mut = _save.find("updateVideo.mutate")
+ok(0 <= _save.find("subject.trim()") < _restore < _ret < _mut,
+   "trim then restore+return BEFORE mutate (empty never PATCHes)")
+ok("body: { subject: trimmed" in _save,
+   "valid save PATCHes the trimmed subject (not the raw textarea)")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},

@@ -122,11 +122,18 @@ function VideoModal({ video, channelId, onClose }: { video: Video; channelId: nu
   const [skipGate, setSkipGate] = useState<string>(video.skip_gate === null ? "" : String(video.skip_gate));
   const editable = ["draft", "queued", "failed", "rejected"].includes(video.status);
 
-  const save = () => m.updateVideo.mutate({
-    id: video.id,
-    body: { subject, render_profile_id: profileId ? Number(profileId) : null,
-            skip_gate: skipGate === "" ? null : skipGate === "true" },
-  }, { onSuccess: onClose });
+  const save = () => {
+    const trimmed = subject.trim();
+    if (!trimmed) {
+      setSubject(video.subject);
+      return;
+    }
+    m.updateVideo.mutate({
+      id: video.id,
+      body: { subject: trimmed, render_profile_id: profileId ? Number(profileId) : null,
+              skip_gate: skipGate === "" ? null : skipGate === "true" },
+    }, { onSuccess: onClose });
+  };
 
   return (
     <Modal open wide={!!video.video_path} onClose={onClose} title="Manage video">
