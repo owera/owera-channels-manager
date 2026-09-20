@@ -1635,5 +1635,27 @@ flag the operator step in the commit body.
 - **acceptance:** empty / whitespace-only Save restores the current
   subject and does not PATCH; a typed subject still saves (stripped).
   Remaining from #47 (not bundled): POST /api/videos create still
-  persists `subject.strip() == ""`; JSON bool `render_profile_id`
-  still coerces true→1 / false→0.
+  persists `subject.strip() == ""` — closed as #49. JSON bool
+  `render_profile_id` still coerces true→1 / false→0.
+
+### 49. ✅ DONE (code shipped to main 2026-09-20) POST /api/videos rejects blank subject — normal
+- **resolution (2026-09-20):** `_require_str` is now also the choke point
+  on create `subject` after the topic 404 and before `session.add`.
+  JSON `""` / whitespace-only 400 (was a silent empty-subject row via
+  `body.subject.strip()`). Null is already 422 (required `str`). A
+  valid subject is stripped (same as PATCH). `queue=true` still lands
+  QUEUED. A 400 writes no row. Suite: `tests/verify_videos.py`
+  56 → 101. Isolated commit; no money-path files. SPA `createVideo`
+  is unused — this is the growth-agent / curl floor.
+- **why (found shipping #47/#48, not bundled):** PATCH floored
+  null/blank; create still stripped straight onto the NOT NULL
+  column. `""` / `"   "` persisted an empty subject, and the next
+  `metadata.generate(v.subject, …)` TypeErrors on
+  `(title or subject)[:100]`. Same class as #37 on channel create.
+- **caution:** normal (`videos.py` POST create only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** POST subject=`""` / `"   "` is 400 and creates no
+  row; omitted/null still 422; a typed subject still 201 (stripped);
+  queue=true still QUEUED; missing topic still 404; sibling
+  untouched. Remaining from #47 (not bundled): JSON bool
+  `render_profile_id` still coerces true→1 / false→0.

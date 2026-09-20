@@ -1,4 +1,5 @@
-"""Regression checks for PATCH /api/videos/{id} subject floor.
+"""Regression checks for PATCH /api/videos/{id} and POST /api/videos
+subject floors.
 
 This project has no pytest; run directly:
     PYTHONPATH=. uv run python tests/verify_videos.py
@@ -13,9 +14,17 @@ whitespace-only restore ``video.subject`` and skip the PATCH (same
 class as #34 after the API floor). Growth-agent / curl still send
 null and still 400.
 
+#47 floored PATCH. POST /api/videos still did ``body.subject.strip()``
+straight onto the row, so ``""`` / ``"   "`` persisted an empty
+subject — the same TypeError on the next metadata generate, and a
+blank board card. Null is already 422 on create (required ``str``,
+not ``Optional[str]``). ``createVideo`` is unused in the SPA;
+growth-agent / curl still reach this path.
+
 title / description / privacy / skip_gate / render_profile_id stay
 nullable (null is inherit or "not yet generated"). A 400 mixed body
-writes none of the fields. Sibling videos untouched.
+writes none of the fields. Sibling videos untouched. A 400 create
+writes no row.
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real
 manager.db, no network, lifespan/scheduler never started). Exits
@@ -28,7 +37,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.main as main
 from app.config import settings
@@ -149,6 +158,20 @@ def patch(vid: int = 1, **body):
     return client.patch(f"/api/videos/{vid}", auth=auth, json=body)
 
 
+def post(**body):
+    return client.post("/api/videos", auth=auth, json=body)
+
+
+def n_videos() -> int:
+    with Session(engine) as s:
+        return len(s.exec(select(Video)).all())
+
+
+def video_ids() -> set[int]:
+    with Session(engine) as s:
+        return {v.id for v in s.exec(select(Video)).all()}
+
+
 try:
     print("GET /api/videos/{id}")
     r = client.get("/api/videos/1", auth=auth)
@@ -252,6 +275,115 @@ try:
     _setattr = _vid_src.find("for k, val in data.items():", _update_def)
     ok(0 <= _update_def < _req < _setattr,
        "update_video floors subject before setattr")
+
+    print("POST /api/videos: valid persist + strip + queue flag")
+    before_1 = snapshot(1)
+    before_2 = snapshot(2)
+    ids_before = video_ids()
+    n_before = n_videos()
+
+    r = post(topic_id=1, subject="new idea")
+    ok(r.status_code == 201, "POST valid subject is 201")
+    got = r.json()
+    ok(got.get("subject") == "new idea", "response subject is the requested value")
+    ok(got.get("channel_id") == 1, "create binds channel_id from the topic")
+    ok(got.get("topic_id") == 1, "create binds the requested topic")
+    ok(got.get("status") == VideoStatus.DRAFT,
+       "omitted queue defaults to draft (not queued)")
+    ok(got.get("id") not in ids_before, "create minted a new id")
+    ok(snapshot(got["id"])["subject"] == "new idea", "valid subject persisted")
+    ok(snapshot(1) == before_1, "POST left video 1 untouched")
+    ok(snapshot(2) == before_2, "POST left video 2 untouched")
+    ok(n_videos() == n_before + 1, "valid POST added exactly one row")
+    created_id = got["id"]
+
+    r = post(topic_id=1, subject="  padded create  ")
+    ok(r.status_code == 201, "whitespace-padded create subject is 201")
+    ok(r.json().get("subject") == "padded create",
+       "POST strips surrounding whitespace (same as PATCH)")
+    ok(snapshot(r.json()["id"])["subject"] == "padded create",
+       "stripped create subject persisted")
+
+    r = post(topic_id=1, subject="queued idea", queue=True)
+    ok(r.status_code == 201, "POST queue=true is 201")
+    ok(r.json().get("status") == VideoStatus.QUEUED,
+       "queue=true lands QUEUED (the flag is not dropped by the floor)")
+    ok(r.json().get("subject") == "queued idea", "queue=true kept the subject")
+
+    print("POST /api/videos: blank/whitespace subject is 400, writes no row")
+    n_before = n_videos()
+    ids_before = video_ids()
+    before_1 = snapshot(1)
+    before_2 = snapshot(2)
+
+    r = post(topic_id=1, subject="")
+    ok(r.status_code == 400, "POST subject=\"\" is 400")
+    ok("non-empty" in r.text and "subject" in r.text.lower(),
+       "empty-subject POST 400 names the subject floor (not a generic 400)")
+    ok(n_videos() == n_before, "POST subject=\"\" creates no row")
+    ok(video_ids() == ids_before, "POST subject=\"\" did not mint an id")
+
+    r = post(topic_id=1, subject="   ")
+    ok(r.status_code == 400, "POST whitespace-only subject is 400")
+    ok(n_videos() == n_before, "POST whitespace-only subject creates no row")
+
+    r = post(topic_id=1, subject=None)
+    ok(r.status_code == 422, "POST subject=null is 422 (required str, not Optional)")
+    ok(n_videos() == n_before, "POST subject=null creates no row")
+
+    r = post(topic_id=1)
+    ok(r.status_code == 422, "POST omitted subject is 422")
+    ok(n_videos() == n_before, "POST omitted subject creates no row")
+
+    print("POST /api/videos: mixed body cannot smuggle queue past a 400")
+    r = post(topic_id=1, subject="", queue=True)
+    ok(r.status_code == 400, "mixed POST with empty subject is 400")
+    ok(n_videos() == n_before, "400 mixed POST creates no row")
+    ok(video_ids() == ids_before, "400 mixed POST did not persist a queued blank")
+
+    print("POST /api/videos: JSON bool is 4xx")
+    r = post(topic_id=1, subject=False)
+    ok(r.status_code in (400, 422),
+       "POST subject=false is 4xx (must not coerce to 'False')")
+    ok(n_videos() == n_before, "POST subject=false creates no row")
+
+    r = post(topic_id=1, subject=True)
+    ok(r.status_code in (400, 422), "POST subject=true is 4xx")
+    ok(n_videos() == n_before, "POST subject=true creates no row")
+
+    print("POST /api/videos: 404 topic + auth")
+    r = post(topic_id=999, subject="nope")
+    ok(r.status_code == 404, "POST missing topic is 404")
+    ok(n_videos() == n_before, "404 POST creates no row")
+
+    r = post(topic_id=999, subject="")
+    ok(r.status_code == 404,
+       "POST empty subject on a missing topic is still 404 (topic gate first)")
+    ok(n_videos() == n_before, "404 empty-subject POST creates no row")
+
+    r = client.post("/api/videos", json={"topic_id": 1, "subject": "no-auth"})
+    ok(r.status_code == 401, "POST still requires auth")
+    ok(n_videos() == n_before, "unauthenticated POST creates no row")
+
+    ok(snapshot(1) == before_1, "video 1 untouched after every create probe")
+    ok(snapshot(2) == before_2, "video 2 untouched after every create probe")
+    ok(snapshot(created_id)["subject"] == "new idea",
+       "earlier valid create was not clobbered by the 400s")
+
+    # add-then-400 is observationally equivalent today (get_session does
+    # not commit on HTTPException), but a later auto-commit would persist
+    # the blank row. Pin source order so that mutant dies here, not in prod.
+    _create_def = _vid_src.find("def create_video")
+    _topic_404 = _vid_src.find("topic not found", _create_def)
+    _create_req = _vid_src.find('_require_str(', _create_def)
+    _add = _vid_src.find("session.add(v)", _create_def)
+    _update_req = _vid_src.find('_require_str(data, "subject"', _update_def)
+    ok(0 <= _create_def < _topic_404 < _create_req < _add < _update_def,
+       "create_video floors subject after the topic 404 and before session.add")
+    ok(_create_req != _update_req,
+       "create_video has its own _require_str call (not the PATCH one)")
+    ok('"subject"' in _vid_src[_create_req:_create_req + 80],
+       "create_video floors the subject key (not a different field)")
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw

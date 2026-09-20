@@ -24,7 +24,9 @@ def _require_str(fields: dict, key: str, hint: str) -> None:
     ``Video.subject`` is NOT NULL. ``setattr(..., None)`` persists SQL NULL,
     and ``metadata.generate(v.subject, …)`` TypeErrors on
     ``(meta.get("title") or subject)[:100]``. Board save sends the textarea
-    as-is, so an empty Save PATCHes ``""``.
+    as-is, so an empty Save PATCHes ``""``. Create used to
+    ``body.subject.strip()`` onto the row, so ``""`` / ``"   "`` persisted
+    the same blank.
     """
     if key not in fields:
         return
@@ -237,8 +239,17 @@ def create_video(body: VideoCreate, session: Session = Depends(get_session)):
     topic = session.get(Topic, body.topic_id)
     if not topic:
         raise HTTPException(404, "topic not found")
+    # PATCH already floors through _require_str. Create used to strip
+    # straight onto the row, so "" / "   " persisted an empty subject
+    # (metadata.generate TypeErrors; board card is blank). Null is
+    # already 422 (VideoCreate.subject is a required str).
+    fields = {"subject": body.subject}
+    _require_str(fields, "subject",
+                 "subject must be a non-empty string "
+                 "(null/blank TypeErrors metadata.generate: "
+                 "(title or subject)[:100])")
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)).one() or 0
-    v = Video(channel_id=topic.channel_id, topic_id=topic.id, subject=body.subject.strip(),
+    v = Video(channel_id=topic.channel_id, topic_id=topic.id, subject=fields["subject"],
               status=VideoStatus.QUEUED if body.queue else VideoStatus.DRAFT, position=mx + 1)
     session.add(v)
     session.commit()
