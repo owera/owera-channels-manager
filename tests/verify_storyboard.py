@@ -226,6 +226,10 @@ ok(storyboard._GAP == craft.BEAT_GAP_S,
    "gate B fade gap matches the aligner (do not count the 0.12s fade as hold)")
 ok(storyboard._ENDCARD_MAX == 4.0,
    "series endcard / last-cta hold ceiling is 4.0s")
+ok(storyboard._HOOK_MAX == 4.0,
+   "frame0 visual-hold target is 4.0s (surplus is later speech, not sentence 1)")
+ok(storyboard._HOOK_MAX == storyboard._ENDCARD_MAX,
+   "hook cap matches the endcard ceiling")
 ok(storyboard._ENDCARD_MAX == craft.ENDCARD_MAX_S,
    "storyboard ceiling matches the craft gate")
 ok(storyboard._ROW_STEP_MAX == 1.1,
@@ -593,17 +597,19 @@ draggy = [
 ]
 storyboard.align_storyboard(draggy, DRAG43, 43.3)
 ok(draggy[0]["start"] == 0.0, "max-hold still pins hook at 0")
-ok(draggy[3]["dur"] <= storyboard._MID_MAX + 1e-6,
+_list_b = [b for b in draggy if b.get("type") == "list"][-1]
+_cmp_b = [b for b in draggy if b.get("type") == "compare"][-1]
+ok(_list_b["dur"] <= storyboard._MID_MAX + 1e-6,
    "9s list is capped at _MID_MAX (was ~9s on word-sync)")
-ok(draggy[4]["dur"] <= storyboard._MID_MAX + 1e-6,
+ok(_cmp_b["dur"] <= storyboard._MID_MAX + 1e-6,
    "successor cmp absorbs the surplus without itself exceeding _MID_MAX")
-ok(draggy[3]["start"] < draggy[4]["start"],
+ok(_list_b["start"] < _cmp_b["start"],
    "capped list still precedes the cmp (monotonic)")
 ok(storyboard.validate_storyboard(draggy, 43.3),
    "max-hold layout still validates")
 # Word-sync would freeze the list ~9s (cmp cue at 19.5). Max-hold + endcard
 # walk must keep the list ≤ _MID_MAX; later mids may slide but stay capped.
-ok(draggy[3]["start"] + draggy[3]["dur"] <= draggy[4]["start"] + 1e-6,
+ok(_list_b["start"] + _list_b["dur"] <= _cmp_b["start"] + 1e-6,
    "list yields to cmp (no 9s drag into the claim)")
 
 # Successor already at the cap: only shorten as far as the successor can absorb.
@@ -621,7 +627,8 @@ tight_succ = [
     {"type": "cta", "cue": "follow", "text": "C"},
 ]
 storyboard.align_storyboard(tight_succ, tight_succ_words, 22.0)
-ok(tight_succ[2]["dur"] <= storyboard._MID_MAX + 1e-6,
+_tight_cmp = [b for b in tight_succ if b.get("type") == "compare"][-1]
+ok(_tight_cmp["dur"] <= storyboard._MID_MAX + 1e-6,
    "already-capped successor is not pushed over _MID_MAX")
 ok(storyboard.validate_storyboard(tight_succ, 22.0),
    "partial max-hold (successor at cap) still validates")
@@ -669,6 +676,80 @@ ok(penult[2]["start"] >= penult[1]["start"] + penult[1]["dur"] - 1e-6,
    "chip starts after the claim beat (no overlap with frame0)")
 ok(storyboard.validate_storyboard(penult, 18.72),
    "4.0s endcard + re-capped penultimate still validates")
+
+# Hook surplus fill (v1267/golden ch2-code): 3s mids + 4s CTA dump leftover
+# onto Gate-B-exempt frame0. Fill with copies of unique object mids, not
+# hook-claim quotes (09-17 R2 drop). Remainder stays on hook.
+print("align_storyboard hook-surplus fill")
+hook_dump_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "code", "start": 4.0, "dur": 0.3},
+     {"text": "cmp", "start": 8.0, "dur": 0.3},
+     {"text": "stat", "start": 12.0, "dur": 0.3},
+     {"text": "follow", "start": 36.0, "dur": 0.3}]
+)
+hook_dump = [
+    {"type": "hook", "cue": "open", "text": "Você gastou R$80 no Cursor"},
+    {"type": "code", "cue": "code", "lang": "python", "lines": ["x=1"]},
+    {"type": "compare", "cue": "cmp",
+     "left": {"title": "L", "items": ["a"]}, "right": {"title": "R", "items": ["b"]}},
+    {"type": "stat", "cue": "stat", "value": "80", "unit": "R$", "label": "bill"},
+    {"type": "cta", "cue": "follow", "text": "Subscribe · IA"},
+]
+storyboard.align_storyboard(hook_dump, hook_dump_words, 40.0)
+ok(hook_dump[0]["start"] == 0.0, "hook fill still pins frame0 at 0")
+ok(hook_dump[0]["dur"] <= storyboard._HOOK_MAX + storyboard._MID_MAX + 1e-6,
+   "frozen hook is capped (was ~13-17s dump onto frame0)")
+ok(hook_dump[0]["dur"] >= storyboard._MIN_DUR,
+   "capped hook still holds a real card")
+fill_types = [b.get("type") for b in hook_dump[1:-1]]
+ok(all(t != "statement" for t in fill_types),
+   "hook fill never clones statement beats (Gate C)")
+ok("code" in fill_types and "compare" in fill_types and "stat" in fill_types,
+   "original object mids still present after fill")
+ok(all((b.get("type") or "") != "hook" for b in hook_dump[1:]),
+   "fill does not clone the hook claim as extra hook cards")
+ok(all(float(b["dur"]) <= storyboard._MID_MAX + 1e-6
+       for b in hook_dump[1:-1]),
+   "inserted mids stay at Gate B _MID_MAX")
+ok(hook_dump[-1]["dur"] <= storyboard._ENDCARD_MAX + 1e-6,
+   "CTA ceiling holds after hook fill")
+ok(hook_dump[-1]["type"] == "cta", "CTA stays last")
+ok(storyboard.validate_storyboard(hook_dump, 40.0),
+   "hook-fill layout still validates")
+# Short hook is a no-op (ch1-code 5.2s class).
+short_hook_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "code", "start": 3.5, "dur": 0.3},
+     {"text": "follow", "start": 7.0, "dur": 0.3}]
+)
+short_hook = [
+    {"type": "hook", "cue": "open", "text": "Your RAG is slow"},
+    {"type": "code", "cue": "code", "lang": "python", "lines": ["x=1"]},
+    {"type": "cta", "cue": "follow", "text": "C"},
+]
+n_before = len(short_hook)
+storyboard.align_storyboard(short_hook, short_hook_words, 11.0)
+ok(len(short_hook) == n_before,
+   "hook fill is a no-op when frame0 is already near _HOOK_MAX")
+ok(short_hook[0]["type"] == "hook" and short_hook[1]["type"] == "code",
+   "short-hook board keeps original beat identities")
+# No object donor (statement-only mid) — do not clone the statement (Gate C).
+no_donor_words = (
+    [{"text": "open", "start": 0.0, "dur": 0.4},
+     {"text": "mid", "start": 5.0, "dur": 0.3},
+     {"text": "follow", "start": 12.0, "dur": 0.3}]
+)
+no_donor = [
+    {"type": "hook", "cue": "open", "text": "H"},
+    {"type": "statement", "cue": "mid", "text": "S"},
+    {"type": "cta", "cue": "follow", "text": "C"},
+]
+storyboard.align_storyboard(no_donor, no_donor_words, 20.2)
+ok(sum(1 for b in no_donor if b.get("type") == "statement") == 1,
+   "no object donor: do not insert extra statements")
+ok(no_donor[0]["type"] == "hook" and no_donor[-1]["type"] == "cta",
+   "no-donor board keeps hook/cta")
 
 even = [{"type": "x"}, {"type": "y"}, {"type": "z"}]
 storyboard._even_space(even, 10.0)

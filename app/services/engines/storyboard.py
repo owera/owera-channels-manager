@@ -18,6 +18,7 @@ Design rules:
     parameter, so it never imports ``worker`` (no import cycle).
 """
 
+import copy
 import json
 import logging
 import re
@@ -41,6 +42,17 @@ _MID_MAX = 3.0   # mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S 
 # (so a penultimate 8s+ list can shrink); _cap_endcard then slides the chip
 # to the last 4s and re-caps the penultimate at _MID_MAX.
 _ENDCARD_MAX = 4.0
+# Frame0 visual-hold target. Gate B exempts hook, so _MID_MAX recap walks
+# leftover onto beat 0 (a 40s short with 3s mids + 4s CTA freezes frame0
+# for 12–17s — v1265/v1267, golden ch2-code). Surplus is later speech,
+# not sentence 1. Cap the freeze and fill the window with copies of
+# existing unique object mids (not hook-claim quotes — that dropped R2
+# on 2026-09-17).
+_HOOK_MAX = 4.0
+_HOOK_FILL_MAX = 8
+_HOOK_FILL_TYPES = frozenset({
+    "code", "command", "diagram", "compare", "stat", "term_define",
+})
 _ROW_STEP_MAX = 1.1  # max gap between list-row reveals — see render_list
 _ROW_STEP_SHORTS = 0.6  # Shorts craft gate C: item stagger ≤0.6s
 _LIST_MAX = 6.0      # empty list dumps >6s are a retention hole — see _cap_list_holds
@@ -1287,11 +1299,65 @@ def _strip_mid_subscribe_beats(beats) -> None:
             b[key] = _scrub(val)
 
 
+def _fill_hook_surplus(beats, duration: float) -> None:
+    """Cap a frozen frame0. Surplus is later speech over the hook card.
+
+    Quote-pulse of the hook claim dropped R2 (09-17). Insert copies of
+    existing unique object mids into the surplus window so later words
+    get a real visual. Remainder stays on hook (no dead gap, no Gate B
+    over-cap). No-ops when hook is already ≤ _HOOK_MAX or there is no
+    object donor (do not clone statement/list/quote).
+    """
+    if not beats or len(beats) < 3:
+        return
+    hook = beats[0]
+    if (hook.get("type") or "") != "hook":
+        return
+    nxt = beats[1]
+    nxt_start = float(nxt.get("start") or 0.0)
+    hook_dur = float(hook.get("dur") or 0.0)
+    if hook_dur <= _HOOK_MAX + 1e-9:
+        return
+    donors = [
+        b for b in beats[1:-1]
+        if (b.get("type") or "") in _HOOK_FILL_TYPES
+    ]
+    if not donors:
+        return
+    slot = _MID_MAX + _GAP
+    n = min(_HOOK_FILL_MAX, int((hook_dur - _HOOK_MAX) / slot))
+    if n <= 0:
+        if hook_dur - _HOOK_MAX >= _MID_MIN:
+            n = 1
+        else:
+            return
+    inserts = []
+    end = nxt_start
+    for i in range(n - 1, -1, -1):
+        start = end - _GAP - _MID_MAX
+        if start < _MIN_DUR:
+            return
+        src = donors[i % len(donors)]
+        nb = copy.deepcopy(src)
+        nb.pop("endcard", None)
+        nb["start"] = round(start, 3)
+        nb["dur"] = round(_MID_MAX, 3)
+        inserts.append(nb)
+        end = start
+    inserts.reverse()
+    first_start = float(inserts[0]["start"])
+    if first_start <= _GAP + _MIN_DUR:
+        return
+    hook["dur"] = round(max(_MIN_DUR, first_start - _GAP), 3)
+    beats[1:1] = inserts
+
+
 def _cap_endcard(beats, duration: float) -> None:
     """Craft gate: last cta/endcard ≤ 4.0s, after the claim, not on frame0.
 
     Slide the chip to the tail. Surplus walks backward onto earlier mids,
-    each re-capped at _MID_MAX. Hook stays pinned at 0 and may grow.
+    each re-capped at _MID_MAX. Hook stays pinned at 0; leftover that
+    would freeze frame0 is then filled by _fill_hook_surplus.
     """
     if not beats or beats[-1].get("type") != "cta":
         return
@@ -1331,6 +1397,7 @@ def _cap_endcard(beats, duration: float) -> None:
         prev = beats[i - 1]
         prev_start = float(prev.get("start") or 0.0)
         prev["dur"] = round(max(_MIN_DUR, cur["start"] - _GAP - prev_start), 3)
+    _fill_hook_surplus(beats, duration)
 
 
 def _cap_statements(beats, content_format=None) -> None:
