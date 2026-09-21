@@ -1610,10 +1610,8 @@ flag the operator step in the commit body.
 - **acceptance:** PATCH subject=null / `""` / `"   "` is 400 and
   leaves the row unchanged; a typed subject still persists (stripped);
   title-only PATCH leaves subject; sibling untouched.
-  Follow-ups shipped separately: Board empty-subject restore (#48).
-  Remaining (not bundled): POST /api/videos create still persists
-  `subject.strip() == ""`; JSON bool `render_profile_id` still
-  coerces true→1 / false→0.
+  Follow-ups shipped separately: Board empty-subject restore (#48);
+  POST create blank subject (#49); JSON bool `render_profile_id` (#50).
 
 ### 48. ✅ DONE (code shipped to main 2026-09-19) Board empty-subject restores instead of PATCHing "" — normal
 - **resolution (2026-09-19):** VideoModal `save` trims the textarea;
@@ -1636,7 +1634,7 @@ flag the operator step in the commit body.
   subject and does not PATCH; a typed subject still saves (stripped).
   Remaining from #47 (not bundled): POST /api/videos create still
   persists `subject.strip() == ""` — closed as #49. JSON bool
-  `render_profile_id` still coerces true→1 / false→0.
+  `render_profile_id` still coerces true→1 / false→0 — closed as #50.
 
 ### 49. ✅ DONE (code shipped to main 2026-09-20) POST /api/videos rejects blank subject — normal
 - **resolution (2026-09-20):** `_require_str` is now also the choke point
@@ -1657,5 +1655,29 @@ flag the operator step in the commit body.
 - **acceptance:** POST subject=`""` / `"   "` is 400 and creates no
   row; omitted/null still 422; a typed subject still 201 (stripped);
   queue=true still QUEUED; missing topic still 404; sibling
-  untouched. Remaining from #47 (not bundled): JSON bool
+  untouched. Remaining from #47 (closed as #50): JSON bool
   `render_profile_id` still coerces true→1 / false→0.
+
+### 50. ✅ DONE (code shipped to main 2026-09-21) PATCH /api/videos rejects JSON bool render_profile_id — normal
+- **resolution (2026-09-21):** `VideoUpdate._reject_bool_profile`
+  `mode="before"` rejects JSON bool before lax `Optional[int]`
+  coerces `false→0` / `true→1`. Null is still 200 (unbound /
+  inherit). Integer 2 still 200. `skip_gate=true` still 200 (the
+  floor is the int field only). Mixed 4xx writes nothing. Suite:
+  `tests/verify_videos.py` 101 → 127. Isolated commit; no
+  money-path files.
+- **why (found shipping #47/#49, not bundled):** PATCH floored
+  subject; `render_profile_id` stayed a lax `Optional[int]`.
+  `true` silently rebinds the video to profile id=1;
+  `false` writes 0, which `resolve_engine` treats as unbound
+  (`if not pid`) but is not None. Same class as #36/#39 bool
+  floors. SPA Board select sends `Number(id)` or null.
+- **caution:** normal (`schemas.py` VideoUpdate only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** PATCH `render_profile_id=true/false` is 4xx and
+  writes nothing (seeded id=2 does not become 1 or 0); integer
+  still 200; null still 200; skip_gate bool still 200;
+  subject-only leaves the profile; mixed 4xx does not smuggle
+  subject. Remaining (not bundled): `TopicUpdate.render_profile_id`
+  and `ChannelUpdate.default_render_profile_id` still coerce
+  bools the same way; integer 0 still persists.

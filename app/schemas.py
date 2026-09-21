@@ -125,6 +125,16 @@ class VideoUpdate(BaseModel):
     description: Optional[str] = None
     tags: Optional[list[str]] = None
 
+    @field_validator("render_profile_id", mode="before")
+    @classmethod
+    def _reject_bool_profile(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently rebinds the video to profile id=1; false writes 0,
+        # which resolve_engine treats as unbound (`if not pid`) but is not None.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class RejectBody(BaseModel):
     reason: str = ""

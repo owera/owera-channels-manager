@@ -21,10 +21,15 @@ blank board card. Null is already 422 on create (required ``str``,
 not ``Optional[str]``). ``createVideo`` is unused in the SPA;
 growth-agent / curl still reach this path.
 
-title / description / privacy / skip_gate / render_profile_id stay
-nullable (null is inherit or "not yet generated"). A 400 mixed body
-writes none of the fields. Sibling videos untouched. A 400 create
-writes no row.
+title / description / privacy / skip_gate stay nullable (null is
+inherit or "not yet generated"). ``render_profile_id`` null is still
+legal (unbound / inherit). JSON bool is not: lax ``Optional[int]``
+coerces ``false→0`` / ``true→1`` before the handler. ``true`` silently
+rebinds the video to profile id=1; ``false`` writes 0, which
+``resolve_engine`` treats as unbound today (``if not pid``) but is
+not None. Rejected on ``VideoUpdate`` with ``mode="before"``. A 400
+mixed body writes none of the fields. Sibling videos untouched. A
+400 create writes no row.
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real
 manager.db, no network, lifespan/scheduler never started). Exits
@@ -32,6 +37,7 @@ non-zero on the first failed assertion.
 """
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -44,7 +50,9 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import videos as videos_router
+from app.schemas import VideoUpdate
 from app.services import metadata
+from app.services import engines as engines_mod
 
 _checks = 0
 
@@ -75,6 +83,16 @@ ok("(meta.get(\"title\") or subject or \"\")[:100]" not in _meta_src,
 _vid_src = Path(videos_router.__file__).read_text()
 ok("metadata.generate(v.subject," in _vid_src,
    "POST /api/videos/{id}/metadata still forwards v.subject (None TypeErrors)")
+
+# Why true→1 is a silent rebind and false→0 is not None: resolve_engine
+# skips a falsy pid (`if not pid`), so 0 is unbound today while 1 loads
+# profile id=1. Pin the live gate so this suite's "not a boolean" stays
+# coupled to engine selection.
+_eng_src = Path(engines_mod.__file__).read_text()
+ok("if not pid:" in _eng_src,
+   "resolve_engine still treats pid=0 as unbound (if not pid)")
+ok("if pid is None:" not in _eng_src,
+   "resolve_engine does not distinguish 0 from None (false→0 is a latent bind)")
 
 # Board save is the live SPA path. After #47 empty-Save is a 400
 # instead of a wipe; restore the seeded subject and skip PATCH
@@ -275,6 +293,70 @@ try:
     _setattr = _vid_src.find("for k, val in data.items():", _update_def)
     ok(0 <= _update_def < _req < _setattr,
        "update_video floors subject before setattr")
+
+    print("PATCH /api/videos/{id}: JSON bool render_profile_id is 4xx")
+    # Lax Optional[int] coerces false→0 / true→1 BEFORE the handler.
+    # Seed id=2 so true→1 is a visible rebind (id=1 would hide it).
+    r = patch(render_profile_id=2)
+    ok(r.status_code == 200, "render_profile_id=2 (integer) is 200")
+    ok(snapshot()["render_profile_id"] == 2, "integer 2 persisted")
+    ok(snapshot()["subject"] == before["subject"],
+       "integer profile PATCH left subject")
+
+    r = patch(skip_gate=True)
+    ok(r.status_code == 200,
+       "skip_gate=true is 200 (bool field; the floor is render_profile_id only)")
+    ok(snapshot()["skip_gate"] is True, "skip_gate=true persisted")
+    ok(snapshot()["render_profile_id"] == 2,
+       "skip_gate PATCH left render_profile_id")
+
+    before_profile = snapshot()
+    r = patch(render_profile_id=False)
+    ok(r.status_code in (400, 422),
+       "render_profile_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-profile 4xx names the boolean rejection")
+    ok(snapshot() == before_profile, "render_profile_id=false writes nothing")
+    ok(snapshot()["render_profile_id"] == 2,
+       "false did not persist a 0 unbind")
+
+    r = patch(render_profile_id=True)
+    ok(r.status_code in (400, 422),
+       "render_profile_id=true is 4xx (must not coerce to 1)")
+    ok(snapshot() == before_profile, "render_profile_id=true writes nothing")
+    ok(snapshot()["render_profile_id"] == 2,
+       "true did not rebind profile id=2 to 1")
+
+    r = patch(render_profile_id=True, subject="smuggled-profile")
+    ok(r.status_code in (400, 422),
+       "mixed PATCH with render_profile_id=true is 4xx")
+    ok(snapshot() == before_profile,
+       "4xx mixed profile PATCH writes none of the fields")
+    ok(snapshot()["subject"] != "smuggled-profile",
+       "4xx mixed profile PATCH did not persist subject")
+
+    r = patch(subject=before["subject"])
+    ok(r.status_code == 200, "subject-only PATCH (profile omitted) is 200")
+    ok(snapshot()["render_profile_id"] == 2,
+       "subject-only PATCH left render_profile_id "
+       "(exclude_unset; always-reject-profile would 400)")
+
+    r = patch(render_profile_id=1)
+    ok(r.status_code == 200, "render_profile_id=1 (integer) is 200")
+    ok(snapshot()["render_profile_id"] == 1,
+       "integer 1 persisted (true-coercion target is a legal int; "
+       "a mode=after 0/1 reject would 400 here)")
+
+    r = patch(render_profile_id=None, skip_gate=None)
+    ok(r.status_code == 200, "restore render_profile_id=null is 200")
+    ok(snapshot()["render_profile_id"] is None, "profile restored to unbound")
+    ok(snapshot()["skip_gate"] is None, "skip_gate restored")
+
+    upd_src = inspect.getsource(VideoUpdate)
+    ok('_reject_bool_profile' in upd_src
+       and '@field_validator("render_profile_id", mode="before")' in upd_src,
+       "VideoUpdate._reject_bool_profile is mode=before on render_profile_id "
+       "(mode=after sees the already-coerced 0/1)")
 
     print("POST /api/videos: valid persist + strip + queue flag")
     before_1 = snapshot(1)
