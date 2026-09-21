@@ -37,6 +37,7 @@ first failed assertion.
 """
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -49,6 +50,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus
 from app.routers import channels as channels_router
+from app.schemas import ChannelUpdate
 from app.services import publish_loop, render_loop
 
 _checks = 0
@@ -284,6 +286,63 @@ try:
     ok(r.status_code == 200, "default_render_profile_id=null is 200 (clear is legal)")
     ok(snapshot()["default_render_profile_id"] is None, "profile id cleared")
     ok(snapshot()["daily_publish_budget"] == 2, "profile-null PATCH left publish budget")
+
+    print("PATCH /api/channels/{id}: JSON bool default_render_profile_id is 4xx")
+    r = patch(default_render_profile_id=2)
+    ok(r.status_code == 200, "default_render_profile_id=2 (integer) is 200")
+    ok(snapshot()["default_render_profile_id"] == 2, "integer 2 persisted")
+    ok(snapshot()["daily_publish_budget"] == 2, "integer profile PATCH left publish budget")
+
+    r = patch(paused=True)
+    ok(r.status_code == 200,
+       "paused=true is 200 (bool field; the floor is default_render_profile_id only)")
+    ok(snapshot()["default_render_profile_id"] == 2, "paused PATCH left profile id")
+    r = patch(paused=False)
+    ok(r.status_code == 200, "paused restored to false is 200")
+    ok(snapshot()["default_render_profile_id"] == 2, "unpause left profile id")
+
+    before_profile = snapshot()
+    r = patch(default_render_profile_id=False)
+    ok(r.status_code in (400, 422),
+       "default_render_profile_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-profile 4xx names the boolean rejection")
+    ok(snapshot() == before_profile, "default_render_profile_id=false writes nothing")
+    ok(snapshot()["default_render_profile_id"] == 2,
+       "false did not persist a 0 unbind")
+
+    r = patch(default_render_profile_id=True)
+    ok(r.status_code in (400, 422),
+       "default_render_profile_id=true is 4xx (must not coerce to 1)")
+    ok(snapshot() == before_profile, "default_render_profile_id=true writes nothing")
+    ok(snapshot()["default_render_profile_id"] == 2,
+       "true did not rebind channel profile id=2 to 1")
+
+    r = patch(default_render_profile_id=True, name="smuggled-profile")
+    ok(r.status_code in (400, 422),
+       "mixed PATCH with default_render_profile_id=true is 4xx")
+    ok(snapshot() == before_profile,
+       "4xx mixed channel-profile PATCH writes none of the fields")
+
+    r = patch(name=before_profile["name"])
+    ok(r.status_code == 200, "name-only PATCH (profile omitted) is 200")
+    ok(snapshot()["default_render_profile_id"] == 2,
+       "name-only PATCH left default_render_profile_id")
+
+    r = patch(default_render_profile_id=1)
+    ok(r.status_code == 200, "default_render_profile_id=1 (integer) is 200")
+    ok(snapshot()["default_render_profile_id"] == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+
+    r = patch(default_render_profile_id=None)
+    ok(r.status_code == 200, "restore default_render_profile_id=null is 200")
+    ok(snapshot()["default_render_profile_id"] is None, "channel profile restored to unbound")
+    ok(snapshot()["daily_publish_budget"] == 2, "profile restore left publish budget")
+
+    cu_src = inspect.getsource(ChannelUpdate)
+    ok('_reject_bool_profile' in cu_src
+       and '@field_validator("default_render_profile_id", mode="before")' in cu_src,
+       "ChannelUpdate._reject_bool_profile is mode=before on default_render_profile_id")
 
     print("PATCH /api/channels/{id}: empty body + auth + missing")
     before = snapshot()

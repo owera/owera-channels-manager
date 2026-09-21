@@ -1678,6 +1678,29 @@ flag the operator step in the commit body.
   writes nothing (seeded id=2 does not become 1 or 0); integer
   still 200; null still 200; skip_gate bool still 200;
   subject-only leaves the profile; mixed 4xx does not smuggle
-  subject. Remaining (not bundled): `TopicUpdate.render_profile_id`
-  and `ChannelUpdate.default_render_profile_id` still coerce
-  bools the same way; integer 0 still persists.
+  subject. Remaining from #50 (closed as #51):
+  `TopicUpdate.render_profile_id` and
+  `ChannelUpdate.default_render_profile_id` still coerced
+  bools the same way. Integer 0 still persists.
+
+### 51. ✅ DONE (code shipped to main 2026-09-21) PATCH topics/channels reject JSON bool render_profile_id — normal
+- **resolution (2026-09-21):** `TopicUpdate._reject_bool_profile`
+  and `ChannelUpdate._reject_bool_profile` `mode="before"` reject
+  JSON bool on `render_profile_id` /
+  `default_render_profile_id` (same floor as VideoUpdate #50).
+  Null still 200 (unbound). Integer 2/1 still 200. `active=true`
+  / `paused=true` still 200. Mixed 4xx writes nothing. Suites:
+  `tests/verify_topics.py` 165 → 186, `tests/verify_channels.py`
+  111 → 135. Isolated commit; no money-path files.
+- **why (found shipping #50, not bundled):** video PATCH was
+  floored; topic PATCH rebinds every video under the topic via
+  `resolve_engine` layer 2, and channel PATCH rebinds the
+  default for unbound videos. Lax `Optional[int]` still coerced
+  `true→1` / `false→0`.
+- **caution:** normal (`schemas.py` TopicUpdate + ChannelUpdate;
+  not a money-path file). Isolated commit + regression tests.
+- **acceptance:** PATCH topic/channel profile `true/false` is 4xx
+  and writes nothing (seeded id=2 does not become 1 or 0);
+  integer still 200; null still 200; sibling bool fields still
+  200. Remaining (not bundled): `TopicCreate.render_profile_id`
+  still coerces; integer 0 still persists.

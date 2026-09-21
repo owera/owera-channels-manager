@@ -45,6 +45,15 @@ class ChannelUpdate(BaseModel):
             raise ValueError("must be an integer >= 0, not a boolean")
         return v
 
+    @field_validator("default_render_profile_id", mode="before")
+    @classmethod
+    def _reject_bool_profile(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently rebinds the channel default to profile id=1.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class PlaylistCreate(BaseModel):
     title: str
@@ -92,6 +101,15 @@ class TopicUpdate(BaseModel):
         # 0 is a legal park, so false would silently park; true would unpark.
         if isinstance(v, bool):
             raise ValueError("must be an integer >= 0, not a boolean")
+        return v
+
+    @field_validator("render_profile_id", mode="before")
+    @classmethod
+    def _reject_bool_profile(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently rebinds every video under the topic to profile id=1.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
         return v
 
 

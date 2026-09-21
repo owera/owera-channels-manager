@@ -40,7 +40,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import topics as topics_router
-from app.schemas import GenerateBody
+from app.schemas import GenerateBody, TopicUpdate
 
 _checks = 0
 
@@ -141,6 +141,11 @@ def topic_name(topic_id):
 def topic_weight(topic_id):
     with Session(engine) as s:
         return s.get(Topic, topic_id).weight
+
+
+def topic_profile(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).render_profile_id
 
 
 def draft_count(topic_id):
@@ -538,6 +543,57 @@ try:
     ok(upd_src.index("_require_int") < upd_src.index("setattr"),
        "_require_int runs before setattr "
        "(setattr-then-400 would smuggle other fields if the session committed)")
+
+    print("PATCH /api/topics/{id}: JSON bool render_profile_id is 4xx")
+    # Same class as VideoUpdate #50. Seed id=2 so true→1 is a visible rebind.
+    ok(topic_profile(2) is None, "precondition: live topic profile is unbound")
+    r = patch_topic(2, render_profile_id=2)
+    ok(r.status_code == 200, "topic render_profile_id=2 (integer) is 200")
+    ok(topic_profile(2) == 2, "integer 2 persisted on the topic")
+
+    r = patch_topic(2, active=True)
+    ok(r.status_code == 200,
+       "active=true is 200 (bool field; the floor is render_profile_id only)")
+    ok(topic_profile(2) == 2, "active PATCH left render_profile_id")
+
+    r = patch_topic(2, render_profile_id=False)
+    ok(r.status_code in (400, 422),
+       "topic render_profile_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-profile 4xx names the boolean rejection")
+    ok(topic_profile(2) == 2, "false did not persist a 0 unbind")
+
+    r = patch_topic(2, render_profile_id=True)
+    ok(r.status_code in (400, 422),
+       "topic render_profile_id=true is 4xx (must not coerce to 1)")
+    ok(topic_profile(2) == 2, "true did not rebind topic profile id=2 to 1")
+
+    r = patch_topic(2, render_profile_id=True, name="smuggled-profile")
+    ok(r.status_code in (400, 422),
+       "mixed PATCH with topic render_profile_id=true is 4xx")
+    ok(topic_name(2) != "smuggled-profile",
+       "4xx mixed topic-profile PATCH did not persist name")
+    ok(topic_profile(2) == 2, "4xx mixed topic-profile PATCH left profile")
+
+    r = patch_topic(2, name=topic_name(2))
+    ok(r.status_code == 200, "name-only PATCH (profile omitted) is 200")
+    ok(topic_profile(2) == 2,
+       "name-only PATCH left render_profile_id")
+
+    r = patch_topic(2, render_profile_id=1)
+    ok(r.status_code == 200, "topic render_profile_id=1 (integer) is 200")
+    ok(topic_profile(2) == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+
+    r = patch_topic(2, render_profile_id=None)
+    ok(r.status_code == 200, "topic render_profile_id=null is 200 (unbound is legal)")
+    ok(topic_profile(2) is None, "topic profile restored to unbound")
+    ok(topic_weight(2) == 1, "profile-null PATCH left live weight")
+
+    tu_src = inspect.getsource(TopicUpdate)
+    ok('_reject_bool_profile' in tu_src
+       and '@field_validator("render_profile_id", mode="before")' in tu_src,
+       "TopicUpdate._reject_bool_profile is mode=before on render_profile_id")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()
