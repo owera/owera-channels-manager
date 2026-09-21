@@ -426,11 +426,15 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 
 
 # Grok -p sometimes prefixes the VO with coding-agent CoT (09-13/09-14 golden-set
-# flake: "I'll check the workspace for series naming…"). Frame0/title lock that
-# garbage onto the video. Strip leading assistant-planning sentences only —
+# flake: "I'll check the workspace for series naming…"; 09-20/09-21: "The title
+# maps to the Agent memory series" / "The tests pin this to the Agent memory
+# series" / "Checking the workspace for the series name"). Frame0/title lock
+# that garbage onto the video. Strip leading assistant-planning sentences only —
 # a real @workspace / Copilot hook is not first-person planning.
 _PREAMBLE_START = re.compile(
     r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
+    r"Checking the workspace|"
+    r"The tests pin|The title maps|The endcard|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
     r"The prompt|Vou |Deixa eu |Deixe-me )\b",
     re.I,
@@ -438,7 +442,9 @@ _PREAMBLE_START = re.compile(
 _PREAMBLE_BODY = re.compile(
     r"\b(video-worker|voiceover conventions|series naming|"
     r"endcard matches|closer line|spoken script only|"
-    r"check the workspace)\b",
+    r"check(?:ing)? the workspace|craft rules|script shape|"
+    r"expected script|series name|tests pin|title maps|"
+    r"pin this to|endcard line)\b",
     re.I,
 )
 

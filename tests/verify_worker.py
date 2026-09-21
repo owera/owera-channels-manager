@@ -293,6 +293,38 @@ ok(worker._strip_script_preamble("I'll check the workspace for series naming.")
    == "I'll check the workspace for series naming.",
    "all-preamble script is kept so the word-count retry still has text")
 
+_FLAKE_0921 = (
+    "The tests pin this to the Agent memory series. I'll read the craft rules "
+    "and the expected script shape next. Your AI agent forgets everything between chats. "
+    "That's not a bug."
+)
+ok(worker._strip_script_preamble(_FLAKE_0921)
+   .startswith("Your AI agent forgets everything between chats."),
+   "09-21 ch1-concept flake: 'The tests pin this to the Agent memory series' drops")
+ok("The tests pin" not in worker._strip_script_preamble(_FLAKE_0921),
+   "09-21 CoT 'The tests pin' does not leak into the VO")
+
+_FLAKE_0920 = (
+    "The title maps to the Agent memory series. I'll pull the craft rules and a "
+    "matching example so the script hits the same structure. Your AI agent forgets "
+    "everything between chats. That's not a model glitch."
+)
+ok(worker._strip_script_preamble(_FLAKE_0920)
+   .startswith("Your AI agent forgets everything between chats."),
+   "09-20 ch1-concept flake: 'The title maps to the Agent memory series' drops")
+
+_FLAKE_GERUND = (
+    "Checking the workspace for the series name so that line matches. "
+    "The endcard line is generated from a series name. "
+    "Sua RAG busca lixo. Não é o modelo."
+)
+cleaned_gerund = worker._strip_script_preamble(_FLAKE_GERUND)
+ok(cleaned_gerund.startswith("Sua RAG busca lixo."),
+   "09-20 ch2-concept gerund 'Checking the workspace' + 'The endcard line' drop")
+ok("Checking the workspace" not in cleaned_gerund
+   and "endcard line" not in cleaned_gerund,
+   "gerund CoT and endcard-meta do not leak")
+
 def _cot_then_claim(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return _FLAKE + " " + " ".join(["word"] * 50)
