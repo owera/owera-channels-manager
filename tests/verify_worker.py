@@ -325,6 +325,44 @@ ok("Checking the workspace" not in cleaned_gerund
    and "endcard line" not in cleaned_gerund,
    "gerund CoT and endcard-meta do not leak")
 
+_FLAKE_0922 = (
+    "Conferindo a contagem para ficar na faixa de 70 a 100 palavras, com o "
+    "gancho curto e o endcard só na última linha. Sua RAG busca lixo. "
+    "O erro é o corte, não o modelo."
+)
+cleaned_0922 = worker._strip_script_preamble(_FLAKE_0922)
+ok(cleaned_0922.startswith("Sua RAG busca lixo."),
+   "09-22 ch2-concept flake: 'Conferindo a contagem… 70 a 100 palavras' drops")
+ok("Conferindo a contagem" not in cleaned_0922
+   and "70 a 100 palavras" not in cleaned_0922
+   and "gancho curto" not in cleaned_0922,
+   "word-count retry CoT does not leak into the VO")
+ok("O erro é o corte, não o modelo." in cleaned_0922,
+   "spoken claim after the counting CoT is kept")
+
+_FLAKE_COUNT_EN = (
+    "Counting carefully to stay in the 70 to 100 words band with a short hook. "
+    "Your RAG is slow and still wrong. Rank what you found."
+)
+ok(worker._strip_script_preamble(_FLAKE_COUNT_EN)
+   .startswith("Your RAG is slow and still wrong."),
+   "EN word-count retry CoT drops; pain-first claim kept")
+
+_FLAKE_0922_LIVE = (
+    "The script has to open on the pain in one short line and end on a fixed "
+    "series card. I'll check how this channel names the series so the last line "
+    "matches. Sua RAG busca lixo. O erro é o chunking."
+)
+cleaned_live = worker._strip_script_preamble(_FLAKE_0922_LIVE)
+ok(cleaned_live.startswith("Sua RAG busca lixo."),
+   "09-22 live grok flake: 'The script has to open on the pain' + I'll-check drop")
+ok("The script has to" not in cleaned_live
+   and "I'll check" not in cleaned_live
+   and "fixed series card" not in cleaned_live,
+   "script-planning CoT does not leak into the VO")
+ok("O erro é o chunking." in cleaned_live,
+   "spoken claim after the script-planning CoT is kept")
+
 def _cot_then_claim(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return _FLAKE + " " + " ".join(["word"] * 50)

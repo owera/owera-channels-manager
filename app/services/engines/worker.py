@@ -428,13 +428,19 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 # Grok -p sometimes prefixes the VO with coding-agent CoT (09-13/09-14 golden-set
 # flake: "I'll check the workspace for series naming…"; 09-20/09-21: "The title
 # maps to the Agent memory series" / "The tests pin this to the Agent memory
-# series" / "Checking the workspace for the series name"). Frame0/title lock
-# that garbage onto the video. Strip leading assistant-planning sentences only —
-# a real @workspace / Copilot hook is not first-person planning.
+# series" / "Checking the workspace for the series name"; 09-22: the word-count
+# retry leaked "Conferindo a contagem para ficar na faixa de 70 a 100 palavras"
+# onto frame0/title). Frame0/title lock that garbage onto the video. Strip
+# leading assistant-planning sentences only — a real @workspace / Copilot hook
+# is not first-person planning.
 _PREAMBLE_START = re.compile(
     r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
     r"Checking the workspace|"
+    r"Checking the (?:word )?count|"
+    r"Count(?:ing)? carefully|"
+    r"Conferindo a contagem|"
     r"The tests pin|The title maps|The endcard|"
+    r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
     r"The prompt|Vou |Deixa eu |Deixe-me )\b",
     re.I,
@@ -444,7 +450,16 @@ _PREAMBLE_BODY = re.compile(
     r"endcard matches|closer line|spoken script only|"
     r"check(?:ing)? the workspace|craft rules|script shape|"
     r"expected script|series name|tests pin|title maps|"
-    r"pin this to|endcard line)\b",
+    r"pin this to|endcard line|"
+    r"faixa de \d+ a \d+ palavras|"
+    r"\d+ to \d+ words|"
+    r"word[- ]count|"
+    r"gancho curto|"
+    r"endcard s[oó] na|"
+    r"open on the pain|"
+    r"fixed series card|"
+    r"names the series|"
+    r"last line matches)\b",
     re.I,
 )
 
@@ -565,7 +580,8 @@ def _generate_script(subject: str, params: dict) -> str:
         logger.debug("script word count %d outside [%d,%d] for %r; retrying", wc, lo, hi, subject)
         retry = _llm(
             prompt + f"\n\nIMPORTANT: Your response MUST be between {lo} and {hi} words. "
-            "Count carefully before responding.",
+            "Return ONLY the spoken voiceover — never mention the word count, "
+            "craft rules, series name, or endcard plan.",
             max_tokens=max_tokens,
         ).strip()
         retry = re.sub(r"^[\"'`]+|[\"'`]+$", "", retry).strip()
