@@ -22,6 +22,11 @@ topic. JSON bool (lax ``int`` coerces ``false→0`` / ``true→1``) is the
 same class as #37/#39. These checks pin count ``<= 0`` / bool as 4xx
 before any generate_ideas, and that omitted count still defaults to 8.
 
+#50/#51 floored JSON bool ``render_profile_id`` on PATCH. Create still
+assigned ``body.render_profile_id`` after lax ``Optional[int]`` coerced
+``true→1`` / ``false→0``. These checks pin POST create bool as 4xx
+before any row, and that omitted/null still unbound.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -40,7 +45,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import topics as topics_router
-from app.schemas import GenerateBody, TopicUpdate
+from app.schemas import GenerateBody, TopicCreate, TopicUpdate
 
 _checks = 0
 
@@ -146,6 +151,16 @@ def topic_weight(topic_id):
 def topic_profile(topic_id):
     with Session(engine) as s:
         return s.get(Topic, topic_id).render_profile_id
+
+
+def n_topics():
+    with Session(engine) as s:
+        return s.exec(select(func.count(Topic.id))).one()
+
+
+def topic_names():
+    with Session(engine) as s:
+        return {t.name for t in s.exec(select(Topic)).all()}
 
 
 def draft_count(topic_id):
@@ -474,6 +489,87 @@ try:
        "create canonical long persisted "
        "(_canonical_format('short') constant would write short)")
     ok(topic_format(r.json()["id"]) == "long", "create canonical long row is long")
+
+    print("POST /api/topics: JSON bool render_profile_id is 4xx")
+    # Same class as TopicUpdate #51. Lax Optional[int] coerces false→0 /
+    # true→1 before create_topic assigns body.render_profile_id. 0 is
+    # treated as unbound by resolve_engine (`if not pid`) but is not None;
+    # true silently binds the new topic to profile id=1.
+    n_before = n_topics()
+    names_before = topic_names()
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateProfileInt", "render_profile_id": 2})
+    ok(r.status_code == 201, "create render_profile_id=2 (integer) is 201")
+    ok(r.json().get("render_profile_id") == 2, "create integer 2 persisted")
+    ok(topic_profile(r.json()["id"]) == 2, "create integer 2 row")
+    create_int_id = r.json()["id"]
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateProfileOmit"})
+    ok(r.status_code == 201, "create omitted render_profile_id is 201")
+    ok(r.json().get("render_profile_id") is None,
+       "omitted render_profile_id stays unbound (not coerced to 0)")
+    ok(topic_profile(r.json()["id"]) is None, "omitted profile row is unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateProfileNull", "render_profile_id": None})
+    ok(r.status_code == 201, "create render_profile_id=null is 201 (unbound is legal)")
+    ok(r.json().get("render_profile_id") is None, "null profile persisted as unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistTrue", "create_playlist": True})
+    ok(r.status_code == 201,
+       "create_playlist=true is 201 (bool field; the floor is render_profile_id only)")
+    ok(r.json().get("render_profile_id") is None,
+       "create_playlist=true left profile unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "BadFalseProfile", "render_profile_id": False})
+    ok(r.status_code in (400, 422),
+       "create render_profile_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-profile create 4xx names the boolean rejection")
+    ok("BadFalseProfile" not in topic_names(),
+       "create render_profile_id=false writes no row")
+    ok(n_topics() == n_before + 4,
+       "false-profile create did not add a row "
+       "(integer/omit/null/create_playlist already added 4)")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "BadTrueProfile", "render_profile_id": True})
+    ok(r.status_code in (400, 422),
+       "create render_profile_id=true is 4xx (must not coerce to 1)")
+    ok("boolean" in r.text.lower(),
+       "true-profile create 4xx names the boolean rejection")
+    ok("BadTrueProfile" not in topic_names(),
+       "create render_profile_id=true writes no row")
+    ok(topic_profile(create_int_id) == 2,
+       "true-profile 4xx left the integer-2 sibling")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "SmuggledProfile", "render_profile_id": True,
+        "content_format": "long"})
+    ok(r.status_code in (400, 422),
+       "mixed create with render_profile_id=true is 4xx")
+    ok("SmuggledProfile" not in topic_names(),
+       "4xx mixed create wrote none of the fields")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateProfileOne", "render_profile_id": 1})
+    ok(r.status_code == 201, "create render_profile_id=1 (integer) is 201")
+    ok(r.json().get("render_profile_id") == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+
+    ok(n_topics() == n_before + 5,
+       "bool-profile 4xx created no extra rows (5 legal creates)")
+    ok(names_before.isdisjoint({"BadFalseProfile", "BadTrueProfile", "SmuggledProfile"}),
+       "precondition held: bool-profile names were not already seeded")
+
+    tc_src = inspect.getsource(TopicCreate)
+    ok('_reject_bool_profile' in tc_src
+       and '@field_validator("render_profile_id", mode="before")' in tc_src,
+       "TopicCreate._reject_bool_profile is mode=before on render_profile_id")
 
     print("PATCH /api/topics/{id}: weight floor (null/bool/negative 400; 0 parks)")
     # Topic 1 is parked weight=0; topic 2 is live weight=1; topic 3 is heavy weight=2.

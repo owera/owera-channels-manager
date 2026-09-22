@@ -1702,5 +1702,26 @@ flag the operator step in the commit body.
 - **acceptance:** PATCH topic/channel profile `true/false` is 4xx
   and writes nothing (seeded id=2 does not become 1 or 0);
   integer still 200; null still 200; sibling bool fields still
-  200. Remaining (not bundled): `TopicCreate.render_profile_id`
-  still coerces; integer 0 still persists.
+  200. Remaining closed as #52 (`TopicCreate.render_profile_id`);
+  integer 0 still persists.
+
+### 52. ✅ DONE (code shipped to main 2026-09-22) POST /api/topics rejects JSON bool render_profile_id — normal
+- **resolution (2026-09-22):** `TopicCreate._reject_bool_profile`
+  `mode="before"` rejects JSON bool on `render_profile_id` (same
+  floor as TopicUpdate #51 / VideoUpdate #50). Null still 201
+  (unbound). Omitted still 201 unbound. Integer 2/1 still 201.
+  `create_playlist=true` still 201. Mixed 4xx writes no row.
+  Suite: `tests/verify_topics.py` 186 → 211. Isolated commit;
+  no money-path files.
+- **why (found shipping #51, not bundled):** topic PATCH was
+  floored; create still assigned `body.render_profile_id` after
+  lax `Optional[int]` coerced `true→1` / `false→0`. A growth-agent
+  / curl `{"render_profile_id": true}` bound the new topic to
+  profile id=1; `false` wrote 0, which `resolve_engine` treats as
+  unbound (`if not pid`) but is not None.
+- **caution:** normal (`schemas.py` TopicCreate only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** POST create profile `true/false` is 4xx and
+  writes no row; integer still 201; null/omitted still 201
+  unbound; `create_playlist=true` still 201. Remaining (not
+  bundled): integer 0 still persists.
