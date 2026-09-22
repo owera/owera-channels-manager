@@ -1156,3 +1156,216 @@ def ensure_series_endcard_vo(script: str | None, subject: str | None,
             parts[-1] = vo
             return " ".join(parts).strip()
     return (raw.rstrip() + " " + vo).strip()
+
+
+# ---------------------------------------------------------------------------
+# Publish craft gate — durable craft_review + anti-nonsense (CoS 2026-09-22)
+#
+# Publish must NOT pick videos without an explicit craft_review=pass.
+# Extends the existing title lock + Video Maker A/B/C (review_gate_reason)
+# with: non-empty script, optional VO/beats on creation_config, mute/no-audio
+# probe, and configurable nonsense-title patterns.
+# Does not replace Gate A/B/C or PATCH /craft — those stay as-is.
+# ---------------------------------------------------------------------------
+
+CRAFT_REVIEW_PENDING = "pending"
+CRAFT_REVIEW_PASS = "pass"
+CRAFT_REVIEW_FAIL = "fail"
+
+# Configurable. Replace the list (or call set_nonsense_title_patterns) to
+# extend ops bans without a code change on the hot path. Matched against the
+# title head before `·` when present, else the whole title (folded-ish).
+NONSENSE_TITLE_PATTERNS: list[str] = [
+    # "billed $58" / "billed $58 when…" spam heads without a real claim stake
+    r"^billed\s*\$\d+\b",
+    # bare series-only titles (no spoken claim)
+    r"^(copilot\s+credits|ia|agent\s+memory|crewai|local|claude\s+code)\s+\d+\s*$",
+]
+
+_NONSENSE_TITLE_RES: list[re.Pattern[str]] | None = None
+
+NONSENSE_TITLE_REASON = (
+    "title matches configurable nonsense/spam pattern "
+    "(e.g. billed $N head or bare series nn) — park via reject"
+)
+EMPTY_SCRIPT_REASON = "script is empty — craft persist or re-render before publish"
+MISSING_VO_BEATS_REASON = (
+    "creation_config has no VO/beats — need beats[] (or omit creation_config for legacy)"
+)
+MUTE_AUDIO_REASON = "video has no audio track (mute / missing narration) — reject"
+
+
+def set_nonsense_title_patterns(patterns: list[str] | None) -> None:
+    """Replace the nonsense-title regex list and clear the compiled cache."""
+    global NONSENSE_TITLE_PATTERNS, _NONSENSE_TITLE_RES
+    NONSENSE_TITLE_PATTERNS = list(patterns or [])
+    _NONSENSE_TITLE_RES = None
+
+
+def _nonsense_res() -> list[re.Pattern[str]]:
+    global _NONSENSE_TITLE_RES
+    if _NONSENSE_TITLE_RES is None:
+        _NONSENSE_TITLE_RES = [
+            re.compile(p, re.IGNORECASE) for p in NONSENSE_TITLE_PATTERNS if p
+        ]
+    return _NONSENSE_TITLE_RES
+
+
+def _title_head_for_nonsense(title: str | None) -> str:
+    raw = (title or "").strip()
+    if not raw:
+        return ""
+    # Prefer the spoken head before · series nn (same split as Credits/IA lock).
+    if "·" in raw:
+        return raw.split("·", 1)[0].strip()
+    return raw
+
+
+def nonsense_title_reason(title: str | None) -> str | None:
+    """None when the title is not nonsense-spam under the configured patterns."""
+    head = _title_head_for_nonsense(title)
+    whole = (title or "").strip()
+    if not head and not whole:
+        return None  # empty title is title_gate's job
+    for rx in _nonsense_res():
+        if head and rx.search(head):
+            return NONSENSE_TITLE_REASON
+        if whole and rx.search(whole):
+            return NONSENSE_TITLE_REASON
+    return None
+
+
+def script_nonempty(script: str | None) -> bool:
+    return bool((script or "").strip())
+
+
+def creation_config_has_vo_beats(creation_config) -> bool:
+    """Optional VO/beats presence for the publish craft gate.
+
+    - No creation_config / empty dict → True (pré-gate / legacy inventory).
+    - beats non-empty list → True.
+    - beats=[] or used_fallback without beats → False.
+    """
+    cc = _as_dict(creation_config)
+    if not cc:
+        return True
+    beats = cc.get("beats")
+    if isinstance(beats, list) and len(beats) > 0:
+        return True
+    if cc.get("used_fallback") and not (isinstance(beats, list) and beats):
+        return False
+    if "beats" in cc and isinstance(beats, list) and len(beats) == 0:
+        return False
+    # creation_config present without a beats key — treat as legacy snapshot.
+    return True
+
+
+def probe_has_audio(path: str | None) -> bool | None:
+    """Audio-track probe via ffprobe.
+
+    Returns:
+      True  — file exists and has ≥1 audio stream
+      False — file exists and has zero audio streams (mute)
+      None  — path missing / unreadable / ffprobe failed (skip mute reject)
+    """
+    if not path:
+        return None
+    from pathlib import Path
+    import subprocess
+
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=index",
+                "-of", "csv=p=0",
+                str(p),
+            ],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return bool(lines)
+
+
+def publish_craft_block_reason(
+    *,
+    title: str | None,
+    script: str | None,
+    creation_config=None,
+    content_format: str | None = "short",
+    video_path: str | None = None,
+    require_vo_beats: bool = True,
+    check_audio: bool = True,
+) -> str | None:
+    """First publish-blocking craft reason, or None when eligible.
+
+    Order (operator-readable): nonsense title → existing review_gate (title
+    lock + Gate A/B/C) → empty script → optional VO/beats → mute audio.
+    Long-form still requires script (+ audio when checkable); A/B/C stay exempt
+    via review_gate_reason.
+    """
+    blocked = nonsense_title_reason(title)
+    if blocked:
+        return blocked
+    blocked = review_gate_reason(title, content_format, creation_config)
+    if blocked:
+        return blocked
+    if not script_nonempty(script):
+        return EMPTY_SCRIPT_REASON
+    if require_vo_beats and not creation_config_has_vo_beats(creation_config):
+        return MISSING_VO_BEATS_REASON
+    if check_audio:
+        audio = probe_has_audio(video_path)
+        if audio is False:
+            return MUTE_AUDIO_REASON
+    return None
+
+
+def evaluate_craft_review(
+    *,
+    title: str | None,
+    script: str | None,
+    creation_config=None,
+    content_format: str | None = "short",
+    video_path: str | None = None,
+    require_vo_beats: bool = True,
+    check_audio: bool = True,
+) -> tuple[str, str | None]:
+    """Return (pass|fail, reason). Does not mutate the video row."""
+    reason = publish_craft_block_reason(
+        title=title,
+        script=script,
+        creation_config=creation_config,
+        content_format=content_format,
+        video_path=video_path,
+        require_vo_beats=require_vo_beats,
+        check_audio=check_audio,
+    )
+    if reason:
+        return CRAFT_REVIEW_FAIL, reason
+    return CRAFT_REVIEW_PASS, None
+
+
+def apply_craft_review_to_video(video, *, content_format: str | None = "short",
+                                require_vo_beats: bool = True,
+                                check_audio: bool = True) -> tuple[str, str | None]:
+    """Evaluate and write video.craft_review. Returns (status, reason)."""
+    status, reason = evaluate_craft_review(
+        title=video.title,
+        script=video.script,
+        creation_config=video.creation_config,
+        content_format=content_format,
+        video_path=video.video_path,
+        require_vo_beats=require_vo_beats,
+        check_audio=check_audio,
+    )
+    video.craft_review = status
+    return status, reason

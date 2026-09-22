@@ -564,7 +564,8 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v)
 ok(_uploads == [], "bad title never opens upload_video")
-ok(v.status == VideoStatus.REVIEW, "blocked publish returns the row to review")
+ok(v.status == VideoStatus.REJECTED, "blocked publish auto-rejects (anti-nonsense)")
+ok(v.craft_review == "fail", "blocked publish sets craft_review=fail")
 ok(v.error and "spoken series pattern" in v.error,
    "blocked publish records the gate reason")
 ok(v.yt_video_id is None, "no YouTube id on a blocked publish")
@@ -854,6 +855,7 @@ print("publish_loop refuses a craft-gate FAIL (no upload)")
 v3 = Video(channel_id=ch.id, topic_id=t.id, subject="craft",
            status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
            title="Copilot billed the cancelled run · Copilot Credits 14",
+           script="Copilot billed the cancelled run. Subscribe — next Copilot Credits trap.",
            creation_config=json.dumps({"beats": typo, "used_fallback": False}))
 s.add(v3); s.commit(); s.refresh(v3)
 _uploads = []
@@ -861,7 +863,8 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v3)
 ok(_uploads == [], "craft-gate FAIL never opens upload_video")
-ok(v3.status == VideoStatus.REVIEW, "blocked craft publish returns the row to review")
+ok(v3.status == VideoStatus.REJECTED, "blocked craft publish auto-rejects")
+ok(v3.craft_review == "fail", "blocked craft publish sets craft_review=fail")
 ok(v3.error and "craft gate FAIL" in v3.error and "[A]" in v3.error,
    "blocked craft publish records the letter-tagged reason")
 youtube.get_service, youtube.upload_video = _orig_get, _orig_up

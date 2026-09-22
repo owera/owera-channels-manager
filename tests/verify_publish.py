@@ -88,6 +88,11 @@ def make_channel(session, **kw):
 
 def make_video(session, channel, **kw):
     kw.setdefault("title", _OK_TITLE)
+    # Publish craft gate (craft/publish-craft-gate): selection requires
+    # craft_review=pass + non-empty script. Fixtures that exercise the
+    # drip/upload path default to an explicit pass so legacy cases stay green.
+    kw.setdefault("craft_review", "pass")
+    kw.setdefault("script", "It costs $79. Here is why Credits matter.")
     v = Video(channel_id=channel.id, topic_id=kw.pop("topic_id", 1),
               subject=kw.pop("subject", "Test subject"), **kw)
     session.add(v)

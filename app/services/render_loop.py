@@ -180,16 +180,26 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     from app.services import craft
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    blocked = craft.review_gate_reason(video.title, fmt, video.creation_config)
+    # Full publish craft gate (title / A+B+C / script / VO / mute) so skip-gate
+    # auto-approve writes an explicit craft_review=pass (or parks in review).
+    blocked = craft.publish_craft_block_reason(
+        title=video.title, script=video.script,
+        creation_config=video.creation_config, content_format=fmt,
+        video_path=video.video_path,
+    )
     if blocked:
         video.status = VideoStatus.REVIEW
+        video.craft_review = craft.CRAFT_REVIEW_FAIL
         video.error = blocked
         video.approved_at = None
     elif _effective_skip_gate(video, channel):
         video.status = VideoStatus.APPROVED
+        video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = utcnow()
     else:
         video.status = VideoStatus.REVIEW
+        # Pending operator approve — not yet an explicit pass.
+        video.craft_review = craft.CRAFT_REVIEW_PENDING
     quota.log(session, kind="render", status="success", video_id=video.id, channel_id=channel.id)
 
 

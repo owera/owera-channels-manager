@@ -51,7 +51,8 @@ def _add_missing_columns() -> None:
 
     wanted = {
         "renderprofile": [("engine", "VARCHAR DEFAULT 'mpt'")],
-        "video": [("engine", "VARCHAR"), ("creation_config", "VARCHAR")],
+        "video": [("engine", "VARCHAR"), ("creation_config", "VARCHAR"),
+                  ("craft_review", "VARCHAR DEFAULT 'pending'")],
         "videometric": [("average_view_duration", "FLOAT DEFAULT 0"),
                         ("traffic_json", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME"),

@@ -21,7 +21,7 @@ The gate refuses:
 - `POST /api/videos/{id}/approve` (409 + reason)
 - skip-gate auto-approve (stays `review` with `error` set)
 - `POST /api/videos/{id}/retry` when the artifact would re-enter `approved`
-- `publish_loop._publish_one` (returns the row to `review`, does not upload)
+- `publish_loop._publish_one` (auto-rejects with `craft_review=fail`, does not upload)
 
 Long-form is exempt (no series suffix).
 
@@ -97,6 +97,34 @@ Follow-tomorrow / waitlist / Cloud. Do **not** invert the global CTA ban.
 Generic description still appends Subscribe/Inscreva-se; that is not the
 endcard.
 
+## Publish craft gate (`craft_review`)
+
+Durable column `Video.craft_review` ∈ {`pending`, `pass`, `fail`}.
+
+The publish loop **only selects** `status=approved` **and** `craft_review=pass`.
+Pending approved rows are evaluated on each publish tick
+(`_sweep_craft_reviews`):
+
+- clear → `craft_review=pass` (eligible)
+- blocked → auto-**reject** (`craft_review=fail`)
+
+Publish eligibility (`craft.publish_craft_block_reason`), in order:
+
+1. configurable nonsense-title patterns (default: `billed $N` head, bare series nn)
+2. existing title lock + Video Maker A/B/C (`review_gate_reason`)
+3. non-empty `script`
+4. optional VO/beats on `creation_config` (legacy rows without `creation_config` fail-open)
+5. mute / no audio track when `ffprobe` can read the file
+
+`POST …/approve`, skip-gate finalize, and `POST …/retry` (artifact kept) write
+`craft_review=pass` only when the full publish craft gate clears.
+`PATCH …/craft` re-scores `craft_review` without flipping status (PR #31 path).
+
+Nonsense patterns are configurable via `craft.set_nonsense_title_patterns([...])`
+(defaults in `craft.NONSENSE_TITLE_PATTERNS`). No mix / concurrency / spend change.
+
+Regression: `tests/verify_publish_craft_gate.py`.
+
 ## Video Maker craft gate (Shorts A+B+C)
 
 Automatic PASS/FAIL on the storyboard/render path (post-compose, before
@@ -110,7 +138,7 @@ The gate refuses the same surfaces as the spoken-title lock:
 - `POST /api/videos/{id}/approve` (409 + reason)
 - skip-gate auto-approve (stays `review` with `error` set)
 - `POST /api/videos/{id}/retry` when the artifact would re-enter `approved`
-- `publish_loop._publish_one` (returns the row to `review`, does not upload)
+- `publish_loop._publish_one` (auto-rejects with `craft_review=fail`, does not upload)
 
 `GET /api/agent/issues` exposes `craft_gate_blocked` (informational).
 
