@@ -78,8 +78,13 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
     if not ch:
         raise HTTPException(404, "channel not found")
     cfg_row = app_settings(session)
+    from app.services import craft as craft_svc
     approved = session.exec(
-        select(Video).where(Video.channel_id == channel_id, Video.status == VideoStatus.APPROVED)
+        select(Video).where(
+            Video.channel_id == channel_id,
+            Video.status == VideoStatus.APPROVED,
+            Video.craft_review == craft_svc.CRAFT_REVIEW_PASS,
+        )
     ).all()
     if not approved:
         return {}
@@ -355,10 +360,17 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
     for k, val in data.items():
         setattr(v, k, val)
     v.updated_at = utcnow()
+    # Re-score durable craft_review after honesty edits (does not flip status).
+    from app.services import craft
+    topic = session.get(Topic, v.topic_id)
+    fmt = "long" if topic and topic.content_format == "long" else "short"
+    cr_status, cr_reason = craft.apply_craft_review_to_video(v, content_format=fmt)
     changed = ",".join(sorted(data.keys()))
     quota.log(session, kind="craft_persist", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"craft persist via API: {changed} (status={v.status}, no requeue)")
+              detail=f"craft persist via API: {changed} (status={v.status}, "
+                     f"craft_review={cr_status}, no requeue"
+                     + (f"; {cr_reason}" if cr_reason else "") + ")")
     session.add(v)
     session.commit()
     session.refresh(v)
@@ -447,13 +459,20 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
     from app.services import craft
-    blocked = craft.review_gate_reason(v.title, fmt, v.creation_config)
+    blocked = craft.publish_craft_block_reason(
+        title=v.title, script=v.script, creation_config=v.creation_config,
+        content_format=fmt, video_path=v.video_path,
+    )
     if blocked:
+        v.craft_review = craft.CRAFT_REVIEW_FAIL
+        session.add(v)
+        session.commit()
         raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"approved via API: {v.status} -> approved")
+              detail=f"approved via API: {v.status} -> approved; craft_review=pass")
     v.status = VideoStatus.APPROVED
+    v.craft_review = craft.CRAFT_REVIEW_PASS
     v.approved_at = utcnow()
     v.rejected_reason = None
     session.add(v)
@@ -493,17 +512,25 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft
-        blocked = craft.review_gate_reason(v.title, fmt, v.creation_config)
+        blocked = craft.publish_craft_block_reason(
+            title=v.title, script=v.script, creation_config=v.creation_config,
+            content_format=fmt, video_path=v.video_path,
+        )
         if blocked:
+            v.craft_review = craft.CRAFT_REVIEW_FAIL
+            session.add(v)
+            session.commit()
             raise HTTPException(409, blocked)
         quota.log(session, kind="retry", status="success", video_id=v.id,
                   channel_id=v.channel_id,
-                  detail=f"retried via API: {v.status} -> approved (artifact kept, re-publish)")
+                  detail=f"retried via API: {v.status} -> approved "
+                         f"(artifact kept, re-publish); craft_review=pass")
         # Reset the stuck-publish cap so an operator/agent retry after a diagnosed
         # root cause (token parse, network) gets a full publish_max_retries budget
         # instead of one hang and an immediate give-up (retry_count already at cap).
         return _set_status(session, video_id, VideoStatus.APPROVED, error=None,
-                           approved_at=utcnow(), retry_count=0)
+                           approved_at=utcnow(), retry_count=0,
+                           craft_review=craft.CRAFT_REVIEW_PASS)
     quota.log(session, kind="retry", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"retried via API: {v.status} -> queued (re-render)")

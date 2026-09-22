@@ -164,6 +164,10 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
     #    whole day (observed 2026-08-03/05: ch1 5L/0S). Cap is soft: if no short
     #    is approved, fall through so longs still drain rather than starve.
     # Within each pool: higher-weight topics first, then FIFO by approved_at.
+    #
+    # Craft gate (CoS 2026-09-22): only craft_review=pass is eligible. Pending
+    # / fail / NULL never enter the drip — _sweep_craft_reviews evaluates them
+    # first (pass stays approved; fail auto-rejects).
     def _pick(fmt: str | None) -> Video | None:
         q = (
             select(Video)
@@ -171,6 +175,7 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
             .where(
                 Video.channel_id == channel_id,
                 Video.status == VideoStatus.APPROVED,
+                Video.craft_review == craft.CRAFT_REVIEW_PASS,
             )
             .order_by(Topic.weight.desc(), Video.approved_at, Video.id)
         )
@@ -190,6 +195,44 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
         if video:
             return video
     return _pick(None)
+
+
+
+def _sweep_craft_reviews(session: Session, channel_id: int) -> None:
+    """Evaluate approved videos that are not yet craft_review=pass.
+
+    - pass → durable craft_review=pass (eligible for _next_approved)
+    - fail → auto-reject (mute / empty script / nonsense title / Gate A/B/C)
+    Idempotent; does not touch already-pass rows.
+    """
+    pending = session.exec(
+        select(Video).where(
+            Video.channel_id == channel_id,
+            Video.status == VideoStatus.APPROVED,
+            Video.craft_review != craft.CRAFT_REVIEW_PASS,
+        )
+    ).all()
+    for video in pending:
+        topic = session.get(Topic, video.topic_id)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
+        status, reason = craft.apply_craft_review_to_video(video, content_format=fmt)
+        if status == craft.CRAFT_REVIEW_PASS:
+            video.error = None
+            session.add(video)
+            quota.log(session, kind="craft_review", status="success",
+                      video_id=video.id, channel_id=channel_id,
+                      detail="craft_review=pass (publish eligible)")
+            continue
+        # Anti-nonsense: do not leave fail rows in the approved pool.
+        video.status = VideoStatus.REJECTED
+        video.rejected_reason = (reason or "craft_review fail")[:500]
+        video.error = reason
+        session.add(video)
+        quota.log(session, kind="craft_review", status="error",
+                  video_id=video.id, channel_id=channel_id,
+                  detail=f"craft_review=fail → rejected: {reason}")
+    if pending:
+        session.commit()
 
 
 def _recover_stuck_publishing(session: Session) -> None:
@@ -272,15 +315,28 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
 def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    blocked = craft.review_gate_reason(video.title, fmt, video.creation_config)
+    # Defense in depth: selection already requires craft_review=pass, but
+    # re-check the full publish craft gate (title / A+B+C / script / VO /
+    # mute) so a stale pass cannot upload nonsense.
+    blocked = craft.publish_craft_block_reason(
+        title=video.title,
+        script=video.script,
+        creation_config=video.creation_config,
+        content_format=fmt,
+        video_path=video.video_path,
+    )
     if blocked:
-        video.status = VideoStatus.REVIEW
+        video.craft_review = craft.CRAFT_REVIEW_FAIL
+        video.status = VideoStatus.REJECTED
+        video.rejected_reason = blocked[:500]
         video.error = blocked
         session.add(video)
         quota.log(session, kind="publish", status="error", video_id=video.id,
-                  channel_id=channel.id, detail=blocked)
+                  channel_id=channel.id, detail=f"publish craft gate: {blocked}")
         session.commit()
         return
+    if video.craft_review != craft.CRAFT_REVIEW_PASS:
+        video.craft_review = craft.CRAFT_REVIEW_PASS
 
     video.status = VideoStatus.PUBLISHING
     video.render_progress = 0          # reuse as upload progress while publishing
@@ -468,6 +524,9 @@ def tick() -> None:
             ).one()
             if in_flight:
                 continue
+            # Evaluate pending craft_review on approved rows before selection
+            # (pass → eligible; fail → auto-reject). Cheap when pool is clean.
+            _sweep_craft_reviews(session, channel.id)
             video = _next_approved(session, channel.id)
             if not video:
                 continue

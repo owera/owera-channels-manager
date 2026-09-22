@@ -35,6 +35,16 @@ class VideoStatus:
     REJECTED = "rejected"
 
 
+# Durable publish craft gate (anti-nonsense). Publish loop only selects pass.
+# pending = not yet evaluated / needs operator or auto-eval;
+# fail = blocked (mute, empty script, banned title, Gate A/B/C);
+# pass = explicit craft gate clearance required before publish picks the row.
+class CraftReview:
+    PENDING = "pending"
+    PASS = "pass"
+    FAIL = "fail"
+
+
 class OAuthStatus:
     DISCONNECTED = "disconnected"
     CONNECTED = "connected"
@@ -138,6 +148,10 @@ class Video(SQLModel, table=True):
     # voice, bgm, script length, …) — the "treatment" signal joined to VideoMetric for
     # learning what drives engagement. Recorded at finalize; captured now (can't backfill).
     creation_config: Optional[str] = None
+
+    # Durable craft gate for the publish loop (see CraftReview). Default pending
+    # so legacy approved rows cannot publish until evaluated to pass.
+    craft_review: str = Field(default="pending", index=True)
 
     # gate / metadata
     title: Optional[str] = None
