@@ -152,6 +152,8 @@ class VideoUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[list[str]] = None
+    # craft fields intentionally omitted — PATCH /api/videos must
+    # not rewrite the treatment signal. Use PATCH /api/videos/{id}/craft.
 
     @field_validator("render_profile_id", mode="before")
     @classmethod
@@ -162,6 +164,17 @@ class VideoUpdate(BaseModel):
         if isinstance(v, bool):
             raise ValueError("must be an integer, not a boolean")
         return v
+
+
+class VideoCraftPersist(BaseModel):
+    """Narrow body for PATCH /api/videos/{id}/craft (#1257 ship-nit).
+
+    Correct spoken $N / script / hook beats (creation_config) on an
+    already-rendered video without requeue. VideoUpdate deliberately
+    omits these fields so a wide PATCH cannot silently rewrite them.
+    """
+    script: Optional[str] = None
+    creation_config: Optional[Any] = None  # dict (preferred) or JSON object string
 
 
 class RejectBody(BaseModel):

@@ -9,7 +9,7 @@ from sqlmodel import Session, func, select
 from app.config import settings as cfg
 from app.db import app_settings, get_session
 from app.models import Channel, Topic, Video, VideoStatus, utcnow
-from app.schemas import RejectBody, ReorderBody, VideoCreate, VideoUpdate
+from app.schemas import RejectBody, ReorderBody, VideoCraftPersist, VideoCreate, VideoUpdate
 from app.services import metadata, quota
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
@@ -283,6 +283,82 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
     for k, val in data.items():
         setattr(v, k, val)
     v.updated_at = utcnow()
+    session.add(v)
+    session.commit()
+    session.refresh(v)
+    return v
+
+
+
+@router.patch("/{video_id}/craft")
+def persist_craft(video_id: int, body: VideoCraftPersist,
+                  session: Session = Depends(get_session)):
+    """Persist script / creation_config without burning a re-render slot.
+
+    #1257 ship-nit: PATCH /api/videos ignores script & creation_config because
+    VideoUpdate omits them. Requeue was the only way to correct spoken $N /
+    hook beats on an approved video — that spends a render budget slot.
+    This narrow endpoint writes those fields only, leaves status / video_path
+    / mpt_task_id / render_progress untouched, and is gated to
+    approved | review | rendered (pre-publish honesty for the new queue).
+    """
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    allowed = (VideoStatus.APPROVED, VideoStatus.REVIEW, VideoStatus.RENDERED)
+    if v.status not in allowed:
+        raise HTTPException(
+            409,
+            f"cannot persist craft from status '{v.status}' "
+            f"(need approved/review/rendered; requeue to re-render)",
+        )
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(400, "provide script and/or creation_config")
+
+    if "script" in data:
+        script = data["script"]
+        if not isinstance(script, str) or not script.strip():
+            raise HTTPException(
+                400,
+                "script must be a non-empty string "
+                "(omit the key to leave script unchanged)",
+            )
+        data["script"] = script.strip()
+
+    if "creation_config" in data:
+        cc = data["creation_config"]
+        if cc is None:
+            raise HTTPException(
+                400,
+                "creation_config must be a JSON object "
+                "(omit the key to leave it unchanged)",
+            )
+        if isinstance(cc, str):
+            try:
+                parsed = json.loads(cc)
+            except json.JSONDecodeError:
+                raise HTTPException(400, "creation_config string must be valid JSON")
+            if not isinstance(parsed, dict):
+                raise HTTPException(400, "creation_config must be a JSON object")
+            data["creation_config"] = json.dumps(parsed)
+        elif isinstance(cc, dict):
+            data["creation_config"] = json.dumps(cc)
+        else:
+            raise HTTPException(
+                400,
+                "creation_config must be a JSON object (dict) or JSON object string",
+            )
+
+    # Only script / creation_config — never status, video_path, mpt_task_id,
+    # or render_progress (those would burn or fake a re-render slot).
+    for k, val in data.items():
+        setattr(v, k, val)
+    v.updated_at = utcnow()
+    changed = ",".join(sorted(data.keys()))
+    quota.log(session, kind="craft_persist", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"craft persist via API: {changed} (status={v.status}, no requeue)")
     session.add(v)
     session.commit()
     session.refresh(v)

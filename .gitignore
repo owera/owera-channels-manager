@@ -14,3 +14,4 @@ run/.rubric_review/
 .claude/
 run/.run-check.lock
 run/.code-agent.lock
+.craft-persist-handoff/
