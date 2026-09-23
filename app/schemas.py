@@ -238,6 +238,21 @@ class SettingsUpdate(BaseModel):
     topic_autogen_min_pending: Optional[int] = None
     topic_autogen_target: Optional[int] = None
 
+    @field_validator(
+        "render_concurrency", "publish_drip_minutes",
+        "topic_autogen_min_pending", "topic_autogen_target",
+        mode="before",
+    )
+    @classmethod
+    def _reject_bool_int(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # drip false becomes the legal no-spacing 0 (every tick may publish);
+        # concurrency true becomes 1 and passes the >= 1 floor.
+        # _require_int's isinstance(bool) never sees the original bool.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 # ---- YouTube channel administration ----
 class BrandingUpdate(BaseModel):

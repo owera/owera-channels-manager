@@ -1745,3 +1745,31 @@ flag the operator step in the commit body.
 - **acceptance:** the three suites pass again; n does not decrease;
   approve from review is 200 + JobRun; skip-gate True auto-approves
   with `craft_review=pass`; a revoked token still flips EXPIRED.
+
+### 54. ✅ DONE (code shipped to main 2026-09-23) PATCH /api/settings rejects JSON bool ints — normal
+- **resolution (2026-09-23):** `SettingsUpdate._reject_bool_int`
+  `mode="before"` rejects JSON bool on `render_concurrency`,
+  `publish_drip_minutes`, `topic_autogen_min_pending`, and
+  `topic_autogen_target` before lax `Optional[int]` coerces
+  `false→0` / `true→1`. The handler's `isinstance(bool)` never saw
+  the original bool: drip `false` became the legal no-spacing 0
+  (`(now - last) >= 0` is always true), and concurrency `true`
+  became 1 and passed the `>= 1` floor. Null / below-floor still
+  400. Integer 0 drip and integer 1 concurrency still 200.
+  `scheduler_paused=true` and `topic_autogen_enabled=true` still
+  200. Mixed 4xx writes nothing. Suite: `tests/verify_settings.py`
+  119 → 168. Isolated commit; no money-path files.
+- **why (found 2026-09-23 ranking remaining lax Optional[int] after
+  #52):** channel budgets and topic weight already reject bools at
+  the schema. Settings still coerced, and `_require_int`'s bool
+  check was dead code after `model_dump`.
+- **caution:** normal (`schemas.py` SettingsUpdate + the settings
+  router comment; not a money-path file). Isolated commit +
+  regression tests.
+- **acceptance:** PATCH `true`/`false` on each of the four int
+  fields is 4xx and writes nothing (seeded concurrency 2 does not
+  become 1; drip 15 does not become 0); integer 0/1 still 200;
+  sibling bool fields still 200. Remaining (not bundled):
+  `TopicCreate`/`TopicUpdate.playlist_id`, `ProfileCreate.channel_id`,
+  and trend `channel_id` still coerce bools the same way. Integer 0
+  on `render_profile_id` still persists.

@@ -23,6 +23,12 @@ Pins:
   * 0 / negative / null concurrency is 400 and writes nothing
   * negative / null drip is 400; 0 drip (no spacing) is allowed
   * null / negative autogen ints are 400; 0 is allowed (autofill already floors)
+  * JSON bool on the four int fields is 4xx and writes nothing. Lax
+    Optional[int] coerces false→0 / true→1 before ``_require_int``, so
+    the handler's isinstance(bool) never sees it: drip false is the
+    legal no-spacing 0, concurrency true is 1 and passes ``>= 1``.
+    ``scheduler_paused`` / ``topic_autogen_enabled`` true still 200.
+    Integer 0 and 1 stay legal.
   * unauthenticated is still 401
   * Settings.tsx empty/invalid blur does not ``Number()`` the raw input
     (``Number("") === 0`` is now a 400); it restores the current value
@@ -257,6 +263,134 @@ try:
     ok(r.status_code == 400, "mixed body with concurrency=0 is 400")
     ok(snapshot() == before,
        "a 400 mixed body writes none of the fields (paused/drip stay put)")
+
+    print("PATCH /api/settings: JSON bool ints are 4xx (must not coerce)")
+    # Lax Optional[int] coerces before _require_int, so the handler's
+    # isinstance(bool) never sees the original JSON bool. true→1 passes
+    # the concurrency >= 1 floor; false→0 is the legal no-spacing drip
+    # ((now - last) >= 0 is always true). Seed values differ from both
+    # coercion targets so a persisted 0/1 cannot hide.
+    before = snapshot()
+    ok(before["render_concurrency"] == 2,
+       "precondition: concurrency is 2 (true would become 1)")
+    ok(before["publish_drip_minutes"] == 15,
+       "precondition: drip is 15 (false would become 0, true would become 1)")
+    ok(before["topic_autogen_min_pending"] == 4,
+       "precondition: autogen min is 4 (false would become 0)")
+    ok(before["topic_autogen_target"] == 8,
+       "precondition: autogen target is 8 (false would become 0)")
+
+    r = patch(render_concurrency=True)
+    ok(r.status_code in (400, 422),
+       "concurrency=true is 4xx (must not coerce to 1)")
+    ok("boolean" in r.text.lower(),
+       "true-concurrency 4xx names the boolean rejection")
+    ok(snapshot() == before, "concurrency=true writes nothing")
+    ok(snapshot()["render_concurrency"] == 2,
+       "true did not drop concurrency 2 to 1")
+
+    r = patch(render_concurrency=False)
+    ok(r.status_code in (400, 422),
+       "concurrency=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-concurrency 4xx names the boolean rejection "
+       "(not only the >= 1 floor)")
+    ok(snapshot() == before, "concurrency=false writes nothing")
+
+    r = patch(publish_drip_minutes=False)
+    ok(r.status_code in (400, 422),
+       "drip=false is 4xx (must not coerce to 0, the legal no-spacing drip)")
+    ok("boolean" in r.text.lower(), "false-drip 4xx names the boolean rejection")
+    ok(snapshot() == before, "drip=false writes nothing")
+    ok(snapshot()["publish_drip_minutes"] == 15, "false did not persist drip=0")
+
+    r = patch(publish_drip_minutes=True)
+    ok(r.status_code in (400, 422),
+       "drip=true is 4xx (must not coerce to 1)")
+    ok(snapshot()["publish_drip_minutes"] == 15, "true did not persist drip=1")
+
+    r = patch(topic_autogen_min_pending=False)
+    ok(r.status_code in (400, 422),
+       "autogen min=false is 4xx (must not coerce to 0)")
+    ok(snapshot()["topic_autogen_min_pending"] == 4,
+       "false did not persist autogen min=0")
+
+    r = patch(topic_autogen_min_pending=True)
+    ok(r.status_code in (400, 422),
+       "autogen min=true is 4xx (must not coerce to 1)")
+    ok(snapshot()["topic_autogen_min_pending"] == 4,
+       "true did not persist autogen min=1")
+
+    r = patch(topic_autogen_target=False)
+    ok(r.status_code in (400, 422),
+       "autogen target=false is 4xx (must not coerce to 0)")
+    ok(snapshot()["topic_autogen_target"] == 8,
+       "false did not persist autogen target=0")
+
+    r = patch(topic_autogen_target=True)
+    ok(r.status_code in (400, 422),
+       "autogen target=true is 4xx (must not coerce to 1)")
+    ok(snapshot()["topic_autogen_target"] == 8,
+       "true did not persist autogen target=1")
+
+    r = patch(publish_drip_minutes=False, render_concurrency=4)
+    ok(r.status_code in (400, 422), "mixed PATCH with drip=false is 4xx")
+    ok(snapshot() == before,
+       "4xx mixed bool PATCH did not smuggle concurrency=4")
+
+    r = patch(scheduler_paused=True)
+    ok(r.status_code == 200,
+       "scheduler_paused=true is 200 (bool field; the floor is the int fields only)")
+    ok(snapshot()["render_concurrency"] == 2, "paused PATCH left concurrency")
+    ok(snapshot()["publish_drip_minutes"] == 15, "paused PATCH left drip")
+    r = patch(scheduler_paused=False)
+    ok(r.status_code == 200, "restore paused=false is 200")
+
+    r = patch(topic_autogen_enabled=True)
+    ok(r.status_code == 200,
+       "topic_autogen_enabled=true is 200 (bool field; the floor is the int fields only)")
+    ok(snapshot()["topic_autogen_target"] == 8, "autogen-flag PATCH left target")
+    r = patch(topic_autogen_enabled=False)
+    ok(r.status_code == 200, "restore topic_autogen_enabled=false is 200")
+    ok(snapshot() == before, "sibling bool round-trip restored the row")
+
+    # Integer coercion targets stay legal. 1 is what true becomes; 0 is
+    # what false becomes on the >= 0 fields.
+    r = patch(render_concurrency=1)
+    ok(r.status_code == 200, "concurrency=1 (integer) is 200")
+    ok(snapshot()["render_concurrency"] == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+    r = patch(render_concurrency=2)
+    ok(r.status_code == 200, "restore concurrency=2 is 200")
+
+    r = patch(publish_drip_minutes=0)
+    ok(r.status_code == 200, "drip=0 (integer) still allowed after the bool floor")
+    ok(snapshot()["publish_drip_minutes"] == 0, "integer drip=0 persisted")
+    r = patch(publish_drip_minutes=15)
+    ok(r.status_code == 200, "restore drip=15 is 200")
+
+    r = patch(topic_autogen_min_pending=0)
+    ok(r.status_code == 200, "autogen min=0 (integer) still allowed after the bool floor")
+    ok(snapshot()["topic_autogen_min_pending"] == 0, "integer autogen min=0 persisted")
+    r = patch(topic_autogen_target=1)
+    ok(r.status_code == 200, "autogen target=1 (integer) is 200")
+    ok(snapshot()["topic_autogen_target"] == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+    r = patch(topic_autogen_min_pending=4, topic_autogen_target=8)
+    ok(r.status_code == 200, "restore autogen min=4 target=8 is 200")
+    ok(snapshot() == before, "integer round-trip restored the row")
+
+    import inspect
+
+    from app.schemas import SettingsUpdate
+    su_src = inspect.getsource(SettingsUpdate)
+    ok("_reject_bool_int" in su_src and 'mode="before"' in su_src,
+       "SettingsUpdate._reject_bool_int is mode=before")
+    ok(su_src.count('"render_concurrency"') >= 1
+       and su_src.count('"publish_drip_minutes"') >= 1
+       and su_src.count('"topic_autogen_min_pending"') >= 1
+       and su_src.count('"topic_autogen_target"') >= 1,
+       "bool floor source names all four int fields")
 
     print("PATCH /api/settings: empty body + auth")
     before = snapshot()

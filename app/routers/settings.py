@@ -15,8 +15,9 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
 
     ``int`` columns on Settings are NOT NULL. ``setattr(..., None)`` persists
     SQL NULL, and the next ``in_flight >= cfg.render_concurrency`` TypeErrors
-    the render tick. ``bool`` is a subclass of ``int``, so an explicit check
-    keeps ``true`` from becoming concurrency=1.
+    the render tick. JSON bools are rejected earlier by SettingsUpdate
+    (lax Optional[int] would coerce false→0 / true→1 before model_dump);
+    the isinstance(bool) check here is defense in depth for non-HTTP callers.
     """
     if key not in fields:
         return
