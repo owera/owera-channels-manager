@@ -11,7 +11,7 @@ Pipeline map, YPP gaps, agent handoffs, and the multi-network sketch:
 Shorts titles must match:
 
 ```
-·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code)\s+\d+
+·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code|Shipping|Agent traps)\s+\d+
 ```
 
 Example: `Copilot billed the cancelled run · Copilot Credits 14`

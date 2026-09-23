@@ -7,7 +7,7 @@ OBJECT on frame0 AND the thumb that echoes that same spoken phrase — not an
 abstract diagram, emoji soup, or generic slide.
 
 Spoken-title suffix (shorts): `· <series> <nn>` with series in
-Copilot Credits | Agent memory | CrewAI | IA | Local | Claude Code.
+Copilot Credits | Agent memory | CrewAI | IA | Local | Claude Code | Shipping | Agent traps.
 
 Series endcard (shorts, after the claim — not frame0): spoken
 `Subscribe — next {series} {noun}.` (≤8 words) + chip `Subscribe · {series}`.
@@ -31,18 +31,20 @@ SERIES_LABELS = (
     "IA",
     "Local",
     "Claude Code",
+    "Shipping",
+    "Agent traps",
 )
 
 # Middle-dot + one of the live series labels + integer episode. Case-insensitive
 # so a PT "ia 12" still matches the IA label; labels with spaces stay literal.
 SPOKEN_TITLE_RE = re.compile(
-    r"·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code)\s+\d+\b",
+    r"·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code|Shipping|Agent traps)\s+\d+\b",
     re.IGNORECASE,
 )
 
 TITLE_GATE_REASON = (
     "title does not match spoken series pattern "
-    "(need '· Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code <nn>') "
+    "(need '· Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code|Shipping|Agent traps <nn>') "
     "— pré-pattern leftovers must be parked via reject, not mass-retitled"
 )
 
