@@ -975,6 +975,49 @@ ok(v.status == VideoStatus.FAILED and v.error == "ffmpeg exploded" and v.retry_c
 ok(set(issues.TRANSIENT_SIGNATURES) == set(render_loop._TRANSIENT),
    "issues.TRANSIENT_SIGNATURES stays in lockstep with render_loop._TRANSIENT")
 
+# grok.Timeout cool-down: re-queue stamps not_before; _submit_new skips until elapsed.
+print("grok.Timeout retry backoff 30-60s")
+render_loop._grok_timeout_not_before.clear()
+s = fresh_session()
+use_engine(StubEngine(poll_result={"state": STATE_FAILED,
+                                   "error": "grok.Timeout: grok -p timed out after 600s"}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="gt1",
+               last_attempt_at=NOW, render_progress=50)
+render_loop._advance_in_flight(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.retry_count == 1,
+   "grok.Timeout -> QUEUED retry")
+ok(v.id in render_loop._grok_timeout_not_before,
+   "grok.Timeout stamps cool-down not_before for the video id")
+nb = render_loop._grok_timeout_not_before[v.id]
+import time as _time
+delta = nb - _time.time()
+ok(25 <= delta <= 65,
+   f"cool-down is ~30-60s from now (got {delta:.1f}s remaining)")
+# While cool-down is active, _submit_new must not re-pick the row.
+# Force not_before far in the future and ensure status stays QUEUED (not RENDERING).
+render_loop._grok_timeout_not_before[v.id] = _time.time() + 3600
+# Give the channel budget/concurrency headroom via defaults of make_channel.
+render_loop._submit_new(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.QUEUED and v.mpt_task_id is None,
+   "_submit_new respects grok.Timeout cool-down (does not re-submit early)")
+# Expire cool-down → submit proceeds.
+render_loop._grok_timeout_not_before[v.id] = _time.time() - 1
+render_loop._submit_new(s)
+s.commit()
+v = s.get(Video, v.id)
+ok(v.status == VideoStatus.RENDERING and v.mpt_task_id is not None,
+   "after cool-down expires, grok.Timeout retry is submitted")
+ok(v.id not in render_loop._grok_timeout_not_before,
+   "successful submit clears the cool-down stamp")
+render_loop._grok_timeout_not_before.clear()
+
+
 # 2026-08-13 overnight: litellm 600s / Anthropic disconnect were treated as
 # terminal. Same retry path as 529. Real error strings from v956 / v962.
 s = fresh_session()
@@ -1277,6 +1320,9 @@ v = drive_complete(s, ch, t)
 ok(v.status == VideoStatus.QUEUED and v.retry_count == 1,
    "grok.Timeout at metadata is a transient retry (same as litellm.Timeout)")
 render_loop.metadata = _prev_meta
+# fresh_session() reuses low video ids; clear cool-down so later tick/_submit_new
+# cases are not poisoned by this Timeout stamp.
+render_loop._grok_timeout_not_before.clear()
 
 settings.storage_dir = _orig_storage
 

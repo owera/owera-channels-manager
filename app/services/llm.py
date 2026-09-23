@@ -60,15 +60,24 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def complete(prompt: str, system: str | None = None, max_tokens: int | None = None) -> str:
+def complete(
+    prompt: str,
+    system: str | None = None,
+    max_tokens: int | None = None,
+    *,
+    timeout: int | None = None,
+) -> str:
     """Run ``grok -p`` and return stdout text.
 
     ``max_tokens`` is accepted so callers of the old ``_llm(prompt, system, max_tokens)``
     seam keep their signature; grok 1.0.5 ``-p`` has no equivalent flag and it is ignored.
+
+    ``timeout`` overrides ``settings.grok_timeout_seconds`` when set (use
+    ``settings.grok_timeout_seconds_light`` for idea/metadata callers).
     """
     cmd = build_cmd(prompt, system)
     cwd = scratch_dir()
-    timeout = int(settings.grok_timeout_seconds)
+    timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
     env = _child_env()
     logger.info("llm backend=grok-cli bin=%s prompt_chars=%d", settings.grok_bin,
                 len(cmd[-1]))

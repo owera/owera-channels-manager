@@ -5,6 +5,8 @@ channel.default_render_profile.
 """
 
 import json
+import random
+import time
 import logging
 import shutil
 import subprocess
@@ -43,6 +45,13 @@ _TRANSIENT = (
     "BlockingIOError",
 )
 
+# Post-Timeout cool-down before _submit_new re-picks a QUEUED row. Avoids
+# immediately restacking another 600s grok -p on a saturated CLI (observed
+# ~13–14 grok.Timeout / 24h). In-process map — single manager process.
+_GROK_TIMEOUT_BACKOFF_LO_S = 30
+_GROK_TIMEOUT_BACKOFF_HI_S = 60
+_grok_timeout_not_before: dict[int, float] = {}
+
 
 def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool) -> None:
     """Re-queue a failed-to-finish render, or mark FAILED once the budget is spent.
@@ -50,6 +59,9 @@ def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool)
     QUEUED (not APPROVED): _submit_new picks it up again. APPROVED would skip
     rendering and hand a file-less video to the publish loop. The handle and
     progress are cleared so the retry is a clean start.
+
+    grok.Timeout gets an extra 30–60s cool-down before re-submit (see
+    ``_grok_timeout_not_before``); other transients re-queue immediately.
     """
     if transient and video.retry_count < 2:
         video.status = VideoStatus.QUEUED
@@ -57,10 +69,19 @@ def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool)
         video.mpt_task_id = None
         video.render_progress = 0
         video.error = None
+        if video.id is not None and "grok.Timeout" in (err or ""):
+            delay = random.randint(_GROK_TIMEOUT_BACKOFF_LO_S, _GROK_TIMEOUT_BACKOFF_HI_S)
+            _grok_timeout_not_before[video.id] = time.time() + delay
+            logger.info(
+                "grok.Timeout backoff %ds before retry for video %s (attempt %d/2)",
+                delay, video.id, video.retry_count,
+            )
         quota.log(session, kind="render", status="error", video_id=video.id,
                   channel_id=video.channel_id,
                   detail=f"transient error (retry {video.retry_count}/2): {err[:200]}")
     else:
+        if video.id is not None:
+            _grok_timeout_not_before.pop(video.id, None)
         video.status = VideoStatus.FAILED
         video.error = err
         quota.log(session, kind="render", status="error", video_id=video.id,
@@ -430,9 +451,13 @@ def _submit_new(session: Session) -> None:
     if in_flight >= cfg.render_concurrency:
         return
     candidates = _queued_candidates(session)
+    now = time.time()
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
             break
+        not_before = _grok_timeout_not_before.get(video.id) if video.id is not None else None
+        if not_before is not None and now < not_before:
+            continue  # still inside grok.Timeout cool-down
         channel = session.get(Channel, video.channel_id)
         if not channel or channel.paused:
             continue
@@ -476,6 +501,8 @@ def _submit_new(session: Session) -> None:
         video.render_progress = 0
         video.error = None
         video.last_attempt_at = utcnow()
+        if video.id is not None:
+            _grok_timeout_not_before.pop(video.id, None)
         quota.log(session, kind="render", status="started", video_id=video.id, channel_id=channel.id)
         in_flight += 1
 
