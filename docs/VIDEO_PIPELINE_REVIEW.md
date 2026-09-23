@@ -123,7 +123,7 @@ Legend: **SHIPPED** matches intent · **PARTIAL** intent exists but leaks · **W
 **What the code actually accepts** (`craft.SPOKEN_TITLE_RE`) — closed allowlist, case-insensitive:
 
 ```
-·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code)\s+\d+\b
+·\s*(Copilot Credits|Agent memory|CrewAI|IA|Local|Claude Code|Shipping|Agent traps)\s+\d+\b
 ```
 
 `Hook · Other Series 1` is **rejected** (`verify_craft`). There is no generic `· Series {nn}` matcher. Live subjects look like:

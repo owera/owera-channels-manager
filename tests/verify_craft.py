@@ -41,6 +41,12 @@ ok(craft.spoken_title_ok("x · copilot credits 1"),
    "series match is case-insensitive")
 ok(not craft.spoken_title_ok("Copilot billed the cancelled run"),
    "missing · series nn is rejected")
+ok(craft.spoken_title_ok("Gate failed mid at 5.8s. Craft parked it. · Shipping 1"),
+   "Shipping nn matches")
+ok(craft.spoken_title_ok("Chat said done. Prod was still running. · Agent traps 1"),
+   "Agent traps nn matches")
+ok(craft.spoken_title_ok("x · shipping 2"), "Shipping match is case-insensitive")
+ok(craft.spoken_title_ok("x · agent traps 3"), "Agent traps match is case-insensitive")
 ok(not craft.spoken_title_ok("Hook · Other Series 1"),
    "unknown series label is rejected")
 ok(not craft.spoken_title_ok("Hook · Copilot Credits"),
