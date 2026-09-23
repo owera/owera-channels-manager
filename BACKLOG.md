@@ -1725,3 +1725,23 @@ flag the operator step in the commit body.
   writes no row; integer still 201; null/omitted still 201
   unbound; `create_playlist=true` still 201. Remaining (not
   bundled): integer 0 still persists.
+
+### 53. ✅ DONE (code shipped to main 2026-09-23) Restore suites the durable craft_review gate left red — normal
+- **resolution (2026-09-23):** tests-only. `7c0a375` rejects an empty
+  script inside `publish_craft_block_reason` before approve, skip-gate,
+  and `get_service`. Title-only fixtures 409'd approve, parked
+  skip-gate auto-approve in REVIEW, and never reached the revoked-token
+  EXPIRED flip. Approve / retry-with-artifact rows now carry a
+  non-empty script; render skip-gate drives pass the same script (and
+  the REVIEW override requires `error` empty, so a craft park cannot
+  satisfy it); notify `make_video` defaults script + `craft_review=pass`
+  the way `verify_publish` already does. Production behavior unchanged.
+  Suites: `verify_lifecycle_audit.py` 61, `verify_notify.py` 68,
+  `verify_render.py` 143. Isolated commit; no app/**.
+- **why (found 2026-09-23 gating the settings bool floor):** three
+  `verify_*.py` files were red on `main` after the durable craft_review
+  commit, so the code-agent gate could not ship anything else.
+- **caution:** normal (tests only). Isolated commit.
+- **acceptance:** the three suites pass again; n does not decrease;
+  approve from review is 200 + JobRun; skip-gate True auto-approves
+  with `craft_review=pass`; a revoked token still flips EXPIRED.

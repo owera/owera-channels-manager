@@ -1203,20 +1203,24 @@ ok(v.status == VideoStatus.REVIEW and v.thumb_path is None,
 
 print("finalize: skip-gate resolution routes REVIEW vs APPROVED")
 OK_TITLE = "Your RAG reads junk · Copilot Credits 1"
+# Durable craft_review (7c0a375) parks an empty script in REVIEW before
+# skip_gate is consulted. A passing script lets these pins see the gate.
+OK_SCRIPT = "It costs $79. Here is why Credits matter."
 s = fresh_session()
 ch = make_channel(s, default_skip_gate=True)
 t = make_topic(s, ch, content_format="short")
-v = drive_complete(s, ch, t, title=OK_TITLE)          # video.skip_gate None
-ok(v.status == VideoStatus.APPROVED and v.approved_at is not None,
+v = drive_complete(s, ch, t, title=OK_TITLE, script=OK_SCRIPT)  # skip_gate None
+ok(v.status == VideoStatus.APPROVED and v.approved_at is not None
+   and v.craft_review == "pass" and not v.error,
    "skip_gate None inherits channel default True -> APPROVED with approved_at")
-v = drive_complete(s, ch, t, skip_gate=False, title=OK_TITLE)
-ok(v.status == VideoStatus.REVIEW,
+v = drive_complete(s, ch, t, skip_gate=False, title=OK_TITLE, script=OK_SCRIPT)
+ok(v.status == VideoStatus.REVIEW and v.approved_at is None and not v.error,
    "video skip_gate False overrides channel True -> REVIEW")
 s = fresh_session()
 ch = make_channel(s)                                  # default_skip_gate False
 t = make_topic(s, ch, content_format="short")
-v = drive_complete(s, ch, t, skip_gate=True, title=OK_TITLE)
-ok(v.status == VideoStatus.APPROVED,
+v = drive_complete(s, ch, t, skip_gate=True, title=OK_TITLE, script=OK_SCRIPT)
+ok(v.status == VideoStatus.APPROVED and v.craft_review == "pass",
    "video skip_gate True overrides channel False -> APPROVED")
 v_blocked = drive_complete(s, ch, t, skip_gate=True)  # MetaStub title=gen-title
 ok(v_blocked.status == VideoStatus.REVIEW

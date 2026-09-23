@@ -37,7 +37,10 @@ from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 # Craft-gate B (8f9ed39) added craft.review_gate_reason to POST approve.
 # "Hook · Copilot Credits 1" fails the useful-phrase + $N lock → 409,
 # so the audit-trail pin never wrote a JobRun.
+# Durable craft_review (7c0a375) also requires a non-empty script before
+# approve / retry-with-artifact; an empty script 409s and writes no JobRun.
 _OK_TITLE = "Cache miss costs $79 · Copilot Credits 1"
+_OK_SCRIPT = "It costs $79. Here is why Credits matter."
 
 _checks = 0
 
@@ -61,10 +64,10 @@ with Session(engine) as s:
     s.commit()
     s.add(Video(channel_id=1, topic_id=1, subject="in review",
                 status=VideoStatus.REVIEW,
-                title=_OK_TITLE))                       # id 1
+                title=_OK_TITLE, script=_OK_SCRIPT))            # id 1
     s.add(Video(channel_id=1, topic_id=1, subject="rendered, unreviewed",
                 status=VideoStatus.RENDERED,
-                title=_OK_TITLE))                     # id 2
+                title=_OK_TITLE, script=_OK_SCRIPT))            # id 2
     s.add(Video(channel_id=1, topic_id=1, subject="still a draft",
                 status=VideoStatus.DRAFT))                        # id 3
     s.add(Video(channel_id=1, topic_id=1, subject="weak hook",
@@ -75,7 +78,7 @@ with Session(engine) as s:
     s.add(Video(channel_id=1, topic_id=1, subject="upload failed",
                 status=VideoStatus.FAILED, error="upload 500",
                 video_path="storage/videos/5/video.mp4",
-                title=_OK_TITLE,
+                title=_OK_TITLE, script=_OK_SCRIPT,
                 retry_count=5))                            # id 6
     s.add(Video(channel_id=1, topic_id=1, subject="render failed too",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 7
@@ -86,13 +89,13 @@ with Session(engine) as s:
     s.commit()
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 in review",
                 status=VideoStatus.REVIEW,
-                title=_OK_TITLE))                       # id 8
+                title=_OK_TITLE, script=_OK_SCRIPT))            # id 8
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 render failed",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 9
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 upload failed",
                 status=VideoStatus.FAILED, error="upload 500",
                 video_path="storage/videos/9/video.mp4",
-                title=_OK_TITLE))         # id 10
+                title=_OK_TITLE, script=_OK_SCRIPT))    # id 10
     s.commit()
 
 

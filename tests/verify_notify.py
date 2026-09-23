@@ -73,6 +73,10 @@ def make_channel(session, **kw):
 
 def make_video(session, channel, **kw):
     kw.setdefault("title", _OK_TITLE)
+    # Durable craft_review (7c0a375): _publish_one rejects an empty script
+    # before get_service, so a NeedsConnect fixture never flipped EXPIRED.
+    kw.setdefault("script", "It costs $79. Here is why Credits matter.")
+    kw.setdefault("craft_review", "pass")
     v = Video(channel_id=channel.id, topic_id=kw.pop("topic_id", 1),
               subject=kw.pop("subject", "Test subject"), **kw)
     session.add(v)
