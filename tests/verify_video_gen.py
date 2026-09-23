@@ -565,5 +565,29 @@ for banned in ("Mastering", "Deep Dive", "Complete Guide", "Introduction to"):
        f"long-form brief still names forbidden opener {banned!r}")
 
 
+# --- idea CoT prefix (09-23 drafts 1321 / 1325) is stripped, claim kept ---
+_llm_calls.clear()
+out_cot = _run_ideas(
+    _text=(
+        "Vou conferir o catálogo para não repetir título nem o número da série."
+        "O agente me cobrou $47 no terminal. · Claude Code 10\n"
+        "Vou conferir o catálogo da série para o próximo número e um ângulo "
+        "que ainda não foi usado.Bateria trava a GPU em 30W, não é engenharia. · IA 199\n"
+        "Vou conferir o catálogo e só isso.\n"
+        "O agente force-pushou a main. · Claude Code 11"
+    ),
+    n=8,
+)
+ok(out_cot == [
+    "O agente me cobrou $47 no terminal. · Claude Code 10",
+    "Bateria trava a GPU em 30W, não é engenharia. · IA 199",
+    "O agente force-pushou a main. · Claude Code 11",
+], "catalog-planning CoT drops; glued claim and series suffix stay; pure CoT line is discarded")
+ok(video_gen._strip_idea_cot(
+    "Your agent wrote to production with the staging tool. · Agent traps 1"
+) == "Your agent wrote to production with the staging tool. · Agent traps 1",
+   "clean patterned title is unchanged")
+
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

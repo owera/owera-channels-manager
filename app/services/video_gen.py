@@ -22,6 +22,52 @@ LANGUAGE_CODES = {
     "es": "es-ES",
 }
 
+# Grok -p sometimes prefixes an idea with catalog-planning CoT and glues the
+# real title on with no space (09-23 drafts 1321 / 1325: "Vou conferir o
+# catálogo….O agente… · Claude Code 10"). Drop those leading sentences.
+# A line that is only planning is discarded — unlike script preamble, there
+# is no word-count retry that needs the original text kept.
+_IDEA_COT_START = re.compile(
+    r"^(?:"
+    r"vou conferir o cat[aá]logo|"
+    r"conferindo a contagem|"
+    r"the hook has to|"
+    r"the first line has to|"
+    r"i'll check how|"
+    r"checking the workspace|"
+    r"the script has to|"
+    r"the tests pin|"
+    r"the title maps"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_idea_cot(title: str) -> str | None:
+    """Return the title with leading idea-planning sentences removed.
+
+    None means the line was only planning and must not become a video subject.
+    """
+    raw = (title or "").strip()
+    if not raw:
+        return None
+    parts = [
+        p.strip()
+        for p in re.split(r"(?<=[.!?…])(?=\s|[A-ZÁÉÍÓÚÃÕÂÊÔ])", raw)
+        if p.strip()
+    ]
+    if not parts:
+        return None
+    i = 0
+    while i < len(parts) and _IDEA_COT_START.match(parts[i]):
+        i += 1
+    if i == 0:
+        return raw
+    if i >= len(parts):
+        return None
+    kept = " ".join(parts[i:]).strip()
+    return kept or None
+
 
 def language_from_voice(voice_name: str | None) -> str | None:
     """Map a voice id like 'pt-BR-AntonioNeural[-Male]' to a language name for prompts."""
@@ -136,6 +182,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     out: list[str] = []
     for line in text.splitlines():
         title = re.sub(r"^\s*[-*\d.)\s]+", "", line).strip().strip('"')
+        title = _strip_idea_cot(title) or ""
         if not title or title.lower() in seen:
             continue
         if contains_banned(title) or contains_subscribe_cta(title):
