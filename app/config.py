@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # 300s was enough for shorts (~6k-char storyboard prompts) but overnight
     # longs (09-01 v1213/v1223, ~10k-char prompts) hit grok.Timeout at 300s
     # exactly and the worker swallowed it into kinetic-text fallback.
+    # Light budget for short completions (idea strip / metadata / digest-adjacent).
+    # Storyboard + script compose keep grok_timeout_seconds (600).
+    grok_timeout_seconds_light: int = 180     # env: MANAGER_GROK_TIMEOUT_SECONDS_LIGHT
 
     # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
     hf_token: str = ""

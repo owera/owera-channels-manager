@@ -9,7 +9,7 @@ through it. It must spawn ``grok -p`` (Grok Build CLI headless), use the
 machine's OAuth login, and never require XAI_API_KEY / Anthropic / LiteLLM.
 
 Covers, dependency-free (no network, no real grok, no Anthropic):
-  - config defaults: grok_bin='grok', timeout 300; litellm_model / anthropic_api_key gone
+  - config defaults: grok_bin='grok', timeout 600 + light 180; litellm_model / anthropic_api_key gone
   - ``build_prompt`` / ``build_cmd``: ``-p``, system prepend, no max_tokens flag
   - ``complete`` (subprocess stubbed): argv, cwd=scratch, timeout, env strips
     XAI_API_KEY / GROK_API_KEY / ANTHROPIC_API_KEY and keeps HOME
@@ -52,6 +52,8 @@ print("config: grok CLI is the manager LLM")
 
 ok(settings.grok_bin == "grok", "default grok_bin is 'grok' (PATH lookup)")
 ok(settings.grok_timeout_seconds == 600, "default grok timeout is 600s (long storyboards)")
+ok(settings.grok_timeout_seconds_light == 180,
+   "default light timeout is 180s (ideas/metadata)")
 ok(not hasattr(settings, "litellm_model"),
    "litellm_model setting is gone (no anthropic/claude default)")
 ok(not hasattr(settings, "anthropic_api_key"),
@@ -145,6 +147,27 @@ with tempfile.TemporaryDirectory() as td:
 settings.grok_bin = _orig_bin
 settings.grok_timeout_seconds = _orig_timeout
 settings.storage_dir = _orig_storage
+
+# Explicit timeout= kwarg overrides settings (light path for ideas/metadata).
+_captured.clear()
+with tempfile.TemporaryDirectory() as td2:
+    settings.storage_dir = td2
+    with patch.object(llm.subprocess, "run", side_effect=_run_ok):
+        out = llm.complete("short", timeout=180)
+ok(out == "the reply", "timeout= override still returns stdout")
+ok(_captured["timeout"] == 180, "timeout= kwarg wins over settings.grok_timeout_seconds")
+settings.storage_dir = _orig_storage
+
+# video_gen / metadata call sites pass the light budget.
+src_vg = inspect.getsource(video_gen.generate_ideas)
+ok("grok_timeout_seconds_light" in src_vg,
+   "generate_ideas uses grok_timeout_seconds_light")
+src_meta = inspect.getsource(metadata._llm_fallback)
+ok("grok_timeout_seconds_light" in src_meta,
+   "metadata._llm_fallback uses grok_timeout_seconds_light")
+src_worker = inspect.getsource(worker._llm)
+ok("timeout" not in src_worker.split("complete(")[1].split(")")[0],
+   "worker._llm keeps default (storyboard/script) timeout — no light override")
 
 
 def _run_empty(cmd, **kw):

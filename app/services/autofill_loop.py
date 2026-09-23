@@ -96,6 +96,17 @@ def tick() -> None:
         cfg = app_settings(session)
         if not cfg.topic_autogen_enabled:
             return
+        # Soft-skip idea-strip grok while renders own the CLI — same reason as
+        # growth-agent.sh (avoid stacking light completions on storyboard compose).
+        rendering = session.exec(
+            select(func.count(Video.id)).where(Video.status == VideoStatus.RENDERING)
+        ).one()
+        if rendering:
+            logger.info(
+                "skipping autofill tick: %d video(s) rendering (avoid grok.Timeout stack)",
+                rendering,
+            )
+            return
         threshold = max(1, cfg.topic_autogen_min_pending)
         target = max(threshold, cfg.topic_autogen_target)  # ceiling never below the trigger
 

@@ -60,6 +60,28 @@ if ! curl -sf -o /dev/null -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:707
   exit 0
 fi
 
+# --- Skip heavy grok when renders are active --------------------------------
+# Stacking the daily grok digest/rubric on top of storyboard compose is a
+# primary grok.Timeout source (CLI single-flight / 600s wall). Soft-skip;
+# launchd will try again tomorrow (or next timer fire).
+DASH_JSON="$(curl -sf -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:7070/api/dashboard 2>/dev/null || true)"
+RENDERING="$(printf '%s' "$DASH_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit
+n = 0
+for row in data if isinstance(data, list) else []:
+    counts = row.get("counts") or {}
+    n += int(counts.get("rendering") or 0)
+print(n)
+' 2>/dev/null || echo 0)"
+if [ "${RENDERING:-0}" -gt 0 ]; then
+  log "active renders=$RENDERING — skipping heavy grok run (avoid Timeout stack)"
+  exit 0
+fi
+
 # --- Run ------------------------------------------------------------------
 log "starting daily run"
 # { } is not a subshell — STATUS set inside remains visible after the group.

@@ -2,6 +2,7 @@
 
 import re
 
+from app.config import settings
 from app.services.llm import complete
 
 # The channel's spoken language lives implicitly in its render-profile voice id
@@ -176,7 +177,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             f"{avoid or '(none yet)'}\n\n"
             "Return ONLY the titles, one per line, no numbering, no bullets, no commentary."
         )
-    text = complete(prompt) or ""
+    text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light)) or ""
 
     seen = {s.lower() for s in existing}
     out: list[str] = []

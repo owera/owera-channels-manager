@@ -16,6 +16,7 @@ retries never double-append.
 import json
 import re
 
+from app.config import settings
 from app.services.llm import GrokCLIError, complete
 from app.services.mpt_client import mpt
 
@@ -112,7 +113,7 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 f"No commentary.{lang_rule}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
-        text = complete(prompt) or ""
+        text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light)) or ""
         text = re.sub(r"^```[a-zA-Z0-9]*\s*|\s*```$", "", text.strip())
         data = json.loads(text)
         return _from_meta(subject, data)
