@@ -25,12 +25,16 @@ LANGUAGE_CODES = {
 
 # Grok -p sometimes prefixes an idea with catalog-planning CoT and glues the
 # real title on with no space (09-23 drafts 1321 / 1325: "Vou conferir o
-# catálogo….O agente… · Claude Code 10"). Drop those leading sentences.
-# A line that is only planning is discarded — unlike script preamble, there
-# is no word-count retry that needs the original text kept.
+# catálogo….O agente… · Claude Code 10"; 09-24 draft 1336: "O catálogo que
+# você colou já passa de IA 172. Vou conferir o próximo número….Texto…").
+# Drop those leading sentences. A line that is only planning is discarded —
+# unlike script preamble, there is no word-count retry that needs the
+# original text kept.
 _IDEA_COT_START = re.compile(
     r"^(?:"
     r"vou conferir o cat[aá]logo|"
+    r"vou conferir o pr[oó]ximo n[uú]mero|"
+    r"o cat[aá]logo que voc[eê] colou j[aá] passa|"
     r"conferindo a contagem|"
     r"the hook has to|"
     r"the first line has to|"

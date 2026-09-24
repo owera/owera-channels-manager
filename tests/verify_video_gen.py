@@ -581,7 +581,11 @@ out_cot = _run_ideas(
         "Vou conferir o catálogo da série para o próximo número e um ângulo "
         "que ainda não foi usado.Bateria trava a GPU em 30W, não é engenharia. · IA 199\n"
         "Vou conferir o catálogo e só isso.\n"
-        "O agente force-pushou a main. · Claude Code 11"
+        "O agente force-pushou a main. · Claude Code 11\n"
+        "O catálogo que você colou já passa de IA 172. Vou conferir o próximo "
+        "número livre antes de fechar os títulos.Texto em português sai R$14, "
+        "não é engenharia. · IA 200\n"
+        "Vou conferir o próximo número livre antes de fechar os títulos."
     ),
     n=8,
 )
@@ -589,6 +593,7 @@ ok(out_cot == [
     "O agente me cobrou $47 no terminal. · Claude Code 10",
     "Bateria trava a GPU em 30W, não é engenharia. · IA 199",
     "O agente force-pushou a main. · Claude Code 11",
+    "Texto em português sai R$14, não é engenharia. · IA 200",
 ], "catalog-planning CoT drops; glued claim and series suffix stay; pure CoT line is discarded")
 ok(video_gen._strip_idea_cot(
     "Your agent wrote to production with the staging tool. · Agent traps 1"
