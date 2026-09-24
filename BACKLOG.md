@@ -1773,3 +1773,26 @@ flag the operator step in the commit body.
   `TopicCreate`/`TopicUpdate.playlist_id`, `ProfileCreate.channel_id`,
   and trend `channel_id` still coerce bools the same way. Integer 0
   on `render_profile_id` still persists.
+
+### 55. ✅ DONE (code shipped to main 2026-09-24) Restore suites the light-timeout commit left red — normal
+- **resolution (2026-09-24):** tests-only. `ebbdaa5` passes
+  `timeout=grok_timeout_seconds_light` into `llm.complete` from
+  `generate_ideas` and `metadata._llm_fallback`, and `autofill_loop.tick`
+  returns before the pending count while any video is `RENDERING`.
+  The idea/metadata stubs still took `(prompt, system, max_tokens)` so
+  the new kwarg raised `TypeError` (metadata then fell through to the
+  heuristic, so hashtags looked stripped-wrong). The autofill fixture
+  bundled `RENDERING` with statuses that must still refill, so the new
+  whole-tick skip looked like a pending-count regression. Stubs accept
+  `timeout` and pin the light budget (distinct from the 600s storyboard
+  budget). Terminal/PUBLISHING rows still refill; one `RENDERING` row
+  skips every channel and does not call `generate_ideas`. Production
+  behavior unchanged.
+- **why (found 2026-09-24 gating the playlist bool floor):** three
+  `verify_*.py` files were red on `main` after the grok-timeout commit,
+  so the code-agent gate could not ship anything else.
+- **caution:** normal (tests only). Isolated commit.
+- **acceptance:** `verify_autofill.py`, `verify_metadata.py`, and
+  `verify_video_gen.py` print `ALL n CHECKS PASSED` with n not decreased;
+  a light-timeout call is pinned; a single RENDERING video skips
+  autofill across channels; PUBLISHING still refills.

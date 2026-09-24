@@ -161,9 +161,9 @@ print("generate: MPT dead → grok-cli fallback")
 _llm_calls: list[dict] = []
 
 
-def _fake_complete(prompt, system=None, max_tokens=None):
+def _fake_complete(prompt, system=None, max_tokens=None, timeout=None):
     _llm_calls.append({"prompt": prompt, "system": system,
-                       "max_tokens": max_tokens})
+                       "max_tokens": max_tokens, "timeout": timeout})
     return json.dumps({
         "title": "LLM Title",
         "caption": "LLM caption about the topic.",
@@ -180,6 +180,12 @@ ok(out["title"] == "script text",
 ok(out["tags"][:3] == ["llm", "ai", "code"], "LLM hashtags stripped + kept")
 ok(metadata.EXTRA_TAGS[0] in out["tags"], "EXTRA_TAGS still appended on LLM path")
 ok(len(_llm_calls) == 1, "exactly one llm.complete call on the fallback path")
+ok(metadata.settings.grok_timeout_seconds_light
+   != metadata.settings.grok_timeout_seconds,
+   "precondition: light timeout differs from the storyboard timeout")
+ok(_llm_calls[0]["timeout"] == metadata.settings.grok_timeout_seconds_light,
+   "metadata fallback passes grok_timeout_seconds_light "
+   "(not the 600s storyboard budget, and not an omitted timeout)")
 prompt = _llm_calls[0]["prompt"]
 ok("HARD RULE" in prompt and "Brazilian Portuguese" in prompt,
    "language rule present in the LLM prompt when language is set")
@@ -215,7 +221,7 @@ ok(long_script not in prompt_long,
    "full uncapped script is absent from the prompt")
 
 # fenced JSON response is stripped before parse
-def _fenced_complete(prompt, system=None, max_tokens=None):
+def _fenced_complete(prompt, system=None, max_tokens=None, timeout=None):
     return "```json\n" + json.dumps({
         "title": "Fenced", "caption": "c", "hashtags": ["#x"],
     }) + "\n```"

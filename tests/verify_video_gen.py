@@ -286,11 +286,12 @@ _llm_calls: list[dict] = []
 
 
 def _complete_factory(text: str):
-    def _complete(prompt, system=None, max_tokens=None):
+    def _complete(prompt, system=None, max_tokens=None, timeout=None):
         _llm_calls.append({
             "prompt": prompt,
             "system": system,
             "max_tokens": max_tokens,
+            "timeout": timeout,
         })
         return text
     return _complete
@@ -323,6 +324,12 @@ ok(out == ["Why Your Agent Forgets Everything",
            "Stop Chaining Models Blindly"],
    "short form: two clean lines become two titles")
 ok(len(_llm_calls) == 1, "exactly one llm.complete call")
+ok(video_gen.settings.grok_timeout_seconds_light
+   != video_gen.settings.grok_timeout_seconds,
+   "precondition: light timeout differs from the storyboard timeout")
+ok(_llm_calls[0]["timeout"] == video_gen.settings.grok_timeout_seconds_light,
+   "generate_ideas passes grok_timeout_seconds_light "
+   "(not the 600s storyboard budget, and not an omitted timeout)")
 ok(_llm_calls[0]["system"] is None, "generate_ideas is a single user prompt (no system)")
 prompt = _llm_calls[0]["prompt"]
 ok("short-video ideas" in prompt or "YouTube Shorts" in prompt,
@@ -519,8 +526,8 @@ out_empty = _run_ideas(_text="", n=8)
 ok(out_empty == [], "empty LLM content → []")
 
 
-def _none_content(prompt, system=None, max_tokens=None):
-    _llm_calls.append({"prompt": prompt})
+def _none_content(prompt, system=None, max_tokens=None, timeout=None):
+    _llm_calls.append({"prompt": prompt, "timeout": timeout})
     return None
 
 

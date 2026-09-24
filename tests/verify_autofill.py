@@ -17,7 +17,8 @@ consume every leftover seat), and the 08-28 leftover-format mix-cap
 This cycle extends that incident suite with the remaining tick / helper
 branches: autogen off, threshold/target floors, weight-4 multiplier cap,
 horizon=0 no-cap path, generate_ideas exception/empty, JobRun + kwarg
-forwarding, QUEUED-counts-as-pending vs terminal statuses, inactive / parked
+forwarding, QUEUED-counts-as-pending vs terminal statuses (RENDERING is a
+whole-tick skip, not a pending-count miss), inactive / parked
 topics, long-only (no mix cap) and short-only (no reserve), two-long mix-cap
 increment, and per-channel isolation.
 
@@ -401,18 +402,39 @@ ok(drafts_for(s, t.id) == 3,
 ok(pending_for(s, t.id) == 5, "after refill: 2 queued + 3 new drafts")
 
 print("case: terminal / in-flight statuses do not count as pending")
+# RENDERING is not in this set. tick() returns before the pending count
+# while any video is rendering (ebbdaa5 — don't stack idea-strip grok on
+# storyboard compose). PUBLISHING stays here so a skip widened to it dies.
 s = fresh_session()
 ch = make_channel(s, daily_render_budget=8)
 t = make_topic(s, ch, name="terminals", content_format="short")
 for i, st in enumerate(
     (VideoStatus.PUBLISHED, VideoStatus.FAILED, VideoStatus.REJECTED,
-     VideoStatus.REVIEW, VideoStatus.APPROVED, VideoStatus.RENDERING,
+     VideoStatus.REVIEW, VideoStatus.APPROVED,
      VideoStatus.RENDERED, VideoStatus.PUBLISHING), start=1
 ):
     add_video(s, ch, t, f"term-{st}", st, i)
-run_tick(s, _Cfg(target=2, horizon=1, min_pending=1), well_behaved)
+rec = recording()
+run_tick(s, _Cfg(target=2, horizon=1, min_pending=1), rec)
 ok(drafts_for(s, t.id) == 2,
-   "PUBLISHED/FAILED/REVIEW/… do not satisfy the pending threshold")
+   "PUBLISHED/FAILED/REVIEW/PUBLISHING/… do not satisfy the pending threshold")
+ok(len(rec.calls) == 1,
+   "those statuses still reach generate_ideas (not a whole-tick skip)")
+
+print("case: any RENDERING video soft-skips the whole autofill tick")
+s = fresh_session()
+ch_a = make_channel(s, slug="rend-a", daily_render_budget=8)
+ch_b = make_channel(s, slug="rend-b", daily_render_budget=8)
+ta = make_topic(s, ch_a, name="rendering-topic", content_format="short")
+tb = make_topic(s, ch_b, name="sibling-channel", content_format="short")
+add_video(s, ch_a, ta, "in-render", VideoStatus.RENDERING, 1)
+rec = recording()
+run_tick(s, _Cfg(target=2, horizon=1, min_pending=1), rec)
+ok(drafts_for(s, ta.id) == 0 and drafts_for(s, tb.id) == 0,
+   "one RENDERING video skips autofill for every channel "
+   "(a channel filter would still refill channel B)")
+ok(rec.calls == [],
+   "the rendering skip does not call generate_ideas")
 
 print("case: weight multiplier caps at 4 (a stray weight=10 cannot 10x the bench)")
 s = fresh_session()
