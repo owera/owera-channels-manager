@@ -94,6 +94,17 @@ class TopicCreate(BaseModel):
             raise ValueError("must be an integer, not a boolean")
         return v
 
+    @field_validator("playlist_id", mode="before")
+    @classmethod
+    def _reject_bool_playlist(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently links the new topic to playlist id=1, so publish
+        # inserts into that series. false is falsy, so create's
+        # `if body.playlist_id` skips the link and returns 201 unbound.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class TopicUpdate(BaseModel):
     name: Optional[str] = None
@@ -118,6 +129,18 @@ class TopicUpdate(BaseModel):
     def _reject_bool_profile(cls, v):
         # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
         # true silently rebinds every video under the topic to profile id=1.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
+    @field_validator("playlist_id", mode="before")
+    @classmethod
+    def _reject_bool_playlist(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before setattr.
+        # true rebinds the topic to playlist id=1 (publish inserts into
+        # that series). false writes 0, which is falsy, so
+        # ensure_topic_playlist mints a new playlist and the previous
+        # link is gone.
         if isinstance(v, bool):
             raise ValueError("must be an integer, not a boolean")
         return v

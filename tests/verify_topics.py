@@ -27,6 +27,12 @@ assigned ``body.render_profile_id`` after lax ``Optional[int]`` coerced
 ``true→1`` / ``false→0``. These checks pin POST create bool as 4xx
 before any row, and that omitted/null still unbound.
 
+#54 left ``playlist_id`` on the same lax ``Optional[int]``. PATCH
+``true`` rebinds the topic onto playlist id=1 (publish then adds its
+videos to the wrong series); ``false`` writes 0, which publish treats
+as unlinked but is not None. Create's ``if body.playlist_id`` skips
+the falsy 0 and returns 201 unbound. These checks pin both paths.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -43,7 +49,7 @@ from sqlmodel import Session, SQLModel, create_engine, func, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Playlist, Topic, Video, VideoStatus
 from app.routers import topics as topics_router
 from app.schemas import GenerateBody, TopicCreate, TopicUpdate
 
@@ -90,6 +96,12 @@ with Session(engine) as s:
     for i in range(6):
         s.add(Video(channel_id=1, topic_id=5, subject=f"full-draft-{i}",
                     status=VideoStatus.DRAFT))
+    # Distinct yt ids so a title-only pin cannot pass if both series
+    # share a name. id=1 is the true→1 coercion target; id=2 is the seed.
+    s.add(Playlist(channel_id=1, yt_playlist_id="PLseriesone0000000000000001",
+                   title="Series One"))
+    s.add(Playlist(channel_id=1, yt_playlist_id="PLseriestwo0000000000000002",
+                   title="Series Two"))
     s.commit()
 
 
@@ -151,6 +163,11 @@ def topic_weight(topic_id):
 def topic_profile(topic_id):
     with Session(engine) as s:
         return s.get(Topic, topic_id).render_profile_id
+
+
+def topic_playlist(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).playlist_id
 
 
 def n_topics():
@@ -571,6 +588,99 @@ try:
        and '@field_validator("render_profile_id", mode="before")' in tc_src,
        "TopicCreate._reject_bool_profile is mode=before on render_profile_id")
 
+    print("POST /api/topics: JSON bool playlist_id is 4xx")
+    # Same class as render_profile_id #52. Lax Optional[int] coerces
+    # false→0 / true→1 before create_topic. true links the new topic to
+    # playlist id=1. false is falsy, so `if body.playlist_id` skips the
+    # link and the create looks unbound (201) instead of rejected.
+    n_before_pl = n_topics()
+    names_before_pl = topic_names()
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistInt", "playlist_id": 2})
+    ok(r.status_code == 201, "create playlist_id=2 (integer) is 201")
+    ok(r.json().get("playlist_id") == 2, "create integer 2 playlist persisted")
+    ok(topic_playlist(r.json()["id"]) == 2, "create integer 2 playlist row")
+    ok(r.json().get("playlist_yt_id") == "PLseriestwo0000000000000002",
+       "create integer 2 response carries playlist 2's yt id")
+    create_pl_id = r.json()["id"]
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistOmit"})
+    ok(r.status_code == 201, "create omitted playlist_id is 201")
+    ok(r.json().get("playlist_id") is None,
+       "omitted playlist_id stays unbound (not coerced to 0)")
+    ok(topic_playlist(r.json()["id"]) is None, "omitted playlist row is unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistNull", "playlist_id": None})
+    ok(r.status_code == 201, "create playlist_id=null is 201 (unbound is legal)")
+    ok(r.json().get("playlist_id") is None, "null playlist persisted as unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistZero", "playlist_id": 0})
+    ok(r.status_code == 201, "create playlist_id=0 (integer) is 201")
+    ok(r.json().get("playlist_id") is None,
+       "create integer 0 stays unbound (`if body.playlist_id` skips 0; "
+       "the bool floor must not start rejecting 0)")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistFlag", "create_playlist": True})
+    ok(r.status_code == 201,
+       "create_playlist=true is 201 (bool field; the floor is playlist_id only)")
+    ok(r.json().get("playlist_id") is None,
+       "create_playlist=true left playlist unbound")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "BadFalsePlaylist", "playlist_id": False})
+    ok(r.status_code in (400, 422),
+       "create playlist_id=false is 4xx (must not coerce to 0 and 201)")
+    ok("boolean" in r.text.lower(),
+       "false-playlist create 4xx names the boolean rejection")
+    ok("BadFalsePlaylist" not in topic_names(),
+       "create playlist_id=false writes no row")
+    ok(n_topics() == n_before_pl + 5,
+       "false-playlist create did not add a row "
+       "(integer/omit/null/zero/create_playlist already added 5)")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "BadTruePlaylist", "playlist_id": True})
+    ok(r.status_code in (400, 422),
+       "create playlist_id=true is 4xx (must not coerce to 1)")
+    ok("boolean" in r.text.lower(),
+       "true-playlist create 4xx names the boolean rejection")
+    ok("BadTruePlaylist" not in topic_names(),
+       "create playlist_id=true writes no row")
+    ok(topic_playlist(create_pl_id) == 2,
+       "true-playlist 4xx left the integer-2 sibling")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "SmuggledPlaylist", "playlist_id": True,
+        "content_format": "long"})
+    ok(r.status_code in (400, 422),
+       "mixed create with playlist_id=true is 4xx")
+    ok("SmuggledPlaylist" not in topic_names(),
+       "4xx mixed playlist create wrote none of the fields")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreatePlaylistOne", "playlist_id": 1})
+    ok(r.status_code == 201, "create playlist_id=1 (integer) is 201")
+    ok(r.json().get("playlist_id") == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+    ok(r.json().get("playlist_title") == "Series One",
+       "integer 1 create names playlist 1, not playlist 2")
+
+    ok(n_topics() == n_before_pl + 6,
+       "bool-playlist 4xx created no extra rows (6 legal creates)")
+    ok(names_before_pl.isdisjoint(
+        {"BadFalsePlaylist", "BadTruePlaylist", "SmuggledPlaylist"}),
+       "precondition held: bool-playlist names were not already seeded")
+
+    tc_pl = inspect.getsource(TopicCreate)
+    ok('_reject_bool_playlist' in tc_pl
+       and '@field_validator("playlist_id", mode="before")' in tc_pl,
+       "TopicCreate._reject_bool_playlist is mode=before on playlist_id")
+
     print("PATCH /api/topics/{id}: weight floor (null/bool/negative 400; 0 parks)")
     # Topic 1 is parked weight=0; topic 2 is live weight=1; topic 3 is heavy weight=2.
     ok(topic_weight(1) == 0, "precondition: topic 1 is parked at weight=0")
@@ -690,6 +800,74 @@ try:
     ok('_reject_bool_profile' in tu_src
        and '@field_validator("render_profile_id", mode="before")' in tu_src,
        "TopicUpdate._reject_bool_profile is mode=before on render_profile_id")
+
+    print("PATCH /api/topics/{id}: JSON bool playlist_id is 4xx")
+    # Same class as render_profile_id #51. Seed playlist id=2 so true→1
+    # is a visible rebind onto the other series. Publish inserts into
+    # topic.playlist_id when it is truthy. false→0 is falsy, so
+    # ensure_topic_playlist mints a new playlist and the old link is gone.
+    ok(topic_playlist(2) is None, "precondition: live topic playlist is unbound")
+    r = patch_topic(2, playlist_id=2)
+    ok(r.status_code == 200, "topic playlist_id=2 (integer) is 200")
+    ok(topic_playlist(2) == 2, "integer 2 persisted on the topic playlist")
+    ok(r.json().get("playlist_title") == "Series Two",
+       "integer 2 response names the linked playlist")
+    ok(r.json().get("playlist_yt_id") == "PLseriestwo0000000000000002",
+       "integer 2 response carries playlist 2's yt id")
+
+    r = patch_topic(2, active=False)
+    ok(r.status_code == 200,
+       "active=false is 200 (bool field; the floor is playlist_id only)")
+    ok(topic_playlist(2) == 2, "active PATCH left playlist_id")
+    r = patch_topic(2, active=True)
+    ok(r.status_code == 200, "restore topic 2 active=true")
+    ok(topic_playlist(2) == 2, "active restore left playlist_id")
+
+    r = patch_topic(2, playlist_id=False)
+    ok(r.status_code in (400, 422),
+       "topic playlist_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text.lower(),
+       "false-playlist 4xx names the boolean rejection")
+    ok(topic_playlist(2) == 2, "false did not persist a 0 unlink")
+
+    r = patch_topic(2, playlist_id=True)
+    ok(r.status_code in (400, 422),
+       "topic playlist_id=true is 4xx (must not coerce to 1)")
+    ok(topic_playlist(2) == 2, "true did not rebind topic playlist id=2 to 1")
+
+    r = patch_topic(2, playlist_id=True, name="smuggled-playlist")
+    ok(r.status_code in (400, 422),
+       "mixed PATCH with topic playlist_id=true is 4xx")
+    ok(topic_name(2) != "smuggled-playlist",
+       "4xx mixed topic-playlist PATCH did not persist name")
+    ok(topic_playlist(2) == 2, "4xx mixed topic-playlist PATCH left playlist")
+
+    r = patch_topic(2, name=topic_name(2))
+    ok(r.status_code == 200, "name-only PATCH (playlist omitted) is 200")
+    ok(topic_playlist(2) == 2, "name-only PATCH left playlist_id")
+
+    r = patch_topic(2, playlist_id=1)
+    ok(r.status_code == 200, "topic playlist_id=1 (integer) is 200")
+    ok(topic_playlist(2) == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+    ok(r.json().get("playlist_title") == "Series One",
+       "integer 1 response names playlist 1, not playlist 2")
+
+    r = patch_topic(2, playlist_id=0)
+    ok(r.status_code == 200, "topic playlist_id=0 (integer) is 200")
+    ok(topic_playlist(2) == 0,
+       "integer 0 persisted (false-coercion target is a legal int; "
+       "publish treats it as unlinked, but the floor is bool-only)")
+
+    r = patch_topic(2, playlist_id=None)
+    ok(r.status_code == 200, "topic playlist_id=null is 200 (unlink is legal)")
+    ok(topic_playlist(2) is None, "null playlist persisted as unbound")
+    ok(topic_weight(2) == 1, "playlist-null PATCH left live weight")
+
+    tu_pl = inspect.getsource(TopicUpdate)
+    ok('_reject_bool_playlist' in tu_pl
+       and '@field_validator("playlist_id", mode="before")' in tu_pl,
+       "TopicUpdate._reject_bool_playlist is mode=before on playlist_id")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()

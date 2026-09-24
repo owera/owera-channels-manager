@@ -1770,9 +1770,9 @@ flag the operator step in the commit body.
   fields is 4xx and writes nothing (seeded concurrency 2 does not
   become 1; drip 15 does not become 0); integer 0/1 still 200;
   sibling bool fields still 200. Remaining (not bundled):
-  `TopicCreate`/`TopicUpdate.playlist_id`, `ProfileCreate.channel_id`,
-  and trend `channel_id` still coerce bools the same way. Integer 0
-  on `render_profile_id` still persists.
+  playlist_id closed as #56. `ProfileCreate.channel_id` and trend
+  `channel_id` still coerce bools the same way. Integer 0 on
+  `render_profile_id` still persists.
 
 ### 55. ✅ DONE (code shipped to main 2026-09-24) Restore suites the light-timeout commit left red — normal
 - **resolution (2026-09-24):** tests-only. `ebbdaa5` passes
@@ -1796,3 +1796,29 @@ flag the operator step in the commit body.
   `verify_video_gen.py` print `ALL n CHECKS PASSED` with n not decreased;
   a light-timeout call is pinned; a single RENDERING video skips
   autofill across channels; PUBLISHING still refills.
+
+### 56. ✅ DONE (code shipped to main 2026-09-24) POST/PATCH /api/topics reject JSON bool playlist_id — normal
+- **resolution (2026-09-24):** `TopicCreate._reject_bool_playlist` and
+  `TopicUpdate._reject_bool_playlist` `mode="before"` reject JSON bool
+  on `playlist_id` before lax `Optional[int]` coerces `false→0` /
+  `true→1`. Create's `if body.playlist_id` would have skipped the
+  falsy 0 and returned 201 unbound; PATCH setattr would have stored
+  0, and `ensure_topic_playlist` treats 0 as missing, so the next
+  publish mints a new playlist (50 units) and the previous link is
+  gone. `true` links the topic to playlist id=1 and publish inserts
+  into that series. Integer 2/1/0 still succeed (create still skips
+  0 via the existing falsy check). Null / omitted still unbound.
+  `create_playlist=true` and `active=true/false` still succeed.
+  Mixed 4xx writes nothing. Suite: `tests/verify_topics.py` 211 → 268.
+  Isolated commit; no money-path files.
+- **why (left open by #54):** profile id was floored; `playlist_id`
+  on create and update still coerced. A growth-agent / curl
+  `{"playlist_id": true}` binds the topic to playlist id=1.
+- **caution:** normal (`schemas.py` TopicCreate + TopicUpdate only;
+  not a money-path file). Isolated commit + regression tests.
+- **acceptance:** POST/PATCH playlist `true`/`false` is 4xx and writes
+  nothing (seeded playlist id=2 does not become 1 or 0); integer 2/1
+  still link; integer 0 still persists on PATCH and stays unbound on
+  create; null/omitted still unbound; `create_playlist` and `active`
+  still accept bools. Remaining (not bundled):
+  `ProfileCreate.channel_id` and trend `channel_id`.
