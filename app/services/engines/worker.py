@@ -459,7 +459,9 @@ _PREAMBLE_BODY = re.compile(
     r"open on the pain|"
     r"fixed series card|"
     r"names the series|"
-    r"last line matches)\b",
+    r"last line matches|"
+    r"series notes|"
+    r"generic take)\b",
     re.I,
 )
 
@@ -513,8 +515,29 @@ def _lock_patterned_opener(script: str, subject: str) -> str:
     text = (script or "").strip()
     if not text:
         return opener
-    parts = re.split(r"(?<=[.!?…])\s+", text, maxsplit=1)
-    rest = parts[1].strip() if len(parts) > 1 else ""
+    # Two-sentence title heads (v1320: "Chat cancelled order 8. Prod shipped
+    # it.") must not maxsplit=1 the already-locked opener — that duplicated
+    # the second sentence and left mid-script CoT ("I'll check the series
+    # notes…") as the next spoken line. If the script already opens on the
+    # head, keep it and strip preamble from what follows.
+    if text.startswith(opener):
+        rest = text[len(opener):].lstrip()
+    else:
+        parts = re.split(r"(?<=[.!?…])\s+", text, maxsplit=1)
+        rest = parts[1].strip() if len(parts) > 1 else ""
+    # Drop CoT that landed AFTER the claim (v1320). Unlike
+    # _strip_script_preamble, all-preamble rest is discarded — the opener
+    # already satisfies the word-count retry.
+    if rest:
+        rest_parts = [
+            p.strip()
+            for p in re.split(r"(?<=[.!?…])(?=\s|[A-Z])", rest)
+            if p.strip()
+        ]
+        i = 0
+        while i < len(rest_parts) and _is_script_preamble(rest_parts[i]):
+            i += 1
+        rest = " ".join(rest_parts[i:]).strip()
     return f"{opener} {rest}".strip() if rest else opener
 
 

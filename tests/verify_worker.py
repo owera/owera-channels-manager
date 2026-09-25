@@ -417,6 +417,30 @@ ok(worker._lock_patterned_opener(
 ) == "Você ligou o Whisper na GPU e acha que é engenharia. O resto.",
    "PT patterned subject overwrites a drifted opener")
 
+# v1320: two-sentence title head + CoT after the claim. maxsplit=1 used to
+# duplicate "Prod shipped it." and leave "I'll check the series notes…" spoken.
+_V1320_SUBJ = "Chat cancelled order 8. Prod shipped it. · Agent memory 14"
+_V1320 = (
+    "Chat cancelled order 8. Prod shipped it. "
+    "I'll check the series notes so the script matches that story, not a generic take. "
+    "Chat cancelled order 8, but production still shipped it. "
+    "The warehouse packed the box."
+)
+locked_1320 = worker._lock_patterned_opener(_V1320, _V1320_SUBJ)
+ok(locked_1320.startswith("Chat cancelled order 8. Prod shipped it."),
+   "v1320 opener stays the two-sentence title head")
+ok(locked_1320.count("Prod shipped it.") == 1,
+   "two-sentence head is not duplicated by maxsplit=1")
+ok("I'll check" not in locked_1320 and "series notes" not in locked_1320,
+   "mid-script series-notes CoT is dropped")
+ok("warehouse packed the box" in locked_1320,
+   "real body after the CoT is kept")
+ok(worker._lock_patterned_opener(
+    "I'll check the series notes so the script matches that story, not a generic take.",
+    _V1320_SUBJ,
+) == "Chat cancelled order 8. Prod shipped it.",
+   "rest that is only CoT is discarded; opener remains")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
