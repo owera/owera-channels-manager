@@ -222,6 +222,17 @@ class TrendCreate(BaseModel):
     status: Optional[str] = None              # researched | watching | adopted | rejected
     decision_reason: Optional[str] = None
 
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently binds the trend (create or upsert-by-term) to
+        # channel id=1. false is 0, which 404s when no channel 0 exists;
+        # PATCH is what used to store that 0, and adopt treats it as missing.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class TrendUpdate(BaseModel):
     description: Optional[str] = None
@@ -233,6 +244,15 @@ class TrendUpdate(BaseModel):
     score: Optional[float] = None
     status: Optional[str] = None
     decision_reason: Optional[str] = None
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # PATCH setattr would store 0 or rebind the trend to channel id=1.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
 
 
 class TrendAdoptBody(BaseModel):
@@ -248,6 +268,17 @@ class TrendAdoptBody(BaseModel):
         # Lax int coerces JSON false→0 / true→1 before the handler.
         # idea_count 0 then became a silent one-idea adopt; produce_count
         # true would auto-produce one.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # adopt uses `body.channel_id or t.channel_id`: false is falsy, so
+        # the adopt lands on the trend's own channel; true adopts onto
+        # channel id=1.
         if isinstance(v, bool):
             raise ValueError("must be an integer, not a boolean")
         return v

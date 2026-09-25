@@ -17,6 +17,11 @@ PATCH ``setattr``s the raw body, so a growth-agent / curl leftover
 the dashboard label. Same class as #38 on topics. These checks pin PATCH
 (and POST upsert) to the same gate.
 
+channel_id bool (backlog #57): lax Optional[int] coerces JSON true→1 /
+false→0. Create/upsert/PATCH then bind the trend to channel 1 (or store
+0). Adopt ``body.channel_id or t.channel_id`` treats false as missing
+and adopts onto the trend's own channel, and true adopts onto channel 1.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network,
 no LLM). ``video_gen.generate_ideas`` is stubbed. Exits non-zero on the first
 failed assertion.
@@ -35,7 +40,7 @@ from app.db import get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal,
                         TrendStatus, Video, VideoStatus)
 from app.routers import trends as trends_router
-from app.schemas import TrendAdoptBody
+from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 
 _checks = 0
 
@@ -173,6 +178,26 @@ def trend_row(tid):
 def adopt_runs():
     with Session(engine) as s:
         return s.exec(select(JobRun).where(JobRun.kind == "trend_adopt")).all()
+
+
+def trend_count():
+    with Session(engine) as s:
+        return s.exec(select(func.count(TrendSignal.id))).one()
+
+
+def trend_by_norm(norm):
+    with Session(engine) as s:
+        return s.exec(select(TrendSignal).where(TrendSignal.term_norm == norm)).first()
+
+
+def trend_channel(tid):
+    with Session(engine) as s:
+        return s.get(TrendSignal, tid).channel_id
+
+
+def rows_on(model, cid):
+    with Session(engine) as s:
+        return s.exec(select(func.count(model.id)).where(model.channel_id == cid)).one()
 
 
 try:
@@ -556,6 +581,229 @@ try:
        "(always _canonical_format(data.get(...)) clobbers omitted to short)")
     ok(trend_format(long_create_id) == "long",
        "upsert-omit left the long create row long")
+
+    print("trend channel_id rejects JSON bool (must not bind channel 1)")
+    # Channel 1's bench is full by the time we get here, so adopt
+    # channel_id=true would 409 "board at capacity" without a validator
+    # (true coerces to 1). Channel B is empty, so adopt channel_id=false
+    # would succeed (0 is falsy → fall back to B). Both must 422.
+    with Session(engine) as s:
+        s.add(Channel(slug="b", name="B", oauth_status=OAuthStatus.CONNECTED,
+                      daily_render_budget=5))
+        s.commit()
+        ch_b_id = s.exec(select(Channel).where(Channel.slug == "b")).one().id
+        s.add(TrendSignal(term="Bool Channel", term_norm="bool channel",
+                          channel_id=ch_b_id, status=TrendStatus.WATCHING,
+                          score=50, description="bool channel pin"))
+        s.add(TrendSignal(term="Bool Happy", term_norm="bool happy",
+                          channel_id=ch_b_id, status=TrendStatus.WATCHING,
+                          score=49, description="integer adopt still works"))
+        s.add(TrendSignal(term="Bool Null Adopt", term_norm="bool null adopt",
+                          channel_id=ch_b_id, status=TrendStatus.WATCHING,
+                          score=48, description="explicit null still adopts"))
+        s.add(TrendSignal(term="Bool Zero Adopt", term_norm="bool zero adopt",
+                          channel_id=ch_b_id, status=TrendStatus.WATCHING,
+                          score=47, description="integer 0 still falls back"))
+        s.commit()
+        bool_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "bool channel")).one().id
+        happy_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "bool happy")).one().id
+        null_adopt_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "bool null adopt")).one().id
+        zero_adopt_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "bool zero adopt")).one().id
+    ok(ch_b_id != 1, "precondition: channel B is not id 1 (true coerces to 1)")
+    ok(trend_channel(bool_id) == ch_b_id, "precondition: bool trend is on channel B")
+    ok(pending() == 10, "precondition: channel 1 bench is full (true adopt would 409)")
+
+    def _compact(resp):
+        return resp.text.replace(" ", "")
+
+    trends_before = trend_count()
+    topics_b = rows_on(Topic, ch_b_id)
+    topics_1 = rows_on(Topic, 1)
+    videos_b = rows_on(Video, ch_b_id)
+    videos_1 = rows_on(Video, 1)
+    calls_before = len(calls)
+    runs_before = len(adopt_runs())
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "BoolCreateTrue", "channel_id": True})
+    ok(r.status_code in (400, 422),
+       "create channel_id=true is 4xx (must not coerce to 1 and 201)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "create true names boolean and keeps input true (mode=after would show 1)")
+    ok(trend_by_norm("boolcreatetrue") is None, "create true writes no row")
+    ok(trend_count() == trends_before, "create true does not insert a trend")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "BoolCreateFalse", "channel_id": False})
+    ok(r.status_code in (400, 422),
+       "create channel_id=false is 4xx (must not coerce to 0)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "create false names boolean (channel-not-found 404 would not)")
+    ok(trend_by_norm("boolcreatefalse") is None, "create false writes no row")
+    ok(trend_count() == trends_before, "create false does not insert a trend")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "BoolCreateInt", "channel_id": ch_b_id})
+    ok(r.status_code == 201, "create integer channel_id is 201")
+    created = trend_by_norm("boolcreateint")
+    ok(created is not None and created.channel_id == ch_b_id,
+       "create integer channel_id persisted on channel B (always-raise dies here)")
+    ok(trend_count() == trends_before + 1, "create integer inserted one trend")
+
+    r = client.post("/api/trends", auth=auth, json={"term": "BoolCreateOmit"})
+    ok(r.status_code == 201, "create omitting channel_id is 201")
+    omitted = trend_by_norm("boolcreateomit")
+    ok(omitted is not None and omitted.channel_id is None,
+       "omitted channel_id stays unbound")
+
+    # Omitted skips the validator; explicit null is what reject-None sees.
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "BoolCreateNull", "channel_id": None})
+    ok(r.status_code == 201, "create channel_id=null is 201")
+    nulled = trend_by_norm("boolcreatenull")
+    ok(nulled is not None and nulled.channel_id is None,
+       "create null stays unbound")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "BoolCreateInt", "channel_id": True})
+    ok(r.status_code in (400, 422),
+       "upsert channel_id=true is 4xx (must not rebind an existing trend)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "upsert true names boolean")
+    ok(trend_channel(created.id) == ch_b_id,
+       "upsert true left the integer-created trend on channel B")
+
+    r = patch_trend(bool_id, channel_id=True)
+    ok(r.status_code in (400, 422),
+       "PATCH channel_id=true is 4xx (must not rebind to channel 1)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "PATCH true names boolean and keeps input true")
+    ok(trend_channel(bool_id) == ch_b_id,
+       "PATCH true left the trend on channel B")
+
+    r = patch_trend(bool_id, channel_id=False)
+    ok(r.status_code in (400, 422),
+       "PATCH channel_id=false is 4xx (must not store 0)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "PATCH false names boolean (setattr 0 would 200)")
+    ok(trend_channel(bool_id) == ch_b_id,
+       "PATCH false left the trend on channel B")
+
+    r = patch_trend(bool_id, channel_id=1)
+    ok(r.status_code == 200, "PATCH integer channel_id=1 is 200")
+    ok(trend_channel(bool_id) == 1,
+       "PATCH integer 1 rebound the trend (always-raise dies here)")
+    r = patch_trend(bool_id, channel_id=ch_b_id)
+    ok(r.status_code == 200 and trend_channel(bool_id) == ch_b_id,
+       "PATCH integer restored the trend to channel B")
+
+    r = patch_trend(bool_id, channel_id=0)
+    ok(r.status_code == 200, "PATCH integer channel_id=0 is 200")
+    ok(trend_channel(bool_id) == 0,
+       "PATCH integer 0 still persists (bool false is the reject)")
+    r = patch_trend(bool_id, channel_id=ch_b_id)
+    ok(trend_channel(bool_id) == ch_b_id, "restored channel B after integer 0")
+
+    r = patch_trend(bool_id, channel_id=None)
+    ok(r.status_code == 200, "PATCH channel_id=null is 200")
+    ok(trend_channel(bool_id) is None,
+       "PATCH null unbound the trend (reject-None would 422)")
+    r = patch_trend(bool_id, channel_id=ch_b_id)
+    ok(trend_channel(bool_id) == ch_b_id, "restored channel B after null")
+
+    r = patch_trend(bool_id, description="still on B")
+    ok(r.status_code == 200, "description-only PATCH is 200")
+    ok(trend_channel(bool_id) == ch_b_id,
+       "description-only PATCH left channel_id (exclude_unset)")
+
+    r = client.post(
+        f"/api/trends/{bool_id}/adopt", auth=auth,
+        json={"channel_id": True, "idea_count": 1, "produce_count": 0})
+    ok(r.status_code in (400, 422),
+       "adopt channel_id=true is 4xx (must not adopt onto channel 1)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "adopt true names boolean (full-board 409 would not)")
+    ok(len(calls) == calls_before, "adopt true never called generate_ideas")
+    ok(rows_on(Topic, 1) == topics_1, "adopt true created no topic on channel 1")
+    ok(rows_on(Topic, ch_b_id) == topics_b, "adopt true created no topic on channel B")
+    ok(rows_on(Video, 1) == videos_1 and rows_on(Video, ch_b_id) == videos_b,
+       "adopt true wrote no videos")
+    t = trend_row(bool_id)
+    ok(t.status == TrendStatus.WATCHING and t.adopted_topic_id is None
+       and t.channel_id == ch_b_id,
+       "adopt true left the trend watching on channel B")
+    ok(len(adopt_runs()) == runs_before, "adopt true writes no JobRun")
+
+    r = client.post(
+        f"/api/trends/{bool_id}/adopt", auth=auth,
+        json={"channel_id": False, "idea_count": 1, "produce_count": 0})
+    ok(r.status_code in (400, 422),
+       "adopt channel_id=false is 4xx (0 is falsy and would adopt onto B)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "adopt false names boolean")
+    ok(len(calls) == calls_before, "adopt false never called generate_ideas")
+    ok(rows_on(Topic, ch_b_id) == topics_b,
+       "adopt false created no topic on channel B")
+    t = trend_row(bool_id)
+    ok(t.status == TrendStatus.WATCHING and t.channel_id == ch_b_id,
+       "adopt false left the trend watching on channel B")
+
+    r = client.post(
+        f"/api/trends/{happy_id}/adopt", auth=auth,
+        json={"channel_id": ch_b_id, "idea_count": 1, "produce_count": 0})
+    ok(r.status_code == 200, "adopt integer channel_id is 200")
+    ok(r.json().get("ideas") == 1, "adopt integer seeded one idea")
+    ok(len(calls) == calls_before + 1, "adopt integer called generate_ideas once")
+    ok(rows_on(Topic, ch_b_id) == topics_b + 1,
+       "adopt integer created the topic on channel B, not channel 1")
+    ok(rows_on(Topic, 1) == topics_1, "adopt integer created no topic on channel 1")
+    ok(rows_on(Video, 1) == videos_1, "adopt integer wrote no videos on channel 1")
+    t = trend_row(happy_id)
+    ok(t.status == TrendStatus.ADOPTED and t.channel_id == ch_b_id,
+       "adopt integer marked the trend adopted on channel B")
+
+    # Explicit null and integer 0 are not bools. null is missing; 0 is
+    # falsy in `body.channel_id or t.channel_id` and falls back to B.
+    # A reject-None / reject-zero copied onto TrendAdoptBody dies here.
+    topics_after = rows_on(Topic, ch_b_id)
+    r = client.post(
+        f"/api/trends/{null_adopt_id}/adopt", auth=auth,
+        json={"channel_id": None, "idea_count": 1, "produce_count": 0})
+    ok(r.status_code == 200, "adopt channel_id=null is 200")
+    ok(rows_on(Topic, ch_b_id) == topics_after + 1,
+       "adopt null created the topic on channel B")
+    ok(rows_on(Topic, 1) == topics_1, "adopt null created no topic on channel 1")
+    t = trend_row(null_adopt_id)
+    ok(t.status == TrendStatus.ADOPTED and t.channel_id == ch_b_id,
+       "adopt null adopted onto channel B (reject-None would 422)")
+
+    topics_after = rows_on(Topic, ch_b_id)
+    r = client.post(
+        f"/api/trends/{zero_adopt_id}/adopt", auth=auth,
+        json={"channel_id": 0, "idea_count": 1, "produce_count": 0})
+    ok(r.status_code == 200, "adopt channel_id=0 is 200")
+    ok(rows_on(Topic, ch_b_id) == topics_after + 1,
+       "adopt integer 0 fell back to channel B (reject-zero would 422)")
+    ok(rows_on(Topic, 1) == topics_1, "adopt integer 0 created no topic on channel 1")
+    t = trend_row(zero_adopt_id)
+    ok(t.status == TrendStatus.ADOPTED and t.channel_id == ch_b_id,
+       "adopt integer 0 did not store channel 0; the trend is on B")
+
+    for cls, name in (
+        (TrendCreate, "TrendCreate"),
+        (TrendUpdate, "TrendUpdate"),
+        (TrendAdoptBody, "TrendAdoptBody"),
+    ):
+        src = inspect.getsource(cls)
+        ok('@field_validator("channel_id", mode="before")' in src,
+           f"{name} rejects channel_id with mode=before "
+           "(mode=after would already have coerced true→1)")
+        ok("def _reject_bool_channel" in src,
+           f"{name} has _reject_bool_channel")
 finally:
     trends_router.video_gen.generate_ideas = _orig_ideas
     trends_router.video_gen.channel_language = _orig_lang

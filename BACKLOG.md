@@ -1821,4 +1821,33 @@ flag the operator step in the commit body.
   still link; integer 0 still persists on PATCH and stays unbound on
   create; null/omitted still unbound; `create_playlist` and `active`
   still accept bools. Remaining (not bundled):
-  `ProfileCreate.channel_id` and trend `channel_id`.
+  `ProfileCreate.channel_id` and trend `channel_id` (closed as #57).
+
+### 57. ✅ DONE (code shipped to main 2026-09-25) POST/PATCH/adopt trends reject JSON bool channel_id — normal
+- **resolution (2026-09-25):** `TrendCreate._reject_bool_channel`,
+  `TrendUpdate._reject_bool_channel`, and
+  `TrendAdoptBody._reject_bool_channel` `mode="before"` reject JSON
+  bool on `channel_id` before lax `Optional[int]` coerces `false→0` /
+  `true→1`. Create and upsert `true` bound the trend to channel id=1.
+  PATCH `true` rebound it; PATCH `false` stored 0. Adopt uses
+  `body.channel_id or t.channel_id`, so `false` is falsy and the adopt
+  landed on the trend's own channel, while `true` adopted onto channel
+  1. Integer ids, integer 0, null, and omitted still behave as before.
+  `idea_count` / `produce_count` bool rejection is unchanged. Explicit
+  adopt `null` still adopts onto the trend's channel; integer `0`
+  stays falsy and falls back the same way. Suite:
+  `tests/verify_trends.py` 151 → 223. Isolated commit; no money-path
+  files.
+- **why (left open by #54/#56):** profile and playlist ids were floored;
+  trend `channel_id` on create, update, and adopt still coerced. A
+  growth-agent / curl `{"channel_id": true}` adopts onto channel 1.
+- **caution:** normal (`schemas.py` TrendCreate, TrendUpdate,
+  TrendAdoptBody only; not a money-path file). Isolated commit +
+  regression tests.
+- **acceptance:** POST/upsert/PATCH/adopt `channel_id` `true`/`false`
+  is 4xx and writes nothing (a trend on channel B does not move to 1
+  or 0, and adopt does not create a topic); integer ids still link and
+  adopt; integer 0 still persists on PATCH and still falls back on
+  adopt; null/omitted stay unbound on create, null still unbinds on
+  PATCH, and explicit adopt null still adopts onto the trend's channel.
+  Remaining (not bundled): `ProfileCreate.channel_id`.
