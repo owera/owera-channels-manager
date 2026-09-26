@@ -441,6 +441,35 @@ ok(worker._lock_patterned_opener(
 ) == "Chat cancelled order 8. Prod shipped it.",
    "rest that is only CoT is discarded; opener remains")
 
+# v1343: real title head, then a non-I'll planning sentence, then curly-apostrophe
+# word-count CoT (I'll / 70–100). A leading-only strip stopped at the claim and
+# left both CoT sentences in the VO; ASCII I'll also missed the curly mark.
+_V1343_SUBJ = "Chat linked ticket 19. Prod orphaned it. \u00b7 Agent memory 24"
+_V1343 = (
+    "Chat linked ticket 19. Prod orphaned it. "
+    "The title is a two-beat incident. "
+    "I\u2019ll count the script so it stays inside 70\u2013100 words and opens on that hook. "
+    "Chat linked ticket 19. Prod orphaned it. "
+    "The link sat in the transcript. Production reads one table, and the parent id "
+    "on ticket 19 is null."
+)
+locked_1343 = worker._lock_patterned_opener(_V1343, _V1343_SUBJ)
+ok(locked_1343.startswith("Chat linked ticket 19. Prod orphaned it."),
+   "v1343 opener stays the two-sentence title head")
+ok("two-beat" not in locked_1343 and "count the script" not in locked_1343
+   and "70-100" not in locked_1343.replace("\u2013", "-")
+   and "70–100" not in locked_1343
+   and "opens on that hook" not in locked_1343,
+   "v1343 mid-script count-the-script CoT (curly apostrophe + en-dash) is dropped")
+ok("link sat in the transcript" in locked_1343
+   and "parent id" in locked_1343,
+   "v1343 warehouse body after the CoT is kept")
+ok(worker._strip_script_preamble(_V1343).startswith("Chat linked ticket 19."),
+   "unpatterned strip also drops the mid-script 1343 CoT, not only a leading run")
+ok("count the script" not in worker._strip_script_preamble(_V1343)
+   and "two-beat" not in worker._strip_script_preamble(_V1343),
+   "strip_script_preamble drops 1343 CoT even without a patterned subject")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (

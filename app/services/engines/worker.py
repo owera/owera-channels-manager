@@ -439,7 +439,8 @@ _PREAMBLE_START = re.compile(
     r"Checking the (?:word )?count|"
     r"Count(?:ing)? carefully|"
     r"Conferindo a contagem|"
-    r"The tests pin|The title maps|The endcard|"
+    r"The tests pin|The title maps|The title is a two-beat|"
+    r"The endcard|"
     r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
     r"The prompt|Vou |Deixa eu |Deixe-me )\b",
@@ -452,8 +453,11 @@ _PREAMBLE_BODY = re.compile(
     r"expected script|series name|tests pin|title maps|"
     r"pin this to|endcard line|"
     r"faixa de \d+ a \d+ palavras|"
-    r"\d+ to \d+ words|"
+    r"\d+\s*(?:to|-)\s*\d+\s*words|"
     r"word[- ]count|"
+    r"count the script|"
+    r"two-beat incident|"
+    r"opens on that hook|"
     r"gancho curto|"
     r"endcard s[oó] na|"
     r"open on the pain|"
@@ -466,11 +470,35 @@ _PREAMBLE_BODY = re.compile(
 )
 
 
+def _fold_script_punct(s: str) -> str:
+    """Grok often emits curly apostrophes and en-dashes in CoT (v1343)."""
+    return (
+        (s or "")
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+
+
 def _is_script_preamble(sentence: str) -> bool:
-    s = (sentence or "").strip()
+    s = _fold_script_punct(sentence).strip()
     if not s:
         return True
     return bool(_PREAMBLE_START.match(s) or _PREAMBLE_BODY.search(s))
+
+
+def _drop_preamble_sentences(parts: list[str], *, keep_all_if_empty: bool) -> list[str]:
+    """Drop every CoT sentence, not only a leading run.
+
+    v1343 spoke a real title head, then 'The title is a two-beat incident'
+    then 'I'll count the script…' — a leading-only strip stopped at the
+    first real claim and left the mid-script CoT in the VO.
+    """
+    kept = [p for p in parts if not _is_script_preamble(p)]
+    if not kept and keep_all_if_empty:
+        return parts
+    return kept
 
 
 def _strip_script_preamble(text: str) -> str:
@@ -485,10 +513,7 @@ def _strip_script_preamble(text: str) -> str:
     if not raw:
         return raw
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])(?=\s|[A-Z])", raw) if p.strip()]
-    i = 0
-    while i < len(parts) and _is_script_preamble(parts[i]):
-        i += 1
-    kept = parts[i:]
+    kept = _drop_preamble_sentences(parts, keep_all_if_empty=True)
     if not kept:
         return raw
     return " ".join(kept)
@@ -534,10 +559,9 @@ def _lock_patterned_opener(script: str, subject: str) -> str:
             for p in re.split(r"(?<=[.!?…])(?=\s|[A-Z])", rest)
             if p.strip()
         ]
-        i = 0
-        while i < len(rest_parts) and _is_script_preamble(rest_parts[i]):
-            i += 1
-        rest = " ".join(rest_parts[i:]).strip()
+        rest = " ".join(
+            _drop_preamble_sentences(rest_parts, keep_all_if_empty=False)
+        ).strip()
     return f"{opener} {rest}".strip() if rest else opener
 
 
