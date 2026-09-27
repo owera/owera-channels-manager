@@ -177,6 +177,16 @@ class VideoCreate(BaseModel):
     subject: str
     queue: bool = False                     # True -> go straight to queued, else draft
 
+    @field_validator("topic_id", mode="before")
+    @classmethod
+    def _reject_bool_topic(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # true creates the video on topic id=1. false becomes 0 and
+        # 404s only because no topic 0 exists.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class VideoUpdate(BaseModel):
     subject: Optional[str] = None

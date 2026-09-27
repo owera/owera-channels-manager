@@ -50,7 +50,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import videos as videos_router
-from app.schemas import VideoUpdate
+from app.schemas import VideoCreate, VideoUpdate
 from app.services import metadata
 from app.services import engines as engines_mod
 
@@ -451,6 +451,71 @@ try:
     ok(snapshot(2) == before_2, "video 2 untouched after every create probe")
     ok(snapshot(created_id)["subject"] == "new idea",
        "earlier valid create was not clobbered by the 400s")
+
+    print("POST /api/videos: JSON bool topic_id is 422")
+    # true coerces to topic 1 and creates a video on channel 1. false
+    # coerces to 0 and 404s only because no topic 0 exists — that 404
+    # must not count as the rejection (it writes nothing for the wrong
+    # reason and would not if a topic 0 were ever inserted).
+
+    def n_on_topic(tid: int) -> int:
+        with Session(engine) as s:
+            return len(s.exec(select(Video).where(Video.topic_id == tid)).all())
+
+    def _compact(resp):
+        return resp.text.replace(" ", "")
+
+    n_before = n_videos()
+    ids_before = video_ids()
+    on_1 = n_on_topic(1)
+    on_2 = n_on_topic(2)
+    ok(on_2 >= 1 and on_1 > on_2,
+       "precondition: topic 2 exists and is not topic 1 (true coerces to 1)")
+
+    r = post(topic_id=True, subject="bool topic true", queue=True)
+    ok(r.status_code == 422,
+       "POST topic_id=true is 422 (must not coerce to 1 and 201)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "topic true names boolean and keeps input true (mode=after would show 1)")
+    ok(n_videos() == n_before and video_ids() == ids_before,
+       "POST topic_id=true writes no row")
+    ok(n_on_topic(1) == on_1, "POST topic_id=true added nothing on topic 1")
+
+    r = post(topic_id=False, subject="bool topic false")
+    ok(r.status_code == 422,
+       "POST topic_id=false is 422 (a missing topic 0 would be 404)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "topic false names boolean (topic-not-found 404 would not)")
+    ok(n_videos() == n_before, "POST topic_id=false writes no row")
+
+    r = post(topic_id=None, subject="null topic")
+    ok(r.status_code == 422, "POST topic_id=null is 422")
+    ok("boolean" not in r.text,
+       "null topic_id is the required-int error, not the bool rejection")
+    ok(n_videos() == n_before, "POST topic_id=null writes no row")
+
+    r = post(topic_id=0, subject="zero topic")
+    ok(r.status_code == 404, "POST topic_id=0 is still 404 (no topic 0)")
+    ok("topic not found" in r.text and "boolean" not in r.text,
+       "integer 0 stays the topic 404 (reject-zero would say boolean)")
+    ok(n_videos() == n_before, "POST topic_id=0 writes no row")
+
+    r = post(topic_id=2, subject="on topic b", queue=False)
+    ok(r.status_code == 201, "POST integer topic_id=2 is 201")
+    got = r.json()
+    ok(got.get("topic_id") == 2 and got.get("channel_id") == 2,
+       "integer topic 2 binds channel B, not channel 1 (always-raise dies here)")
+    ok(got.get("status") == VideoStatus.DRAFT,
+       "queue=false still creates a draft (queue stays a real bool)")
+    ok(n_on_topic(2) == on_2 + 1, "integer topic 2 added one video on topic 2")
+    ok(n_on_topic(1) == on_1, "integer topic 2 added nothing on topic 1")
+    ok(snapshot(1) == before_1 and snapshot(2) == before_2,
+       "topic-bool probes left the seeded videos untouched")
+
+    create_src = inspect.getsource(VideoCreate)
+    ok('_reject_bool_topic' in create_src
+       and '@field_validator("topic_id", mode="before")' in create_src,
+       "VideoCreate._reject_bool_topic is mode=before on topic_id")
 
     # add-then-400 is observationally equivalent today (get_session does
     # not commit on HTTPException), but a later auto-commit would persist

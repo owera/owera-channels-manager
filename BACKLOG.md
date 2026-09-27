@@ -1874,18 +1874,43 @@ flag the operator step in the commit body.
   and show on that channel's list only; integer 0 still persists and
   stays off every real channel's list; null/omitted stay shared and
   still appear on every channel's list. PATCH still cannot rebind.
-  Remaining (not bundled): `VideoCreate.topic_id` (#59).
+  Remaining (not bundled): `VideoCreate.topic_id` (closed as #59).
 
-### 59. POST /api/videos rejects JSON bool topic_id — normal
-- **why (found while shipping #58):** `VideoCreate.topic_id` is a bare
-  `int`. JSON `true` coerces to 1, so `POST /api/videos` creates a
-  draft/queued video on topic 1 when that topic exists. `false`
-  coerces to 0 and 404s only because no topic 0 exists.
-- **approach:** `mode="before"` validator, same shape as #58. Integer
-  ids, including a missing topic's 404, stay as they are.
+### 59. ✅ DONE (code shipped to main 2026-09-27) POST /api/videos rejects JSON bool topic_id — normal
+- **resolution (2026-09-27):** `VideoCreate._reject_bool_topic`
+  `mode="before"` rejects JSON bool on `topic_id` before lax `int`
+  coerces `false→0` / `true→1`. `true` created a video on topic 1
+  (and `queue: true` would enqueue it). `false` became 0 and 404d
+  only because no topic 0 exists. Integer ids still create on that
+  topic; integer 0 is still the topic 404; null stays the required-int
+  422 (not the bool message). `queue` stays a real bool. Suite:
+  `tests/verify_videos.py` 127 → 148. Isolated commit; no money-path
+  files.
+- **why (found while shipping #58):** `VideoCreate.topic_id` was a
+  bare `int`. A growth-agent / curl `{"topic_id": true}` lands a
+  video on topic 1.
 - **caution:** normal (`schemas.py` VideoCreate only). Isolated commit
-  + extend `tests/verify_videos.py`.
-- **acceptance:** POST `topic_id` `true`/`false` is 4xx and writes no
-  video; an integer topic id still creates on that topic, not topic 1.
-  Remaining after this (not bundled): `ReorderBody.channel_id` and
-  `ordered_ids` (`POST /api/videos/reorder` and `/produce`).
+  + regression tests.
+- **acceptance:** POST `topic_id` `true`/`false` is 422 and writes no
+  video; integer topic 2 still creates on channel 2, not channel 1;
+  integer 0 still 404s; null does not take the bool message; `queue`
+  false still drafts.
+  Remaining (not bundled): `ReorderBody.channel_id` and `ordered_ids`
+  (#60).
+
+### 60. POST /api/videos/reorder and /produce reject JSON bool ids — normal
+- **why (found while shipping #59):** `ReorderBody.channel_id` is a
+  bare `int` and `ordered_ids` is `list[int]`. `reorder` applies
+  positions only when `v.channel_id == body.channel_id`, so `true`
+  reorders channel 1. `ordered_ids: [true]` becomes `[1]` and can
+  queue or reposition video 1. `produce_bulk` ignores `channel_id`
+  and queues every draft id in the list.
+- **approach:** `mode="before"` on `channel_id`, and a list validator
+  that rejects any bool element before lax int coercion. Integers,
+  including integer 0, stay as they are.
+- **caution:** normal (`schemas.py` ReorderBody only). Isolated commit
+  + extend `tests/verify_videos.py`. Do not change reorder/produce
+  behavior for real ids.
+- **acceptance:** `channel_id` `true`/`false` and a bool inside
+  `ordered_ids` are 4xx and write nothing; an integer list still
+  reorders that channel and still bulk-produces those drafts.
