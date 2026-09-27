@@ -740,6 +740,64 @@ _tts_src = inspect.getsource(worker._tts)
 ok('"-8%"' in _tts_src and '"-2Hz"' in _tts_src and 'startswith("pt")' in _tts_src,
    "PT edge-tts eases rate/pitch (no paid TTS API)")
 
+# NoAudioReceived: bounded in-process retry (v1360, 2026-09-26 upstream blip).
+print("_tts: NoAudioReceived retry")
+import edge_tts as _edge_tts
+
+
+class _FakeComm:
+    plan: list = []   # per-attempt: "fail" | "ok"
+    calls = 0
+
+    def __init__(self, text, voice, **kw):
+        pass
+
+    async def stream(self):
+        i = _FakeComm.calls
+        _FakeComm.calls += 1
+        if _FakeComm.plan[i] == "fail":
+            raise _edge_tts.exceptions.NoAudioReceived("No audio was received.")
+        yield {"type": "WordBoundary", "text": "hi", "offset": 0, "duration": 1e7}
+        yield {"type": "audio", "data": b"ID3fake"}
+
+
+_orig_att, _orig_bo = settings.tts_attempts, settings.tts_retry_backoff_seconds
+with tempfile.TemporaryDirectory() as _td:
+    _out = Path(_td) / "n.mp3"
+    _sleeps: list = []
+    settings.tts_attempts, settings.tts_retry_backoff_seconds = 3, [5, 20]
+    _FakeComm.plan, _FakeComm.calls = ["fail", "fail", "ok"], 0
+    with patch.object(_edge_tts, "Communicate", _FakeComm), \
+            patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+        _w = worker._tts("hello", "en-US-AndrewNeural", _out)
+    ok(_FakeComm.calls == 3 and _out.read_bytes() == b"ID3fake",
+       "two NoAudioReceived then success → audio written on attempt 3")
+    ok(_sleeps == [5, 20], "backoff 5s then 20s between attempts")
+    ok(len(_w) == 1 and _w[0]["text"] == "hi",
+       "word list holds only the successful attempt's boundaries")
+
+    _FakeComm.plan, _FakeComm.calls, _sleeps[:] = ["fail", "fail", "fail"], 0, []
+    _raised = False
+    try:
+        with patch.object(_edge_tts, "Communicate", _FakeComm), \
+                patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+            worker._tts("hello", "en-US-AndrewNeural", _out)
+    except _edge_tts.exceptions.NoAudioReceived as e:
+        _raised = "No audio was received" in str(e)
+    ok(_raised and _FakeComm.calls == 3,
+       "persistent NoAudioReceived re-raises after tts_attempts (render_loop keeps it transient)")
+
+    settings.tts_attempts = 1
+    _FakeComm.plan, _FakeComm.calls, _sleeps[:] = ["fail"], 0, []
+    try:
+        with patch.object(_edge_tts, "Communicate", _FakeComm), \
+                patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+            worker._tts("hello", "en-US-AndrewNeural", _out)
+    except _edge_tts.exceptions.NoAudioReceived:
+        pass
+    ok(_FakeComm.calls == 1 and _sleeps == [], "tts_attempts=1 → no retry (kill switch)")
+settings.tts_attempts, settings.tts_retry_backoff_seconds = _orig_att, _orig_bo
+
 
 # ---------------------------------------------------------------------------
 # _creation_config
@@ -1068,7 +1126,8 @@ try:
        "compose gets subject + language (PT voice path)")
     ok(kw["topic_id"] == 3 and kw["content_format"] == "long",
        "topic_id + content_format reach compose")
-    ok(kw["llm"] is worker._llm, "compose is given worker._llm (same seam)")
+    ok(kw["llm"] is worker._llm_compose,
+       "compose is given worker._llm_compose (HARD timeout + pinned reasoning effort)")
 
     with patch("app.services.engines.storyboard.compose",
                return_value="<html>from-compose</html>") as compose_en:

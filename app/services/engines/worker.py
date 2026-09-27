@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 logger = logging.getLogger("manager.worker")
@@ -415,6 +416,22 @@ def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
     return complete(prompt, system=system, max_tokens=max_tokens)
 
 
+def _llm_compose(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
+    """Storyboard compose seam: same HARD timeout as ``_llm`` (unchanged), but pins
+    ``--reasoning-effort`` to ``settings.grok_compose_reasoning_effort``.
+
+    Since the 2026-09-22 default-model flip to grok-4.7-build (effort "high"), the
+    compose call spends ~33k reasoning tokens and ~400s before the first output
+    token for a ~1.5k-char JSON answer; ~1/3 of calls crossed 600s. Lowering effort
+    on this one structured-output call cuts latency without touching the timeout.
+    Empty setting = CLI default (kill switch)."""
+    from app.services.llm import complete
+
+    effort = settings.grok_compose_reasoning_effort or None
+    return complete(prompt, system=system, max_tokens=max_tokens,
+                    reasoning_effort=effort)
+
+
 def _word_count_bounds(params: dict) -> tuple[int, int]:
     """Acceptable word count range for a generated script.  Scripts outside this band
     on the first try get one retry with an explicit word count constraint."""
@@ -751,7 +768,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             subject=subject, script=script, words=words, duration=duration,
             resolution=resolution, width=width, height=height, topic_id=topic_id,
             content_format=content_format, allowed_types=settings.composition_beat_types,
-            language=language, llm=_llm, brand=brand,
+            language=language, llm=_llm_compose, brand=brand,
         )
         return html or ""
     except Exception as e:
@@ -964,7 +981,23 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
                         "dur": (chunk.get("duration") or 0) / 1e7,
                     })
 
-    asyncio.run(_gen())
+    # NoAudioReceived = the service closed the turn without audio (upstream flake /
+    # throttle, not bad params: same voice + text succeed minutes later). Retry
+    # in-process with a short backoff before failing the render (see config).
+    attempts = max(1, int(settings.tts_attempts or 1))
+    backoff = list(settings.tts_retry_backoff_seconds or [])
+    for attempt in range(1, attempts + 1):
+        words.clear()
+        try:
+            asyncio.run(_gen())
+            break
+        except edge_tts.exceptions.NoAudioReceived as e:
+            if attempt >= attempts:
+                raise
+            delay = backoff[min(attempt - 1, len(backoff) - 1)] if backoff else 0
+            logger.warning("edge-tts NoAudioReceived (voice=%s, attempt %d/%d): %s; "
+                           "retrying in %ss", voice, attempt, attempts, e, delay)
+            time.sleep(delay)
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"edge-tts produced no audio for voice {voice}")
     return words

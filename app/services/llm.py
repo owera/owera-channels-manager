@@ -1,7 +1,7 @@
 """Manager LLM client: Grok Build CLI in headless mode (`grok -p`).
 
 Every manager completion (topic autogen, script/metadata, HyperFrames motion
-steps, thumbnail hooks) goes through ``complete``. Live claw0: grok 1.0.5 at
+steps, thumbnail hooks) goes through ``complete``. Live claw0: grok 1.0.41 at
 ``~/.local/bin/grok`` → ``~/.grok/bin/grok``. Auth is the CLI OIDC session
 (``grok login``), not api.x.ai / LiteLLM / Anthropic / XAI_API_KEY.
 
@@ -48,9 +48,25 @@ def build_prompt(prompt: str, system: str | None = None) -> str:
     return user
 
 
-def build_cmd(prompt: str, system: str | None = None) -> list[str]:
-    """Headless grok 1.0.5: ``grok -p <prompt>`` (``-p`` is ``--single``)."""
-    return [settings.grok_bin, "-p", build_prompt(prompt, system)]
+def build_cmd(
+    prompt: str,
+    system: str | None = None,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> list[str]:
+    """Headless: ``grok -p <prompt>`` (``-p`` is ``--single``).
+
+    ``model`` / ``reasoning_effort`` add ``-m`` / ``--reasoning-effort`` (grok
+    >= 1.0.41) only when non-empty; with neither the argv is exactly
+    ``[grok, -p, prompt]`` and the CLI uses its server-side defaults. The prompt
+    stays the LAST element (``complete`` logs ``len(cmd[-1])``)."""
+    cmd = [settings.grok_bin]
+    if model:
+        cmd += ["-m", model]
+    if reasoning_effort:
+        cmd += ["--reasoning-effort", reasoning_effort]
+    return cmd + ["-p", build_prompt(prompt, system)]
 
 
 def _child_env() -> dict[str, str]:
@@ -66,6 +82,8 @@ def complete(
     max_tokens: int | None = None,
     *,
     timeout: int | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Run ``grok -p`` and return stdout text.
 
@@ -74,12 +92,18 @@ def complete(
 
     ``timeout`` overrides ``settings.grok_timeout_seconds`` when set (use
     ``settings.grok_timeout_seconds_light`` for idea/metadata callers).
+
+    ``model`` defaults to ``settings.grok_model`` (empty = CLI default);
+    ``reasoning_effort`` defaults to none (CLI default). The storyboard compose
+    seam (``worker._llm_compose``) passes ``settings.grok_compose_reasoning_effort``.
     """
-    cmd = build_cmd(prompt, system)
+    model = model if model is not None else (settings.grok_model or None)
+    cmd = build_cmd(prompt, system, model=model, reasoning_effort=reasoning_effort)
     cwd = scratch_dir()
     timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
     env = _child_env()
-    logger.info("llm backend=grok-cli bin=%s prompt_chars=%d", settings.grok_bin,
+    logger.info("llm backend=grok-cli bin=%s model=%s effort=%s prompt_chars=%d",
+                settings.grok_bin, model or "default", reasoning_effort or "default",
                 len(cmd[-1]))
     try:
         proc = subprocess.run(

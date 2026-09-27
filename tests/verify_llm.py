@@ -89,6 +89,20 @@ ok(cmd_sys == [settings.grok_bin, "-p", "system bit\n\nuser bit"],
    "system+user flattened into the single -p argument")
 
 
+# Model / reasoning-effort pins (grok >= 1.0.41 `-m` / `--reasoning-effort`).
+ok(settings.grok_model == "", "default grok_model is empty (CLI default model, no -m)")
+ok(settings.grok_compose_reasoning_effort == "medium",
+   "default compose reasoning effort is medium (2026-09-22 grok-4.7 compose timeouts)")
+cmd_pin = llm.build_cmd("u", system="s", model="grok-4.6", reasoning_effort="medium")
+ok(cmd_pin == [settings.grok_bin, "-m", "grok-4.6", "--reasoning-effort", "medium",
+               "-p", "s\n\nu"],
+   "model/effort add -m / --reasoning-effort before -p; prompt stays last")
+ok(llm.build_cmd("u", model="", reasoning_effort="") == [settings.grok_bin, "-p", "u"],
+   "empty model/effort add no flags")
+ok(llm.build_cmd("u", reasoning_effort="low")[-2:] == ["-p", "u"]
+   and "-m" not in llm.build_cmd("u", reasoning_effort="low"),
+   "effort alone adds only --reasoning-effort")
+
 # ---------------------------------------------------------------------------
 # complete — subprocess stubbed
 # ---------------------------------------------------------------------------
@@ -263,6 +277,48 @@ ok(m.call_args.kwargs["system"] == "sys prompt"
    and m.call_args.args[0] == "user prompt",
    "worker._llm forwards prompt/system/max_tokens to llm.complete")
 
+
+
+# complete(): settings.grok_model is the default -m; explicit args win; the storyboard
+# compose seam pins --reasoning-effort and keeps the HARD (default) timeout.
+_captured.clear()
+_orig_model = settings.grok_model
+with tempfile.TemporaryDirectory() as td3:
+    settings.storage_dir = td3
+    with patch.object(llm.subprocess, "run", side_effect=_run_ok):
+        llm.complete("plain")
+    ok(_captured["cmd"] == [settings.grok_bin, "-p", "plain"],
+       "default complete() argv unchanged (no -m / --reasoning-effort)")
+    settings.grok_model = "grok-4.6"
+    with patch.object(llm.subprocess, "run", side_effect=_run_ok):
+        llm.complete("pinned")
+    ok(_captured["cmd"][1:3] == ["-m", "grok-4.6"], "settings.grok_model → -m <model>")
+    with patch.object(llm.subprocess, "run", side_effect=_run_ok):
+        llm.complete("override", model="grok-4.7", reasoning_effort="low")
+    ok(_captured["cmd"] == [settings.grok_bin, "-m", "grok-4.7", "--reasoning-effort", "low",
+                            "-p", "override"], "explicit model/effort kwargs win")
+settings.grok_model = _orig_model
+settings.storage_dir = _orig_storage
+
+with patch.object(llm, "complete", return_value="{}") as m:
+    worker._llm_compose("sb user", system="sb sys", max_tokens=1500)
+ok(m.call_args.kwargs.get("reasoning_effort") == settings.grok_compose_reasoning_effort,
+   "worker._llm_compose pins reasoning_effort = settings.grok_compose_reasoning_effort")
+ok("timeout" not in m.call_args.kwargs,
+   "worker._llm_compose keeps the default HARD timeout (no LIGHT override)")
+_orig_eff = settings.grok_compose_reasoning_effort
+settings.grok_compose_reasoning_effort = ""
+with patch.object(llm, "complete", return_value="{}") as m:
+    worker._llm_compose("sb user")
+ok(m.call_args.kwargs.get("reasoning_effort") is None,
+   "empty grok_compose_reasoning_effort → no flag (kill switch)")
+settings.grok_compose_reasoning_effort = _orig_eff
+with patch.object(llm, "complete", return_value="x") as m:
+    worker._llm("script prompt")
+ok("reasoning_effort" not in m.call_args.kwargs,
+   "worker._llm (script/thumb) does not pin effort — only compose does")
+src_gc = inspect.getsource(worker._generate_composition)
+ok("llm=_llm_compose" in src_gc, "storyboard.compose is wired to worker._llm_compose")
 
 print()
 print(f"ALL {_checks} CHECKS PASSED")

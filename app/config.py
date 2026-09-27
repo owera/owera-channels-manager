@@ -66,6 +66,22 @@ class Settings(BaseSettings):
     # Light budget for short completions (idea strip / metadata / digest-adjacent).
     # Storyboard + script compose keep grok_timeout_seconds (600).
     grok_timeout_seconds_light: int = 180     # env: MANAGER_GROK_TIMEOUT_SECONDS_LIGHT
+    # Model / reasoning-effort pins for `grok -p` (grok >= 1.0.41 flags `-m` and
+    # `--reasoning-effort`). 2026-09-22: the CLI's server-side default model flipped
+    # grok-4.6-build -> grok-4.7-build ("grok-4.7-launch" campaign, effort "high").
+    # Storyboard compose reasoning doubled (median ~16k -> ~33k reasoning tokens,
+    # first token after ~400s, wall median ~286s -> ~480s, p90 ~567s), so ~1/3 of
+    # compose calls crossed the 600s HARD timeout on BOTH channels (v1297..v1356).
+    # Empty string = no flag (CLI default), i.e. the old behavior.
+    grok_model: str = ""                      # env: MANAGER_GROK_MODEL (e.g. "grok-4.6")
+    # Effort for the storyboard compose call only (the step that times out).
+    # Accepted values per the CLI model catalog: low | medium | high | xhigh.
+    grok_compose_reasoning_effort: str = "medium"  # env: MANAGER_GROK_COMPOSE_REASONING_EFFORT
+    # edge-tts NoAudioReceived is an upstream flake (2026-09-26 21:00-21:53 BRT: 4 of
+    # 8 en-US calls, then clean). Retry in-process before failing the whole render so
+    # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).
+    tts_attempts: int = 3                     # env: MANAGER_TTS_ATTEMPTS
+    tts_retry_backoff_seconds: list[int] = [5, 20]  # sleep before attempt 2, 3, ...
 
     # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
     hf_token: str = ""
