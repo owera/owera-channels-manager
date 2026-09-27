@@ -1850,4 +1850,42 @@ flag the operator step in the commit body.
   adopt; integer 0 still persists on PATCH and still falls back on
   adopt; null/omitted stay unbound on create, null still unbinds on
   PATCH, and explicit adopt null still adopts onto the trend's channel.
-  Remaining (not bundled): `ProfileCreate.channel_id`.
+  Remaining (not bundled): `ProfileCreate.channel_id` (closed as #58).
+
+### 58. ✅ DONE (code shipped to main 2026-09-27) POST /api/profiles rejects JSON bool channel_id — normal
+- **resolution (2026-09-27):** `ProfileCreate._reject_bool_channel`
+  `mode="before"` rejects JSON bool on `channel_id` before lax
+  `Optional[int]` coerces `false→0` / `true→1`. `true` bound the new
+  render profile to channel id=1, so only that channel's filtered list
+  offered it. `false` stored 0, which is not null, so the profile was
+  neither shared (null shows on every channel's list) nor visible on
+  any real channel. Integer ids, integer 0, null, and omitted are
+  unchanged. `ProfileUpdate` still has no `channel_id` (the editor
+  locks scope after create); a bool on PATCH does not rebind.
+  Suite: `tests/verify_profiles.py` (55 checks). Isolated commit; no
+  money-path files.
+- **why (left open by #57):** profile and playlist ids were floored;
+  `POST /api/profiles` still coerced `channel_id`. A growth-agent /
+  curl `{"channel_id": true}` attaches the profile to channel 1.
+- **caution:** normal (`schemas.py` ProfileCreate only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** POST `channel_id` `true`/`false` is 4xx and writes
+  nothing (no row on channel 1, no stored 0); integer ids still bind
+  and show on that channel's list only; integer 0 still persists and
+  stays off every real channel's list; null/omitted stay shared and
+  still appear on every channel's list. PATCH still cannot rebind.
+  Remaining (not bundled): `VideoCreate.topic_id` (#59).
+
+### 59. POST /api/videos rejects JSON bool topic_id — normal
+- **why (found while shipping #58):** `VideoCreate.topic_id` is a bare
+  `int`. JSON `true` coerces to 1, so `POST /api/videos` creates a
+  draft/queued video on topic 1 when that topic exists. `false`
+  coerces to 0 and 404s only because no topic 0 exists.
+- **approach:** `mode="before"` validator, same shape as #58. Integer
+  ids, including a missing topic's 404, stay as they are.
+- **caution:** normal (`schemas.py` VideoCreate only). Isolated commit
+  + extend `tests/verify_videos.py`.
+- **acceptance:** POST `topic_id` `true`/`false` is 4xx and writes no
+  video; an integer topic id still creates on that topic, not topic 1.
+  Remaining after this (not bundled): `ReorderBody.channel_id` and
+  `ordered_ids` (`POST /api/videos/reorder` and `/produce`).

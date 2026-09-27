@@ -67,6 +67,18 @@ class ProfileCreate(BaseModel):
     engine: str = "mpt"
     params: dict[str, Any] = {}
 
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true silently binds the new profile to channel id=1, so only that
+        # channel's filtered list offers it. false stores 0, which is not
+        # null, so the profile is neither shared nor on any real channel's
+        # list.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
 
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
