@@ -447,6 +447,30 @@ ok("Another Numbered One" in out_messy,
 ok("" not in out_messy and all(t.strip() for t in out_messy),
    "blank / whitespace-only lines are dropped")
 
+# 2026-09-27: the old [-*\d.)\s]+ class ate model-size openers
+# ("32B em Q4" → "B em Q4", "16GB rodou" → "GB rodou"; review 1347/1353/1355).
+_llm_calls.clear()
+out_sizes = _run_ideas(
+    _text="\n".join([
+        "32B em Q4 rodou na 24GB. O Q8, não.",
+        "16GB rodou o 14B. O contexto 32k, não.",
+        "1.5x slower on CPU than the GPU path",
+        "3 Mistakes That Break Your Agent Memory",
+        "1. First Numbered Title",
+    ]),
+    n=8,
+)
+ok(out_sizes[0] == "32B em Q4 rodou na 24GB. O Q8, não.",
+   "model-size opener '32B em Q4' is not stripped as a list marker")
+ok(out_sizes[1] == "16GB rodou o 14B. O contexto 32k, não.",
+   "memory-size opener '16GB rodou' is not stripped as a list marker")
+ok(out_sizes[2] == "1.5x slower on CPU than the GPU path",
+   "decimal opener '1.5x' is not stripped (no whitespace after the dot)")
+ok(out_sizes[3] == "3 Mistakes That Break Your Agent Memory",
+   "a bare leading count with no marker punctuation is kept")
+ok(out_sizes[4] == "First Numbered Title",
+   "a real '1. ' list marker is still stripped beside number-led titles")
+
 # banned CTA titles are dropped in code, not only by the prompt
 _llm_calls.clear()
 out_ban = _run_ideas(

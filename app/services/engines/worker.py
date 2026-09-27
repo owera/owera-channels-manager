@@ -440,6 +440,7 @@ _PREAMBLE_START = re.compile(
     r"Count(?:ing)? carefully|"
     r"Conferindo a contagem|"
     r"The tests pin|The title maps|The title is a two-beat|"
+    r"This title is tied|"
     r"The endcard|"
     r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
@@ -465,6 +466,8 @@ _PREAMBLE_BODY = re.compile(
     r"names the series|"
     r"last line matches|"
     r"series notes|"
+    r"named series|"
+    r"channel rules|"
     r"generic take)\b",
     re.I,
 )

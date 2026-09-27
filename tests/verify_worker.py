@@ -470,6 +470,23 @@ ok("count the script" not in worker._strip_script_preamble(_V1343)
    and "two-beat" not in worker._strip_script_preamble(_V1343),
    "strip_script_preamble drops 1343 CoT even without a patterned subject")
 
+# 09-27 ch1-concept golden: unpatterned subject, frame0 locked the CoT
+# "This title is tied to a named series in the channel rules."
+_FLAKE_0927 = (
+    "This title is tied to a named series in the channel rules. "
+    "Your AI agent forgets everything between chats. Close the tab and the context is gone."
+)
+ok(worker._strip_script_preamble(_FLAKE_0927).startswith(
+    "Your AI agent forgets everything between chats."),
+   "09-27 ch1-concept flake: 'This title is tied to a named series' drops")
+ok("named series" not in worker._strip_script_preamble(_FLAKE_0927).lower()
+   and "channel rules" not in worker._strip_script_preamble(_FLAKE_0927).lower(),
+   "09-27 channel-rules CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "This title is the bug. Your agent forgot the cart."
+).startswith("This title is the bug."),
+   "a real 'This title is the bug' hook is not treated as series-rules CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (

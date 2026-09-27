@@ -48,6 +48,19 @@ _IDEA_COT_START = re.compile(
 )
 
 
+# List markers only ("1. ", "2) ", "- ", "* "). A repeated class of digits,
+# dots, and spaces also ate legitimate openers (2026-09-27 review 1347 / 1353 /
+# 1355: "16GB rodou…" → "GB rodou…", "32B em Q4…" → "B em Q4…") because model
+# sizes and memory figures start with a digit. Require a marker punctuation
+# (or a bullet) plus whitespace so "32B", "16GB", and "1.5x" stay intact.
+_LIST_MARKER = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+")
+
+
+def _strip_list_marker(line: str) -> str:
+    """Drop one leading list marker. Leave a title that starts with a number."""
+    return _LIST_MARKER.sub("", line, count=1).strip().strip('"')
+
+
 def _strip_idea_cot(title: str) -> str | None:
     """Return the title with leading idea-planning sentences removed.
 
@@ -186,7 +199,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     seen = {s.lower() for s in existing}
     out: list[str] = []
     for line in text.splitlines():
-        title = re.sub(r"^\s*[-*\d.)\s]+", "", line).strip().strip('"')
+        title = _strip_list_marker(line)
         title = _strip_idea_cot(title) or ""
         if not title or title.lower() in seen:
             continue
