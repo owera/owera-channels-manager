@@ -9,7 +9,14 @@ from sqlmodel import Session, func, select
 from app.config import settings as cfg
 from app.db import app_settings, get_session
 from app.models import Channel, Topic, Video, VideoStatus, utcnow
-from app.schemas import RejectBody, ReorderBody, VideoCraftPersist, VideoCreate, VideoUpdate
+from app.schemas import (
+    RejectBody,
+    ReorderBody,
+    VideoCraftPersist,
+    VideoCreate,
+    VideoScriptSet,
+    VideoUpdate,
+)
 from app.services import metadata, quota
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
@@ -253,13 +260,67 @@ def create_video(body: VideoCreate, session: Session = Depends(get_session)):
                  "subject must be a non-empty string "
                  "(null/blank TypeErrors metadata.generate: "
                  "(title or subject)[:100])")
+    # Optional provided script / title (item 8). Null = omitted; blank = 400.
+    if body.script is not None:
+        fields["script"] = body.script
+        _require_str(fields, "script",
+                     "script must be a non-empty string "
+                     "(omit it or send null to have the engine generate one)")
+    if body.title is not None:
+        fields["title"] = body.title
+        _require_str(fields, "title",
+                     "title must be a non-empty string (omit it or send null)")
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)).one() or 0
     v = Video(channel_id=topic.channel_id, topic_id=topic.id, subject=fields["subject"],
               status=VideoStatus.QUEUED if body.queue else VideoStatus.DRAFT, position=mx + 1)
+    if "title" in fields:
+        v.title = fields["title"]
+    if "script" in fields:
+        _apply_provided_script(v, fields["script"])
     session.add(v)
     session.commit()
     session.refresh(v)
+    if "script" in fields:
+        quota.log(session, kind="script_set", status="success", video_id=v.id,
+                  channel_id=v.channel_id,
+                  detail=f"provided script on create ({len(fields['script'].split())} words; "
+                         + (v.error or "hook aligned") + ")")
+        session.commit()
+        session.refresh(v)
     return v
+
+
+def _apply_provided_script(v: Video, script: str | None) -> None:
+    """Set (str) or clear (None) the provided script + its provenance marker.
+
+    The render loop speaks a provided script verbatim (no grok -p). A first
+    line that doesn't carry the title claim is surfaced on ``error`` now and
+    fails the pre-render / publish craft gate later — never regenerated.
+    """
+    from app.services import craft
+    cc: dict = {}
+    if v.creation_config:
+        try:
+            parsed = json.loads(v.creation_config)
+            cc = parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            cc = {}
+    cc.pop("script_edits", None)
+    reason = None
+    if script is None:
+        v.script = None
+        cc.pop("script_source", None)
+    else:
+        v.script = script
+        cc["script_source"] = craft.SCRIPT_SOURCE_PROVIDED
+        reason = craft.provided_script_hook_reason(script, title=v.title, subject=v.subject)
+    # Only own our reason on ``error``: never clear another guard's note
+    # (e.g. the subject_guard hold, compared by value on every tick).
+    if reason:
+        v.error = reason
+    elif (v.error or "").startswith(craft.PROVIDED_SCRIPT_HOOK_REASON):
+        v.error = None
+    v.creation_config = json.dumps(cc) if cc else None
 
 
 @router.get("/{video_id}")
@@ -371,6 +432,52 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
               detail=f"craft persist via API: {changed} (status={v.status}, "
                      f"craft_review={cr_status}, no requeue"
                      + (f"; {cr_reason}" if cr_reason else "") + ")")
+    session.add(v)
+    session.commit()
+    session.refresh(v)
+    return v
+
+
+@router.patch("/{video_id}/script")
+def set_script(video_id: int, body: VideoScriptSet,
+               session: Session = Depends(get_session)):
+    """Set / clear the provided script before rendering (item 8).
+
+    Allowed on draft | queued (queued = not submitted yet; submit flips to
+    rendering) | failed without an artifact (e.g. the provided-script hook
+    gate parked it — fix, then POST …/retry). ``{"script": "..."}`` marks
+    ``creation_config.script_source="provided"`` → spoken verbatim, no
+    grok -p. ``{"script": null}`` clears it → the engine generates again.
+    Never touches status / budget; post-render edits stay on PATCH …/craft.
+    """
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    allowed = v.status in (VideoStatus.DRAFT, VideoStatus.QUEUED) or (
+        v.status == VideoStatus.FAILED and not v.video_path)
+    if not allowed:
+        raise HTTPException(
+            409,
+            f"cannot set script from status '{v.status}' "
+            f"(need draft/queued/failed-without-artifact; use PATCH …/craft after render)",
+        )
+    data = body.model_dump(exclude_unset=True)
+    if "script" not in data:
+        raise HTTPException(400, "provide script (string to set, null to clear)")
+    script = data["script"]
+    if script is not None:
+        fields = {"script": script}
+        _require_str(fields, "script",
+                     "script must be a non-empty string (send null to clear)")
+        script = fields["script"]
+    _apply_provided_script(v, script)
+    v.updated_at = utcnow()
+    quota.log(session, kind="script_set", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=(f"provided script cleared via API (status={v.status})" if script is None
+                      else f"provided script set via API (status={v.status}, "
+                           f"{len(script.split())} words; "
+                           + (v.error or "hook aligned") + ")"))
     session.add(v)
     session.commit()
     session.refresh(v)

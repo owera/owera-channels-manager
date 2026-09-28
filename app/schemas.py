@@ -176,6 +176,12 @@ class VideoCreate(BaseModel):
     topic_id: int
     subject: str
     queue: bool = False                     # True -> go straight to queued, else draft
+    # Optional provided VO (item 8): spoken verbatim instead of the grok -p
+    # script (creation_config.script_source="provided"). Null/omitted = generate.
+    script: Optional[str] = None
+    # Optional explicit title (same field PATCH /api/videos already accepts);
+    # finalize keeps a pre-set title instead of the metadata one.
+    title: Optional[str] = None
 
     @field_validator("topic_id", mode="before")
     @classmethod
@@ -220,6 +226,16 @@ class VideoCraftPersist(BaseModel):
     """
     script: Optional[str] = None
     creation_config: Optional[Any] = None  # dict (preferred) or JSON object string
+
+
+class VideoScriptSet(BaseModel):
+    """Body for PATCH /api/videos/{id}/script (item 8).
+
+    Set (non-empty string) or clear (null) the provided script on a video
+    that hasn't started rendering (draft | queued | failed without artifact).
+    The key is required; post-render corrections stay on PATCH …/craft.
+    """
+    script: Optional[str] = None
 
 
 class RejectBody(BaseModel):

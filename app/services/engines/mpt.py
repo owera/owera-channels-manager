@@ -15,7 +15,10 @@ class MPTEngine:
     def submit(self, video, params: dict) -> str:
         # content_format is a manager-internal hint (consumed via the aspect/script
         # overrides already merged into params); don't pass it to MPT's VideoParams.
-        params = {k: v for k, v in params.items() if k != "content_format"}
+        # provided_script is the HyperFrames worker's key — MPT gets the same text
+        # on its native ``video_script`` field (render_loop sets both).
+        params = {k: v for k, v in params.items()
+                  if k not in ("content_format", "provided_script")}
         return mpt.submit(params)
 
     def poll(self, handle: str) -> dict:

@@ -1163,6 +1163,97 @@ def ensure_series_endcard_vo(script: str | None, subject: str | None,
     return (raw.rstrip() + " " + vo).strip()
 
 
+
+# ---------------------------------------------------------------------------
+# Provided scripts (item 8) — operator/CMO-authored VO used verbatim.
+#
+# A video created with a ``script`` (POST /api/videos) or given one on a draft
+# (PATCH /api/videos/{id}/script) carries ``creation_config.script_source =
+# "provided"``. The render loop then skips ``worker._generate_script`` (grok -p)
+# and speaks that text. It is NEVER silently regenerated: a first spoken line
+# that doesn't carry the title claim fails the craft gate with
+# PROVIDED_SCRIPT_HOOK_REASON. The only edits are the same deterministic craft
+# rules the generated path applies (series endcard pin, miolo Subscribe strip,
+# banned-CTA strip) — recorded on ``creation_config.script_edits``.
+# ---------------------------------------------------------------------------
+
+SCRIPT_SOURCE_PROVIDED = "provided"
+SCRIPT_SOURCE_GENERATED = "generated"
+
+PROVIDED_SCRIPT_HOOK_REASON = (
+    "provided script: first spoken line does not carry the title claim"
+)
+
+
+def script_source(creation_config) -> str | None:
+    """``creation_config.script_source`` (provided|generated) or None (legacy)."""
+    src = _as_dict(creation_config).get("script_source")
+    return src if isinstance(src, str) and src else None
+
+
+def is_provided_script(creation_config) -> bool:
+    return script_source(creation_config) == SCRIPT_SOURCE_PROVIDED
+
+
+def provided_script_hook_reason(script: str | None, *, title: str | None = None,
+                                subject: str | None = None) -> str | None:
+    """None when a provided script opens on the title/subject claim.
+
+    Reuses the storyboard hook helpers: hook = title head before ``·``
+    (else subject head), spoken = first sentence of the script, aligned via
+    ``claim_aligned``; a ``$N`` stake in the hook must stay numerals on the
+    spoken line (``preserves_dollar_numerals``). No hook available → None
+    (nothing to align against; the title gate owns empty titles).
+    """
+    hook = spoken_hook_source(title or subject, None, None)
+    if not hook:
+        hook = spoken_hook_source(subject, None, None)
+    if not hook:
+        return None
+    spoken = first_spoken_sentence(script)
+    if not spoken:
+        return f"{PROVIDED_SCRIPT_HOOK_REASON} (script is empty)"
+    if claim_aligned(hook, spoken) and preserves_dollar_numerals(hook, spoken):
+        return None
+    return (f"{PROVIDED_SCRIPT_HOOK_REASON} (hook {hook[:80]!r} vs spoken "
+            f"{spoken[:80]!r}) — fix it via PATCH /api/videos/{{id}}/script; "
+            f"provided scripts are never regenerated")
+
+
+def prepare_provided_script(script: str | None, subject: str | None, *,
+                            brand: str | None = None,
+                            content_format: str | None = "short"
+                            ) -> tuple[str, list[str]]:
+    """Provided script → the exact VO text to speak, plus the edits applied.
+
+    Verbatim except the generated path's deterministic craft rules:
+    banned CTA sentences dropped (``strip_banned``), miolo Subscribe dropped
+    (``strip_mid_subscribe``), and for shorts the standard series endcard
+    ``Subscribe — next {series} {noun}.`` appended when the last sentence
+    isn't already an endcard VO (an existing closer is kept as written —
+    never duplicated or rewritten). Long-form skips the endcard, like
+    ``worker._generate_script``.
+    """
+    text = (script or "").strip()
+    edits: list[str] = []
+    if not text:
+        return "", edits
+    cleaned = strip_banned(text) or text
+    if cleaned != text:
+        edits.append("banned_cta_stripped")
+    text = cleaned
+    if (content_format or "short") == "long":
+        return text, edits
+    body = strip_mid_subscribe(text)
+    if body and body != text:
+        edits.append("mid_subscribe_stripped")
+        text = body
+    parts = [p for p in re.split(r"(?<=[.!?…])\s+", text) if p.strip()]
+    if parts and is_endcard_vo(parts[-1]):
+        return text, edits
+    edits.append("endcard_appended")
+    return ensure_series_endcard_vo(text, subject, brand=brand), edits
+
 # ---------------------------------------------------------------------------
 # Publish craft gate — durable craft_review + anti-nonsense (CoS 2026-09-22)
 #
@@ -1337,7 +1428,8 @@ def publish_craft_block_reason(
     """First publish-blocking craft reason, or None when eligible.
 
     Order (operator-readable): nonsense title → existing review_gate (title
-    lock + Gate A/B/C) → empty script → optional VO/beats → mute audio.
+    lock + Gate A/B/C) → empty script → provided-script hook alignment
+    (``script_source=provided`` only) → optional VO/beats → mute audio.
     Long-form still requires script (+ audio when checkable); A/B/C stay exempt
     via review_gate_reason.
     """
@@ -1349,6 +1441,11 @@ def publish_craft_block_reason(
         return blocked
     if not script_nonempty(script):
         return EMPTY_SCRIPT_REASON
+    if is_provided_script(creation_config):
+        # Provided VO is spoken verbatim — never regenerated to fix the hook.
+        blocked = provided_script_hook_reason(script, title=title)
+        if blocked:
+            return blocked
     if require_vo_beats and not creation_config_has_vo_beats(creation_config):
         return MISSING_VO_BEATS_REASON
     if check_audio:
