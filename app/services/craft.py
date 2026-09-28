@@ -151,9 +151,10 @@ CRAFT_RULES_SHORT = (
     "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
     "Title suffix must be '· <series> <nn>' with series one of: "
     + " | ".join(SERIES_LABELS) + ". "
-    "Keep dollar stakes as numerals on title/frame0/thumb (e.g. $79) — "
-    "NEVER expand to 'seventy-nine dollars'. Credits/IA pre-approve needs "
-    "spoken phrase + ($N or concrete noun) + ·nn."
+    "NEVER put a money value (a currency symbol followed by a number) in the TITLE — "
+    "the publish gate rejects it. Where a money amount is spoken in the VO, keep it "
+    "as numerals — NEVER spell it out in words. Credits/IA pre-approve needs "
+    "spoken phrase + concrete noun + ·nn."
 )
 
 STOPWORDS = {
@@ -187,7 +188,7 @@ TITLE_BANNED_REASON = (
 )
 TITLE_CLAIM_REASON = (
     "Credits/IA title must carry (a) a useful spoken first phrase, "
-    "(b) a $N numeral OR concrete noun, and (c) · series nn — "
+    "(b) a concrete noun (currency values are not allowed in titles), and (c) · series nn — "
     "do not mass-retitle the catalog; park leftovers via reject"
 )
 
@@ -240,10 +241,12 @@ def _useful_spoken_phrase(title: str | None) -> bool:
 
 
 def _has_claim_stake(title: str | None) -> bool:
-    """(b) $N numeral OR concrete noun grounded in the spoken head."""
+    """(b) concrete noun grounded in the spoken head.
+
+    2026-09-28: a $N numeral no longer satisfies (b) on its own — currency values
+    in titles are now a publish-gate reject (CURRENCY_TITLE_PATTERN), so the
+    noun path is the only way to pass. The noun check is unchanged."""
     head = ((title or "").split("·", 1)[0] or "").strip()
-    if dollar_numerals(head):
-        return True
     if spelled_dollar_amount(head):
         return False
     obj = opening_object(head)
@@ -1177,11 +1180,18 @@ CRAFT_REVIEW_FAIL = "fail"
 # Configurable. Replace the list (or call set_nonsense_title_patterns) to
 # extend ops bans without a code change on the hot path. Matched against the
 # title head before `·` when present, else the whole title (folded-ish).
+# 2026-09-28 (CoS): ANY currency value anywhere in the title — `R$` or `$`
+# followed by a number (R$50, R$ 22, $47, $1.5k, US$9). Title-only: the script /
+# VO may still say the amount. Supersedes the narrower "billed $N" head (kept
+# first so its reason text stays stable for existing callers).
+CURRENCY_TITLE_PATTERN = r"(?:r\$|\$)\s*\d"
+
 NONSENSE_TITLE_PATTERNS: list[str] = [
     # "billed $58" / "billed $58 when…" spam heads without a real claim stake
     r"^billed\s*\$\d+\b",
     # bare series-only titles (no spoken claim)
     r"^(copilot\s+credits|ia|agent\s+memory|crewai|local|claude\s+code)\s+\d+\s*$",
+    CURRENCY_TITLE_PATTERN,
 ]
 
 _NONSENSE_TITLE_RES: list[re.Pattern[str]] | None = None
@@ -1195,6 +1205,10 @@ MISSING_VO_BEATS_REASON = (
     "creation_config has no VO/beats — need beats[] (or omit creation_config for legacy)"
 )
 MUTE_AUDIO_REASON = "video has no audio track (mute / missing narration) — reject"
+CURRENCY_TITLE_REASON = (
+    "title carries a currency value (R$N / $N) — not allowed in titles; keep the "
+    "amount in the script/VO and retitle, or park via reject"
+)
 
 
 def set_nonsense_title_patterns(patterns: list[str] | None) -> None:
@@ -1211,6 +1225,19 @@ def _nonsense_res() -> list[re.Pattern[str]]:
             re.compile(p, re.IGNORECASE) for p in NONSENSE_TITLE_PATTERNS if p
         ]
     return _NONSENSE_TITLE_RES
+
+
+def _nonsense_reason_for(rx: re.Pattern[str]) -> str:
+    return (CURRENCY_TITLE_REASON if rx.pattern == CURRENCY_TITLE_PATTERN
+            else NONSENSE_TITLE_REASON)
+
+
+_CURRENCY_TITLE_RE = re.compile(CURRENCY_TITLE_PATTERN, re.IGNORECASE)
+
+
+def currency_in_text(text: str | None) -> bool:
+    """True when text carries `R$`/`$` followed by a number (the title ban shape)."""
+    return bool(_CURRENCY_TITLE_RE.search(text or ""))
 
 
 def _title_head_for_nonsense(title: str | None) -> str:
@@ -1231,9 +1258,9 @@ def nonsense_title_reason(title: str | None) -> str | None:
         return None  # empty title is title_gate's job
     for rx in _nonsense_res():
         if head and rx.search(head):
-            return NONSENSE_TITLE_REASON
+            return _nonsense_reason_for(rx)
         if whole and rx.search(whole):
-            return NONSENSE_TITLE_REASON
+            return _nonsense_reason_for(rx)
     return None
 
 

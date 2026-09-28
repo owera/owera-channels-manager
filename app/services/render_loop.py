@@ -22,6 +22,7 @@ from app.services import metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.engines.worker import _has_visible_frames
 from app.services.mpt_client import build_video_params
+from app.services.subject_guard import HOLD_PREFIX, subject_guard_reason
 from app.services.topic_playlist import ensure_topic_playlist
 
 logger = logging.getLogger("manager.render")
@@ -507,6 +508,25 @@ def _submit_new(session: Session) -> None:
         in_flight += 1
 
 
+def _hold_invalid_subject(session: Session, video: Video, ch: Channel) -> bool:
+    """True (and keep it DRAFT) when the subject fails the pre-produce guard.
+
+    Records the reason on video.error and one `produce` error JobRun — only when
+    the reason changes, so a held draft doesn't write a row every 15s tick."""
+    reason = subject_guard_reason(video.subject)
+    if not reason:
+        return False
+    if video.error != reason:
+        video.error = reason
+        session.add(video)
+        quota.log(session, kind="produce", status="error", video_id=video.id,
+                  channel_id=ch.id,
+                  detail=f"auto-produce held draft (not queued): {reason}")
+        logger.info("auto-produce held draft %s on channel %s: %s",
+                    video.id, ch.slug, reason)
+    return True
+
+
 def _auto_produce(session: Session) -> None:
     """Promote DRAFT -> QUEUED to fill today's free render capacity.
 
@@ -546,6 +566,11 @@ def _auto_produce(session: Session) -> None:
                    Topic.active == True, Topic.weight > 0)  # noqa: E712
             .order_by(Topic.weight.desc(), Video.position, Video.id)
         ).all()
+        # Subject guard (2026-09-28 RR refill): a draft whose subject lost its
+        # leading number/stake ("B em…", "camadas na GPU…") or carries a currency
+        # value stays DRAFT — it never takes a render slot; the next valid draft
+        # does. The reason is recorded once on video.error + a produce JobRun.
+        rows = [(v, t) for v, t in rows if not _hold_invalid_subject(session, v, ch)]
         if not rows:
             continue
         longs = [v for v, t in rows if t.content_format == "long"]
@@ -589,6 +614,8 @@ def _auto_produce(session: Session) -> None:
         picks.extend(longs[: headroom - len(picks)])
         for v in picks:
             v.status = VideoStatus.QUEUED
+            if (v.error or "").startswith(HOLD_PREFIX):
+                v.error = None          # subject was fixed since it was held
             session.add(v)
             quota.log(session, kind="produce", status="success", video_id=v.id,
                       channel_id=ch.id,

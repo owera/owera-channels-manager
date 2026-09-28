@@ -89,6 +89,8 @@ def dashboard(session: Session = Depends(get_session)):
             "quota_cap": settings.youtube_daily_quota_cap,
             "next_publish_eta": _next_publish_eta(session, ch, cfg),
             "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0)),
+            # Runway / under-publish signals (same computation as the issues digest).
+            "publish_signals": issues.publish_signals(session, ch),
             "active": [{"id": v.id, "subject": v.subject, "status": v.status,
                         "render_progress": v.render_progress} for v in active],
         })

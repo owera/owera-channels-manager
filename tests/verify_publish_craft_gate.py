@@ -47,7 +47,8 @@ def ok(cond, msg):
 
 def _passing_title(token="Cache miss"):
     token = (token or "ready").strip() or "ready"
-    return f"{token} costs $79 · Copilot Credits 1"
+    # 2026-09-28: no currency value in titles (publish gate rejects it) — noun path.
+    return f"{token} re-bills the whole receipt · Copilot Credits 1"
 
 
 _OK_TITLE = _passing_title("Cache miss")
@@ -152,10 +153,15 @@ ok(craft.nonsense_title_reason("Copilot Credits 14")
    == craft.NONSENSE_TITLE_REASON,
    "bare series nn is nonsense")
 ok(craft.nonsense_title_reason(_OK_TITLE) is None,
-   "useful Credits $N title is not nonsense")
+   "useful Credits noun title is not nonsense")
+# 2026-09-28 (CoS item 6): any currency value in a title is now blocked, so the
+# former "billed $N mid-claim is a real stake" case flips to the currency reason.
 ok(craft.nonsense_title_reason("Copilot billed $58 when it timed out · Copilot Credits 1")
+   == craft.CURRENCY_TITLE_REASON,
+   "Copilot billed $N claim is now blocked (currency value in title)")
+ok(craft.nonsense_title_reason("Copilot billed the run that timed out · Copilot Credits 1")
    is None,
-   "Copilot billed $N claim is NOT nonsense (real spoken stake)")
+   "billing words without an amount are NOT nonsense (real spoken stake)")
 
 ok(craft.publish_craft_block_reason(
        title=_OK_TITLE, script="", creation_config=_OK_CC)
@@ -310,6 +316,7 @@ ok(craft.nonsense_title_reason("billed $58 · Copilot Credits 1") is None,
 craft.set_nonsense_title_patterns([
     r"^billed\s*\$\d+\b",
     r"^(copilot\s+credits|ia|agent\s+memory|crewai|local|claude\s+code)\s+\d+\s*$",
+    craft.CURRENCY_TITLE_PATTERN,
 ])
 
 

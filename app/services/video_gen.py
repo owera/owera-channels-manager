@@ -139,6 +139,76 @@ def channel_language_code(session, channel_id: int | None) -> str | None:
     return code_from_voice(voice)
 
 
+# 2026-09-22 Rodrigo killed the billing-AMOUNT hook formula (a billing verb +
+# a money value as the hook: charged/billed/cobrou/"Prod added" + amount, or an
+# idea that opens on a money value). Billing WORDS alone (billing, coupon,
+# invoice, charge, plan, card) stay allowed. 2026-09-28 (CoS item 6) titles may
+# not carry any currency value at all — the publish craft gate rejects them —
+# so ideas with one are dropped here instead of becoming unproducible drafts.
+# Keep this text free of literal money examples: a negative example still primes.
+NO_BILLING_AMOUNT_HOOK = (
+    "HOOK RULE: never use a charged/billed amount as the hook, and never put a money "
+    "value (a currency symbol followed by a number) anywhere in the title. Lead with a "
+    "useful spoken claim plus a concrete noun (the tool, file, command, model, flag, "
+    "field, or setting) — the same rule as the Shipping and Agent traps series. "
+    "Mentioning billing, a coupon, an invoice or a plan is fine without an amount."
+)
+
+# OS "Agent memory" series (item 9, 2026-09-28): five straight billing/price
+# scenarios (EUR/USD, SAVE20 coupon, annual vs monthly, warranty, card) read as
+# clones. Keep the "Chat did X. Prod did Y." template, spread the domains, cap
+# billing/price at 1 in 5. Applies to NEW ideas only — never rewrites drafts.
+AGENT_MEMORY_SERIES_RE = re.compile(r"agent\s+memory", re.IGNORECASE)
+AGENT_MEMORY_DOMAINS = (
+    "calendar/scheduling", "shipping address", "permission/access",
+    "language/locale", "user preference", "order status", "timezone",
+    "notifications", "file edits", "retries/rate limits", "environment (staging vs prod)",
+    "identity/account", "search filters", "data retention/deletion",
+)
+AGENT_MEMORY_SPREAD = (
+    "SCENARIO SPREAD (Agent memory): keep the title template exactly "
+    "'Chat did X. Prod did Y.' (two short sentences, then the · Agent memory nn "
+    "suffix). Spread the scenarios across different domains — "
+    + ", ".join(AGENT_MEMORY_DOMAINS) + " — one domain per idea, no two in a row "
+    "from the same domain. At most 1 in 5 ideas may be about billing/price "
+    "(currency, coupons, plans, invoices, refunds, cards, warranties); the rest "
+    "must be non-billing."
+)
+BILLING_WINDOW = 5          # sliding window for the 1-in-5 billing cap
+_BILLING_THEME_RE = re.compile(
+    r"\b(?:bill(?:ed|ing|s)?|charg(?:e|ed|es|ing)|pric(?:e|ed|es|ing)|invoic(?:e|ed|es)|"
+    r"coupon|discount|refund(?:ed|s)?|warranty|subscription|checkout|payment|paid|pay|"
+    r"card|annual|monthly|usd|eur|brl|tax|fee|cobr(?:ou|a|ar|an[çc]a)|pre[çc]o|fatura|"
+    r"cupom|reembolso|assinatura|cart[aã]o|plano|mensal|anual)\b|[$€£]",
+    re.IGNORECASE,
+)
+
+
+def is_billing_themed(text: str | None) -> bool:
+    """Cheap keyword classifier: is this idea about billing/price?"""
+    return bool(_BILLING_THEME_RE.search(text or ""))
+
+
+def _is_agent_memory(topic_name: str | None, theme_prompt: str | None) -> bool:
+    return bool(AGENT_MEMORY_SERIES_RE.search(f"{topic_name or ''}\n{theme_prompt or ''}"))
+
+
+def _cap_billing(ideas: list[str], existing: list[str], window: int = BILLING_WINDOW) -> list[str]:
+    """Keep at most 1 billing-themed idea in any `window` consecutive subjects,
+    counting the tail of `existing` (the topic's recent subjects) before the new
+    batch. Over-cap billing ideas are dropped (no extra LLM call); the autofill
+    loop's next tick asks again for the shortfall."""
+    tail = [bool(is_billing_themed(x)) for x in existing[-(window - 1):]] if window > 1 else []
+    out: list[str] = []
+    for idea in ideas:
+        billing = is_billing_themed(idea)
+        if billing and any(tail[-(window - 1):]):
+            continue
+        out.append(idea)
+        tail.append(billing)
+    return out
+
+
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
                    n: int = 8, content_format: str = "short",
                    language: str | None = None) -> list[str]:
@@ -147,8 +217,12 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
     lang_rule = (f"\nHARD RULE: write every title in {language} — the channel publishes "
                  f"exclusively in {language}, whatever language the theme name is in." if language else "")
-    from app.services.craft import CRAFT_RULES_SHORT, contains_banned, contains_subscribe_cta
-    craft_rule = f"\n{CRAFT_RULES_SHORT}"
+    from app.services.craft import (CRAFT_RULES_SHORT, contains_banned,
+                                    contains_subscribe_cta, currency_in_text)
+    craft_rule = f"\n{CRAFT_RULES_SHORT}\n{NO_BILLING_AMOUNT_HOOK}"
+    agent_memory = _is_agent_memory(topic_name, theme_prompt)
+    if agent_memory:
+        craft_rule += f"\n{AGENT_MEMORY_SPREAD}"
     if content_format == "long":
         prompt = (
             f"Generate {n} distinct, compelling ideas for in-depth long-form YouTube videos, "
@@ -186,8 +260,8 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             "demystification (X Is Not Magic — It's Just Y), speed hook (X in 60 Seconds), "
             "visceral consequence (X Ate My [concrete loss] in [timeframe] — Here's Why), "
             "brutal-truth reveal (The X Nobody Tells You About Y). "
-            "Use specific numbers and concrete stakes when they fit naturally (dollar amounts, "
-            "time durations, measurable outcomes) — they signal credibility and magnify the hook. "
+            "Use specific numbers and concrete stakes when they fit naturally (time durations, "
+            "sizes, counts, measurable outcomes) — they signal credibility and magnify the hook. "
             "AVOID as openers: 'Mastering', 'Deep Dive', 'Optimize', 'Cut X%' — they attract "
             "no one who isn't already convinced. Avoid vague or generic titles. "
             "Do NOT repeat or closely paraphrase any of these existing titles:\n"
@@ -205,6 +279,10 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             continue
         if contains_banned(title) or contains_subscribe_cta(title):
             continue
+        if currency_in_text(title):
+            continue  # publish gate rejects currency in titles (item 6)
         seen.add(title.lower())
         out.append(title)
+    if agent_memory:
+        out = _cap_billing(out, list(existing))
     return out[:max(0, n)]  # the model often returns more lines than asked

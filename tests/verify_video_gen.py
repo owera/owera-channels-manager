@@ -601,24 +601,28 @@ _llm_calls.clear()
 out_cot = _run_ideas(
     _text=(
         "Vou conferir o catálogo para não repetir título nem o número da série."
-        "O agente me cobrou $47 no terminal. · Claude Code 10\n"
+        "O agente apagou o .env no terminal. · Claude Code 10\n"
         "Vou conferir o catálogo da série para o próximo número e um ângulo "
         "que ainda não foi usado.Bateria trava a GPU em 30W, não é engenharia. · IA 199\n"
         "Vou conferir o catálogo e só isso.\n"
         "O agente force-pushou a main. · Claude Code 11\n"
         "O catálogo que você colou já passa de IA 172. Vou conferir o próximo "
-        "número livre antes de fechar os títulos.Texto em português sai R$14, "
-        "não é engenharia. · IA 200\n"
+        "número livre antes de fechar os títulos.Texto em português gasta o dobro "
+        "de tokens, não é engenharia. · IA 200\n"
         "Vou conferir o próximo número livre antes de fechar os títulos."
     ),
     n=8,
 )
 ok(out_cot == [
-    "O agente me cobrou $47 no terminal. · Claude Code 10",
+    "O agente apagou o .env no terminal. · Claude Code 10",
     "Bateria trava a GPU em 30W, não é engenharia. · IA 199",
     "O agente force-pushou a main. · Claude Code 11",
-    "Texto em português sai R$14, não é engenharia. · IA 200",
+    "Texto em português gasta o dobro de tokens, não é engenharia. · IA 200",
 ], "catalog-planning CoT drops; glued claim and series suffix stay; pure CoT line is discarded")
+# (2026-09-28: the two glued claims above used to carry "$47" / "R$14"; titles
+# may no longer carry currency, so they were swapped to non-currency claims —
+# the CoT-strip intent is unchanged. The currency drop is pinned in
+# verify_rr_refill.py.)
 ok(video_gen._strip_idea_cot(
     "Your agent wrote to production with the staging tool. · Agent traps 1"
 ) == "Your agent wrote to production with the staging tool. · Agent traps 1",
