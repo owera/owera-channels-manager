@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     autofill_tick_minutes: int = 20           # how often to top up low topic idea queues
     autofill_batch: int = 8                   # ideas generated per topic refill
 
+    # Review / publish runway signals (issues digest + dashboard; signal-only —
+    # nothing here changes a budget, the mix, or auto-approves anything).
+    # 2026-09-27 RR published 4/5 with two craft-PASS renders idle in review.
+    ops_tz: str = "America/Fortaleza"         # the operator's day (review deadline tz)
+    review_decide_by: str = "10:45"           # HH:MM ops_tz: review_ready decided before the 11:00 window
+    runway_buffer: int = 1                    # runway target = daily_publish_budget + this (5 + 1 = 6)
+
     # --- Composition (HyperFrames storyboard) -----------------------------------
     # Which beat types the LLM may use and the validator will accept. Any beat whose
     # type is not listed here is downgraded to "statement", so this list is the rollout

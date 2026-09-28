@@ -53,7 +53,8 @@ TIMEOUT = settings.publish_timeout_seconds
 # discriminate which video published.
 def _passing_title(token="Cache miss"):
     token = (token or "ready").strip() or "ready"
-    return f"{token} costs $79 · Copilot Credits 1"
+    # 2026-09-28: no currency value in titles (publish gate rejects it) — noun path.
+    return f"{token} re-bills the whole receipt · Copilot Credits 1"
 
 
 _OK_TITLE = _passing_title("Cache miss")

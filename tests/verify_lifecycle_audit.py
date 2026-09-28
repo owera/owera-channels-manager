@@ -39,7 +39,8 @@ from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 # so the audit-trail pin never wrote a JobRun.
 # Durable craft_review (7c0a375) also requires a non-empty script before
 # approve / retry-with-artifact; an empty script 409s and writes no JobRun.
-_OK_TITLE = "Cache miss costs $79 · Copilot Credits 1"
+# 2026-09-28: titles may not carry a currency value (publish gate) — noun path.
+_OK_TITLE = "Cache miss re-bills the whole receipt · Copilot Credits 1"
 _OK_SCRIPT = "It costs $79. Here is why Credits matter."
 
 _checks = 0

@@ -34,10 +34,11 @@ Ops park leftover pré-pattern items via **reject**. Do **not** mass-retitle.
 
 ## $N numeral lock (frame0 + thumb)
 
-Dollar stakes stay numerals on title / frame0 / thumb (e.g. `$79`).
+Since 2026-09-28 titles carry **no currency value** (see the publish gate
+below), so the lock only applies when a `$N` reaches frame0 / thumb from the
+spoken claim; with no `$N` it simply does not apply. When one is present,
 `opening_object` / `compress_claim` / thumbnail hook compression must
-**never** expand to "seventy-nine dollars". Same `$N` on thumb and frame0,
-aligned with the spoken title.
+**never** expand it to "seventy-nine dollars". Same `$N` on thumb and frame0.
 
 ## Credits / IA pre-approve title lock (new queue only)
 
@@ -45,7 +46,8 @@ For titles matching `· Copilot Credits|IA <nn>`, approve / skip-gate /
 retry-to-approved / publish also require:
 
 1. a useful spoken first phrase (head before `·`)
-2. a `$N` numeral **or** concrete noun (bill / RAG / terminal / …)
+2. a concrete noun (bill / RAG / terminal / …) — a `$N` no longer counts
+   (currency values are blocked in titles)
 3. the `· series nn` suffix
 
 Regression FAIL: Follow, Follow-tomorrow, Siga, Siga-amanhã, waitlist,
@@ -110,7 +112,10 @@ Pending approved rows are evaluated on each publish tick
 
 Publish eligibility (`craft.publish_craft_block_reason`), in order:
 
-1. configurable nonsense-title patterns (default: `billed $N` head, bare series nn)
+1. configurable nonsense-title patterns (default: `billed $N` head, bare series nn,
+   and — since 2026-09-28 — **any currency value anywhere in the title**:
+   `R$` or `$` followed by a number, case-insensitive; title-only, the script /
+   VO may still say the amount)
 2. existing title lock + Video Maker A/B/C (`review_gate_reason`)
 3. non-empty `script`
 4. provided scripts only (`creation_config.script_source=provided`): first spoken
@@ -295,3 +300,14 @@ Channels will pull/restart. Checkout:
 Do **not** raise `daily_publish_budget`, `daily_render_budget`, or
 `render_concurrency`. Do not change topic weights. After pull: restart the
 manager unit so the publish gate is live before the next drip.
+
+## Pre-produce subject guard (2026-09-28)
+
+`render_loop._auto_produce` runs `subject_guard.subject_guard_reason` before a
+draft takes a render slot. Held drafts stay `draft` with the reason on
+`error` + one `produce` error run, and the next valid draft is queued. Held:
+a lowercase first word (except allowlisted literals like `node_modules`,
+code-ish tokens with `_ . / - @ :` or digits, camelCase brands like `eGPU`),
+a bare unit / currency token with no number (`B`, `GB`, `%`, `R$`, `x` …),
+leading punctuation, and any currency value (`R$N` / `$N`) in the subject.
+The digest lists them under `subject_held`.
