@@ -113,8 +113,10 @@ Publish eligibility (`craft.publish_craft_block_reason`), in order:
 1. configurable nonsense-title patterns (default: `billed $N` head, bare series nn)
 2. existing title lock + Video Maker A/B/C (`review_gate_reason`)
 3. non-empty `script`
-4. optional VO/beats on `creation_config` (legacy rows without `creation_config` fail-open)
-5. mute / no audio track when `ffprobe` can read the file
+4. provided scripts only (`creation_config.script_source=provided`): first spoken
+   line carries the title claim (`provided_script_hook_reason`, see below)
+5. optional VO/beats on `creation_config` (legacy rows without `creation_config` fail-open)
+6. mute / no audio track when `ffprobe` can read the file
 
 `POST …/approve`, skip-gate finalize, and `POST …/retry` (artifact kept) write
 `craft_review=pass` only when the full publish craft gate clears.
@@ -124,6 +126,46 @@ Nonsense patterns are configurable via `craft.set_nonsense_title_patterns([...])
 (defaults in `craft.NONSENSE_TITLE_PATTERNS`). No mix / concurrency / spend change.
 
 Regression: `tests/verify_publish_craft_gate.py`.
+
+## Provided scripts (spoken verbatim)
+
+A video can carry an operator/CMO-authored VO instead of the `grok -p` script.
+
+- **Set it on create:** `POST /api/videos` accepts optional `script` (and `title`).
+- **Set / clear it before render:** `PATCH /api/videos/{id}/script` with
+  `{"script": "..."}` (or `{"script": null}` to go back to generated). Allowed on
+  `draft`, `queued` (not submitted yet) and `failed` without an artifact; 409
+  otherwise. Post-render edits stay on `PATCH …/craft`; the wide
+  `PATCH /api/videos/{id}` still ignores `script`.
+- Either path writes `creation_config.script_source = "provided"` and a
+  `script_set` JobRun. Rows without that marker (including requeues of
+  generated videos) keep regenerating exactly as before.
+
+At submit the render loop:
+
+1. Checks the hook: the first spoken sentence must be `claim_aligned` with the
+   title head before `·` (else the subject head), and a `$N` stake stays numerals.
+   If it doesn't match, the video goes to `failed` with `craft_review=fail` and
+   the `PROVIDED_SCRIPT_HOOK_REASON` error. No render slot, playlist or engine
+   call is used, and the script is **never regenerated**. Fix it with
+   `PATCH …/script`, then `POST …/retry`.
+2. Applies only the deterministic rules the generated path already uses
+   (`craft.prepare_provided_script`): banned-CTA sentences dropped, mid-short
+   Subscribe dropped, and for shorts the standard `Subscribe — next {series} {noun}.`
+   appended when the last sentence isn't already an endcard VO. An existing
+   closer is kept as written and never duplicated. The edits go to
+   `creation_config.script_edits`.
+3. Passes the text to the engine: HyperFrames gets `params["provided_script"]`
+   (`worker.run_job` skips `_generate_script`; TTS and storyboard use the text
+   verbatim), and MPT gets its native `video_script`.
+
+`_finalize` keeps the provided script (provided text plus endcard) as the text
+of record. An empty, None or re-derived task script never overwrites it.
+Everything else runs through the normal gates: Gate A/B/C, real VO / mute
+check, title gate and `craft_review`. The worker stamps
+`creation_config.script_source = provided|generated` on every render.
+
+Regression: `tests/verify_provided_script.py`.
 
 ## Video Maker craft gate (Shorts A+B+C)
 

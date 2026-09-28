@@ -128,6 +128,50 @@ def _effective_skip_gate(video: Video, channel: Channel) -> bool:
     return channel.default_skip_gate if video.skip_gate is None else video.skip_gate
 
 
+def _cc_dict(raw) -> dict:
+    """creation_config column (JSON str / dict / None) → dict (never raises)."""
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _prepare_provided_script(session: Session, video: Video, channel: Channel,
+                             fmt: str, brand: str | None) -> str | None:
+    """Pre-render gate + prep for a provided script. Returns the VO text to
+    speak verbatim, "" when the video has no provided script (generate as
+    usual), or None when the video was parked FAILED (misaligned hook — never
+    silently regenerated, no render slot spent)."""
+    from app.services import craft
+    if not (craft.is_provided_script(video.creation_config)
+            and (video.script or "").strip()):
+        return ""
+    blocked = craft.provided_script_hook_reason(
+        video.script, title=video.title, subject=video.subject)
+    if blocked:
+        video.status = VideoStatus.FAILED
+        video.error = blocked
+        video.craft_review = craft.CRAFT_REVIEW_FAIL
+        quota.log(session, kind="render", status="error", video_id=video.id,
+                  channel_id=channel.id,
+                  detail=f"provided script blocked before render (no slot used): {blocked}")
+        return None
+    series_src = video.title if craft.spoken_title_ok(video.title) else video.subject
+    prepared, edits = craft.prepare_provided_script(
+        video.script, series_src, brand=brand, content_format=fmt)
+    video.script = prepared
+    cc = _cc_dict(video.creation_config)
+    cc["script_source"] = craft.SCRIPT_SOURCE_PROVIDED
+    cc["script_edits"] = edits
+    video.creation_config = json.dumps(cc)
+    return prepared
+
+
 def _format_overrides(content_format: str) -> dict:
     """Highest-priority render params for long-form: force a landscape aspect and a
     longer script. Shorts keep the existing profile-driven behavior (no overrides)."""
@@ -172,9 +216,21 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
                   channel_id=channel.id, detail=video.error)
         return
 
-    video.script = task.get("script") or video.script
+    # Provided scripts (creation_config.script_source=provided) are the spoken
+    # text of record: the engine only echoes them back, so an empty/None (or
+    # re-derived) task script must never clobber the provided + endcard VO.
+    from app.services import craft as _craft
+    prior_cc = _cc_dict(video.creation_config)
+    provided = (_craft.is_provided_script(prior_cc)
+                and bool((video.script or "").strip()))
+    if not provided:
+        video.script = task.get("script") or video.script
     if task.get("creation_config"):
-        video.creation_config = json.dumps(task["creation_config"])
+        cc = task["creation_config"]
+        if provided and isinstance(cc, dict):
+            cc = {**cc, "script_source": _craft.SCRIPT_SOURCE_PROVIDED,
+                  "script_edits": prior_cc.get("script_edits") or []}
+        video.creation_config = json.dumps(cc)
 
     thumb = dest_dir / "thumb.jpg"
     if _make_thumbnail(dest, thumb):
@@ -470,9 +526,15 @@ def _submit_new(session: Session) -> None:
                 >= channel.daily_render_budget):
             continue
         topic = session.get(Topic, video.topic_id)
+        fmt = "long" if topic and topic.content_format == "long" else "short"
+        from app.services.craft import brand_of
+        brand = brand_of(channel.slug, channel.name, channel_id=channel.id)
+        # Provided script: hook-gate before any side effect (playlist / slot).
+        provided_script = _prepare_provided_script(session, video, channel, fmt, brand)
+        if provided_script is None:
+            continue
         # A video is starting production → make sure its topic playlist exists.
         ensure_topic_playlist(session, topic, channel)
-        fmt = "long" if topic and topic.content_format == "long" else "short"
         params = build_video_params(
             video.subject,
             _profile_params(session, channel.default_render_profile_id),
@@ -483,8 +545,12 @@ def _submit_new(session: Session) -> None:
         )
         params["content_format"] = fmt
         params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
-        from app.services.craft import brand_of
-        params["brand"] = brand_of(channel.slug, channel.name, channel_id=channel.id)
+        params["brand"] = brand
+        if provided_script:
+            # Spoken verbatim: HyperFrames worker skips _generate_script on
+            # provided_script; MPT uses its native video_script field.
+            params["provided_script"] = provided_script
+            params["video_script"] = provided_script
         params["channel_id"] = channel.id
         params["channel_slug"] = channel.slug
         engine_name = resolve_engine(session, video, topic, channel)

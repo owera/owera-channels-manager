@@ -307,9 +307,15 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         aspect = params.get("video_aspect") or "9:16"
         resolution, width, height = _ASPECTS.get(aspect, _ASPECTS["9:16"])
 
-        # 1. Narration script
+        # 1. Narration script. A provided script (render_loop passes it as
+        # params["provided_script"], already endcard-pinned by
+        # craft.prepare_provided_script) is spoken verbatim — no grok -p rewrite.
         _status(handle, progress=5)
-        script = _generate_script(subject, params)
+        provided = (params.get("provided_script") or "").strip()
+        if provided:
+            script = provided
+        else:
+            script = _generate_script(subject, params)
         _status(handle, script=script, progress=12)
 
         # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
@@ -371,6 +377,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
 
         # Record the creative choices (the "treatment" signal) for later analytics joins.
         cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback)
+        cc["script_source"] = "provided" if provided else "generated"
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
