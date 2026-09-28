@@ -234,8 +234,8 @@ bill = craft.series_endcard(
 ok(bill["noun"] == "receipt" and bill["vo"].endswith("receipt."),
    "noun is picked from title/script (receipt before bill/drop/trap)")
 
-ok(craft.series_of(None, "os") == "Copilot Credits",
-   "missing title + OS brand → Copilot Credits")
+ok(craft.series_of(None, "os") == "Agent memory",
+   "missing title + OS brand → Agent memory (Credits wedge killed)")
 ok(craft.series_of(None, "rr") == "IA",
    "missing title + RR brand → IA")
 ok(craft.series_of(None, None) == "Copilot Credits",

@@ -51,9 +51,10 @@ TITLE_GATE_REASON = (
 # Next-claim noun on the series endcard VO. Only these — never invent a CTA.
 NEXT_CLAIM_NOUNS = ("trap", "receipt", "bill", "drop")
 
-# Brand defaults when the title has no · series nn (English public YT).
-# OS = Copilot Credits; RR = IA. Other series only swap {series}/{noun}.
-DEFAULT_SERIES = {"os": "Copilot Credits", "rr": "IA"}
+# Brand defaults when the title has no · series nn.
+# OS = Agent memory (Credits wedge killed 2026-09-22); RR = IA.
+# Unknown brand keeps the English public fallback. Patterned titles still win.
+DEFAULT_SERIES = {"os": "Agent memory", "rr": "IA"}
 DEFAULT_SERIES_FALLBACK = "Copilot Credits"
 DEFAULT_NOUN = "trap"
 
@@ -1059,7 +1060,7 @@ def _canonical_series(raw: str) -> str:
 def series_of(title: str | None, brand: str | None = None) -> str:
     """Series label for the endcard. Title suffix wins; else brand default.
 
-    OS → Copilot Credits; RR → IA. Unknown brand → Copilot Credits (English
+    OS → Agent memory; RR → IA. Unknown brand → Copilot Credits (English
     public YT). Never invent a third CTA — only swap {series}/{noun}.
     """
     m = SPOKEN_TITLE_RE.search(title or "")
@@ -1106,7 +1107,7 @@ def series_endcard(title: str | None, script: str | None = None,
                    brand: str | None = None, noun: str | None = None) -> dict:
     """VO + chip + optional micro for the series endcard.
 
-    Defaults: OS / Copilot Credits / trap; RR / IA / trap.
+    Defaults: OS / Agent memory / trap; RR / IA / trap.
     """
     series = series_of(title, brand)
     n = noun if noun in NEXT_CLAIM_NOUNS else next_claim_noun(title, script)

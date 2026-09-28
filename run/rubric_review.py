@@ -75,7 +75,13 @@ def _render_subject(entry: dict, out_dir: Path) -> dict:
     for old in out_dir.glob("b*.png"):
         old.unlink()
     subject, fmt = entry["subject"], entry["format"]
-    params = {"content_format": fmt, "paragraph_number": 2, "voice_name": entry["voice"]}
+    # ch1 goldens are OS, ch2 goldens are RR — same infer_brand the worker uses
+    # so unpatterned endcards match production instead of the unknown-brand fallback.
+    channel_id = 1 if entry["id"].startswith("ch1") else 2
+    from app.services.engines import theme
+    brand = theme.infer_brand(channel_id)
+    params = {"content_format": fmt, "paragraph_number": 2, "voice_name": entry["voice"],
+              "brand": brand, "channel_id": channel_id}
 
     script = worker._generate_script(subject, params)
     words = worker._tts(script, worker._voice(params), out_dir / "narration.mp3")
@@ -87,6 +93,7 @@ def _render_subject(entry: dict, out_dir: Path) -> dict:
         resolution="portrait", width=1080, height=1920, topic_id=entry["topic_id"],
         content_format=fmt, allowed_types=settings.composition_beat_types,
         language=language_from_voice(entry["voice"]), llm=worker._llm,
+        brand=brand, channel_id=channel_id,
     )
     used_fallback = not html
     if used_fallback:
