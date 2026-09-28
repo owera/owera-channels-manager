@@ -260,6 +260,14 @@ try:
     ok(r.status_code == 409, "PATCH …/craft on a draft still 409 (rule unchanged)")
     r = client.patch(f"/api/videos/{vid}", auth=auth, json={"script": "wide"})
     ok(row(vid).script == A1_SCRIPT, "wide PATCH still ignores script")
+    with Session(engine) as s:
+        held = s.get(Video, vid)
+        held.error = "subject held: other guard note"
+        s.add(held)
+        s.commit()
+    r = client.patch(f"/api/videos/{vid}/script", auth=auth, json={"script": A1_SCRIPT})
+    ok(r.status_code == 200 and row(vid).error == "subject held: other guard note",
+       "aligned script set never clears another guard's error note")
     r = client.patch(f"/api/videos/{v_mis.id}/script", auth=auth, json={"script": None})
     v = row(v_mis.id)
     ok(r.status_code == 200 and v.script is None and v.creation_config is None,

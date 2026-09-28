@@ -306,14 +306,20 @@ def _apply_provided_script(v: Video, script: str | None) -> None:
         except json.JSONDecodeError:
             cc = {}
     cc.pop("script_edits", None)
+    reason = None
     if script is None:
         v.script = None
         cc.pop("script_source", None)
-        v.error = None
     else:
         v.script = script
         cc["script_source"] = craft.SCRIPT_SOURCE_PROVIDED
-        v.error = craft.provided_script_hook_reason(script, title=v.title, subject=v.subject)
+        reason = craft.provided_script_hook_reason(script, title=v.title, subject=v.subject)
+    # Only own our reason on ``error``: never clear another guard's note
+    # (e.g. the subject_guard hold, compared by value on every tick).
+    if reason:
+        v.error = reason
+    elif (v.error or "").startswith(craft.PROVIDED_SCRIPT_HOOK_REASON):
+        v.error = None
     v.creation_config = json.dumps(cc) if cc else None
 
 
