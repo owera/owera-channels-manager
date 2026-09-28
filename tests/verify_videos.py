@@ -31,6 +31,15 @@ not None. Rejected on ``VideoUpdate`` with ``mode="before"``. A 400
 mixed body writes none of the fields. Sibling videos untouched. A
 400 create writes no row.
 
+``ReorderBody`` is shared by ``POST /api/videos/reorder`` and
+``POST /api/videos/produce``. ``channel_id`` was a bare ``int`` and
+``ordered_ids`` a ``list[int]``, so JSON ``true`` became channel 1 /
+video 1 and ``false`` became 0. Reorder applies positions only when
+the video's channel matches, so ``true`` reordered channel 1; produce
+ignores ``channel_id`` and queues every draft id in the list, so
+``false`` still queued video 1. Both fields reject bools with
+``mode="before"``. Integer ids, including integer 0, stay as they are.
+
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real
 manager.db, no network, lifespan/scheduler never started). Exits
 non-zero on the first failed assertion.
@@ -48,9 +57,9 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import videos as videos_router
-from app.schemas import VideoCreate, VideoUpdate
+from app.schemas import ReorderBody, VideoCreate, VideoUpdate
 from app.services import metadata
 from app.services import engines as engines_mod
 
@@ -531,6 +540,249 @@ try:
        "create_video has its own _require_str call (not the PATCH one)")
     ok('"subject"' in _vid_src[_create_req:_create_req + 80],
        "create_video floors the subject key (not a different field)")
+
+    print("POST /api/videos/reorder and /produce: JSON bool ids are 422")
+    # true coerces to channel 1 / video 1. false coerces to 0: reorder
+    # then matches no channel and returns 200, and produce ignores
+    # channel_id so false still queues the listed drafts. Neither 200
+    # is a rejection.
+
+    with Session(engine) as s:
+        s.add(Video(channel_id=1, topic_id=1, subject="ch1-extra",
+                    status=VideoStatus.DRAFT, position=5))
+        s.add(Video(channel_id=2, topic_id=2, subject="ch2-extra",
+                    status=VideoStatus.DRAFT, position=7))
+        v1 = s.get(Video, 1)
+        v2 = s.get(Video, 2)
+        v1.position = 4
+        v2.position = 8
+        s.add(v1)
+        s.add(v2)
+        s.commit()
+
+    def vid_by_subject(subj: str) -> int:
+        with Session(engine) as s:
+            return s.exec(select(Video).where(Video.subject == subj)).one().id
+
+    def board_state():
+        with Session(engine) as s:
+            rows = s.exec(select(Video).order_by(Video.id)).all()
+            return tuple(
+                (v.id, v.channel_id, v.position, v.status) for v in rows
+            )
+
+    def n_produce_runs() -> int:
+        with Session(engine) as s:
+            return len(s.exec(select(JobRun).where(JobRun.kind == "produce")).all())
+
+    def post_reorder(**body):
+        return client.post("/api/videos/reorder", auth=auth, json=body)
+
+    def post_produce(**body):
+        return client.post("/api/videos/produce", auth=auth, json=body)
+
+    def first_err(resp):
+        return resp.json()["detail"][0]
+
+    ch1_extra = vid_by_subject("ch1-extra")
+    ch2_extra = vid_by_subject("ch2-extra")
+    topic_b = vid_by_subject("on topic b")
+    ok(ch1_extra != 1 and ch2_extra != 2 and topic_b not in (1, 2),
+       "precondition: extra drafts are not the seeded video ids")
+    base = board_state()
+    base_by_id = {row[0]: row for row in base}
+    ok(base_by_id[1][2] == 4 and base_by_id[ch1_extra][2] == 5,
+       "precondition: channel 1 positions are not already the true-coerced order")
+    ok(base_by_id[2][2] == 8 and base_by_id[ch2_extra][2] == 7,
+       "precondition: channel 2 positions will change under an integer reorder")
+    # An earlier create probe queued one video on purpose (queue=true).
+    # The ids this section reorders or produces are still drafts.
+    ok(base_by_id[1][3] == VideoStatus.DRAFT
+       and base_by_id[2][3] == VideoStatus.DRAFT
+       and base_by_id[ch1_extra][3] == VideoStatus.DRAFT
+       and base_by_id[ch2_extra][3] == VideoStatus.DRAFT
+       and base_by_id[topic_b][3] == VideoStatus.DRAFT,
+       "precondition: reorder/produce targets are still drafts")
+    runs0 = n_produce_runs()
+    ok(runs0 == 0, "precondition: no produce JobRuns yet")
+
+    def unchanged(msg):
+        ok(board_state() == base and n_produce_runs() == runs0, msg)
+
+    r = post_reorder(channel_id=True, ordered_ids=[ch1_extra, 1])
+    ok(r.status_code == 422,
+       "reorder channel_id=true is 422 (must not reorder channel 1)")
+    err = first_err(r)
+    ok(err["loc"][-1] == "channel_id", "reorder channel true error is on channel_id")
+    ok(err["input"] is True,
+       "reorder channel true keeps input true (mode=after would show 1)")
+    ok("boolean" in r.text, "reorder channel true names boolean")
+    unchanged("reorder channel_id=true writes nothing")
+
+    r = post_reorder(channel_id=False, ordered_ids=[ch1_extra, 1])
+    ok(r.status_code == 422,
+       "reorder channel_id=false is 422 (0 would be a silent no-op 200)")
+    err = first_err(r)
+    ok(err["input"] is False,
+       "reorder channel false keeps input false (coerced 0 would 200)")
+    ok("boolean" in r.text, "reorder channel false names boolean")
+    unchanged("reorder channel_id=false writes nothing")
+
+    r = post_reorder(channel_id=1, ordered_ids=[True])
+    ok(r.status_code == 422,
+       "reorder ordered_ids=[true] is 422 (must not move video 1 to position 0)")
+    err = first_err(r)
+    ok(err["loc"][-1] == "ordered_ids", "reorder ids true error is on ordered_ids")
+    ok(err["input"] == [True],
+       "reorder ids true keeps [true] (mode=after would show [1])")
+    ok("boolean" in r.text, "reorder ids true names boolean")
+    unchanged("reorder ordered_ids=[true] writes nothing")
+
+    r = post_reorder(channel_id=1, ordered_ids=[False])
+    ok(r.status_code == 422,
+       "reorder ordered_ids=[false] is 422 (video 0 is a silent skip, not a rejection)")
+    err = first_err(r)
+    ok(err["input"] == [False], "reorder ids false keeps [false]")
+    ok("boolean" in r.text, "reorder ids false names boolean")
+    unchanged("reorder ordered_ids=[false] writes nothing")
+
+    r = post_reorder(channel_id=1, ordered_ids=[ch1_extra, True])
+    ok(r.status_code == 422,
+       "reorder mixed [id, true] is 422 (must not apply the integer prefix)")
+    err = first_err(r)
+    ok(err["input"] == [ch1_extra, True],
+       "reorder mixed ids keep the bool (a strip-bools mutant returns 200)")
+    unchanged("reorder mixed [id, true] writes nothing")
+
+    r = post_produce(channel_id=True, ordered_ids=[1])
+    ok(r.status_code == 422,
+       "produce channel_id=true is 422 (handler ignores channel_id and would queue)")
+    err = first_err(r)
+    ok(err["loc"][-1] == "channel_id" and err["input"] is True,
+       "produce channel true stays on channel_id with input true")
+    ok("boolean" in r.text, "produce channel true names boolean")
+    unchanged("produce channel_id=true writes nothing")
+
+    r = post_produce(channel_id=False, ordered_ids=[1])
+    ok(r.status_code == 422,
+       "produce channel_id=false is 422 (false→0 would still queue video 1)")
+    err = first_err(r)
+    ok(err["input"] is False and "boolean" in r.text,
+       "produce channel false keeps input false and names boolean")
+    unchanged("produce channel_id=false writes nothing")
+
+    r = post_produce(channel_id=1, ordered_ids=[True])
+    ok(r.status_code == 422,
+       "produce ordered_ids=[true] is 422 (must not queue video 1)")
+    err = first_err(r)
+    ok(err["loc"][-1] == "ordered_ids" and err["input"] == [True],
+       "produce ids true keeps [true] on ordered_ids")
+    unchanged("produce ordered_ids=[true] writes nothing")
+
+    r = post_produce(channel_id=1, ordered_ids=[False])
+    ok(r.status_code == 422, "produce ordered_ids=[false] is 422")
+    ok(first_err(r)["input"] == [False], "produce ids false keeps [false]")
+    unchanged("produce ordered_ids=[false] writes nothing")
+
+    r = post_produce(channel_id=2, ordered_ids=[ch1_extra, True])
+    ok(r.status_code == 422,
+       "produce mixed [id, true] is 422 (must not queue the integer prefix)")
+    ok(first_err(r)["input"] == [ch1_extra, True],
+       "produce mixed ids keep the bool")
+    unchanged("produce mixed [id, true] writes nothing")
+
+    r = post_reorder(channel_id=2, ordered_ids=[ch2_extra, 2])
+    ok(r.status_code == 200 and r.json() == {"ok": True},
+       "integer reorder of channel 2 is 200 (always-raise dies here)")
+    moved = board_state()
+    moved_by_id = {row[0]: row for row in moved}
+    ok(moved_by_id[ch2_extra][2] == 0 and moved_by_id[2][2] == 1,
+       "channel 2 order is extra then video 2")
+    ok(moved_by_id[1] == base_by_id[1] and moved_by_id[ch1_extra] == base_by_id[ch1_extra],
+       "channel 2 reorder left channel 1 positions and drafts")
+    ok(moved_by_id[topic_b] == base_by_id[topic_b],
+       "unlisted channel 2 video keeps its position")
+    ok(n_produce_runs() == runs0, "reorder writes no produce JobRun")
+
+    r = post_reorder(channel_id=0, ordered_ids=[ch1_extra, 1])
+    ok(r.status_code == 200 and r.json() == {"ok": True},
+       "reorder channel_id=0 is still 200 (reject-zero would 422)")
+    ok("boolean" not in r.text, "integer 0 channel_id is not the bool rejection")
+    ok(board_state() == moved, "reorder channel_id=0 moves nothing")
+
+    r = post_reorder(channel_id=1, ordered_ids=[0, 1])
+    ok(r.status_code == 200 and r.json() == {"ok": True},
+       "reorder ordered_ids=[0, 1] is 200 (integer 0 is not a bool)")
+    zero_ids = {row[0]: row for row in board_state()}
+    ok(zero_ids[1][2] == 1 and zero_ids[1][3] == VideoStatus.DRAFT,
+       "integer 0 in ordered_ids still repositions video 1 at index 1")
+    ok(zero_ids[ch1_extra] == moved_by_id[ch1_extra],
+       "a video absent from ordered_ids keeps its position")
+    ok(zero_ids[2] == moved_by_id[2] and zero_ids[ch2_extra] == moved_by_id[ch2_extra],
+       "channel 1 reorder left channel 2 positions")
+
+    r = post_produce(channel_id=2, ordered_ids=[ch2_extra, 2, 999])
+    ok(r.status_code == 200 and r.json() == {"produced": 2},
+       "integer produce queues the two listed drafts and skips the missing id")
+    produced = {row[0]: row for row in board_state()}
+    ok(produced[ch2_extra][3] == VideoStatus.QUEUED
+       and produced[2][3] == VideoStatus.QUEUED,
+       "the listed channel 2 drafts are queued")
+    ok(produced[1][3] == VideoStatus.DRAFT and produced[ch1_extra][3] == VideoStatus.DRAFT,
+       "produce did not queue drafts that were not listed")
+    ok(produced[topic_b][3] == VideoStatus.DRAFT,
+       "unlisted channel 2 draft stays a draft")
+    ok(n_produce_runs() == 2, "integer produce wrote one JobRun per queued draft")
+
+    r = post_produce(channel_id=0, ordered_ids=[ch1_extra])
+    ok(r.status_code == 200 and r.json() == {"produced": 1},
+       "produce channel_id=0 still queues the listed draft (0 is not a bool)")
+    ok("boolean" not in r.text, "produce integer 0 is not the bool rejection")
+    after0 = {row[0]: row for row in board_state()}
+    ok(after0[ch1_extra][3] == VideoStatus.QUEUED,
+       "channel_id=0 produce queued ch1-extra")
+    ok(after0[1][3] == VideoStatus.DRAFT, "channel_id=0 produce left video 1 a draft")
+    ok(n_produce_runs() == 3, "channel_id=0 produce wrote one JobRun")
+
+    r = post_produce(channel_id=2, ordered_ids=[2])
+    ok(r.status_code == 200 and r.json() == {"produced": 0},
+       "produce of a non-draft reports 0")
+    ok(n_produce_runs() == 3, "no-op produce writes no JobRun")
+    ok(board_state() == tuple(after0[i] for i in sorted(after0)),
+       "no-op produce leaves the board unchanged")
+
+    r = post_reorder(channel_id=None, ordered_ids=[1])
+    ok(r.status_code == 422, "reorder channel_id=null is 422")
+    ok("boolean" not in r.text,
+       "null channel_id is the required-int error, not the bool rejection")
+    r = post_reorder(channel_id=1, ordered_ids=None)
+    ok(r.status_code == 422, "reorder ordered_ids=null is 422")
+    ok("boolean" not in r.text,
+       "null ordered_ids is the list-type error, not the bool rejection")
+    r = post_reorder(channel_id=1, ordered_ids=True)
+    ok(r.status_code == 422, "reorder ordered_ids=true (not a list) is 422, not 500")
+    r = client.post("/api/videos/reorder", auth=auth, json={"ordered_ids": [1]})
+    ok(r.status_code == 422, "reorder omitted channel_id is 422")
+    ok(board_state() == tuple(after0[i] for i in sorted(after0)),
+       "null and omitted ids write nothing")
+
+    r = client.post("/api/videos/reorder",
+                    json={"channel_id": True, "ordered_ids": [True]})
+    ok(r.status_code == 401, "reorder still requires auth")
+    r = client.post("/api/videos/produce",
+                    json={"channel_id": False, "ordered_ids": [1]})
+    ok(r.status_code == 401, "produce still requires auth")
+    ok(board_state() == tuple(after0[i] for i in sorted(after0))
+       and n_produce_runs() == 3,
+       "unauthenticated reorder/produce write nothing")
+
+    reorder_src = inspect.getsource(ReorderBody)
+    ok('_reject_bool_channel' in reorder_src
+       and '@field_validator("channel_id", mode="before")' in reorder_src,
+       "ReorderBody._reject_bool_channel is mode=before on channel_id")
+    ok('_reject_bool_ids' in reorder_src
+       and '@field_validator("ordered_ids", mode="before")' in reorder_src,
+       "ReorderBody._reject_bool_ids is mode=before on ordered_ids")
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw

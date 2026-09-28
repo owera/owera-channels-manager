@@ -230,6 +230,29 @@ class ReorderBody(BaseModel):
     channel_id: int
     ordered_ids: list[int]
 
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # reorder applies positions only when v.channel_id matches, so
+        # true reorders channel 1. false is 0 and returns 200 having
+        # moved nothing — a silent no-op, not a rejection. produce
+        # ignores channel_id, so false still queues every listed draft.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
+    @field_validator("ordered_ids", mode="before")
+    @classmethod
+    def _reject_bool_ids(cls, v):
+        # Lax list[int] coerces each JSON true→1 / false→0 before the
+        # handler. [true] repositions or bulk-produces video 1; [false]
+        # looks up video 0, skips it, and returns 200. A bool later in
+        # the list must not leave the integer prefix applied.
+        if isinstance(v, list) and any(isinstance(item, bool) for item in v):
+            raise ValueError("must be integers, not booleans")
+        return v
+
 
 # ---- Trend signals (research → smart adoption) ----
 class TrendCreate(BaseModel):

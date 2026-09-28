@@ -1898,7 +1898,19 @@ flag the operator step in the commit body.
   Remaining (not bundled): `ReorderBody.channel_id` and `ordered_ids`
   (#60).
 
-### 60. POST /api/videos/reorder and /produce reject JSON bool ids — normal
+### 60. ✅ DONE (code shipped to main 2026-09-28) POST /api/videos/reorder and /produce reject JSON bool ids — normal
+- **resolution (2026-09-28):** `ReorderBody._reject_bool_channel` and
+  `_reject_bool_ids` are `mode="before"`. JSON `true`/`false` on
+  `channel_id`, and any bool inside `ordered_ids`, are 422 before lax
+  int coercion. `true` was reordering channel 1 (reorder matches
+  `v.channel_id`) and `[true]` was video 1. Produce ignores
+  `channel_id`, so `false` (coerced to 0) still queued the listed
+  drafts — that 200 is not a rejection. Integer ids, including 0,
+  are unchanged: reorder of channel 0 moves nothing and returns 200;
+  a 0 inside `ordered_ids` still repositions the real ids; produce
+  with `channel_id` 0 still queues the listed drafts. Suite:
+  `tests/verify_videos.py` 148 → 227. This was the last bare JSON-body
+  int in `app/schemas.py`.
 - **why (found while shipping #59):** `ReorderBody.channel_id` is a
   bare `int` and `ordered_ids` is `list[int]`. `reorder` applies
   positions only when `v.channel_id == body.channel_id`, so `true`
