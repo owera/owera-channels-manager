@@ -37,7 +37,8 @@ from app.services import analytics_loop, metrics_loop, notify, publish_loop, you
 # Craft-gate B (8f9ed39): `_publish_one` bounces a failing Credits/IA title
 # to REVIEW before get_service. Fixtures must pass the pre-approve lock so
 # the revoked-token wiring pin still reaches NeedsConnect.
-_OK_TITLE = "Cache miss costs $79 · Copilot Credits 1"
+# 2026-09-28: titles may not carry a currency value (publish gate) — noun path.
+_OK_TITLE = "Cache miss re-bills the whole receipt · Copilot Credits 1"
 
 # Safety: the operator's .env may carry a REAL webhook URL. Kill it before any
 # alert can fire, so running this suite never pages anyone with fake alerts.

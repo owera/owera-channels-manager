@@ -168,7 +168,11 @@ back after and quote the after-state in the report; never claim a fix you didn't
 | `failed`, `suggested_action:"retry"` (has a `video_path`, failed at publish) | `POST /api/videos/{id}/retry` → approved | ≤ 5 |
 | `failed`/`rejected`, `suggested_action:"delete"` (dead, age > 7d) | `DELETE /api/videos/{id}` | ≤ 10 |
 | `stuck_rendering`/`stuck_publishing` (past timeout, loop didn't catch it) | `requeue` / `retry` | ≤ 5 |
-| `stuck_review` (gate backlog > 48h) | approve the good ones / reject the bad ones | judgment |
+| `stuck_review` (gate backlog > 48h, age = since last render attempt) | approve the good ones / reject the bad ones | judgment |
+| `review_ready` (review + rendered + craft PASS, **any age**) | **decide every item by `decide_by` (10:45 local)**: `POST /api/videos/{id}/approve` the good ones, `reject` the bad. No age filter — a render that finished overnight is decided this morning, so approved stock is in place before the 11:00 window (2026-09-27 RR 4/5 miss) | judgment, all of them |
+| `under_publish` (escalate: in window, approved + published today < budget, review waiting) | decide `review_ready` for that channel now; if nothing is craft-ready, say so under `⚠ Needs operator` | judgment |
+| `runway_low` (approved + published today < budget + 1) | decide `review_ready` first; keep drafts subject-valid so the 21:00 auto-produce refills. Never raise budgets for this | — |
+| `subject_held` (auto-produce kept a draft: stripped number / bare unit / currency in subject) | `PATCH /api/videos/{id}` `{"subject": …}` restoring the number/stake with no currency value, or `reject` | ≤ 10 |
 | one topic producing repeated failures | `PATCH /api/topics/{id} {"weight":0}` + note it | — |
 | `bgm_pool_low` (auto) | `POST /api/music/generate {"count": <need>}` (cap at 10 per run); then re-read `GET /api/music` to confirm count went up — quote the before/after in the report | ≤ 10 tracks |
 | `cooldown` / `quota` (escalate) | usually self-resets — monitor; only nudge `daily_publish_budget`↓ or `publish_drip_minutes`↑ a small step **with** a written reason | small step |
