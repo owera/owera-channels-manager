@@ -1805,4 +1805,35 @@ _sub_w = [{"text": "resposta", "start": 0.0}, {"text": "certa.", "start": 0.3},
 ok(not craft.contains_subscribe_cta(storyboard._window_text(_sub_w, 0.0, 2.0)),
    "_window_text strips the Subscribe endcard VO from a quote window")
 
+print("#38 overlay claim + #45 _show_whole_claim compose (frame0 = whole head)")
+import copy as _copy
+for _title, _script, _want in (
+    ("Chat routed to Maya. Prod paged Lee. · Agent memory 32",
+     "Chat routed to Maya. Prod paged Lee. The agent kept two memories.",
+     "Chat routed to Maya. Prod paged Lee."),
+    ("Com ReBAR o 14B fez 48 tok/s. Sem, 11. · Local 57",
+     "Com ReBAR o 14B fez 48 tok/s. Sem, 11. A janela da VRAM muda tudo.",
+     "Com ReBAR o 14B fez 48 tok/s. Sem, 11."),
+    ("O prompt processa no CPU por 8 segundos, não é engenharia. · IA 211",
+     "O prompt processa no CPU por 8 segundos, não é engenharia. Isso não é engenharia.",
+     "O prompt processa no CPU por 8 segundos, não é engenharia."),
+):
+    _bb = [{"type": "hook", "text": "x", "cue": "x"},
+           {"type": "stat", "value": "1", "cue": "y"},
+           {"type": "cta", "text": "c", "cue": "z"}]
+    storyboard._lock_opening_hook(_bb, _script, _title)
+    ok(_bb[0]["text"] == _want,
+       "#38 lock: frame0 = whole title head with . , and digits: %r" % _want)
+    _before = _copy.deepcopy(_bb)
+    storyboard._show_whole_claim(_bb, _script, _title)
+    ok(_bb == _before, "#45 _show_whole_claim is a no-op after the #38 lock: %r" % _want[:30])
+_os_html38 = _compose(os_llm, subject=_os_title, script=_os_script, words=_os_words,
+                      duration=round(_os_words[-1]["start"] + 1.0, 2), brand="os",
+                      allowed_types=PHASE_A + ["code", "command", "diagram"])
+_b0_38 = craft.beats_from_html(_os_html38)[0]
+ok(_b0_38["type"] == "hook" and _b0_38["text"] == "Chat routed to Maya. Prod paged Lee.",
+   "compose (#38 + #45): hook == whole head, both periods kept")
+ok('style="opacity:1"' in re.search(r'<div class="beat hook" id="b0"[^>]*>', _os_html38).group(0),
+   "compose (#38 + #45): frame0 still at full opacity at t=0")
+
 print(f"\nALL {_checks} CHECKS PASSED")
