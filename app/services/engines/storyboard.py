@@ -35,21 +35,29 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
-_MID_MAX = 3.0   # mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S (Gate B HARD)
+# Mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S (Gate B HARD).
+# VM 2026-09-29: a mid card is ≤3.0s INCLUDING its fade, so hold = 3.0 − _GAP.
+_MID_MAX = 2.88
 # Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
 # claim. Surplus stays on the payoff / earlier mids — never back on frame0
 # and never a long neon Follow card. Mid-body still dumps into the CTA first
 # (so a penultimate 8s+ list can shrink); _cap_endcard then slides the chip
 # to the last 4s and re-caps the penultimate at _MID_MAX.
-_ENDCARD_MAX = 4.0
+# VM 2026-09-29: endcard ≤3.9s INCLUDING its fade → hold 3.9 − _GAP = 3.78
+# (was 4.0 → measured 4.05–4.08s on every RR endcard). = craft.ENDCARD_MAX_S.
+_ENDCARD_MAX = 3.78
 # Frame0 visual-hold target. Gate B exempts hook, so _MID_MAX recap walks
 # leftover onto beat 0 (a 40s short with 3s mids + 4s CTA freezes frame0
 # for 12–17s — v1265/v1267, golden ch2-code). Surplus is later speech,
-# not sentence 1. Cap the freeze and fill the window with copies of
-# existing unique object mids (not hook-claim quotes — that dropped R2
-# on 2026-09-17).
+# not sentence 1. Cap the freeze and fill the window with NEW quote cards
+# of the words actually spoken in each slot (not hook-claim quotes — that
+# dropped R2 on 2026-09-17). Never copies of existing mids: those clones
+# (plus a second fill pass cloning the clones) put the same card twice
+# back-to-back (~6.2s) or replayed cards 1-3 as 4-6 on RR #1340/#1349/
+# #1354/#1370/#1372/#1373/#1375/#1376 (VM 2026-09-29).
 _HOOK_MAX = 4.0
 _HOOK_FILL_MAX = 8
+# Kept for import compatibility; donors are no longer cloned.
 _HOOK_FILL_TYPES = frozenset({
     "code", "command", "diagram", "compare", "stat", "term_define",
 })
@@ -313,7 +321,7 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
 
     if not tokens:
         _even_space(beats, duration)
-        _cap_endcard(beats, duration)
+        _cap_endcard(beats, duration, words)
         return beats
 
     starts: list[float | None] = [None] * n
@@ -401,7 +409,7 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
         b["start"] = round(max(0.0, starts[i]), 3)
         end = duration if i == n - 1 else max(starts[i] + _MIN_DUR, starts[i + 1] - _GAP)
         b["dur"] = round(max(_MIN_DUR, end - starts[i]), 3)
-    _cap_endcard(beats, duration)
+    _cap_endcard(beats, duration, words)
     return beats
 
 
@@ -626,6 +634,16 @@ def render_hook(b, ctx):
     obj = '<div class="hobj">' + craft.object_markup(spec) + "</div>"
     # Hook emoji is a hard-FAIL as the object — never render 💸/🔥 as a punch.
     inner = obj + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    if s <= 1e-9:
+        # Frame0 (VM 2026-09-29, P0 a): the t=0 frame showed only the gradient
+        # on 17/17 masters because the hook faded in. The first card is at
+        # FULL opacity at t=0 (inline style, not a zero-time tl.set) and the
+        # whole claim is readable; motion is a small scale settle only.
+        track = 'data-track-index="' + str(i) + '"'
+        html = _shell(i, b, "hook", inner).replace(track, track + ' style="opacity:1"', 1)
+        tw = [_from(bid + " .hobj", s, "scale:0.94", "scale:1", dur=0.35),
+              _from(bid + " .htext", s, "scale:0.97", "scale:1", dur=0.35)]
+        return html, _wrap(i, ctx, tw)
     tw = [_from(bid + " .hobj", s, "opacity:0,y:16", "opacity:1,y:0", dur=0.22)]
     tw.append(_from(bid + " .word", s + 0.05, "opacity:0,y:30", "opacity:1,y:0", dur=0.3, stagger=0.045))
     return _shell(i, b, "hook", inner), _wrap(i, ctx, tw)
@@ -1233,6 +1251,44 @@ def _lock_opening_hook(beats, script, subject) -> None:
             b1["w"] = 1
 
 
+_SERIES_SUFFIX_RE = re.compile(r"\s+·\s+.*$")
+_HOOK_CLAIM_MAX_WORDS = 12
+
+
+def _title_head(subject) -> str:
+    """Title text before the ' · Series N' suffix."""
+    return _SERIES_SUFFIX_RE.sub("", str(subject or "").strip()).strip()
+
+
+def _show_whole_claim(beats, script, subject) -> None:
+    """Frame0 shows the WHOLE claim — both halves of a two-part title.
+
+    VM 2026-09-29: 9/17 hooks printed only sentence 1 ('Chat routed to Maya.')
+    and the payoff ('Prod paged Lee.') only reached the thumb. When the
+    narration opens on the full title head (≤12 words) and the current hook
+    is a prefix of it, the hook card shows the head verbatim (punctuation and
+    digits kept). Separate from _lock_opening_hook on purpose: once
+    #38's overlay claim lands, the hook already equals the head → no-op.
+    """
+    from app.services import craft
+    if not beats or (beats[0].get("type") or "") != "hook":
+        return
+    head = _title_head(subject)
+    if not head or len(head.split()) > _HOOK_CLAIM_MAX_WORDS:
+        return
+    ht = _tok(head)
+    hk = _tok(beats[0].get("text") or "")
+    if not ht or ht == hk:
+        return
+    if hk and ht[:len(hk)] != hk:
+        return  # a different claim — never swap frame0 for another sentence
+    if _tok(script)[:len(ht)] != ht:
+        return  # shown must be spoken: the narration opens on the whole head
+    if craft.contains_subscribe_cta(head) or craft.is_endcard_vo(head):
+        return
+    beats[0]["text"] = head
+
+
 def _last_sentence(script: str) -> str:
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if p.strip()]
     return parts[-1] if parts else (script or "").strip()
@@ -1307,60 +1363,174 @@ def _strip_mid_subscribe_beats(beats) -> None:
             b[key] = _scrub(val)
 
 
-def _fill_hook_surplus(beats, duration: float) -> None:
+def _window_text(words, t0: float, t1: float, max_words: int = 8) -> str:
+    """Words whose spoken start falls in [t0, t1), clipped to max_words."""
+    toks = []
+    for w in words or []:
+        try:
+            ws = float(w.get("start") or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if t0 - 1e-9 <= ws < t1 - 1e-9:
+            t = str(w.get("text") or "").strip()
+            if t:
+                toks.append(t)
+    text = " ".join(toks)
+    from app.services import craft
+    if craft.contains_subscribe_cta(text):
+        # Endcard VO words never land on a mid quote card (Subscribe = endcard only).
+        text = craft.strip_subscribe_cta(text)
+    return _words_clip(text, max_words)
+
+
+def _fill_hook_surplus(beats, duration: float, words=None) -> None:
     """Cap a frozen frame0. Surplus is later speech over the hook card.
 
-    Quote-pulse of the hook claim dropped R2 (09-17). Insert copies of
-    existing unique object mids into the surplus window so later words
-    get a real visual. Remainder stays on hook (no dead gap, no Gate B
-    over-cap). No-ops when hook is already ≤ _HOOK_MAX or there is no
-    object donor (do not clone statement/list/quote).
+    Quote-pulse of the hook claim dropped R2 (09-17), and cloning existing
+    object mids into the window put the same card twice back-to-back or
+    replayed cards 1-3 as 4-6 (VM 2026-09-29, repeated-card FAIL). Each
+    slot (walking back from the first mid) becomes a NEW quote card of the
+    words spoken in that slot. A slot with no words, or whose words would
+    repeat a neighbouring/earlier card or only re-quote the hook claim,
+    stops the fill; the remainder stays on the hook (Gate B exempt). One
+    pass only (idempotent): a second pass used to re-fill from the clones.
     """
-    if not beats or len(beats) < 3:
+    if not beats or len(beats) < 3 or not words:
         return
     hook = beats[0]
     if (hook.get("type") or "") != "hook":
         return
+    if any(b.get("_fill") for b in beats):
+        return
+    from app.services import craft
     nxt = beats[1]
     nxt_start = float(nxt.get("start") or 0.0)
     hook_dur = float(hook.get("dur") or 0.0)
     if hook_dur <= _HOOK_MAX + 1e-9:
         return
-    donors = [
-        b for b in beats[1:-1]
-        if (b.get("type") or "") in _HOOK_FILL_TYPES
-    ]
-    if not donors:
-        return
     slot = _MID_MAX + _GAP
-    n = min(_HOOK_FILL_MAX, int((hook_dur - _HOOK_MAX) / slot))
+    n = int((hook_dur - _HOOK_MAX) / slot)
+    # Parity with the old second pass: one more slot when the remainder on
+    # the hook would still leave >= _MID_MIN over _HOOK_MAX.
+    if hook_dur - n * slot - _HOOK_MAX >= _MID_MIN:
+        n += 1
+    n = min(_HOOK_FILL_MAX, n)
     if n <= 0:
-        if hook_dur - _HOOK_MAX >= _MID_MIN:
-            n = 1
-        else:
-            return
+        return
+    hook_toks = set(craft.screen_text_key(hook).split())
+    taken = {craft.screen_text_key(b) for b in beats[1:]}
+    taken.discard("")
     inserts = []
     end = nxt_start
-    for i in range(n - 1, -1, -1):
+    right_key = craft.screen_text_key(nxt)
+    for _ in range(n):
         start = end - _GAP - _MID_MAX
-        if start < _MIN_DUR:
-            return
-        src = donors[i % len(donors)]
-        nb = copy.deepcopy(src)
-        nb.pop("endcard", None)
-        nb["start"] = round(start, 3)
-        nb["dur"] = round(_MID_MAX, 3)
+        if start < _GAP + _MIN_DUR:
+            break
+        text = _window_text(words, start, end)
+        nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
+              "_fill": True, "start": round(start, 3), "dur": round(_MID_MAX, 3)}
+        key = craft.screen_text_key(nb)
+        if (not key or key in taken or craft.screen_text_near(key, right_key)
+                or set(key.split()) <= hook_toks):
+            break
         inserts.append(nb)
+        taken.add(key)
+        right_key = key
         end = start
+    if not inserts:
+        return
     inserts.reverse()
     first_start = float(inserts[0]["start"])
-    if first_start <= _GAP + _MIN_DUR:
-        return
     hook["dur"] = round(max(_MIN_DUR, first_start - _GAP), 3)
     beats[1:1] = inserts
 
 
-def _cap_endcard(beats, duration: float) -> None:
+def _break_repeated_cards(beats, words=None) -> None:
+    """Renderer backstop for the craft-gate repeated-card check.
+
+    When the LLM storyboard itself shows the same card again (e.g. one stat
+    for "…não é engenharia. Isso não é engenharia."), the repeat becomes a
+    different beat type: a quote of the words spoken in its own window, or
+    of its cue. Timing is untouched. If neither candidate clears the check
+    the beat is left as-is and the craft gate FAILs it (never ships quietly).
+    """
+    from app.services import craft
+    n = len(beats)
+    for i in range(1, n):
+        b = beats[i]
+        if (b.get("type") or "") in ("hook", "cta"):
+            continue
+        if not craft.repeated_card_reason(beats, i):
+            continue
+        s0 = float(b.get("start") or 0.0)
+        s1 = s0 + float(b.get("dur") or 0.0)
+        old = dict(b)
+        for cand in (_window_text(words, s0, s1), _words_clip(b.get("cue") or "", 8)):
+            if not cand:
+                continue
+            b.clear()
+            b.update({"type": "quote", "cue": old.get("cue", ""), "text": cand,
+                      "attribution": "", "start": old.get("start"), "dur": old.get("dur")})
+            nxt_key = craft.screen_text_key(beats[i + 1]) if i + 1 < n else ""
+            if not craft.repeated_card_reason(beats, i) and not craft.screen_text_near(
+                    craft.screen_text_key(b), nxt_key):
+                break
+            b.clear()
+            b.update(old)
+
+
+def _split_long_mids(beats, words=None) -> None:
+    """Split, don't stretch (VM 2026-09-29, P0 b): a mid whose hold exceeds
+    _MID_MAX keeps its first _MID_MAX and the rest of its window becomes NEW
+    quote card(s) of the words spoken there, each ≤ _MID_MAX. Never a copy
+    (repeated-card gate). All-or-nothing per beat: if a piece has no words or
+    would repeat a card, the beat is left to the backward walk in _cap_endcard.
+    """
+    if not words or len(beats) < 3:
+        return
+    from app.services import craft
+    slot = _MID_MAX + _GAP
+    i = 1
+    while i < len(beats) - 1:
+        b = beats[i]
+        if (b.get("type") or "") in ("hook", "cta"):
+            i += 1
+            continue
+        s0 = float(b.get("start") or 0.0)
+        rem = float(b.get("dur") or 0.0) - _MID_MAX - _GAP
+        if rem < _MID_MIN - 1e-9:
+            i += 1
+            continue
+        k = int(-(-(rem + _GAP) // slot))  # ceil
+        piece = (rem + _GAP) / k - _GAP
+        taken = {craft.screen_text_key(x) for x in beats}
+        taken.discard("")
+        prev_key = craft.screen_text_key(b)
+        next_key = craft.screen_text_key(beats[i + 1])
+        inserts = []
+        t = s0 + _MID_MAX + _GAP
+        for j in range(k):
+            text = _window_text(words, t, t + piece + _GAP)
+            nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
+                  "_split": True, "start": round(t, 3), "dur": round(piece, 3)}
+            key = craft.screen_text_key(nb)
+            if (not key or key in taken or craft.screen_text_near(key, prev_key)
+                    or (j == k - 1 and craft.screen_text_near(key, next_key))):
+                break
+            inserts.append(nb)
+            taken.add(key)
+            prev_key = key
+            t += piece + _GAP
+        if len(inserts) != k:
+            i += 1
+            continue
+        b["dur"] = round(_MID_MAX, 3)
+        beats[i + 1:i + 1] = inserts
+        i += 1 + k
+
+
+def _cap_endcard(beats, duration: float, words=None) -> None:
     """Craft gate: last cta/endcard ≤ 4.0s, after the claim, not on frame0.
 
     Slide the chip to the tail. Surplus walks backward onto earlier mids,
@@ -1387,6 +1557,10 @@ def _cap_endcard(beats, duration: float) -> None:
     elif dur >= _MIN_DUR:
         last["dur"] = round(dur, 3)
 
+    # Split, don't stretch: long mids (incl. the penultimate that just absorbed
+    # the endcard slide) become card + new quote cards before the walk below.
+    _split_long_mids(beats, words)
+
     # Walk surplus backward so a 4s chip does not revive R4 DRAG on mids.
     for i in range(len(beats) - 2, 0, -1):
         nxt = beats[i + 1]
@@ -1405,7 +1579,7 @@ def _cap_endcard(beats, duration: float) -> None:
         prev = beats[i - 1]
         prev_start = float(prev.get("start") or 0.0)
         prev["dur"] = round(max(_MIN_DUR, cur["start"] - _GAP - prev_start), 3)
-    _fill_hook_surplus(beats, duration)
+    _fill_hook_surplus(beats, duration, words)
 
 
 def _cap_statements(beats, content_format=None) -> None:
@@ -1531,6 +1705,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             beats = rb
 
     _lock_opening_hook(beats, script, subject)
+    _show_whole_claim(beats, script, subject)
     _demote_nonsense_diagrams(beats, content_format)
     _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
     _strip_mid_subscribe_beats(beats)
@@ -1538,13 +1713,15 @@ def compose(*, subject, script, words, duration, resolution, width, height,
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
-    _cap_endcard(beats, duration)
+    _cap_endcard(beats, duration, words)
     if not validate_storyboard(beats, duration):
+        beats[:] = [b for b in beats if not (b.get("_fill") or b.get("_split"))]
         _even_space(beats, duration)
         _cap_list_holds(beats)
-        _cap_endcard(beats, duration)
+        _cap_endcard(beats, duration, words)
         if not validate_storyboard(beats, duration):
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None
+    _break_repeated_cards(beats, words)
     return build_index_html(beats, th, resolution, width, height, duration,
                             content_format=content_format)

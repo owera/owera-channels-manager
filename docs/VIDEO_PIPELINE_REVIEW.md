@@ -47,7 +47,7 @@ plus `failed` / `rejected`.
 | TTS | `worker._tts` | `edge-tts` only. WordBoundary timings for align. PT: `rate=-8%`, `pitch=-2Hz`. No paid TTS. |
 | Render | `app/services/engines/hyperframes.py` + `worker.run_job` | Daemon thread: script → TTS → compose → `npx hyperframes@0.6.97` → blank-frame guard → ffmpeg mux. Status in `status.json`. |
 | Theme | `app/services/engines/theme.py`, `craft.brand_of` | `os` B&W (ch1 / Owera), `rr` warm ink (ch2 / Recio), else legacy neon. |
-| Thumbnail | `app/services/thumbnail.py` | Custom 1280×720 hook card at **publish**, best-effort. Preview `thumb.jpg` at finalize is a 1s ffmpeg still, not the designed card. |
+| Thumbnail | `app/services/thumbnail.py` | Custom 1280×720 hook card at **publish**, best-effort. Preview `thumb.jpg` at finalize is a 1s ffmpeg still, not the designed card. An operator-provided `thumb_provided.*` (`POST /api/videos/{id}/thumbnail`, see CRAFT.md) wins at finalize and publish. |
 | Approve | `app/routers/videos.py` `POST /approve`, `render_loop._finalize`, `craft.title_gate_reason` | Shorts without `· <series> <nn>` cannot leave review. Longs exempt. |
 | Publish drip | `app/services/publish_loop.py`, `app/services/quota.py` | Per-channel: connected OAuth, not paused, inside `publish_windows`, under `daily_publish_budget`, under YouTube quota cap, drip-spaced, one in-flight upload. Mix: reserve first slot of the quota day for a long. |
 | Scheduler | `app/services/scheduler.py` | APScheduler: render 15s, publish 60s, metrics 6h, analytics 12h, autofill 20m, BGM replenish 24h. `max_instances=1`, coalesce. |

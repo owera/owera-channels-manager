@@ -405,6 +405,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             "beat_count": len(beat_types),
             "beats": beats or None,
             "craft_gate": gate,
+            # Aligner caps cards INCLUDING the fade (craft Gate B strict timing).
+            "beat_timing": craft.BEAT_TIMING_INCL_FADE,
             "bgm": (bgm.name if bgm else None),
             "bgm_volume": float(params.get("bgm_volume") or 0.2),
             "script_words": len(script.split()),
@@ -592,7 +594,10 @@ def _lock_patterned_opener(script: str, subject: str) -> str:
     return f"{opener} {rest}".strip() if rest else opener
 
 
-def _generate_script(subject: str, params: dict) -> str:
+def _generate_script(subject: str, params: dict, *, llm=None) -> str:
+    # ``llm``: completion seam override. compose-script (no render) passes
+    # _llm_compose (effort pin); the render path keeps _llm (unchanged).
+    ask = llm or _llm
     n = int(params.get("paragraph_number") or 2)
     if (params.get("content_format") or "short") == "long":
         prompt = (
@@ -643,7 +648,7 @@ def _generate_script(subject: str, params: dict) -> str:
     if lang:
         prompt += (f" HARD RULE: write the entire script in {lang}, regardless of the "
                    f"title's language — this channel narrates exclusively in {lang}.")
-    text = _llm(prompt, max_tokens=max_tokens).strip()
+    text = ask(prompt, max_tokens=max_tokens).strip()
     text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
     text = _strip_script_preamble(text)
 
@@ -652,7 +657,7 @@ def _generate_script(subject: str, params: dict) -> str:
     wc = len(text.split())
     if not (lo <= wc <= hi):
         logger.debug("script word count %d outside [%d,%d] for %r; retrying", wc, lo, hi, subject)
-        retry = _llm(
+        retry = ask(
             prompt + f"\n\nIMPORTANT: Your response MUST be between {lo} and {hi} words. "
             "Return ONLY the spoken voiceover — never mention the word count, "
             "craft rules, series name, or endcard plan.",
@@ -862,7 +867,7 @@ def _fallback_composition(subject: str, script: str, resolution: str,
     output is malformed or its render fails."""
     th = theme.resolve(topic_id, subject, brand=brand)
     k = max(4, min(8, int(duration // 18)))            # more reveals for longer videos
-    lines = _key_lines(script, k=k)
+    lines = _dedupe_fallback_lines(subject, _key_lines(script, k=k))
     pad = max(60, int(width * 0.08))
     segments = [("seg-title", _esc(subject))] + [("seg-line", _esc(l)) for l in lines]
     n = len(segments)
@@ -937,6 +942,22 @@ def _fallback_composition(subject: str, script: str, resolution: str,
   </script>
 </body></html>
 """
+
+
+def _dedupe_fallback_lines(subject: str, lines: list[str]) -> list[str]:
+    """No repeated card in the fallback either: drop a key line whose normalized
+    text equals (or nearly equals) the previous segment — the title lock makes
+    line 1 == subject, and "X. Isso X." scripts repeat a line back-to-back."""
+    from app.services import craft
+    prev = craft.screen_text_key({"text": subject})
+    out = []
+    for line in lines:
+        key = craft.screen_text_key({"text": line})
+        if not key or craft.screen_text_near(key, prev):
+            continue
+        out.append(line)
+        prev = key
+    return out or ["Watch to the end"]
 
 
 def _key_lines(script: str, k: int = 4) -> list[str]:

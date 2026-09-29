@@ -42,7 +42,8 @@ def _publish_hold(ch: Channel, approved: int) -> str | None:
 def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
     """ISO time the next approved video should publish (rank-1 estimate)."""
     n = session.exec(select(func.count(Video.id)).where(
-        Video.channel_id == ch.id, Video.status == VideoStatus.APPROVED)).one()
+        Video.channel_id == ch.id, Video.status == VideoStatus.APPROVED,
+        Video.held.is_not(True))).one()           # held rows never publish
     if not n or ch.paused or ch.oauth_status != OAuthStatus.CONNECTED:
         return None
     daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
@@ -75,6 +76,11 @@ def dashboard(session: Session = Depends(get_session)):
             .where(Video.channel_id == ch.id).group_by(Video.status)
         ).all():
             counts[status] = n
+        # Held approved rows stay in counts["approved"] (status is unchanged) and
+        # are surfaced separately; publish ETA / hold / runway exclude them.
+        held = session.exec(select(func.count(Video.id)).where(
+            Video.channel_id == ch.id, Video.status == VideoStatus.APPROVED,
+            Video.held == True)).one()  # noqa: E712
         active = session.exec(
             select(Video).where(Video.channel_id == ch.id,
                                 Video.status.in_([VideoStatus.RENDERING, VideoStatus.PUBLISHING]))
@@ -88,7 +94,8 @@ def dashboard(session: Session = Depends(get_session)):
             "quota_spent_today": quota.quota_spent_today(session, ch.id),
             "quota_cap": settings.youtube_daily_quota_cap,
             "next_publish_eta": _next_publish_eta(session, ch, cfg),
-            "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0)),
+            "held": held,
+            "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0) - held),
             # Runway / under-publish signals (same computation as the issues digest).
             "publish_signals": issues.publish_signals(session, ch),
             "active": [{"id": v.id, "subject": v.subject, "status": v.status,

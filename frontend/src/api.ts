@@ -86,6 +86,8 @@ export interface Video {
   added_to_playlist: boolean;
   error: string | null;
   retry_count: number;
+  held?: boolean;           // operator hold (POST /api/videos/{id}/hold): never publishes
+  held_at?: string | null;
 }
 
 export interface JobRun {

@@ -233,9 +233,15 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
                   "script_edits": prior_cc.get("script_edits") or []}
         video.creation_config = json.dumps(cc)
 
-    thumb = dest_dir / "thumb.jpg"
-    if _make_thumbnail(dest, thumb):
-        video.thumb_path = str(thumb)
+    # An operator-provided thumbnail (thumb_provided.*) is never replaced by the
+    # 1s still — skip the still entirely and keep the marker on the new blob.
+    from app.services import provided_thumb
+    if provided_thumb.is_provided(video):
+        video.creation_config = provided_thumb.carry_marker(video, video.creation_config)
+    else:
+        thumb = dest_dir / "thumb.jpg"
+        if _make_thumbnail(dest, thumb):
+            video.thumb_path = str(thumb)
 
     if not video.metadata_generated:
         from app.services import video_gen
@@ -373,6 +379,7 @@ def _queued_candidates(session: Session) -> list[Video]:
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == channel.id,
                    Video.status == VideoStatus.APPROVED,
+                   Video.held.is_not(True),     # held longs are not banked runway
                    Topic.content_format == "long")
         ).one()
         longs, shorts = _split_queued_by_format(session, queued)
@@ -406,6 +413,7 @@ def _rebalance_queued_mix(session: Session) -> None:
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == ch.id,
                    Video.status == VideoStatus.APPROVED,
+                   Video.held.is_not(True),     # held longs are not banked runway
                    Topic.content_format == "long")
         ).one()
         queued = session.exec(
@@ -512,6 +520,11 @@ def _submit_new(session: Session) -> None:
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
             break
+        # compose-script (no render) owns this row's script right now: submitting
+        # would generate a second script and race the compose write.
+        from app.services.script_compose import is_composing
+        if is_composing(video.id):
+            continue
         not_before = _grok_timeout_not_before.get(video.id) if video.id is not None else None
         if not_before is not None and now < not_before:
             continue  # still inside grok.Timeout cool-down
@@ -649,6 +662,7 @@ def _auto_produce(session: Session) -> None:
                 select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
                 .where(Video.channel_id == ch.id,
                        Video.status == VideoStatus.APPROVED,
+                       Video.held.is_not(True),  # held longs are not banked runway
                        Topic.content_format == "long")
             ).one()
             in_flight_longs = session.exec(

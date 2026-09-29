@@ -193,6 +193,37 @@ check, title gate and `craft_review`. The worker stamps
 
 Regression: `tests/verify_provided_script.py`.
 
+## Provided thumbnails (operator / Designer file)
+
+A designer thumbnail replaces the template card for one video:
+
+- `POST /api/videos/{id}/thumbnail`: multipart field `file`, or JSON
+  `{"path": "..."}` (must resolve inside the manager `storage_dir`; symlinks and
+  `../` that escape it get a 400). `DELETE` clears it. Allowed from any status
+  before upload (draft … approved, plus failed/rejected). `publishing`/`published`
+  return 409: nothing is re-set on YouTube.
+- Stored at `<storage_dir>/videos/<id>/thumb_provided.<png|jpg>`, and
+  `thumb_path` points at it. The filename is the marker of record.
+  `creation_config.thumb_source="provided"` + `thumb_provided_path` are written
+  too. Each set or clear logs a `thumbnail_set` JobRun.
+- Validation: PNG or JPEG, sniffed from the bytes. Long side must be ≥ 640 and
+  short side ≥ 360. Input over 25 MB is a 413. Over 2 MB (the YouTube
+  thumbnails.set limit), the image is re-encoded to JPEG with ffmpeg: `-q:v`
+  steps, then a scale to a 1280 px long side. If it is still over 2 MB, the
+  upload is a 400. Portrait 1080×1920 is stored as-is (the Shorts template
+  cards are already 720×1280 portrait and YouTube accepts them). An aspect that
+  doesn't match the format only gives a warning.
+- Render `_finalize` skips the 1s still when a provided thumbnail exists and
+  carries the marker into the new `creation_config`. A PATCH `/craft` that
+  replaces `creation_config` can drop the informational keys, but never the
+  provided state, which lives in the filename.
+- At publish, `_set_custom_thumbnail` uploads the provided file and skips
+  `make_thumbnail_png`. If the file is missing on disk, it logs an error JobRun
+  and falls back to the template (`thumb_path` is not overwritten). Without a
+  provided thumbnail, publish works as before.
+
+Regression: `tests/verify_provided_thumb.py`.
+
 ## Video Maker craft gate (Shorts A+B+C)
 
 Automatic PASS/FAIL on the storyboard/render path (post-compose, before
