@@ -60,7 +60,10 @@ DEFAULT_SERIES_FALLBACK = "Copilot Credits"
 DEFAULT_NOUN = "trap"
 
 # Craft gate: last cta/endcard visual hold. Claim stays on screen; chip is last.
-ENDCARD_MAX_S = 4.0
+# VM 2026-09-29: the endcard card lasts ≤3.9s INCLUDING its fade (RR endcards
+# measured 4.05–4.08s with a 4.0s hold). Hold = 3.9 − 0.12 fade gap = 3.78s.
+ENDCARD_CARD_MAX_S = 3.9
+ENDCARD_MAX_S = round(ENDCARD_CARD_MAX_S - 0.12, 2)  # 3.78 — the 0.12 is BEAT_GAP_S
 
 # Spoken series endcard. 1 line, ≤8 words. Subscribe is the YT ask — not Follow.
 #   Subscribe — next {series} {noun}.
@@ -666,12 +669,28 @@ OPENING_WINDOW_S = 3.0
 # YES via CoS 2026-09-15: Gate B HARD at 3.0s for new-queue Shorts miolo
 # (closes the ~5–5.8s command-beat auto-approve hole). MUST equal
 # storyboard._MID_MAX.
-MID_BEAT_MAX_S = 3.0
+# VM 2026-09-29 (Rodrigo P0 b): a mid card lasts ≤3.0s INCLUDING its fade —
+# card-to-card intervals measured 3.05–3.20s with a 3.0s hold + 0.12s fade
+# blank. So the card (hold + BEAT_GAP_S) is capped at MID_CARD_MAX_S and the
+# visual hold at MID_CARD_MAX_S − BEAT_GAP_S = 2.88s. Same for the endcard
+# (ENDCARD_CARD_MAX_S 3.9 → hold 3.78s).
+MID_CARD_MAX_S = 3.0
 
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
-CTA_BEAT_MAX_S = 4.0
+MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)      # 2.88 visual hold
+CTA_CARD_MAX_S = ENDCARD_CARD_MAX_S                          # 3.9 incl. fade
+CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
+# creation_config["beat_timing"] marker: boards rendered by the aligner that
+# caps the card INCLUDING its fade. Stored boards without it were rendered
+# under the old 3.0s / 4.0s HOLD caps (CoS RR publish check 2026-09-29 rated
+# their 3.05–3.20s cards WARN, not FAIL), so the review/publish gate
+# re-checks them with the legacy hold caps instead of auto-rejecting the
+# approved inventory. Every new render is checked strictly.
+BEAT_TIMING_INCL_FADE = "card_incl_fade"
+LEGACY_MID_BEAT_MAX_S = 3.0
+LEGACY_CTA_BEAT_MAX_S = 4.0
 STATEMENT_MAX_SHORTS = 1
 LIST_MAX_PER_SHORT = 1
 LIST_MAX_ITEMS = 3
@@ -979,7 +998,7 @@ def _pass_fail(ok: bool) -> str:
 
 
 def video_maker_gate(beats, *, content_format: str | None = "short",
-                     used_fallback: bool = False) -> dict:
+                     used_fallback: bool = False, legacy_timing: bool = False) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1026,7 +1045,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             "or a non-empty hook.object Decolar prop (receipt/terminal/bill)."
         )
 
-    # --- B: miolo mid ≤3.0s; cta/endcard ≤4.0s; hook EXEMPT ----------------
+    # --- B: mid card ≤3.0s / endcard ≤3.9s INCLUDING the fade; hook EXEMPT -
+    # card = visual hold (dur) + the 0.12s fade gap it owns, which is what the
+    # VM measures card-to-card (3.05–3.20s on a 3.0s hold, 2026-09-29).
     b_hits = []
     for i, b in enumerate(board):
         btype = b.get("type") or "?"
@@ -1034,20 +1055,25 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         if btype == "hook":
             continue
         span = _cue_span(board, i)
-        cap = CTA_BEAT_MAX_S if btype in CTA_TYPES else MID_BEAT_MAX_S
-        if span > cap + 1e-9:
+        card = span + BEAT_GAP_S
+        cap = CTA_CARD_MAX_S if btype in CTA_TYPES else MID_CARD_MAX_S
+        if legacy_timing:  # pre-2026-09-29 render: old HOLD caps (see marker)
+            cap = BEAT_GAP_S + (LEGACY_CTA_BEAT_MAX_S if btype in CTA_TYPES
+                                else LEGACY_MID_BEAT_MAX_S)
+        if card > cap + 1e-6:
             label = "cta/endcard" if btype in CTA_TYPES else "mid"
             b_hits.append(
-                f"beat[{i}] type={btype} {label} held {span:.2f}s "
-                f"(visual dur; limit {cap:.1f}s)"
+                f"beat[{i}] type={btype} {label} card {card:.2f}s incl. fade "
+                f"(hold {span:.2f}s + {BEAT_GAP_S:.2f}s fade; limit {cap:.1f}s)"
             )
     if b_hits:
         checks["B"] = "FAIL"
         reasons.append(
-            f"[B] Beats ≤{MID_BEAT_MAX_S:.0f}s: FAIL — " + "; ".join(b_hits) +
-            f". Mid cards/slides must be ≤{MID_BEAT_MAX_S:.1f}s; "
-            f"cta/endcard series ≤{CTA_BEAT_MAX_S:.1f}s "
-            "(not a Follow-tomorrow hold)."
+            f"[B] Beats ≤{MID_CARD_MAX_S:.1f}s incl. fade: FAIL — " + "; ".join(b_hits) +
+            f". Mid cards/slides must be ≤{MID_CARD_MAX_S:.1f}s including the fade "
+            f"(hold ≤{MID_BEAT_MAX_S:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
+            f"including the fade (hold ≤{CTA_BEAT_MAX_S:.2f}s) — split or add "
+            "beats, never stretch a card (not a Follow-tomorrow hold)."
         )
     # Repeated card: an identical card split only by the fade blink reads as
     # one ~6s frozen visual (freezedetect misses it). Gate B territory.
@@ -1088,7 +1114,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             )
         if span > MID_BEAT_MAX_S + 1e-9:
             c_hits.append(
-                f"list beat[{i}] held {span:.2f}s (max {MID_BEAT_MAX_S:.1f}s)"
+                f"list beat[{i}] held {span:.2f}s (max {MID_BEAT_MAX_S:.2f}s hold)"
             )
         if stagger > LIST_STAGGER_MAX_S + 1e-9:
             c_hits.append(
@@ -1155,8 +1181,9 @@ def video_maker_gate_reason(creation_config=None,
         if isinstance(stored, dict) and stored.get("result") == "FAIL":
             return format_craft_gate_reason(stored)
         return None  # no snapshot (pré-gate inventory) — fail-open
+    legacy = cc.get("beat_timing") != BEAT_TIMING_INCL_FADE
     gate = video_maker_gate(beats, content_format=content_format,
-                            used_fallback=used_fallback)
+                            used_fallback=used_fallback, legacy_timing=legacy)
     return format_craft_gate_reason(gate)
 
 

@@ -197,6 +197,8 @@ cc = worker._creation_config("x", {"topic_id": 1, "content_format": "short"}, ht
 ok(cc["beat_count"] == len(ALL), "creation_config captures the full beat mix")
 ok("code" in cc["beat_types"] and cc["theme"]["accent"] and cc["composition_version"],
    "creation_config records beat_types + theme + version")
+ok(cc.get("beat_timing") == craft.BEAT_TIMING_INCL_FADE,
+   "creation_config marks new renders as card-incl-fade timing (strict Gate B at review/publish)")
 
 # --- variety guard (R2: no all-statement storyboards) ------------------------
 print("_variety_ok")
@@ -218,18 +220,18 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
    "inter-beat gap 0.12s + min duration 0.5s (matches worker clip tolerance)")
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
-ok(storyboard._MID_MAX == 3.0,
-   "align max-hold: mid-body 3.0s (Gate B HARD; penultimate dump still lands on the CTA first)")
+ok(storyboard._MID_MAX == 2.88 and abs(storyboard._MID_MAX + storyboard._GAP - 3.0) < 1e-9,
+   "align max-hold: mid card 3.0s INCLUDING its fade → hold 2.88s (VM 2026-09-29; was 3.0 hold)")
 ok(storyboard._MID_MAX == craft.MID_BEAT_MAX_S,
    "gate B mid-hold cap matches the aligner (do not fail-close below _MID_MAX)")
 ok(storyboard._GAP == craft.BEAT_GAP_S,
    "gate B fade gap matches the aligner (do not count the 0.12s fade as hold)")
-ok(storyboard._ENDCARD_MAX == 4.0,
-   "series endcard / last-cta hold ceiling is 4.0s")
+ok(storyboard._ENDCARD_MAX == 3.78 and abs(storyboard._ENDCARD_MAX + storyboard._GAP - 3.9) < 1e-9,
+   "series endcard ≤3.9s INCLUDING its fade → hold 3.78s (VM 2026-09-29; was 4.0 hold)")
 ok(storyboard._HOOK_MAX == 4.0,
    "frame0 visual-hold target is 4.0s (surplus is later speech, not sentence 1)")
-ok(storyboard._HOOK_MAX == storyboard._ENDCARD_MAX,
-   "hook cap matches the endcard ceiling")
+ok(storyboard._HOOK_MAX >= storyboard._ENDCARD_MAX,
+   "hook target (4.0, Gate B exempt) is not tighter than the endcard hold")
 ok(storyboard._ENDCARD_MAX == craft.ENDCARD_MAX_S,
    "storyboard ceiling matches the craft gate")
 ok(storyboard._ROW_STEP_MAX == 1.1,
@@ -1634,5 +1636,172 @@ _fb_lines = re.findall(r'class="clip seg-(?:title|line)"[^>]*>([^<]*)<', _fb)
 _fb_keys = [craft.screen_text_key({"text": x}) for x in _fb_lines]
 ok(all(not craft.screen_text_near(a, b) for a, b in zip(_fb_keys, _fb_keys[1:])),
    "fallback composition: no neighbouring segments with the same text")
+
+print("frame0 full claim at full opacity (VM 2026-09-29 P0 a)")
+
+
+def _words_of(script, step=0.4, t0=0.0):
+    out, t = [], t0
+    for w in script.split():
+        out.append({"text": w.strip(".,!?"), "start": round(t, 3), "dur": step - 0.05})
+        t += step
+    return out
+
+
+_os_title = "Chat routed to Maya. Prod paged Lee. · Agent memory 32"
+_os_script = ("Chat routed to Maya. Prod paged Lee. The agent kept two memories and "
+              "never merged them, so production trusted the stale one. Pin one store. "
+              "Subscribe — next Agent memory trap.")
+_whole = [{"type": "hook", "text": "Chat routed to Maya", "cue": "Chat routed"}]
+storyboard._show_whole_claim(_whole, _os_script, _os_title)
+ok(_whole[0]["text"] == "Chat routed to Maya. Prod paged Lee.",
+   "two-part title: frame0 shows BOTH halves verbatim (was sentence 1 only on 9/17)")
+_same = [{"type": "hook", "text": "Chat routed to Maya", "cue": "c"}]
+storyboard._show_whole_claim(_same, "Chat routed to Maya. Something else was said.", _os_title)
+ok(_same[0]["text"] == "Chat routed to Maya",
+   "whole claim only when the narration opens on the full head (shown == spoken)")
+_other = [{"type": "hook", "text": "Different opener", "cue": "c"}]
+storyboard._show_whole_claim(_other, _os_script, _os_title)
+ok(_other[0]["text"] == "Different opener",
+   "never swaps frame0 for a claim the current hook is not a prefix of")
+_long_t = " ".join("w%d" % k for k in range(14)) + ". · IA 9"
+_long = [{"type": "hook", "text": "w0 w1 w2", "cue": "c"}]
+storyboard._show_whole_claim(_long, _long_t.split(" · ")[0] + " rest.", _long_t)
+ok(_long[0]["text"] == "w0 w1 w2", "heads over 12 words are left alone (overlay ceiling)")
+_rr = [{"type": "hook", "text": "Com ReBAR o 14B fez 48 tok/s", "cue": "Com ReBAR"}]
+storyboard._show_whole_claim(
+    _rr, "Com ReBAR o 14B fez 48 tok/s. Sem, 11. A janela da VRAM muda tudo.",
+    "Com ReBAR o 14B fez 48 tok/s. Sem, 11. · Local 57")
+ok(_rr[0]["text"] == "Com ReBAR o 14B fez 48 tok/s. Sem, 11.",
+   "RR #1354 shape: payoff 'Sem, 11.' is on the hook card, digits and punctuation kept")
+_nohook = [{"type": "stat", "value": "1"}]
+storyboard._show_whole_claim(_nohook, _os_script, _os_title)
+ok(_nohook == [{"type": "stat", "value": "1"}], "no hook beat → no-op")
+
+
+def os_llm(*a, **k):
+    return json.dumps({"beats": [
+        {"type": "hook", "cue": "Chat routed to Maya", "text": "Chat routed to Maya"},
+        {"type": "stat", "cue": "two memories", "value": "2", "unit": "", "label": "memories"},
+        {"type": "compare", "cue": "production trusted",
+         "left": {"title": "Chat", "items": ["Maya"]}, "right": {"title": "Prod", "items": ["Lee"]}},
+        {"type": "code", "cue": "Pin one store", "lines": ["memory.pin('one')"]},
+        {"type": "cta", "cue": "Subscribe next", "text": "Subscribe"},
+    ]})
+
+
+_os_words = _words_of(_os_script)
+_os_html = _compose(os_llm, subject=_os_title, script=_os_script, words=_os_words,
+                    duration=round(_os_words[-1]["start"] + 1.0, 2), brand="os",
+                    allowed_types=PHASE_A + ["code", "command", "diagram"])
+ok(_os_html is not None, "compose renders the two-part OS title")
+_b0 = re.search(r'<div class="beat hook" id="b0"[^>]*>', _os_html).group(0)
+ok('data-start="0.0"' in _b0 and 'style="opacity:1"' in _b0,
+   "frame0 hook card is at full opacity at t=0 (inline, not a fade-in)")
+ok("Prod" in _os_html.split('id="b0"', 1)[1].split('id="b1"', 1)[0],
+   "compose: the frame0 card carries the payoff half ('Prod paged Lee.')")
+ok(not re.search(r"fromTo\('#b0[^']*',\{[^}]*opacity:0", _os_html),
+   "no opacity:0 → 1 entrance tween on the first card (t=0 frame is not blank)")
+ok(re.search(r"fromTo\('#b0 \.htext',\{scale:0\.97\}", _os_html) is not None,
+   "first card still has motion (scale settle) — renderer keeps ≥1 tween")
+_later = storyboard.render_hook({"type": "hook", "text": "Later hook", "start": 5.0, "dur": 2.0},
+                                {"i": 3, "start": 5.0, "dur": 2.0, "is_last": False})
+ok('style="opacity:1"' not in _later[0] and any("opacity:0" in t for t in _later[1]),
+   "a hook that does not start at t=0 keeps its entrance (only frame0 is static)")
+
+print("timing: mid card ≤3.0s incl. fade, endcard ≤3.9s — split, never stretch (P0 b)")
+_long_script = " ".join("w%d" % k for k in range(110))
+_lw = _words_of(_long_script, step=0.4)  # 44s of continuous speech
+_long_board = [
+    {"type": "hook", "text": "Hook claim here", "cue": "w0 w1"},
+    {"type": "stat", "value": "8", "unit": "GB", "label": "KV", "cue": "w8 w9"},
+    {"type": "code", "lines": ["x=1"], "cue": "w40 w41"},       # 12.8s cue span
+    {"type": "compare", "cue": "w60 w61", "left": {"title": "A", "items": ["a"]},
+     "right": {"title": "B", "items": ["b"]}},
+    {"type": "term_define", "term": "KV", "definition": "cache", "cue": "w70 w71"},
+    {"type": "cta", "text": "Subscribe · IA", "cue": "w100 w101"},
+]
+storyboard.align_storyboard(_long_board, _lw, 44.0)
+storyboard._cap_list_holds(_long_board)
+storyboard._cap_endcard(_long_board, 44.0, _lw)
+_mids = [b for b in _long_board if b["type"] not in ("hook", "cta")]
+ok(all(float(b["dur"]) + storyboard._GAP <= 3.0 + 1e-6 for b in _mids),
+   "every mid card ≤3.0s including its fade")
+ok(float(_long_board[-1]["dur"]) + storyboard._GAP <= 3.9 + 1e-6
+   and _long_board[-1]["type"] == "cta", "endcard ≤3.9s including its fade")
+ok(any(b.get("_split") for b in _long_board),
+   "long cue spans are SPLIT into new quote cards (not stretched)")
+ok(all(b["type"] == "quote" for b in _long_board if b.get("_split")),
+   "split pieces are quote cards of the spoken words")
+_code = next(b for b in _long_board if b["type"] == "code")
+ok(abs(float(_code["start"]) - 16.0) < 1e-6,
+   "the split card stays on its cue (code at w40 = 16.0s) — split keeps word-sync")
+ok(craft.repeated_card_hits(_long_board) == [], "split never repeats a card (#40 gate)")
+ok(craft.video_maker_gate(_long_board)["checks"]["B"] == "PASS",
+   "split board passes Gate B (timing incl. fade + repeated card)")
+ok(storyboard.validate_storyboard(_long_board, 44.0), "split board validates")
+_nw_board = [dict(b) for b in [
+    {"type": "hook", "text": "H", "cue": "w0"},
+    {"type": "stat", "value": "8", "unit": "GB", "label": "KV", "cue": "w8"},
+    {"type": "code", "lines": ["x=1"], "cue": "w40"},
+    {"type": "cta", "text": "Subscribe · IA", "cue": "w100"},
+]]
+storyboard._even_space(_nw_board, 30.0)
+storyboard._cap_endcard(_nw_board, 30.0, None)
+ok(all(float(b["dur"]) + storyboard._GAP <= 3.0 + 1e-6
+       for b in _nw_board if b["type"] not in ("hook", "cta"))
+   and float(_nw_board[-1]["dur"]) <= storyboard._ENDCARD_MAX + 1e-6,
+   "no word timings: caps still hold (surplus walks to the Gate-B-exempt hook)")
+
+# End to end: PULSE RR shape (≈45s, 3.0s holds → 3.12s cards, 4.0 endcard →
+# 4.05–4.08s measured). compose output must now sit inside both limits.
+_rr_script = ("O prompt processa no CPU por 8 segundos, não é engenharia. Isso não é engenharia. "
+              "O CPU autentica, monta o contexto e orquestra a chamada. Quem produz token é a GPU "
+              "ou a API que já está quente. Segurar a resposta 8 segundos no CPU é bloqueio "
+              "disfarçado de modelo grande, sem ganho nenhum. O usuário não sente profundidade, "
+              "sente espera. Profundidade é chegar rápido com a resposta certa e o hardware certo "
+              "no lugar certo. Subscribe — next IA trap.")
+_rr_words = _words_of(_rr_script, step=0.52)
+
+
+def rr_llm(*a, **k):
+    return json.dumps({"beats": [
+        {"type": "hook", "cue": "O prompt processa", "text": "O prompt processa no CPU por 8 segundos"},
+        {"type": "stat", "cue": "Isso não é engenharia", "value": "8", "unit": "s", "label": "no CPU"},
+        {"type": "list", "cue": "O CPU autentica", "title": "Papel do CPU",
+         "items": ["autentica", "monta contexto", "orquestra"]},
+        {"type": "compare", "cue": "Quem produz token", "title": "Quem gera o token",
+         "left": {"title": "CPU", "items": ["orquestra"]}, "right": {"title": "GPU", "items": ["gera"]}},
+        {"type": "command", "cue": "Segurar a resposta", "command": "curl -N /v1/chat"},
+        {"type": "term_define", "cue": "O usuário não sente", "term": "Latência", "definition": "espera"},
+        {"type": "quote", "cue": "Profundidade é chegar", "text": "Profundidade é chegar rápido"},
+        {"type": "cta", "cue": "Subscribe next", "text": "Subscribe"},
+    ]})
+
+
+_rr_dur = round(_rr_words[-1]["start"] + 1.0, 2)
+_rr_html = _compose(rr_llm, subject="O prompt processa no CPU por 8 segundos, não é engenharia. · IA 211",
+                    script=_rr_script, words=_rr_words, duration=_rr_dur, brand="rr",
+                    language="Brazilian Portuguese",
+                    allowed_types=PHASE_A + ["code", "command", "diagram"])
+ok(_rr_html is not None, "compose renders the RR 45s board")
+_rrb = craft.beats_from_html(_rr_html)
+ok(all(float(b["dur"]) + storyboard._GAP <= 3.0 + 1e-6
+       for b in _rrb if b.get("type") not in ("hook", "cta")),
+   "compose RR: every mid card ≤3.0s incl. fade (PULSE: 3.05–3.20s on 14/17)")
+ok(float(_rrb[-1]["dur"]) + storyboard._GAP <= 3.9 + 1e-6,
+   "compose RR: endcard ≤3.9s incl. fade (PULSE: 4.05–4.08s on 7/7 RR)")
+ok(craft.video_maker_gate(_rrb)["checks"]["B"] == "PASS",
+   "compose RR output passes Gate B")
+ok('style="opacity:1"' in re.search(r'<div class="beat hook" id="b0"[^>]*>', _rr_html).group(0),
+   "compose RR: frame0 at full opacity")
+ok(not any(craft.contains_subscribe_cta(b.get("text") or "")
+           for b in _rrb if b.get("type") == "quote"),
+   "split/fill quotes never carry the endcard Subscribe VO")
+_sub_w = [{"text": "resposta", "start": 0.0}, {"text": "certa.", "start": 0.3},
+          {"text": "Subscribe", "start": 0.6}, {"text": "—", "start": 0.8},
+          {"text": "next", "start": 0.9}, {"text": "IA", "start": 1.1}, {"text": "trap.", "start": 1.3}]
+ok(not craft.contains_subscribe_cta(storyboard._window_text(_sub_w, 0.0, 2.0)),
+   "_window_text strips the Subscribe endcard VO from a quote window")
 
 print(f"\nALL {_checks} CHECKS PASSED")

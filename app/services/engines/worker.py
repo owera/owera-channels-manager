@@ -405,6 +405,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             "beat_count": len(beat_types),
             "beats": beats or None,
             "craft_gate": gate,
+            # Aligner caps cards INCLUDING the fade (craft Gate B strict timing).
+            "beat_timing": craft.BEAT_TIMING_INCL_FADE,
             "bgm": (bgm.name if bgm else None),
             "bgm_volume": float(params.get("bgm_volume") or 0.2),
             "script_words": len(script.split()),
