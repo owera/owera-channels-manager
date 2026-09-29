@@ -508,7 +508,9 @@ def _base_css(width: int, height: int, th: dict) -> str:
         "pointer-events:none;position:relative}"
         ".hook .htext{position:relative;z-index:2;font-size:calc(var(--fs)*1.28);font-weight:800;"
         "line-height:1.12;letter-spacing:-1px;text-shadow:0 4px 24px rgba(0,0,0,.7)}"
-        + craft.OBJECT_CSS +
+        + craft.OBJECT_CSS + craft.SPLIT_CSS +
+        ".hook[data-split]{justify-content:flex-start;padding:9% 6% 0;"
+        "--split-top:var(--stroke);color:var(--fg)}" +
         ((".hook{flex-direction:row;align-items:center}"
           ".hook .hobj{width:38%;max-height:62%}") if height < width else "") +
         # statement
@@ -634,6 +636,23 @@ def render_hook(b, ctx):
     obj = '<div class="hobj">' + craft.object_markup(spec) + "</div>"
     # Hook emoji is a hard-FAIL as the object — never render 💸/🔥 as a punch.
     inner = obj + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    if s <= 1e-9 and b.get("split"):
+        # Designer split-card (2026-09-29 P0): frame0 ≡ thumb. Same markup as
+        # thumbnail.py (craft.split_card_markup); whole claim, full opacity at
+        # t=0, no first-word object chip, O ring hidden while this card shows.
+        track = 'data-track-index="' + str(i) + '"'
+        inner = craft.split_card_markup(b["split"], ctx["width"], ctx["height"])
+        html = _shell(i, b, "hook", inner).replace(
+            track, track + ' data-split="1" style="opacity:1"', 1)
+        tw = [_from(bid + " .sc-top", s, "scale:0.97", "scale:1", dur=0.35),
+              _from(bid + " .sc-bot", s, "scale:0.97", "scale:1", dur=0.35),
+              _from(bid + " .sc-x", s + 0.25, "scale:1.6", "scale:1", dur=0.3,
+                    ease="back.out(2)")]
+        if ctx.get("brand") == "os":
+            tw.append("tl.set('#brand-mark',{opacity:0},0);")
+            tw.append("tl.set('#brand-mark',{opacity:0.9,immediateRender:false}," +
+                      _r(s + ctx["dur"]) + ");")
+        return html, _wrap(i, ctx, tw)
     if s <= 1e-9:
         # Frame0 (VM 2026-09-29, P0 a): the t=0 frame showed only the gradient
         # on 17/17 masters because the hook faded in. The first card is at
@@ -999,7 +1018,8 @@ def build_index_html(beats, th, resolution, width, height, duration,
             renderer = render_statement
         ctx = {"i": i, "start": b["start"], "dur": b["dur"],
                "is_last": i == len(beats) - 1, "width": width, "height": height,
-               "duration": duration, "content_format": content_format}
+               "duration": duration, "content_format": content_format,
+               "brand": th.get("brand")}
         html, tw = renderer(b, ctx)
         body.append(html)
         tweens.extend(tw)
@@ -1287,6 +1307,21 @@ def _show_whole_claim(beats, script, subject) -> None:
     if craft.contains_subscribe_cta(head) or craft.is_endcard_vo(head):
         return
     beats[0]["text"] = head
+
+
+def _apply_split_card(beats, subject, provided_thumb=False) -> None:
+    """Designer split-card on frame0 (Agent memory / IA / Local only). Kept
+    only when the card shows exactly the hook claim (whole-claim rule, #45);
+    never with an operator-provided thumbnail (#39)."""
+    from app.services import craft
+    if not beats or (beats[0].get("type") or "") != "hook":
+        return
+    spec = craft.contrast_split(subject, provided_thumb=provided_thumb)
+    if not spec:
+        return
+    if _tok(craft.split_card_text(spec)) != _tok(beats[0].get("text") or ""):
+        return  # frame0 claim is not the title head (narration opened elsewhere)
+    beats[0]["split"] = spec
 
 
 def _last_sentence(script: str) -> str:
@@ -1651,7 +1686,8 @@ def _cap_list_holds(beats) -> None:
 
 def compose(*, subject, script, words, duration, resolution, width, height,
             topic_id=None, content_format="short", allowed_types=None, language=None,
-            llm, brand=None, channel_id=None, channel_slug=None) -> str | None:
+            llm, brand=None, channel_id=None, channel_slug=None,
+            provided_thumb=False) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -1706,6 +1742,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
 
     _lock_opening_hook(beats, script, subject)
     _show_whole_claim(beats, script, subject)
+    _apply_split_card(beats, subject, provided_thumb=provided_thumb)
     _demote_nonsense_diagrams(beats, content_format)
     _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
     _strip_mid_subscribe_beats(beats)

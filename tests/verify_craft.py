@@ -1013,4 +1013,45 @@ _snap = craft.snapshot_beats([_TD, _CMP])
 ok(_snap[0].get("term") == "Keep-alive" and _snap[1].get("left", {}).get("title") == "Peso",
    "snapshot_beats keeps term/definition/left/right for the repeated-card check")
 
+# --- Designer contrast split-card (2026-09-29 council P0) ---------------------
+_sp = craft.contrast_split("Chat applied SAVE20. Prod charged full price. · Agent memory 33")
+ok(_sp and _sp["top_label"] == "Chat" and _sp["top"] == "applied SAVE20."
+   and _sp["bottom_label"] == "Prod" and _sp["bottom"] == "charged full price.",
+   "split: OS Chat/Prod title → labelled top/bottom, digits + periods kept")
+ok(craft.split_card_text(_sp) == _sp["head"] == "Chat applied SAVE20. Prod charged full price.",
+   "split: card text rebuilds the whole head verbatim")
+_sr = craft.contrast_split("Com ReBAR o 14B fez 48 tok/s. Sem, 11. · Local 57")
+ok(_sr and _sr["top_label"] == "Com" and _sr["bottom_label"] == "Sem," and _sr["bottom"] == "11."
+   and craft.split_card_text(_sr) == "Com ReBAR o 14B fez 48 tok/s. Sem, 11.",
+   "split: RR Com/Sem (#1354 shape) keeps '14B', '48 tok/s', 'Sem, 11.'")
+_si = craft.contrast_split("O prompt processa no CPU por 8 segundos, não é engenharia. · IA 211")
+ok(_si and _si["top"] == "O prompt processa no CPU por 8 segundos," and _si["bottom"] == "não é engenharia."
+   and _si["series"] == "IA",
+   "split: IA one-sentence head splits at 'não é engenharia', comma stays on top")
+_sg = craft.contrast_split("Chat said yes. Prod said no! · Agent memory 2")
+ok(_sg and _sg["top_label"] == "Chat" and _sg["bottom"] == "said no!", "split: ! kept")
+_sx = craft.contrast_split("Your agent forgot the key. The run failed. · Agent memory 7")
+ok(_sx and _sx["top_label"] == "" and _sx["top"] == "Your agent forgot the key."
+   and _sx["bottom"] == "The run failed.", "split: two sentences without Chat/Prod → unlabelled cards")
+ok(craft.contrast_split("Chat applied SAVE20. Prod charged full price. · Shipping 4") is None,
+   "split: Shipping series → None (only Agent memory / IA / Local)")
+ok(craft.contrast_split("Chat applied SAVE20. Prod charged full price.") is None,
+   "split: no ' · Series N' suffix → None (no brand-default series)")
+ok(craft.contrast_split("Chat applied SAVE20. Prod charged full price. · Agent memory 33",
+                        provided_thumb=True) is None,
+   "split: provided thumbnail (#39) → None")
+ok(craft.contrast_split("Ollama idle holds 7GB of VRAM · Local 12") is None,
+   "split: one sentence without the verdict → None (normal hook card)")
+ok(craft.contrast_split("A. B. C. · IA 3") is None, "split: three sentences → None")
+ok(craft.contrast_split(None) is None and craft.contrast_split("") is None, "split: empty → None")
+_fs = craft.split_font_px("applied SAVE20.", 1080, 1920)
+ok(108 <= _fs <= 221, "split: type size is 2–3× the old hook at 1080w (%d px)" % _fs)
+ok(craft.split_font_px("x" * 80, 1080, 1920) >= 108, "split: long card never drops below 10% width")
+_mk = craft.split_card_markup(_sp, 1080, 1920)
+ok(_mk.count('class="sc ') == 2 and _mk.count("✕") == 1 and 'sc-bot"><div class="sc-x"' in _mk,
+   "split: shared markup has 2 cards, the ✕ stamp on the bottom card only")
+ok("SAVE20." in _mk and "charged full price." in _mk, "split: markup carries the verbatim text")
+_mke = craft.split_card_markup({"top": "<b>", "bottom": "a&b"}, 1080, 1920)
+ok("&lt;b&gt;" in _mke and "a&amp;b" in _mke, "split: markup escapes HTML")
+
 print(f"\nALL {_checks} CHECKS PASSED")

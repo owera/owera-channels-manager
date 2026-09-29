@@ -363,3 +363,18 @@ code-ish tokens with `_ . / - @ :` or digits, camelCase brands like `eGPU`),
 a bare unit / currency token with no number (`B`, `GB`, `%`, `R$`, `x` …),
 leading punctuation, and any currency value (`R$N` / `$N`) in the subject.
 The digest lists them under `subject_held`.
+
+## Contrast split-card (Designer council 2026-09-29)
+
+Frame0 and the template thumbnail share one markup (`craft.split_card_markup`) for
+titles with a real ` · Agent memory|IA|Local N` suffix:
+
+- `Chat … . Prod … .` / `Com … . Sem, … .` → labelled top card + bottom card with a ✕ stamp.
+- Other two-sentence heads → unlabelled top/bottom cards.
+- One-sentence IA heads `X, não é engenharia.` → split at the verdict.
+- Text is the title head verbatim (punctuation + digits, #38). Frame0 is at full
+  opacity at t=0 and shows the whole claim (#45); the split is only applied when the
+  split text equals the hook text.
+- Never applied when the operator provided a thumbnail (`thumb_source=provided`, #39),
+  on long-form, or on other series (Shipping keeps the object-over-type card).
+- Thumbnail cards sit in 9%–72% of the height; no first-word chip, O ring hidden on the card.
