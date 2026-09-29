@@ -881,6 +881,12 @@ ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
 ok("hook_pace" not in cc_os and cc_os["craft_gate"]["checks"]["B"] == "PASS",
    "OS render: no hook_pace marker, no hook-pace check")
 ok("hook_pace" not in cc_fb, "fallback render: no hook_pace marker (A/C already FAIL)")
+cc_split = worker._creation_config("s", {"content_format": "short"},
+                                   '<div class="beat hook" id="b0" data-split="1" style="opacity:1"></div>',
+                                   "x", 9.0, "portrait", None, False, brand="os")
+ok(cc_split.get("frame0_split") is True,
+   "frame0 rendered with the split card → creation_config.frame0_split (publish thumb matches)")
+ok("frame0_split" not in cc_os, "no split card on frame0 → no frame0_split marker")
 ok("words=words, brand=brand" in inspect.getsource(worker.run_job),
    "run_job passes TTS words + resolved brand into _creation_config")
 

@@ -833,6 +833,15 @@ s, ch, v = _setup_thumb_case("short")
 publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytS")
 ok(_thumb_calls[0].get("content_format") == "short",
    "short topic forwards content_format=short")
+ok(_thumb_calls[0].get("frame0_split") is False,
+   "no creation_config.frame0_split (pre-#46 render) → frame0_split=False (no split thumb)")
+_thumb_calls.clear()
+s, ch, v = _setup_thumb_case("short")
+v.creation_config = json.dumps({"frame0_split": True, "beats": []})
+s.add(v); s.commit()
+publish_loop._set_custom_thumbnail(s, object(), ch, v, "ytSplit")
+ok(_thumb_calls[0].get("frame0_split") is True,
+   "creation_config.frame0_split → thumb uses the same split card as frame0 (frame0 ≡ thumb)")
 
 # YPP craft move #2: brand follows channel slug/id into the thumbnail.
 _thumb_calls.clear()

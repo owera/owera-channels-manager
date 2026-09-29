@@ -721,9 +721,19 @@ with tempfile.TemporaryDirectory() as td:
          patch.object(thumbnail, "_hook_text", side_effect=AssertionError("LLM must not run")) as _ht, \
          patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
          patch.object(thumbnail, "_extract_frame", side_effect=_fake_extract_write):
-        _res = thumbnail.make_thumbnail_png(_T, _T, Path(td) / "s.png", brand="os")
+        _res = thumbnail.make_thumbnail_png(_T, _T, Path(td) / "s.png", brand="os",
+                                            frame0_split=True)
 ok(_res is not None and _seen.get("split") and _seen.get("hook") == "Chat applied SAVE20. Prod charged full price.",
-   "make_thumbnail_png: split title → split spec + verbatim head, no LLM hook compression")
+   "make_thumbnail_png: split title + frame0_split → split spec + verbatim head, no LLM hook compression")
+_seen.clear()
+with tempfile.TemporaryDirectory() as td:
+    with patch.object(thumbnail, "_thumbnail_html", side_effect=_spy_html), \
+         patch.object(thumbnail, "_hook_text", return_value="Old template hook"), \
+         patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
+         patch.object(thumbnail, "_extract_frame", side_effect=_fake_extract_write):
+        thumbnail.make_thumbnail_png(_T, _T, Path(td) / "o.png", brand="os")
+ok(_seen.get("split") is None and _seen.get("hook") == "Old template hook",
+   "make_thumbnail_png: render without frame0_split (approved pre-#46 inventory) → no split thumb (frame0 ≡ thumb)")
 _seen.clear()
 with tempfile.TemporaryDirectory() as td:
     with patch.object(thumbnail, "_thumbnail_html", side_effect=_spy_html), \

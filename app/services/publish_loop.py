@@ -324,7 +324,9 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
             video.subject, video.title, out_png,
             topic_id=video.topic_id or 0,
             content_format=content_format,
-            brand=craft.brand_of(channel.slug, channel.name, channel_id=channel.id))
+            brand=craft.brand_of(channel.slug, channel.name, channel_id=channel.id),
+            # Split-card thumb only when frame0 was rendered with it (frame0 ≡ thumb).
+            frame0_split=bool(craft._as_dict(video.creation_config).get("frame0_split")))
         if not png:
             quota.log(session, kind="thumbnail", status="error", video_id=video.id,
                       channel_id=channel.id, detail="thumbnail generation failed")
