@@ -701,11 +701,37 @@ def get_analytics_service(slug: str):
     return build("youtubeAnalytics", "v2", credentials=creds)
 
 
+# Analytics API 5xx (backendError / internalError) is transient: retry the same
+# query with a short exponential backoff (0.5s, 1s) before giving up. 4xx (scope,
+# quota, bad request) is never retried. ``_sleep`` is patched in tests.
+ANALYTICS_ATTEMPTS = 3
+ANALYTICS_BACKOFF_S = 0.5
+_sleep = __import__("time").sleep
+
+
+def _execute_with_backoff(request, *, attempts: int = ANALYTICS_ATTEMPTS):
+    for attempt in range(1, attempts + 1):
+        try:
+            return request.execute()
+        except HttpError as e:
+            status = getattr(getattr(e, "resp", None), "status", None)
+            try:
+                status = int(status)
+            except (TypeError, ValueError):
+                status = 0
+            if status < 500 or attempt >= attempts:
+                raise
+            delay = ANALYTICS_BACKOFF_S * (2 ** (attempt - 1))
+            logger.info("analytics HTTP %s (attempt %d/%d) — retrying in %.1fs",
+                        status, attempt, attempts, delay)
+            _sleep(delay)
+
+
 def _analytics_row(analytics, channel_yt_id, video_id, start_date, end_date, metrics) -> dict:
-    resp = analytics.reports().query(
+    resp = _execute_with_backoff(analytics.reports().query(
         ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
         dimensions="video", filters=f"video=={video_id}", metrics=metrics, maxResults=1,
-    ).execute()
+    ))
     rows = resp.get("rows") or []
     if not rows:
         return {}
@@ -724,7 +750,11 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
     failed forever, so every impressions/ctr=0 stored before this date was a
     fabricated default, not a measurement. Impressions/CTR stay 0 in VideoMetric
     (Studio-only data); use traffic_json (browse/suggested/search views) as the
-    discovery signal instead."""
+    discovery signal instead.
+
+    ``empty`` is True when the API returned no row at all (values stay
+    zero-filled for callers that want numbers); analytics_loop stores NULL
+    instead of 0 for such a snapshot inside the 24–72h reporting lag."""
     raw: dict = {}
     try:
         raw.update(_analytics_row(
@@ -742,6 +772,7 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
             return cast(0)
 
     return {
+        "empty": not raw,
         "views": _n("views"),
         "impressions": _n("impressions"),
         "ctr": _n("impressionClickThroughRate", float),
@@ -763,11 +794,11 @@ def fetch_traffic_sources(analytics, channel_yt_id: str, video_id: str,
     partial data beats no data; failures return whatever was gathered."""
     out: dict = {"sources": {}, "search_terms": {}}
     try:
-        resp = analytics.reports().query(
+        resp = _execute_with_backoff(analytics.reports().query(
             ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
             dimensions="insightTrafficSourceType", filters=f"video=={video_id}",
             metrics="views,estimatedMinutesWatched", maxResults=25,
-        ).execute()
+        ))
         for row in resp.get("rows") or []:
             out["sources"][str(row[0])] = {"views": int(row[1] or 0),
                                            "watch_min": int(row[2] or 0)}
@@ -775,12 +806,12 @@ def fetch_traffic_sources(analytics, channel_yt_id: str, video_id: str,
         return out
     if out["sources"].get("YT_SEARCH", {}).get("views", 0) > 0:
         try:
-            resp = analytics.reports().query(
+            resp = _execute_with_backoff(analytics.reports().query(
                 ids=f"channel=={channel_yt_id}", startDate=start_date, endDate=end_date,
                 dimensions="insightTrafficSourceDetail",
                 filters=f"video=={video_id};insightTrafficSourceType==YT_SEARCH",
                 metrics="views", sort="-views", maxResults=10,
-            ).execute()
+            ))
             for row in resp.get("rows") or []:
                 out["search_terms"][str(row[0])] = int(row[1] or 0)
         except Exception:

@@ -206,7 +206,11 @@ def publish_signals(session: Session, ch: Channel, now: datetime | None = None,
         return int(session.exec(select(func.count(Video.id)).where(
             Video.channel_id == ch.id, Video.status == st)).one() or 0)
 
-    approved = _count(VideoStatus.APPROVED)
+    # Held approved rows never publish — they are not runway (P0 2026-09-29).
+    approved = int(session.exec(select(func.count(Video.id)).where(
+        Video.channel_id == ch.id, Video.status == VideoStatus.APPROVED,
+        Video.held.is_not(True))).one() or 0)
+    held = _count(VideoStatus.APPROVED) - approved
     review = _count(VideoStatus.REVIEW)
     published_ever = _count(VideoStatus.PUBLISHED)
     published_today = quota.published_today(session, ch.id)
@@ -223,7 +227,7 @@ def publish_signals(session: Session, ch: Channel, now: datetime | None = None,
                 Video.channel_id == ch.id, Video.status == VideoStatus.REVIEW)).all()
             if review_ready_reason(session, v) is None)
     return {
-        "approved": approved, "published_today": published_today,
+        "approved": approved, "held": held, "published_today": published_today,
         "daily_publish_budget": budget, "review_waiting": review,
         "review_ready": review_ready_n, "in_publish_window": in_window,
         "runway": runway, "runway_target": target,
@@ -409,11 +413,13 @@ def detect(session: Session, now: datetime | None = None) -> dict:
         longs = session.exec(
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == channel_id, Video.status == status,
+                   Video.held.is_not(True),
                    Topic.content_format == "long")
         ).one()
         shorts = session.exec(
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == channel_id, Video.status == status,
+                   Video.held.is_not(True),
                    Topic.content_format != "long")
         ).one()
         return {"long": int(longs or 0), "short": int(shorts or 0)}
@@ -465,10 +471,11 @@ def detect(session: Session, now: datetime | None = None) -> dict:
         counts = {}
         for st in (VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING,
                    VideoStatus.APPROVED, VideoStatus.PUBLISHED):
-            counts[st] = session.exec(
-                select(func.count(Video.id)).where(
-                    Video.channel_id == ch.id, Video.status == st)
-            ).one()
+            q = select(func.count(Video.id)).where(
+                Video.channel_id == ch.id, Video.status == st)
+            if st == VideoStatus.APPROVED:
+                q = q.where(Video.held.is_not(True))   # held never publishes
+            counts[st] = session.exec(q).one()
         drafts = counts[VideoStatus.DRAFT]
         active = counts[VideoStatus.QUEUED] + counts[VideoStatus.RENDERING]
         ready = counts[VideoStatus.APPROVED]

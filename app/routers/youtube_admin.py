@@ -165,9 +165,14 @@ def _parse_json(s):
 
 
 def _latest_metrics(session: Session, channel_id: int) -> dict[int, VideoMetric]:
-    """Most recent VideoMetric per video for the channel (video_id -> row)."""
+    """Most recent *measured* VideoMetric per video for the channel (video_id -> row).
+
+    NULL-metric snapshots (API had not reported the video yet, <72h) are skipped:
+    such a video counts as unmeasured (has_data False, excluded from averages)
+    instead of dragging topic/format means down with fabricated zeros."""
     rows = session.exec(
-        select(VideoMetric).where(VideoMetric.channel_id == channel_id)
+        select(VideoMetric).where(VideoMetric.channel_id == channel_id,
+                                  VideoMetric.views.is_not(None))
         .order_by(VideoMetric.captured_at)            # ascending → last write wins
     ).all()
     latest: dict[int, VideoMetric] = {}
@@ -206,7 +211,7 @@ def _compute_monetization(session: Session, channel_id: int) -> dict:
     subscriber_count = latest_cm.subscriber_count if latest_cm else 0
 
     latest_metrics = _latest_metrics(session, channel_id)
-    total_watch_hours = sum(m.watch_time_minutes for m in latest_metrics.values()) / 60
+    total_watch_hours = sum(m.watch_time_minutes or 0 for m in latest_metrics.values()) / 60
 
     topics = _topics_map(session, channel_id)
     # Same != "long" gate as render/issues/publish/autofill — empty/"LONG" are shorts.
@@ -327,15 +332,15 @@ def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_ses
             bucket["video_count"] += 1
             if m:
                 bucket["measured"] += 1
-                bucket["views"] += m.views
-                bucket["impressions"] += m.impressions
-                bucket["watch_time_minutes"] += m.watch_time_minutes
-                bucket["likes"] += m.likes
-                bucket["comments"] += m.comments
-                bucket["subscribers_gained"] += m.subscribers_gained
-                bucket["_ctr_sum"] += m.ctr
-                bucket["_avp_sum"] += m.avg_view_pct
-                bucket["_avd_sum"] += m.average_view_duration
+                bucket["views"] += m.views or 0
+                bucket["impressions"] += m.impressions or 0
+                bucket["watch_time_minutes"] += m.watch_time_minutes or 0
+                bucket["likes"] += m.likes or 0
+                bucket["comments"] += m.comments or 0
+                bucket["subscribers_gained"] += m.subscribers_gained or 0
+                bucket["_ctr_sum"] += m.ctr or 0.0
+                bucket["_avp_sum"] += m.avg_view_pct or 0.0
+                bucket["_avd_sum"] += m.average_view_duration or 0.0
 
     def _finish(bucket: dict) -> dict:
         n = bucket.pop("measured")

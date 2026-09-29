@@ -25,6 +25,15 @@ logger = logging.getLogger("manager.analytics")
 
 # Videos younger than this have no analytics data yet (API latency); skip them.
 _MIN_MATURITY_HOURS = 24
+# Inside the reporting lag an EMPTY API answer means "not reported yet", not
+# "zero views": store NULL metrics instead of fabricated zeros (P1 2026-09-29).
+# Past this age an empty answer is a real zero.
+_NULL_WHEN_EMPTY_HOURS = 72
+_METRIC_FIELDS = ("views", "impressions", "ctr", "avg_view_pct", "average_view_duration",
+                  "watch_time_minutes", "likes", "comments", "subscribers_gained")
+# A channel pass stops early only after this many consecutive failures with no
+# success (API disabled / not reconsented); a single failed video never ends it.
+_NOT_READY_FAILURES = 3
 # Quota reserved per video: core query + (for viewed videos) traffic-source queries.
 _QUOTA_PER_VIDEO = 2 * youtube.QUOTA_ANALYTICS_QUERY
 
@@ -99,9 +108,11 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
         quota.log(session, kind="analytics", status="error", channel_id=channel.id,
                   video_id=video.id, detail=str(e), quota_cost=0)
         return None
+    if data.get("empty") and (now - pub) < timedelta(hours=_NULL_WHEN_EMPTY_HOURS):
+        data = {**data, **{k: None for k in _METRIC_FIELDS}}
     # Traffic-source attribution: only worth a query once the video has views.
     traffic_json = None
-    if data["views"] > 0:
+    if (data["views"] or 0) > 0:
         try:
             traffic = youtube.fetch_traffic_sources(
                 analytics, channel.yt_channel_id, video.yt_video_id, start_date, end_date)
@@ -175,6 +186,7 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
     ).all()
     cap = settings.youtube_daily_quota_cap - _publish_reserve(session, channel)
     recorded = 0
+    failures = 0
     for video in videos:
         if not force and not _snapshot_due(session, video.id):
             continue
@@ -191,12 +203,16 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
         session.commit()           # persist each snapshot so quota accounting is live
         if ok:
             recorded += 1
-        elif recorded == 0:
-            # The first attempt hard-failed and nothing has succeeded — the channel
-            # isn't analytics-ready (API disabled in the Cloud project, or not yet
-            # reconsented for the scope). Stop hammering the rest; retry next tick.
-            logger.info("analytics: first call failed for %s — channel not ready, "
-                        "skipping the rest this tick", channel.slug)
+            failures = 0
+            continue
+        failures += 1
+        if recorded == 0 and failures >= _NOT_READY_FAILURES:
+            # Several consecutive hard failures and nothing has succeeded — the
+            # channel isn't analytics-ready (API disabled in the Cloud project, or
+            # not yet reconsented). Stop hammering the rest; retry next tick. One
+            # failed video (5xx after backoff, bad id) no longer ends the pass.
+            logger.info("analytics: %d consecutive failures for %s — channel not "
+                        "ready, skipping the rest this tick", failures, channel.slug)
             break
     return recorded
 
@@ -212,4 +228,9 @@ def tick() -> None:
         for channel in channels:
             if not channel.yt_channel_id:
                 continue
-            _snapshot_channel(session, channel, now)
+            try:
+                _snapshot_channel(session, channel, now)
+            except Exception:
+                # One channel's unexpected failure must not starve the others.
+                session.rollback()
+                logger.exception("analytics pass failed for %s — continuing", channel.slug)
