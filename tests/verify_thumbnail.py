@@ -259,11 +259,16 @@ with patch.object(thumbnail, "_llm", side_effect=RuntimeError("x")):
     ok(thumbnail._hook_text("   ", None) == "Watch This",
        "whitespace-only subject → sentinel 'Watch This'")
 
-# fallback truncates to 8 words, original casing (not Title Case)
+# fallback keeps the whole claim up to the 12-word overlay ceiling, original
+# casing (not Title Case). It used to clip at 8 words, which dropped the tail
+# of 9-word claims ("… 48 tok/s. Sem, 11." lost "11.").
 with patch.object(thumbnail, "_llm", side_effect=RuntimeError("x")):
     ok(thumbnail._hook_text("s", "one two three four five six seven eight nine")
-       == "one two three four five six seven eight",
-       "fallback keeps the first 8 words, original casing")
+       == "one two three four five six seven eight nine",
+       "fallback keeps a 9-word claim whole (≤12-word overlay ceiling), original casing")
+    ok(thumbnail._hook_text("s", " ".join(f"w{i}" for i in range(1, 15)))
+       == " ".join(f"w{i}" for i in range(1, 13)),
+       "fallback still clips a 14-word single sentence at 12 words")
 
 
 # ---------------------------------------------------------------------------
