@@ -736,5 +736,45 @@ ok(_seen.get("split") is None and _seen.get("hook") == "Shipping hook",
    "make_thumbnail_png: Shipping series → normal template (no split)")
 
 
+# ---------------------------------------------------------------------------
+# Shorts UI safe band (P1 f): template text never in 73–88% of the height
+# ---------------------------------------------------------------------------
+print("Shorts UI safe band (template text out of 73–88% height)")
+import re as _re_f
+_rw, _rh, _, _ = thumbnail._canvas("short")
+
+
+def _stage_box(html):
+    m = _re_f.search(r"#stage\{position:absolute;left:0;right:0;top:(\d+)px;height:(\d+)px", html)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+for _brand in ("os", "rr", None):
+    _hf = thumbnail._thumbnail_html("Your script stays your script in Channels Manager", brand=_brand)
+    _bx = _stage_box(_hf)
+    ok(_bx is not None and (_bx[0] + _bx[1]) / _rh <= thumbnail.SAFE_BOTTOM_FRAC + 1e-6
+       and (_bx[0] + _bx[1]) / _rh < thumbnail.SHORTS_UI_BAND[0] and _bx[0] / _rh >= 0.08,
+       "brand=%s: object + hook box %.1f%%–%.1f%% of the height, above the 73%% Shorts UI band"
+       % (_brand, 100 * _bx[0] / _rh, 100 * (_bx[0] + _bx[1]) / _rh))
+    ok("inset:0" not in _hf.split("#stage{", 1)[1].split("}", 1)[0]
+       and "justify-content:flex-end" not in _hf.split("#stage{", 1)[1].split("}", 1)[0],
+       "brand=%s: stage no longer anchored to the bottom edge (was flex-end + 12%% pad → 73–88%%)" % _brand)
+_sp_f = _craft.contrast_split("Chat applied SAVE20. Prod charged full price. · Agent memory 33")
+_bs = _stage_box(thumbnail._thumbnail_html(_sp_f["head"], brand="os", split=_sp_f))
+ok(_bs and (_bs[0] + _bs[1]) / _rh <= thumbnail.SAFE_BOTTOM_FRAC + 1e-6,
+   "split card shares the same safe box")
+_hl_f = thumbnail._thumbnail_html("Long-form hook", brand="os", content_format="long")
+ok(_stage_box(_hl_f) is None and "flex-direction:row" in _hl_f,
+   "long-form (16:9) layout unchanged — no Shorts UI there")
+ok(thumbnail.SHORTS_UI_BAND == (0.73, 0.88) and thumbnail.SAFE_BOTTOM_FRAC < 0.73,
+   "safe band constants: text ≤72% < 73% Shorts UI top")
+# Provided thumbnails are never re-laid out: publish_loop uploads the provided
+# file and never calls the template (#39, verify_provided_thumb).
+import inspect as _insp_f
+from app.services import publish_loop as _pl_f
+_pl_src = _insp_f.getsource(_pl_f)
+ok("provided_thumb" in _pl_src, "publish_loop still routes provided thumbs around the template (#39)")
+
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

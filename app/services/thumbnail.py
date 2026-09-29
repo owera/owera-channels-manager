@@ -95,6 +95,15 @@ def _hook_text(subject: str, title: str | None,
     return fallback
 
 
+# Shorts UI overlay band (P1 f): YouTube draws the title / channel row /
+# action buttons over roughly 73–88% of a 9:16 frame. Template text stays in
+# [SAFE_TOP_FRAC, SAFE_BOTTOM_FRAC] of the height. Provided thumbs (#39) are
+# never re-laid out.
+SAFE_TOP_FRAC = 0.09
+SAFE_BOTTOM_FRAC = 0.72
+SHORTS_UI_BAND = (0.73, 0.88)
+
+
 def _thumbnail_html(hook: str, accent: str = "#5b8cff",
                     bg_deep: str = "#1b2a6b", brand: str | None = None,
                     th: dict | None = None,
@@ -149,11 +158,18 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
         fg = "#ffffff"
 
     if portrait:
+        # Shorts safe band (P1 f, PULSE 2026-09-29): the custom thumbs put text
+        # at 73–88% of the height, under the Shorts bottom UI (title / channel
+        # / buttons). Object + hook live in 9%–72% (same box as the split card);
+        # nothing is anchored to the bottom edge any more.
+        top = int(rh * SAFE_TOP_FRAC)
+        box_h = int(rh * SAFE_BOTTOM_FRAC) - top
         layout = (
-            f"#stage{{position:absolute;inset:0;display:flex;flex-direction:column;"
-            f"align-items:center;justify-content:flex-end;gap:{int(rh * 0.03)}px;"
-            f"padding:{int(rh * 0.10)}px {pad}px {int(rh * 0.12)}px;box-sizing:border-box}}"
-            f"#hobj{{flex:0 0 auto;width:78%;max-height:34%;--obj-accent:{obj_accent};"
+            f"#stage{{position:absolute;left:0;right:0;top:{top}px;height:{box_h}px;"
+            f"display:flex;flex-direction:column;"
+            f"align-items:center;justify-content:center;gap:{int(rh * 0.03)}px;"
+            f"padding:0 {pad}px;box-sizing:border-box}}"
+            f"#hobj{{flex:0 0 auto;width:78%;max-height:40%;--obj-accent:{obj_accent};"
             f"--obj-mono:ui-monospace,Menlo,Consolas,monospace}}"
             f"#hook{{flex:0 0 auto;width:100%;text-align:center;color:{fg};"
             f"font-size:{font}px;font-weight:800;line-height:1.08;letter-spacing:-2px;"
@@ -179,9 +195,10 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
         # render_hook) → frame0 ≡ thumb. No first-word chip, no O ring. Cards
         # sit in 9%–72% of the height, clear of the Shorts bottom UI.
         mark_html = ""
+        top = int(rh * SAFE_TOP_FRAC)
         layout = (
-            f"#stage{{position:absolute;left:0;right:0;top:{int(rh * 0.09)}px;"
-            f"height:{int(rh * 0.63)}px;padding:0 {int(rw * 0.06)}px;box-sizing:border-box;"
+            f"#stage{{position:absolute;left:0;right:0;top:{top}px;"
+            f"height:{int(rh * SAFE_BOTTOM_FRAC) - top}px;padding:0 {int(rw * 0.06)}px;box-sizing:border-box;"
             f"color:{fg};--split-top:{stroke}}}"
             f"#hook{{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}}"
         )

@@ -401,3 +401,11 @@ The endcard chip and the pinned VO take their series from `craft.series_of(title
 4. Copilot Credits.
 
 `render_loop` passes `params.topic_name`. Shipping #1308/#1311 (rendered 22 Sep, before #33 and before the OS default) showed "Copilot Credits" even though their topic is "Shipping".
+
+## Thumbnail Shorts safe band (P1 f, 2026-09-29)
+
+YouTube draws the Shorts title, channel row and buttons over roughly 73–88% of a 9:16 frame.
+
+- The template thumbnail's object and hook sit in 9%–72% of the height (`thumbnail.SAFE_TOP_FRAC` / `SAFE_BOTTOM_FRAC`), vertically centred. This is the same box as the split card.
+- The old layout anchored the text to the bottom (flex-end with a 12% pad), which put it at 73–88%.
+- Long-form (16:9) is unchanged. Provided thumbnails (#39) are uploaded as-is and never re-laid out.
