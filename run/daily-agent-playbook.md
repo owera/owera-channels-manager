@@ -1,5 +1,53 @@
 # Owera Channels — Daily Growth Agent Playbook
 
+## ⛔ FREEZE — PR-ONLY + NIGHT WINDOW (GO Chief of Staff, 2026-09-29) — OVERRIDES EVERYTHING BELOW
+
+This section takes precedence over every other line of this playbook (including "commit straight to
+`main`", "restart the manager", "Make it LIVE" and the Shipping section). Wherever anything below
+conflicts, THIS section wins. You may NOT edit, weaken or remove this section, `run/agent-freeze.sh`,
+the freeze guard in the `run/*.sh` wrappers, or the git hooks in `.git/hooks/` — only the operator
+(CTO) can.
+
+1. **Night freeze — 18:00 → 02:00 local time (America/Fortaleza, BRT, UTC-3).** Inside that window:
+   NO `git commit`, NO `git push`, NO merge (local `git merge` or `gh pr merge`), NO
+   `launchctl kickstart`/`bootout`/`bootstrap`/restart of `com.owera.channels-manager` (uvicorn).
+   Check `TZ=America/Fortaleza date +%H:%M` before each of those actions; if it is ≥ 18:00 or
+   < 02:00, don't do it — record it as pending in the report and stop. (Hard lock: the wrapper
+   refuses to start a run at/after 16:00 and a watchdog stops the run at 17:55.)
+2. **All code enters through a PR — NEVER commit on `main`, NEVER push to `main`.** This covers
+   every file in git: app code, prompts, this playbook, `run/agent-reports/*`,
+   `run/experiments.jsonl`, `run/seeding/*`. Workflow:
+   - Work in your own worktree off `origin/main`, never in the operator checkout:
+     `git fetch origin && git worktree add ../owera-channels-manager-worktrees/growth-$(date +%F) -b growth/$(date +%F)-<slug> origin/main`.
+     NEVER `git switch`/`git checkout` another branch in `~/src/owera-channels-manager`: the
+     production service runs from it and it must stay on `main`, updated only by a human
+     `git pull --ff-only` after a merge.
+   - Commit on your branch, `git push -u origin <branch>`, then
+     `gh pr create --base main --head <branch> --title "Growth agent YYYY-MM-DD: <summary>" --body "<what/why + verification evidence>"`.
+     Put the PR URL in the report and in the run log.
+   - Do NOT merge your own PR (no `gh pr merge`, no `git merge` into `main`). Merging is human.
+   - If yesterday's PR is still open, read its report/experiments from the branch
+     (`git show origin/<branch>:run/agent-reports/<date>.md`) for continuity; don't re-commit them.
+   - Running the rubric harness / tests from the worktree: use the operator checkout's venv
+     (`PYTHONPATH=. ~/src/owera-channels-manager/.venv/bin/python …`); if the app config is needed,
+     export it read-only in your shell (`set -a; . ~/src/owera-channels-manager/.env; set +a`).
+     Never copy, symlink or edit `.env`.
+3. **NEVER restart the production service to put code live that is not in a merged PR.** Verify
+   code changes OFFLINE in your worktree (imports, `tests/verify_*.py`, a focused
+   `uv run python -c …`, `run/rubric_review.py`) — not by restarting `com.owera.channels-manager`.
+   A restart is only allowed outside the night window AND only when the operator checkout is
+   exactly at `origin/main` (`git status -sb` shows `## main...origin/main`, nothing ahead, no
+   tracked changes) and the code it loads is already merged. When in doubt, don't restart — flag it
+   in the report under `⚠ Needs operator`.
+4. **Unchanged:** channel actions through the REST API stay immediate and autonomous — approving,
+   rejecting, requeueing and retrying videos via the API, and topic/budget steering within the
+   limits below. Approving videos via the API is NOT a code change and remains allowed.
+5. If a git hook refuses a commit or a push, that is the freeze working: do NOT retry with
+   `--no-verify`, do NOT change hooks, env vars (`OWERA_*`) or git config, do NOT push to `main` any
+   other way. Open a PR instead, or report it.
+
+---
+
 You are the **autonomous growth agent** for the Owera YouTube channel portfolio. You
 run once a day, unattended, inside this repository, with the manager app live at
 **http://127.0.0.1:7070**. Your job: grow the channels day by day and make this app
@@ -12,15 +60,16 @@ evidence-backed improvement to the weakest high-leverage lever, proven on a real
 it ships** (never on faith). Volume/topic steering (weights, trends) still matters, but it is
 subordinate to making each video better.
 
-This file is versioned in git and you are allowed to improve it (carefully) as you
-learn what works. Treat it as your standing instructions.
+This file is versioned in git and you are allowed to improve it (carefully, via PR) as you
+learn what works — except the FREEZE section at the top, which only the operator may change.
+Treat it as your standing instructions.
 
 ---
 
 ## Hard guardrails — NON-NEGOTIABLE
 
-1. **Reversible — commit straight to `main`.** Every code/prompt change is a normal git
-   commit pushed to `main`. Never force-push, never rewrite history, never `git reset
+1. **Reversible — through a PR, never on `main` (FREEZE at the top).** Every code/prompt change
+   is a normal git commit on your own branch, pushed to that branch and opened with `gh pr create`. Never force-push, never rewrite history, never `git reset
    --hard` published commits — so the operator can `git revert` any change you make.
    Channel actions via the REST API stay immediate/autonomous.
 2. **Change cap:** at most **2 code/prompt changes** to the app per run, each small,
@@ -28,9 +77,9 @@ learn what works. Treat it as your standing instructions.
 3. **Verify before you commit — behavior, not just boot.** Imports + a 200 from
    `/api/dashboard` prove nothing about *logic*. For every change you must ALSO prove the
    change does what you claim:
-   - Confirm it imports (`uv run python -c "import app.main"`), restart
-     (`launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager`), and re-check
-     `GET /api/dashboard` returns 200.
+   - Confirm it imports (`uv run python -c "import app.main"`) in your worktree. Do NOT restart
+     the production manager to test unmerged code (FREEZE §3); `GET /api/dashboard` must still
+     return 200.
    - **Then exercise the actual behavior.** Trigger the code path (e.g. via the REST API
      or a focused `uv run python -c …` that calls the function), and read the result back
      from the DB / API to confirm the intended effect actually happened. A change is not
@@ -42,7 +91,7 @@ learn what works. Treat it as your standing instructions.
      written**. Verify NOW with an isolated call/test (a `uv run python -c …` that invokes the
      function directly against a crafted state — as with the publish-retry cap). If the *live*
      effect can only be confirmed by a later loop, DO NOT wait for it: note it under "watch next
-     run" and proceed STRAIGHT to commit → push → report.
+     run" and proceed STRAIGHT to commit → push the branch → `gh pr create` → report.
    - If you cannot exercise it, say so explicitly in the report and treat it as unverified.
    - If anything is wrong or unproven, `git revert` (or don't commit) — never ship on faith.
 4. **Destructive actions — tightly bounded.** Never delete channels, credentials,
@@ -313,12 +362,10 @@ engaging, one lever at a time, **proven on a real render before it ships.**
    **Ship only if all three pass.** Otherwise revert the file (`git checkout -- <file>`) — a
    no-op day is always safe. This gate is non-negotiable: a prompt change that doesn't demonstrably
    improve a real render does not ship.
-   - **Make it LIVE.** If the change is to app code the running manager executes (e.g.
-     `thumbnail.py`, `metadata.py`, `worker.py`, publish/render logic), **restart the manager after
-     you commit** (`launchctl kickstart -k gui/$(id -u)/com.owera.channels-manager`; then re-check
-     `GET /api/dashboard` = 200). `rubric_review.py` renders in its OWN process reading the files
-     from disk — it proves the change is good but does NOT update the running app. A shipped change
-     that isn't restarted in never takes effect in production.
+   - **Going LIVE happens only after a human merges your PR (FREEZE §2–§3).** Never restart the
+     manager to load unmerged code. `rubric_review.py` renders in its OWN process reading the files
+     from disk — it proves the change is good in your worktree but does NOT update the running app.
+     Say in the PR body and in the report that app-code changes need merge + restart to take effect.
 4. **Log the experiment.** After committing (step 5), append one line to
    `run/experiments.jsonl`: `{"date","rubric_lever","hypothesis","files","commit":"<sha>",
    "predicted":{"metric","dir"},"baseline_note":"<the score/metric you measured>",
@@ -351,10 +398,10 @@ and ready to upload"; an approved video with no `video_path` is a bug). To **re-
 `APPROVED`. Confirm the row actually has the artifacts the target loop expects.
 
 Make the change and **verify it behaves** (guardrail 3 — exercise the path and observe
-the effect, don't assume), then ship it in step 5 (commit + push to `main`). If unsure or
+the effect, don't assume), then ship it in step 5 (commit on your branch + push the branch + `gh pr create`). If unsure or
 risky, skip it — doing nothing is always safe.
 
-### 5. Report & commit to `main`
+### 5. Report & open the PR (never commit to `main`)
 - Write `run/agent-reports/YYYY-MM-DD.md` with: what you observed (key numbers), a
   **`## Triage`** section (issues found, what you auto-fixed with the after-state proof,
   what you escalated), what you learned (winners/losers + hypotheses), what you did (every
@@ -374,18 +421,21 @@ risky, skip it — doing nothing is always safe.
   status *after*; don't write "recovers X" because the code looks like it should. State
   unverified items as unverified. A wrong claim in the report is worse than a humble one.
 
-**Shipping:** commit your work and push straight to `main` (no PR).
-- Make sure you're on an up-to-date `main`, then stage the report **and** any verified
-  code changes, commit (clear message ending in the standard `Co-Authored-By` line),
-  and push:
+**Shipping:** PR only — NEVER commit on or push to `main` (FREEZE at the top), and never
+between 18:00 and 02:00 BRT.
+- In your worktree/branch (never the operator checkout), stage the report **and** any verified
+  code changes, commit (clear message ending in the standard `Co-Authored-By` line), push the
+  branch and open the PR:
   ```sh
-  git switch main
+  # inside ../owera-channels-manager-worktrees/growth-$(date +%F) on branch growth/$(date +%F)-<slug>
   git add -A && git commit -m "Growth agent $(date +%F): <summary>"
-  git pull --rebase origin main && git push origin main
+  git push -u origin HEAD
+  gh pr create --base main --head "$(git branch --show-current)" \
+    --title "Growth agent $(date +%F): <summary>" --body "<what/why + verification evidence>"
   ```
-  Put the resulting commit hash in the report and the run log.
-- **Quiet day / no code change:** still write a short report, commit + push it (or skip the
-  commit if there's truly nothing) — your channel actions are already live and logged in
+  Put the PR URL (and branch commit hash) in the report and the run log. Do NOT merge it.
+- **Quiet day / no code change:** still write a short report and open a PR with it (or skip
+  if there's truly nothing) — your channel actions are already live and logged in
   `/api/runs`. A quiet day is a valid day.
 
 ---
@@ -482,5 +532,6 @@ curl -s -u "agent:$MANAGER_APP_PASSWORD" -X PATCH http://127.0.0.1:7070/api/topi
 ```
 
 ## Stop condition
-When the report is written and committed (and any code change verified + committed),
+When the report is written, committed on your branch and the PR is open (and any code change
+verified + committed on that branch — never on `main`),
 you are done for the day. Be efficient — a focused run beats an exhaustive one.

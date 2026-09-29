@@ -23,6 +23,21 @@ if [ -f "$REPO/run/run-check.disabled" ]; then
   log "disabled (run/run-check.disabled present) — skipping"
   exit 0
 fi
+# --- FREEZE guard (GO Chief of Staff 2026-09-29) — HARD lock ------------------
+# No run inside the 18:00-02:00 BRT night freeze, no start at/after 16:00, watchdog
+# stops the agent at 17:55, and OWERA_AGENT is exported so the local git hooks refuse
+# agent commits on main / in the window and any push to main. Fail closed.
+if [ ! -r "$REPO/run/agent-freeze.sh" ]; then
+  log "FREEZE: run/agent-freeze.sh missing — refusing to run (fail closed)"
+  exit 1
+fi
+. "$REPO/run/agent-freeze.sh"
+if ! freeze_start_guard run-check; then
+  exit 0
+fi
+OWERA_AGENT=run-check
+export OWERA_AGENT
+
 if ! mkdir "$LOCK" 2>/dev/null; then
   log "previous check still holding the lock — skipping"
   exit 0
@@ -45,7 +60,7 @@ log "starting daily check"
 # { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) run-check ================"
-  grok --prompt-file "$REPO/run/run-check-prompt.md" \
+  freeze_run_with_watchdog grok --prompt-file "$REPO/run/run-check-prompt.md" \
     --permission-mode bypassPermissions \
     --cwd "$REPO"
   STATUS=$?

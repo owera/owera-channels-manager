@@ -34,6 +34,21 @@ if [ -f "$REPO/run/growth-agent.disabled" ]; then
   exit 0
 fi
 
+# --- FREEZE guard (GO Chief of Staff 2026-09-29) — HARD lock ------------------
+# No run inside the 18:00-02:00 BRT night freeze, no start at/after 16:00, watchdog
+# stops the agent at 17:55, and OWERA_AGENT is exported so the local git hooks refuse
+# agent commits on main / in the window and any push to main. Fail closed.
+if [ ! -r "$REPO/run/agent-freeze.sh" ]; then
+  log "FREEZE: run/agent-freeze.sh missing — refusing to run (fail closed)"
+  exit 1
+fi
+. "$REPO/run/agent-freeze.sh"
+if ! freeze_start_guard growth-agent; then
+  exit 0
+fi
+OWERA_AGENT=growth-agent
+export OWERA_AGENT
+
 # --- Single-run lock (mkdir is atomic) ------------------------------------
 if ! mkdir "$LOCK" 2>/dev/null; then
   log "previous run still holding the lock ($LOCK) — skipping"
@@ -87,7 +102,7 @@ log "starting daily run"
 # { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) growth-agent run ================"
-  grok --prompt-file "$REPO/run/daily-agent-playbook.md" \
+  freeze_run_with_watchdog grok --prompt-file "$REPO/run/daily-agent-playbook.md" \
     --permission-mode bypassPermissions \
     --cwd "$REPO"
   STATUS=$?
