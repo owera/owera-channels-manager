@@ -416,6 +416,9 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             # Aligner caps cards INCLUDING the fade (craft Gate B strict timing).
             "beat_timing": craft.BEAT_TIMING_INCL_FADE,
             **({"hook_pace": pace} if pace else {}),
+            # Designer split card rendered on frame0 → the publish-time thumb
+            # uses the same card (frame0 ≡ thumb); absent on older renders.
+            **({"frame0_split": True} if 'data-split="1"' in html else {}),
             "bgm": (bgm.name if bgm else None),
             "bgm_volume": float(params.get("bgm_volume") or 0.2),
             "script_words": len(script.split()),

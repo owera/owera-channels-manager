@@ -263,9 +263,15 @@ def _extract_frame(mp4: Path, out_png: Path,
 def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
                        topic_id: int | None = None,
                        content_format: str = "short",
-                       brand: str | None = None) -> Path | None:
+                       brand: str | None = None,
+                       frame0_split: bool = False) -> Path | None:
     """Build a custom thumbnail PNG at `out_png`. Returns the path, or None on any
-    failure (caller treats thumbnails as best-effort)."""
+    failure (caller treats thumbnails as best-effort).
+
+    ``frame0_split``: the render's frame0 carried the Designer split card
+    (``creation_config.frame0_split``). Only then does the thumb use it, so
+    frame0 ≡ thumb; renders made before #46 (approved inventory) keep the
+    object-over-type template instead of a thumb that no longer matches frame0."""
     out_png = Path(out_png)
     work = out_png.parent / ".thumb_work"
     try:
@@ -276,7 +282,7 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         theme_mod.stage_brand_assets(work, brand)
         from app.services import craft
         split = (craft.contrast_split(title or subject)
-                 if (content_format or "short") != "long" else None)
+                 if frame0_split and (content_format or "short") != "long" else None)
         if split:
             hook = split["head"]  # verbatim claim; no LLM compression on a split card
         else:
