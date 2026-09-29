@@ -99,7 +99,8 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
                     bg_deep: str = "#1b2a6b", brand: str | None = None,
                     th: dict | None = None,
                     obj: dict | str | None = None,
-                    content_format: str = "short") -> str:
+                    content_format: str = "short",
+                    split: dict | None = None) -> str:
     """Object-above-type 9:16 card (shorts) or object-beside (long).
 
     Object proves the spoken angle (bill / receipt / GPU / app / terminal).
@@ -170,6 +171,23 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
             f"text-shadow:0 6px 28px rgba(0,0,0,.55);z-index:2}}"
         )
     brand_attr = f' data-brand="{brand}"' if brand else ""
+    stage_inner = (f'<div id="hobj">{craft.object_markup(spec)}</div>\n'
+                   f'      <div id="hook" class="clip" data-start="0" data-duration="1" '
+                   f'data-track-index="1">{_esc(hook)}</div>')
+    if split and portrait:
+        # Designer split-card (2026-09-29): same markup as frame0 (storyboard
+        # render_hook) → frame0 ≡ thumb. No first-word chip, no O ring. Cards
+        # sit in 9%–72% of the height, clear of the Shorts bottom UI.
+        mark_html = ""
+        layout = (
+            f"#stage{{position:absolute;left:0;right:0;top:{int(rh * 0.09)}px;"
+            f"height:{int(rh * 0.63)}px;padding:0 {int(rw * 0.06)}px;box-sizing:border-box;"
+            f"color:{fg};--split-top:{stroke}}}"
+            f"#hook{{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}}"
+        )
+        stage_inner = (craft.split_card_markup(split, rw, rh) +
+                       f'\n      <div id="hook" class="clip" data-start="0" data-duration="1" '
+                       f'data-track-index="1">{_esc(hook)}</div>')
     return f"""<!doctype html>
 <html lang="en" data-resolution="{resolution}"{brand_attr}>
 <head><meta charset="UTF-8"/>
@@ -181,6 +199,7 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
   {mark_css}
   {layout}
   {craft.OBJECT_CSS}
+  {craft.SPLIT_CSS if split and portrait else ""}
 </style></head>
 <body>
   <div id="root" data-composition-id="master" data-width="{rw}" data-height="{rh}"
@@ -188,8 +207,7 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
     {bar_html}
     {mark_html}
     <div id="stage" class="clip" data-start="0" data-duration="1" data-track-index="0">
-      <div id="hobj">{craft.object_markup(spec)}</div>
-      <div id="hook" class="clip" data-start="0" data-duration="1" data-track-index="1">{_esc(hook)}</div>
+      {stage_inner}
     </div>
   </div>
   <script>
@@ -240,12 +258,18 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         (work / "gsap.min.js").write_bytes((_ASSETS / "gsap.min.js").read_bytes())
         theme_mod.stage_brand_assets(work, brand)
         from app.services import craft
-        hook = _hook_text(subject, title, content_format=content_format)
+        split = (craft.contrast_split(title or subject)
+                 if (content_format or "short") != "long" else None)
+        if split:
+            hook = split["head"]  # verbatim claim; no LLM compression on a split card
+        else:
+            hook = _hook_text(subject, title, content_format=content_format)
         spoken = craft.overlay_hook_source(title, None, subject)
         obj = craft.opening_object(spoken or hook)
         (work / "index.html").write_text(
             _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand,
-                            th=tokens, obj=obj, content_format=content_format))
+                            th=tokens, obj=obj, content_format=content_format,
+                            split=split))
         _render(work, work / "thumb.mp4")
         _extract_frame(work / "thumb.mp4", out_png, content_format=content_format)
         return out_png

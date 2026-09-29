@@ -1703,8 +1703,8 @@ ok("Prod" in _os_html.split('id="b0"', 1)[1].split('id="b1"', 1)[0],
    "compose: the frame0 card carries the payoff half ('Prod paged Lee.')")
 ok(not re.search(r"fromTo\('#b0[^']*',\{[^}]*opacity:0", _os_html),
    "no opacity:0 → 1 entrance tween on the first card (t=0 frame is not blank)")
-ok(re.search(r"fromTo\('#b0 \.htext',\{scale:0\.97\}", _os_html) is not None,
-   "first card still has motion (scale settle) — renderer keeps ≥1 tween")
+ok(re.search(r"fromTo\('#b0 \.(htext|sc-top)',\{scale:0\.97\}", _os_html) is not None,
+   "first card still has motion (scale settle; split-card top on Agent memory) — ≥1 tween")
 _later = storyboard.render_hook({"type": "hook", "text": "Later hook", "start": 5.0, "dur": 2.0},
                                 {"i": 3, "start": 5.0, "dur": 2.0, "is_last": False})
 ok('style="opacity:1"' not in _later[0] and any("opacity:0" in t for t in _later[1]),
@@ -1835,5 +1835,45 @@ ok(_b0_38["type"] == "hook" and _b0_38["text"] == "Chat routed to Maya. Prod pag
    "compose (#38 + #45): hook == whole head, both periods kept")
 ok('style="opacity:1"' in re.search(r'<div class="beat hook" id="b0"[^>]*>', _os_html38).group(0),
    "compose (#38 + #45): frame0 still at full opacity at t=0")
+
+# --- Designer contrast split-card on frame0 (2026-09-29 council, P0) --------
+_b0s = re.search(r'<div class="beat hook" id="b0"[^>]*>', _os_html38).group(0)
+_seg0 = _os_html38.split('id="b0"', 1)[1].split('class="beat ', 1)[0]
+ok('data-split="1"' in _b0s and 'style="opacity:1"' in _b0s,
+   "split: Agent memory frame0 is the split card at full opacity at t=0 (#45 kept)")
+ok('class="sc sc-top"' in _seg0 and 'class="sc sc-bot"' in _seg0 and "✕" in _seg0,
+   "split: top card + bottom card with the ✕ stamp on frame0")
+ok(">Chat<" in _seg0 and "routed to Maya." in _seg0 and ">Prod<" in _seg0 and "paged Lee." in _seg0,
+   "split: whole claim on frame0, periods kept (Chat/Prod as card labels)")
+ok('class="hobj"' not in _seg0, "split: no first-word object chip on the split card")
+ok("tl.set('#brand-mark',{opacity:0},0)" in _os_html38,
+   "split: OS O ring hidden while the split card shows, restored after")
+_os_prov = _compose(os_llm, subject=_os_title, script=_os_script, words=_os_words,
+                    duration=round(_os_words[-1]["start"] + 1.0, 2), brand="os",
+                    allowed_types=PHASE_A + ["code", "command", "diagram"],
+                    provided_thumb=True)
+_b0p = re.search(r'<div class="beat hook" id="b0"[^>]*>', _os_prov).group(0)
+ok('data-split' not in _b0p and 'style="opacity:1"' in _b0p,
+   "split: never with a provided thumbnail (thumb_source=provided) — normal hook card, opacity 1")
+ok(craft.beats_from_html(_os_prov)[0]["text"] == "Chat routed to Maya. Prod paged Lee.",
+   "split off (provided thumb): whole claim still on frame0")
+_rr_split = _rr_html.split('id="b0"', 1)[1].split('class="beat ', 1)[0]
+ok('class="sc sc-top"' in _rr_split and "O prompt processa no CPU por 8 segundos," in _rr_split
+   and "não é engenharia." in _rr_split,
+   "split: IA one-sentence head splits at the verdict, comma and digit kept")
+# Shipping series never gets the split card (series outside Agent memory / IA / Local).
+_sh = [{"type": "hook", "text": "Chat routed to Maya. Prod paged Lee.", "cue": "c"}]
+storyboard._apply_split_card(_sh, "Chat routed to Maya. Prod paged Lee. · Shipping 4")
+ok("split" not in _sh[0], "split: Shipping series keeps the normal hook card")
+# Split kept only when it shows exactly the hook claim.
+_mis = [{"type": "hook", "text": "Chat routed to Maya.", "cue": "c"}]
+storyboard._apply_split_card(_mis, _os_title)
+ok("split" not in _mis[0], "split: hook claim != title head → no split (whole-claim rule)")
+_eq = [{"type": "hook", "text": "Chat routed to Maya. Prod paged Lee.", "cue": "c"}]
+storyboard._apply_split_card(_eq, _os_title, provided_thumb=True)
+ok("split" not in _eq[0], "split: _apply_split_card honours provided_thumb=True")
+storyboard._apply_split_card(_eq, _os_title)
+ok(_eq[0].get("split", {}).get("head") == "Chat routed to Maya. Prod paged Lee.",
+   "split: _apply_split_card sets the spec when claim == head")
 
 print(f"\nALL {_checks} CHECKS PASSED")

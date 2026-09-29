@@ -338,6 +338,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             content_format=params.get("content_format") or "short",
             language=language_from_voice(params.get("voice_name")),
             brand=brand,
+            provided_thumb=params.get("thumb_source") == "provided",
         )
         used_fallback = False
         if not _looks_valid(html):
@@ -765,7 +766,8 @@ def _assemble_composition(clips: list[dict], template_name: str, accent: str,
 def _generate_composition(subject: str, script: str, words: list[dict], resolution: str,
                           width: int, height: int, duration: float, *,
                           topic_id=None, content_format: str = "short",
-                          language: str | None = None, brand: str | None = None) -> str:
+                          language: str | None = None, brand: str | None = None,
+                          provided_thumb: bool = False) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
     the old clip-array path below as a kill switch. Returns "" on generic failure so
@@ -781,6 +783,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             resolution=resolution, width=width, height=height, topic_id=topic_id,
             content_format=content_format, allowed_types=settings.composition_beat_types,
             language=language, llm=_llm_compose, brand=brand,
+            provided_thumb=provided_thumb,
         )
         return html or ""
     except Exception as e:

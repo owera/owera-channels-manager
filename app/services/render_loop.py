@@ -567,6 +567,9 @@ def _submit_new(session: Session) -> None:
             params["video_script"] = provided_script
         params["channel_id"] = channel.id
         params["channel_slug"] = channel.slug
+        # Designer split-card never replaces an operator-provided thumb (#39).
+        from app.services import provided_thumb as _pt
+        params["thumb_source"] = "provided" if _pt.is_provided(video) else ""
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:

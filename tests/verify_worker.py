@@ -1142,6 +1142,21 @@ try:
             "subj", "script", [], "portrait", 1080, 1920, 12.0, language=None)
     ok(compose_none.call_args.kwargs["language"] is None,
        "compose language=None is forwarded (not hardcoded PT)")
+    ok(compose_none.call_args.kwargs["provided_thumb"] is False,
+       "split-card: provided_thumb defaults to False at compose")
+    with patch("app.services.engines.storyboard.compose",
+               return_value="<html>from-compose</html>") as compose_pt:
+        worker._generate_composition(
+            "subj", "script", [], "portrait", 1080, 1920, 12.0, provided_thumb=True)
+    ok(compose_pt.call_args.kwargs["provided_thumb"] is True,
+       "split-card: provided_thumb=True reaches compose (no split card, #39)")
+    _src = inspect.getsource(worker.run_job)
+    ok('provided_thumb=params.get("thumb_source") == "provided"' in _src,
+       "split-card: run_job maps params.thumb_source=provided → provided_thumb")
+    from app.services import render_loop as _rl
+    ok('params["thumb_source"] = "provided" if _pt.is_provided(video) else ""'
+       in inspect.getsource(_rl._submit_new),
+       "split-card: render_loop sets params.thumb_source from provided_thumb.is_provided")
 
     with patch("app.services.engines.storyboard.compose", return_value=None):
         ok(worker._generate_composition("s", "x", [], "portrait", 1080, 1920, 8.0)

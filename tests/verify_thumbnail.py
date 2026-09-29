@@ -684,5 +684,57 @@ with tempfile.TemporaryDirectory() as td:
        "missing gsap.min.js in _ASSETS → None (best-effort)")
 
 
+# ---------------------------------------------------------------------------
+# Designer contrast split-card on the thumbnail (2026-09-29 council P0)
+# ---------------------------------------------------------------------------
+print("split-card thumbnail (Agent memory / IA / Local)")
+import re as _re
+from app.services import craft as _craft
+_T = "Chat applied SAVE20. Prod charged full price. · Agent memory 33"
+_spec = _craft.contrast_split(_T)
+_h = thumbnail._thumbnail_html(_spec["head"], brand="os", th=None,
+                               obj=_craft.opening_object("Chat applied SAVE20."), split=_spec)
+ok('class="sc sc-top"' in _h and 'class="sc sc-bot"' in _h and "✕" in _h,
+   "split thumb: top + bottom card with the ✕ stamp")
+ok(">Chat<" in _h and "applied SAVE20." in _h and ">Prod<" in _h and "charged full price." in _h,
+   "split thumb: whole claim verbatim (digits + periods)")
+ok('id="hobj"' not in _h, "split thumb: no first-word object chip")
+ok('id="brand-mark"' not in _h.split("<body>", 1)[1], "split thumb: no O ring on the split card")
+_top = int(_re.search(r"#stage\{position:absolute;left:0;right:0;top:(\d+)px;height:(\d+)px", _h).group(1))
+_hgt = int(_re.search(r"#stage\{position:absolute;left:0;right:0;top:(\d+)px;height:(\d+)px", _h).group(2))
+ok((_top + _hgt) / 1920 <= 0.72 + 1e-6 and _top / 1920 >= 0.08,
+   "split thumb: cards live in 9%%–72%% of the height (bottom %.1f%%)" % (100 * (_top + _hgt) / 1920))
+ok('id="hook"' in _h and "opacity:0" in _h, "split thumb: #hook kept (hidden) for the renderer contract")
+_hn = thumbnail._thumbnail_html("Ollama idle holds 7GB", brand="os")
+ok('class="sc ' not in _hn and 'id="hobj"' in _hn, "no split spec → normal object-over-type card")
+_hl = thumbnail._thumbnail_html(_spec["head"], brand="os", content_format="long", split=_spec)
+ok('class="sc ' not in _hl, "long-form thumb never uses the split card")
+
+# make_thumbnail_png: split titles skip the LLM hook and pass the spec through.
+_seen = {}
+_orig_html = thumbnail._thumbnail_html
+def _spy_html(*a, **k):
+    _seen.update(k); _seen["hook"] = a[0] if a else k.get("hook")
+    return _orig_html(*a, **k)
+with tempfile.TemporaryDirectory() as td:
+    with patch.object(thumbnail, "_thumbnail_html", side_effect=_spy_html), \
+         patch.object(thumbnail, "_hook_text", side_effect=AssertionError("LLM must not run")) as _ht, \
+         patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
+         patch.object(thumbnail, "_extract_frame", side_effect=_fake_extract_write):
+        _res = thumbnail.make_thumbnail_png(_T, _T, Path(td) / "s.png", brand="os")
+ok(_res is not None and _seen.get("split") and _seen.get("hook") == "Chat applied SAVE20. Prod charged full price.",
+   "make_thumbnail_png: split title → split spec + verbatim head, no LLM hook compression")
+_seen.clear()
+with tempfile.TemporaryDirectory() as td:
+    with patch.object(thumbnail, "_thumbnail_html", side_effect=_spy_html), \
+         patch.object(thumbnail, "_hook_text", return_value="Shipping hook"), \
+         patch.object(thumbnail, "_render", side_effect=_fake_render_write), \
+         patch.object(thumbnail, "_extract_frame", side_effect=_fake_extract_write):
+        thumbnail.make_thumbnail_png("x", "Chat applied SAVE20. Prod charged full price. · Shipping 4",
+                                     Path(td) / "n.png", brand="os")
+ok(_seen.get("split") is None and _seen.get("hook") == "Shipping hook",
+   "make_thumbnail_png: Shipping series → normal template (no split)")
+
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

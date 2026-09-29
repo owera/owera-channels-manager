@@ -608,6 +608,122 @@ def object_markup(obj: dict | str | None) -> str:
     return (f'<div {attrs}><div class="obj-token">{label}</div></div>')
 
 
+# ---------------------------------------------------------------------------
+# Contrast split-card (Designer council 2026-09-29, P0): frame0 ≡ thumb for the
+# Agent memory (OS) and IA / Local (RR) series. Top card = what the chat / the
+# "Com" side said, bottom card = what production / the "Sem" side did, with an
+# ✕ stamp. Every value comes verbatim from the title head (punctuation and
+# digits kept, nothing invented). Never applied when the operator provided a
+# thumbnail (thumb_source=provided, #39). Replaces the first-word object chip
+# and the O ring on that card only.
+# ---------------------------------------------------------------------------
+SPLIT_CARD_SERIES = frozenset({"Agent memory", "IA", "Local"})
+_SPLIT_LABEL_PAIRS = (("chat", "prod"), ("com", "sem"))
+_SPLIT_SENT_RE = re.compile(r"(?<=[.!?])\s+")
+_SPLIT_IA_RE = re.compile(r"^(?P<top>.+?,?)\s+(?P<bot>não é engenharia[.!?]?)$", re.IGNORECASE)
+
+
+def _split_first(sentence: str) -> tuple[str, str]:
+    parts = sentence.split(None, 1)
+    return (parts[0], parts[1]) if len(parts) == 2 else ("", sentence)
+
+
+def contrast_split(title: str | None, *, provided_thumb: bool = False) -> dict | None:
+    """Split-card spec for a patterned title, or None (normal hook card).
+
+    Only titles that carry a real `` · <series> <nn>`` suffix in
+    SPLIT_CARD_SERIES (no brand default). Two-sentence heads split into
+    top/bottom; ``Chat … / Prod …`` and ``Com … / Sem …`` put the first word
+    in the card label. A one-sentence IA head ``X, não é engenharia.`` splits
+    at the verdict. ``top_label + top`` / ``bottom_label + bottom`` rebuild
+    the head verbatim (whole claim on frame0 and thumb).
+    """
+    if provided_thumb:
+        return None
+    m = SPOKEN_TITLE_RE.search(title or "")
+    if not m:
+        return None
+    series = _canonical_series(m.group(1))
+    if series not in SPLIT_CARD_SERIES:
+        return None
+    head = " ".join(((title or "").split("·", 1)[0] or "").split())
+    if not head:
+        return None
+    sents = [x for x in _SPLIT_SENT_RE.split(head) if x.strip()]
+    spec = None
+    if len(sents) == 2:
+        a, b = sents
+        la, ra = _split_first(a)
+        lb, rb = _split_first(b)
+        pair = (theme.fold(la).strip(",;:"), theme.fold(lb).strip(",;:"))
+        if pair in _SPLIT_LABEL_PAIRS and ra and rb:
+            spec = {"top_label": la, "top": ra, "bottom_label": lb, "bottom": rb}
+        else:
+            spec = {"top_label": "", "top": a, "bottom_label": "", "bottom": b}
+    elif len(sents) == 1:
+        mi = _SPLIT_IA_RE.match(head)
+        if mi and mi.group("top").strip():
+            spec = {"top_label": "", "top": mi.group("top").strip(),
+                    "bottom_label": "", "bottom": mi.group("bot")}
+    if not spec:
+        return None
+    spec["series"] = series
+    spec["head"] = head
+    return spec
+
+
+def split_card_text(spec: dict | None) -> str:
+    """The claim the split card shows, rebuilt from its parts (for tests/gates)."""
+    if not spec:
+        return ""
+    top = " ".join(x for x in (spec.get("top_label"), spec.get("top")) if x)
+    bot = " ".join(x for x in (spec.get("bottom_label"), spec.get("bottom")) if x)
+    return f"{top} {bot}".strip()
+
+
+def split_font_px(text: str | None, width: int, height: int) -> int:
+    """Card type size: 2–3× the old hook (≈78–90px at 1080w), fit to the card."""
+    n = max(1, len(" ".join((text or "").split())))
+    avail_w = width * 0.80
+    avail_h = height * 0.26
+    px = (avail_w * avail_h / (0.58 * 1.05 * n)) ** 0.5
+    lo, hi = int(width * 0.10), int(width * 0.205)
+    return int(max(lo, min(hi, px)))
+
+
+def split_card_markup(spec: dict, width: int, height: int) -> str:
+    """Shared frame0/thumb markup (same HTML → frame0 ≡ thumb)."""
+    from app.services.engines.theme import esc
+
+    def card(cls, label, text, stamp):
+        px = split_font_px(text, width, height)
+        lab = ('<div class="sc-label">' + esc(label) + "</div>") if label else ""
+        x = '<div class="sc-x">✕</div>' if stamp else ""
+        return ('<div class="sc ' + cls + '">' + x + lab +
+                '<div class="sc-text" style="font-size:' + str(px) + 'px">' +
+                esc(text) + "</div></div>")
+
+    return ('<div class="split">' +
+            card("sc-top", spec.get("top_label") or "", spec.get("top") or "", False) +
+            card("sc-bot", spec.get("bottom_label") or "", spec.get("bottom") or "", True) +
+            "</div>")
+
+
+SPLIT_CSS = (
+    ".split{display:flex;flex-direction:column;gap:3.2%;width:100%;height:100%;"
+    "box-sizing:border-box;justify-content:flex-start}"
+    ".sc{position:relative;flex:0 0 auto;min-height:28%;box-sizing:border-box;border-radius:26px;"
+    "padding:4.5% 6% 5%;text-align:left;display:flex;flex-direction:column;justify-content:center;"
+    "background:rgba(255,255,255,.06);border:4px solid var(--split-top,#9aa4b2)}"
+    ".sc-bot{border-color:var(--split-bot,#e5484d);background:rgba(229,72,77,.10)}"
+    ".sc-label{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:800;"
+    "letter-spacing:.14em;text-transform:uppercase;font-size:44px;opacity:.78;margin-bottom:.25em}"
+    ".sc-text{font-weight:900;line-height:1.04;letter-spacing:-.02em;overflow-wrap:anywhere}"
+    ".sc-x{position:absolute;right:5%;top:6%;font-size:96px;font-weight:900;line-height:1;"
+    "color:var(--split-bot,#e5484d);transform:rotate(-8deg)}"
+)
+
+
 # Shared widget CSS — storyboard + thumbnail. Object sits ABOVE/BESIDE the hook
 # type; it must not overlay line 1. No emoji, no rainbow bar.
 OBJECT_CSS = (
