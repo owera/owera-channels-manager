@@ -153,6 +153,13 @@ class Video(SQLModel, table=True):
     # so legacy approved rows cannot publish until evaluated to pass.
     craft_review: str = Field(default="pending", index=True)
 
+    # Operator hold on an APPROVED video (P0 2026-09-29): the publish loop skips
+    # held rows (selection + craft sweep) and runway/queue counts exclude them.
+    # Orthogonal to status and craft_review — unhold resumes the drip with the
+    # same artifact, no re-render. Only POST /api/videos/{id}/hold|unhold set it.
+    held: bool = Field(default=False, index=True)
+    held_at: Optional[datetime] = None
+
     # gate / metadata
     title: Optional[str] = None
     description: Optional[str] = None
@@ -197,21 +204,31 @@ class ChannelMetric(SQLModel, table=True):
     captured_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+_NULLABLE_METRIC = {"default": None, "nullable": True}
+
+
 class VideoMetric(SQLModel, table=True):
     """A point-in-time per-video YouTube Analytics snapshot, recorded ~daily by the
     analytics loop. The time series powers the leaderboard the growth agent learns from."""
     id: Optional[int] = Field(default=None, primary_key=True)
     video_id: int = Field(foreign_key="video.id", index=True)
     channel_id: int = Field(foreign_key="channel.id", index=True)
-    views: int = 0
-    impressions: int = 0
-    ctr: float = 0.0                      # impressionClickThroughRate (0..1)
-    avg_view_pct: float = 0.0             # averageViewPercentage (0..100)
-    watch_time_minutes: int = 0          # estimatedMinutesWatched
-    average_view_duration: float = 0.0   # seconds watched per view (avg); pairs with avg_view_pct
-    likes: int = 0
-    comments: int = 0
-    subscribers_gained: int = 0
+    # Metric columns are NULL (not 0) when the API had not reported the video
+    # yet (empty answer inside the 72h lag — analytics_loop). Consumers must
+    # treat NULL as "no data", never as zero (youtube_admin._latest_metrics).
+    # Python default stays 0; the SQL column default is dropped because
+    # SQLAlchemy fires a column default for an explicit None (NULL would be
+    # silently written as 0).
+    views: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
+    impressions: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
+    ctr: Optional[float] = Field(default=0.0, sa_column_kwargs=_NULLABLE_METRIC)  # (0..1)
+    avg_view_pct: Optional[float] = Field(default=0.0, sa_column_kwargs=_NULLABLE_METRIC)  # (0..100)
+    watch_time_minutes: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
+    # seconds watched per view (avg); pairs with avg_view_pct
+    average_view_duration: Optional[float] = Field(default=0.0, sa_column_kwargs=_NULLABLE_METRIC)
+    likes: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
+    comments: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
+    subscribers_gained: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
     # JSON: {"sources": {trafficSourceType: {views, watch_min}}, "search_terms": {term: views}}
     # — where views come from (browse/suggested/search/external), the attribution data
     # the subscriber-growth loop optimizes against. Null when the video has no views yet.

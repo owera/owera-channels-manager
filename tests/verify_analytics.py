@@ -25,7 +25,8 @@ Covers, dependency-free (in-memory SQLite, no network/creds):
   - QuotaExceeded propagates (caller stops the channel pass)
   - ``_dead_token_error``: NeedsConnect returns message; healthy / other → None
   - ``_snapshot_channel``: immature / not-due / no yt_video_id / non-PUBLISHED
-    skipped; newest-first under quota; first hard-fail aborts the rest;
+    skipped; newest-first under quota; 3 consecutive hard-fails with no success
+    abort the rest (P1 2026-09-29: one failure no longer ends the pass);
     force=True bypasses due gate; QuotaExceeded mid-pass breaks cleanly
   - ``tick()``: scheduler_paused no-op; only CONNECTED with yt_channel_id;
     non-CONNECTED never probed
@@ -606,8 +607,9 @@ finally:
     _snap_order.clear()
 
 
-# first hard-fail aborts the rest of the channel pass
-print("\n_snapshot_channel: first hard-fail aborts the rest")
+# P1 2026-09-29: a single failure no longer ends the channel pass; only
+# _NOT_READY_FAILURES (3) consecutive hard-fails with no success do.
+print("\n_snapshot_channel: 3 consecutive hard-fails (no success) abort the rest")
 
 _fail_count = {"n": 0}
 
@@ -629,13 +631,18 @@ try:
                published_at=now - timedelta(hours=40))
     make_video(s, ch, yt_video_id="yt_c", subject="c",
                published_at=now - timedelta(hours=50))
+    make_video(s, ch, yt_video_id="yt_d", subject="d",
+               published_at=now - timedelta(hours=60))
+    make_video(s, ch, yt_video_id="yt_e", subject="e",
+               published_at=now - timedelta(hours=70))
     _fail_count["n"] = 0
     n = analytics_loop._snapshot_channel(s, ch, now)
-    ok(n == 0, "first-fail records nothing")
-    ok(_fail_count["n"] == 1,
-       f"first hard-fail aborts — only 1 fetch attempted (got {_fail_count['n']})")
-    ok(len(jobruns(s, kind="analytics", status="error")) == 1,
-       "one error JobRun for the failed first attempt")
+    ok(n == 0, "not-ready channel records nothing")
+    ok(analytics_loop._NOT_READY_FAILURES == 3, "not-ready threshold is 3 consecutive failures")
+    ok(_fail_count["n"] == 3,
+       f"3 consecutive hard-fails abort — 3 of 5 fetches attempted (got {_fail_count['n']})")
+    ok(len(jobruns(s, kind="analytics", status="error")) == 3,
+       "one error JobRun per failed attempt")
     ok(len(jobruns(s, kind="analytics", status="success")) == 0,
        "no success JobRuns when the channel isn't analytics-ready")
 finally:

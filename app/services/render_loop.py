@@ -379,6 +379,7 @@ def _queued_candidates(session: Session) -> list[Video]:
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == channel.id,
                    Video.status == VideoStatus.APPROVED,
+                   Video.held.is_not(True),     # held longs are not banked runway
                    Topic.content_format == "long")
         ).one()
         longs, shorts = _split_queued_by_format(session, queued)
@@ -412,6 +413,7 @@ def _rebalance_queued_mix(session: Session) -> None:
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == ch.id,
                    Video.status == VideoStatus.APPROVED,
+                   Video.held.is_not(True),     # held longs are not banked runway
                    Topic.content_format == "long")
         ).one()
         queued = session.exec(
@@ -518,6 +520,11 @@ def _submit_new(session: Session) -> None:
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
             break
+        # compose-script (no render) owns this row's script right now: submitting
+        # would generate a second script and race the compose write.
+        from app.services.script_compose import is_composing
+        if is_composing(video.id):
+            continue
         not_before = _grok_timeout_not_before.get(video.id) if video.id is not None else None
         if not_before is not None and now < not_before:
             continue  # still inside grok.Timeout cool-down
@@ -655,6 +662,7 @@ def _auto_produce(session: Session) -> None:
                 select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
                 .where(Video.channel_id == ch.id,
                        Video.status == VideoStatus.APPROVED,
+                       Video.held.is_not(True),  # held longs are not banked runway
                        Topic.content_format == "long")
             ).one()
             in_flight_longs = session.exec(

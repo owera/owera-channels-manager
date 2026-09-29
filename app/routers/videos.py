@@ -3,12 +3,12 @@
 import json
 from datetime import datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
 from app.db import app_settings, get_session
-from app.models import Channel, Topic, Video, VideoStatus, utcnow
+from app.models import Channel, JobRun, Topic, Video, VideoStatus, utcnow
 from app.schemas import (
     RejectBody,
     ReorderBody,
@@ -91,6 +91,7 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
             Video.channel_id == channel_id,
             Video.status == VideoStatus.APPROVED,
             Video.craft_review == craft_svc.CRAFT_REVIEW_PASS,
+            Video.held.is_not(True),              # held rows never publish
         )
     ).all()
     if not approved:
@@ -545,6 +546,99 @@ def produce_bulk(body: ReorderBody, session: Session = Depends(get_session)):
     return {"produced": n}
 
 
+# Review-gate state table (P0 2026-09-29). Anything outside these sets is 409
+# and writes nothing. 2026-09-28: #1360 sat QUEUED with a stale artifact and
+# ``/retry`` (no status check) flipped it straight to APPROVED unreviewed.
+#   approve : rendered | review            (+ a render artifact newer than the
+#                                            last requeue/retry, file on disk)
+#   reject  : draft | queued | rendered | review | approved | failed
+#             (not rendering/publishing: a job is in flight; not published/rejected)
+#   requeue : rendered | review | approved | failed | rejected   -> queued
+#             (draft uses /produce; queued/rendering are already headed to render;
+#              publishing/published are past the artifact)
+#   retry   : failed only. Publish-side failure with the artifact on disk ->
+#             approved (re-publish, craft gate re-checked); otherwise -> queued.
+#   hold    : approved (not held)   unhold : approved + held
+# requeue / retry-to-queued clear the render artifact (see _clear_render_artifact).
+APPROVE_FROM = frozenset({VideoStatus.RENDERED, VideoStatus.REVIEW})
+REJECT_FROM = frozenset({VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERED,
+                         VideoStatus.REVIEW, VideoStatus.APPROVED, VideoStatus.FAILED})
+REQUEUE_FROM = frozenset({VideoStatus.RENDERED, VideoStatus.REVIEW, VideoStatus.APPROVED,
+                          VideoStatus.FAILED, VideoStatus.REJECTED})
+RETRY_FROM = frozenset({VideoStatus.FAILED})
+
+# Stills derived from the render (_finalize: thumb.jpg) or the publish-time
+# template (thumb_custom.png). Anything else on thumb_path (e.g. an
+# operator-provided thumbnail) is craft input, not artifact — never cleared.
+_DERIVED_THUMBS = frozenset({"thumb.jpg", "thumb_custom.png"})
+
+
+def _require_from(v: Video, allowed: frozenset, action: str) -> None:
+    if v.status not in allowed:
+        raise HTTPException(
+            409, f"cannot {action} from status '{v.status}' "
+                 f"(allowed: {', '.join(sorted(allowed))})")
+
+
+def _clear_render_artifact(v: Video) -> dict:
+    """Fields to reset when a video goes back to QUEUED for a re-render.
+
+    Clears what the render produced (video_path, derived thumb, handle,
+    progress, error, approval, craft verdict, hold) so nothing downstream can
+    mistake the old file for the new render. Keeps script / creation_config /
+    title / description / tags and any provided thumbnail — provided craft is
+    input to the next render, not its output. Files on disk are left alone
+    (_finalize overwrites storage/videos/{id}/video.mp4)."""
+    from pathlib import Path as _P
+    from app.services import craft
+    fields = dict(video_path=None, mpt_task_id=None, render_progress=0, error=None,
+                  approved_at=None, craft_review=craft.CRAFT_REVIEW_PENDING,
+                  retry_count=0, held=False, held_at=None)
+    if v.thumb_path and _P(v.thumb_path).name in _DERIVED_THUMBS:
+        fields["thumb_path"] = None
+    return fields
+
+
+def _stale_artifact_reason(session: Session, v: Video) -> str | None:
+    """Why the current artifact cannot be approved, or None.
+
+    Needs video_path pointing at a file, and no requeue / retry-to-queued
+    logged after the latest successful render (legacy rows re-queued before
+    requeue cleared video_path still carry the old path)."""
+    from pathlib import Path as _P
+    if not v.video_path:
+        return "no render artifact (video_path empty) — render first"
+    if not _P(v.video_path).is_file():
+        return f"render artifact missing on disk ({v.video_path}) — requeue to re-render"
+    runs = session.exec(
+        select(JobRun).where(JobRun.video_id == v.id,
+                             JobRun.kind.in_(("render", "requeue", "retry")))
+        .order_by(JobRun.created_at.desc(), JobRun.id.desc())
+    ).all()
+    for r in runs:
+        if r.kind == "render" and r.status == "success":
+            return None
+        if r.kind == "requeue" or (r.kind == "retry" and "-> queued" in (r.detail or "")):
+            return ("artifact predates the last requeue/retry (no successful render "
+                    "since) — wait for the re-render")
+    return None
+
+
+def _publish_side_failure(session: Session, v: Video) -> bool:
+    """True when the FAILED row died in the publish loop (upload error/stall),
+    i.e. its artifact already passed render + review. Decided by the latest
+    render/publish JobRun; rows without one fall back to the upload error text."""
+    last = session.exec(
+        select(JobRun).where(JobRun.video_id == v.id,
+                             JobRun.kind.in_(("render", "publish")))
+        .order_by(JobRun.created_at.desc(), JobRun.id.desc())
+    ).first()
+    if last is not None:
+        return last.kind == "publish"
+    return (v.error or "").startswith(("upload failed", "upload stalled",
+                                       "upload repeatedly stalled"))
+
+
 # The review-gate transitions below each log one JobRun (like produce/delete):
 # reject/requeue/retry/approve had zero jobrun rows ever, so both of this
 # fortnight's operator-vs-agent forensics started blind on these paths. The
@@ -554,8 +648,10 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
-    if v.status not in (VideoStatus.REVIEW, VideoStatus.RENDERED):
-        raise HTTPException(409, f"cannot approve from status '{v.status}'")
+    _require_from(v, APPROVE_FROM, "approve")
+    stale = _stale_artifact_reason(session, v)
+    if stale:
+        raise HTTPException(409, f"cannot approve: {stale}")
     if body:
         data = body.model_dump(exclude_unset=True)
         if "tags" in data:
@@ -582,6 +678,7 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
     v.craft_review = craft.CRAFT_REVIEW_PASS
     v.approved_at = utcnow()
     v.rejected_reason = None
+    v.held, v.held_at = False, None
     session.add(v)
     session.commit()
     session.refresh(v)
@@ -593,10 +690,12 @@ def reject(video_id: int, body: RejectBody, session: Session = Depends(get_sessi
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
+    _require_from(v, REJECT_FROM, "reject")
     quota.log(session, kind="reject", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"rejected via API: {v.status} -> rejected; reason={body.reason!r}")
-    return _set_status(session, video_id, VideoStatus.REJECTED, rejected_reason=body.reason)
+    return _set_status(session, video_id, VideoStatus.REJECTED, rejected_reason=body.reason,
+                       held=False, held_at=None)
 
 
 @router.post("/{video_id}/requeue")
@@ -604,10 +703,12 @@ def requeue(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
+    _require_from(v, REQUEUE_FROM, "requeue")
     quota.log(session, kind="requeue", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"requeued via API: {v.status} -> queued (re-render)")
-    return _set_status(session, video_id, VideoStatus.QUEUED, error=None, mpt_task_id=None, render_progress=0)
+              detail=f"requeued via API: {v.status} -> queued (re-render; artifact cleared"
+                     f"{', was ' + v.video_path if v.video_path else ''})")
+    return _set_status(session, video_id, VideoStatus.QUEUED, **_clear_render_artifact(v))
 
 
 @router.post("/{video_id}/retry")
@@ -615,7 +716,9 @@ def retry(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
-    if v.video_path:
+    _require_from(v, RETRY_FROM, "retry")
+    from pathlib import Path as _P
+    if v.video_path and _P(v.video_path).is_file() and _publish_side_failure(session, v):
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft
@@ -631,17 +734,98 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         quota.log(session, kind="retry", status="success", video_id=v.id,
                   channel_id=v.channel_id,
                   detail=f"retried via API: {v.status} -> approved "
-                         f"(artifact kept, re-publish); craft_review=pass")
+                         f"(publish failure, artifact kept, re-publish); craft_review=pass")
         # Reset the stuck-publish cap so an operator/agent retry after a diagnosed
         # root cause (token parse, network) gets a full publish_max_retries budget
         # instead of one hang and an immediate give-up (retry_count already at cap).
         return _set_status(session, video_id, VideoStatus.APPROVED, error=None,
                            approved_at=utcnow(), retry_count=0,
-                           craft_review=craft.CRAFT_REVIEW_PASS)
+                           craft_review=craft.CRAFT_REVIEW_PASS, held=False, held_at=None)
     quota.log(session, kind="retry", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"retried via API: {v.status} -> queued (re-render)")
-    return _set_status(session, video_id, VideoStatus.QUEUED, error=None, mpt_task_id=None, render_progress=0)
+              detail=f"retried via API: {v.status} -> queued (re-render; artifact cleared)")
+    return _set_status(session, video_id, VideoStatus.QUEUED, **_clear_render_artifact(v))
+
+
+@router.post("/{video_id}/hold")
+def hold(video_id: int, session: Session = Depends(get_session)):
+    """Pull an APPROVED video out of the publish drip without re-rendering.
+
+    Status and craft_review stay as they are; the publish loop (selection and
+    craft sweep) skips held rows and runway/queue counts exclude them."""
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    if v.status != VideoStatus.APPROVED:
+        raise HTTPException(409, f"cannot hold from status '{v.status}' (need approved)")
+    if v.held:
+        raise HTTPException(409, "video is already held")
+    quota.log(session, kind="hold", status="success", video_id=v.id,
+              channel_id=v.channel_id, detail="held via API: approved, out of publish drip")
+    v.held, v.held_at = True, utcnow()
+    v.updated_at = utcnow()
+    session.add(v)
+    session.commit()
+    session.refresh(v)
+    return v
+
+
+@router.post("/{video_id}/unhold")
+def unhold(video_id: int, session: Session = Depends(get_session)):
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    if v.status != VideoStatus.APPROVED:
+        raise HTTPException(409, f"cannot unhold from status '{v.status}' (need approved)")
+    if not v.held:
+        raise HTTPException(409, "video is not held")
+    quota.log(session, kind="unhold", status="success", video_id=v.id,
+              channel_id=v.channel_id, detail="unheld via API: back in publish drip")
+    v.held, v.held_at = False, None
+    v.updated_at = utcnow()
+    session.add(v)
+    session.commit()
+    session.refresh(v)
+    return v
+
+
+@router.post("/{video_id}/compose-script", status_code=202)
+def compose_script(video_id: int, response: Response, force: bool = False,
+                   wait: bool = False, session: Session = Depends(get_session)):
+    """Compose the narration script for a draft/queued video WITHOUT rendering.
+
+    grok -p with the storyboard-compose effort pin (settings.
+    grok_compose_reasoning_effort, default "medium") and the existing grok
+    timeout. Stores the result as the video's provided script (spoken verbatim
+    by the next render — no second grok call, no overwrite). Never touches
+    daily_render_budget, status or the render queue; logs JobRun
+    kind=compose_script (never kind=render). 409 while a render is in flight,
+    outside draft/queued, while another compose runs, or when a script is
+    already saved (pass ?force=true to replace it). Default is async (202 +
+    background thread); ?wait=true runs inline and returns the video (200)."""
+    from app.services import script_compose
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    blocked = script_compose.block_reason(v, force=force)
+    if blocked:
+        raise HTTPException(409, blocked)
+    if not script_compose.claim(v.id):
+        raise HTTPException(409, "a script compose is already running for this video")
+    if wait:
+        try:
+            result = script_compose.compose_into(session, v.id, force=force)
+        finally:
+            script_compose.release(v.id)
+        if result.get("error"):
+            raise HTTPException(result.get("http", 502), result["error"])
+        session.refresh(v)
+        response.status_code = 200
+        return v
+    script_compose.start_background(session.get_bind(), v.id, force=force)
+    return {"video_id": v.id, "status": "composing",
+            "detail": "grok compose started; poll GET /api/videos/{id} "
+                      "or /api/runs (kind=compose_script)"}
 
 
 @router.post("/{video_id}/regenerate-metadata")

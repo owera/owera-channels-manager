@@ -41,9 +41,9 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero, oauthHol
 
       {v.status === "approved" && (
         <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
-          style={{ color: (paused || budgetZero || oauthHold) ? "#f5a524" : STATUS_META.approved.hex }}>
+          style={{ color: (v.held || paused || budgetZero || oauthHold) ? "#f5a524" : STATUS_META.approved.hex }}>
           <span>◷</span>
-          {paused ? "publishes when unpaused" : budgetZero ? "held — publish budget 0" : oauthHold ? "held — reconnect" : eta ? `publishes in ${relTime(eta)}` : "queued to publish"}
+          {v.held ? "on hold — not publishing" : paused ? "publishes when unpaused" : budgetZero ? "held — publish budget 0" : oauthHold ? "held — reconnect" : eta ? `publishes in ${relTime(eta)}` : "queued to publish"}
         </div>
       )}
 
