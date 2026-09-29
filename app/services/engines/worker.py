@@ -592,7 +592,10 @@ def _lock_patterned_opener(script: str, subject: str) -> str:
     return f"{opener} {rest}".strip() if rest else opener
 
 
-def _generate_script(subject: str, params: dict) -> str:
+def _generate_script(subject: str, params: dict, *, llm=None) -> str:
+    # ``llm``: completion seam override. compose-script (no render) passes
+    # _llm_compose (effort pin); the render path keeps _llm (unchanged).
+    ask = llm or _llm
     n = int(params.get("paragraph_number") or 2)
     if (params.get("content_format") or "short") == "long":
         prompt = (
@@ -643,7 +646,7 @@ def _generate_script(subject: str, params: dict) -> str:
     if lang:
         prompt += (f" HARD RULE: write the entire script in {lang}, regardless of the "
                    f"title's language — this channel narrates exclusively in {lang}.")
-    text = _llm(prompt, max_tokens=max_tokens).strip()
+    text = ask(prompt, max_tokens=max_tokens).strip()
     text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
     text = _strip_script_preamble(text)
 
@@ -652,7 +655,7 @@ def _generate_script(subject: str, params: dict) -> str:
     wc = len(text.split())
     if not (lo <= wc <= hi):
         logger.debug("script word count %d outside [%d,%d] for %r; retrying", wc, lo, hi, subject)
-        retry = _llm(
+        retry = ask(
             prompt + f"\n\nIMPORTANT: Your response MUST be between {lo} and {hi} words. "
             "Return ONLY the spoken voiceover — never mention the word count, "
             "craft rules, series name, or endcard plan.",

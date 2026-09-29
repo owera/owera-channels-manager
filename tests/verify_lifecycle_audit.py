@@ -24,6 +24,8 @@ and the app lifespan/scheduler are never started). Exits non-zero on the first
 failure.
 """
 import sys
+import tempfile
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -42,6 +44,19 @@ from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 # 2026-09-28: titles may not carry a currency value (publish gate) — noun path.
 _OK_TITLE = "Cache miss re-bills the whole receipt · Copilot Credits 1"
 _OK_SCRIPT = "It costs $79. Here is why Credits matter."
+
+# P0 2026-09-29 state table: approve needs a render artifact on disk and
+# retry -> approved (re-publish) needs a publish-side failure with the
+# artifact on disk ("upload failed: …" is publish_loop's real error text).
+# requeue -> queued makes the same row illegal for /retry, so the ch2
+# re-render retry uses its own failed row (id 11).
+_ART_DIR = Path(tempfile.mkdtemp(prefix="lifecycle-audit-"))
+
+
+def _artifact(vid: int) -> str:
+    f = _ART_DIR / f"{vid}.mp4"
+    f.write_bytes(b"not really an mp4")
+    return str(f)
 
 _checks = 0
 
@@ -64,10 +79,10 @@ with Session(engine) as s:
     s.add(Topic(channel_id=1, name="T"))
     s.commit()
     s.add(Video(channel_id=1, topic_id=1, subject="in review",
-                status=VideoStatus.REVIEW,
+                status=VideoStatus.REVIEW, video_path=_artifact(1),
                 title=_OK_TITLE, script=_OK_SCRIPT))            # id 1
     s.add(Video(channel_id=1, topic_id=1, subject="rendered, unreviewed",
-                status=VideoStatus.RENDERED,
+                status=VideoStatus.RENDERED, video_path=_artifact(2),
                 title=_OK_TITLE, script=_OK_SCRIPT))            # id 2
     s.add(Video(channel_id=1, topic_id=1, subject="still a draft",
                 status=VideoStatus.DRAFT))                        # id 3
@@ -77,8 +92,8 @@ with Session(engine) as s:
                 status=VideoStatus.FAILED, error="mpt exploded",
                 mpt_task_id="t-dead", render_progress=40))        # id 5
     s.add(Video(channel_id=1, topic_id=1, subject="upload failed",
-                status=VideoStatus.FAILED, error="upload 500",
-                video_path="storage/videos/5/video.mp4",
+                status=VideoStatus.FAILED, error="upload failed: 500",
+                video_path=_artifact(6),
                 title=_OK_TITLE, script=_OK_SCRIPT,
                 retry_count=5))                            # id 6
     s.add(Video(channel_id=1, topic_id=1, subject="render failed too",
@@ -89,14 +104,16 @@ with Session(engine) as s:
     s.add(Topic(channel_id=2, name="T2"))
     s.commit()
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 in review",
-                status=VideoStatus.REVIEW,
+                status=VideoStatus.REVIEW, video_path=_artifact(8),
                 title=_OK_TITLE, script=_OK_SCRIPT))            # id 8
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 render failed",
                 status=VideoStatus.FAILED, error="mpt died"))     # id 9
     s.add(Video(channel_id=2, topic_id=2, subject="ch2 upload failed",
-                status=VideoStatus.FAILED, error="upload 500",
-                video_path="storage/videos/9/video.mp4",
+                status=VideoStatus.FAILED, error="upload failed: 500",
+                video_path=_artifact(10),
                 title=_OK_TITLE, script=_OK_SCRIPT))    # id 10
+    s.add(Video(channel_id=2, topic_id=2, subject="ch2 render failed again",
+                status=VideoStatus.FAILED, error="mpt died"))     # id 11
     s.commit()
 
 
@@ -236,6 +253,8 @@ ok(r.status_code == 200, "ch2 reject returns 200")
 r = client.post("/api/videos/9/requeue", auth=auth)
 ok(r.status_code == 200, "ch2 requeue returns 200")
 r = client.post("/api/videos/9/retry", auth=auth)
+ok(r.status_code == 409, "ch2 retry of the just-requeued (queued) row is 409")
+r = client.post("/api/videos/11/retry", auth=auth)
 ok(r.status_code == 200, "ch2 retry (re-render) returns 200")
 r = client.post("/api/videos/10/retry", auth=auth)
 ok(r.status_code == 200, "ch2 retry (re-publish) returns 200")
@@ -251,7 +270,7 @@ with Session(engine) as s:
     ok(latest["requeue"].video_id == 9 and latest["requeue"].channel_id == 2,
        "ch2 requeue row carries channel_id 2")
     retries = sorted(runs(s, "retry"), key=lambda x: x.id)[-2:]
-    ok([x.video_id for x in retries] == [9, 10]
+    ok([x.video_id for x in retries] == [11, 10]
        and all(x.channel_id == 2 for x in retries),
        "both ch2 retry rows (re-render site AND re-publish site) carry channel_id 2")
     counts = {k: len(runs(s, k)) for k in ("approve", "reject", "requeue", "retry")}

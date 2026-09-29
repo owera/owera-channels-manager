@@ -176,6 +176,7 @@ def _next_approved(session: Session, channel_id: int) -> Video | None:
                 Video.channel_id == channel_id,
                 Video.status == VideoStatus.APPROVED,
                 Video.craft_review == craft.CRAFT_REVIEW_PASS,
+                Video.held.is_not(True),          # operator hold: never publish
             )
             .order_by(Topic.weight.desc(), Video.approved_at, Video.id)
         )
@@ -203,13 +204,16 @@ def _sweep_craft_reviews(session: Session, channel_id: int) -> None:
 
     - pass → durable craft_review=pass (eligible for _next_approved)
     - fail → auto-reject (mute / empty script / nonsense title / Gate A/B/C)
-    Idempotent; does not touch already-pass rows.
+    Idempotent; does not touch already-pass rows. Held rows are skipped
+    entirely (never re-scored, auto-rejected or un-held); unhold re-enters
+    them into the next sweep.
     """
     pending = session.exec(
         select(Video).where(
             Video.channel_id == channel_id,
             Video.status == VideoStatus.APPROVED,
             Video.craft_review != craft.CRAFT_REVIEW_PASS,
+            Video.held.is_not(True),
         )
     ).all()
     for video in pending:
