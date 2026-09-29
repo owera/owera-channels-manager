@@ -1947,4 +1947,24 @@ storyboard._pull_first_cut(_pb4, 3.3 + 4 * 3.0 + 3.78, [])
 ok(json.dumps(_pb4) == _before4,
    "_pull_first_cut: every card at its cap and endcard full → restored (Gate B reports it)")
 
+# --- Series chip from the real topic (P1 e) ---------------------------------
+print("series chip from the real topic (P1 e: Shipping #1308/#1311)")
+_ship_html = _compose(happy_llm, subject="You still can't tell if it works.", topic_name="Shipping")
+_ship_cta = [b for b in craft.beats_from_html(_ship_html) if b.get("type") == "cta"]
+ok(_ship_cta and _ship_cta[-1].get("text") == "Subscribe · Shipping",
+   "compose: unsuffixed subject + no brand + topic 'Shipping' → chip 'Subscribe · Shipping' (was Copilot Credits)")
+_def_html = _compose(happy_llm, subject="You still can't tell if it works.")
+_def_cta = [b for b in craft.beats_from_html(_def_html) if b.get("type") == "cta"]
+ok(_def_cta and _def_cta[-1].get("text") == "Subscribe · Copilot Credits",
+   "compose without topic/brand keeps the old fallback (no silent change)")
+_os_ch = _compose(happy_llm, subject="You still can't tell if it works.", channel_slug="owera-os",
+                  channel_id=1)
+_os_cta = [b for b in craft.beats_from_html(_os_ch) if b.get("type") == "cta"]
+ok(_os_cta and _os_cta[-1].get("text") == "Subscribe · Agent memory",
+   "compose: brand resolved from the channel is used for the chip when brand= is not passed")
+_sx = [{"type": "cta", "text": "old", "cue": "Subscribe"}]
+storyboard._sanitize_cta(_sx, "A. Subscribe — next Shipping trap.", subject="No suffix here",
+                         brand="os", topic_name="Shipping")
+ok(_sx[0]["text"] == "Subscribe · Shipping", "_sanitize_cta: topic beats the OS brand default")
+
 print(f"\nALL {_checks} CHECKS PASSED")

@@ -339,6 +339,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             language=language_from_voice(params.get("voice_name")),
             brand=brand,
             provided_thumb=params.get("thumb_source") == "provided",
+            topic_name=params.get("topic_name"),
         )
         used_fallback = False
         if not _looks_valid(html):
@@ -684,6 +685,7 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
     if (params.get("content_format") or "short") != "long":
         text = craft.ensure_series_endcard_vo(
             text, subject, brand=params.get("brand"),
+            topic_name=params.get("topic_name"),
         )
     return text
 
@@ -774,7 +776,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
                           width: int, height: int, duration: float, *,
                           topic_id=None, content_format: str = "short",
                           language: str | None = None, brand: str | None = None,
-                          provided_thumb: bool = False) -> str:
+                          provided_thumb: bool = False, topic_name: str | None = None) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
     the old clip-array path below as a kill switch. Returns "" on generic failure so
@@ -790,7 +792,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             resolution=resolution, width=width, height=height, topic_id=topic_id,
             content_format=content_format, allowed_types=settings.composition_beat_types,
             language=language, llm=_llm_compose, brand=brand,
-            provided_thumb=provided_thumb,
+            provided_thumb=provided_thumb, topic_name=topic_name,
         )
         return html or ""
     except Exception as e:

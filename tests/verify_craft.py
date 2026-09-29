@@ -1110,4 +1110,43 @@ _r71m = craft.video_maker_gate_reason({"beats": _v1371, "hook_pace": {"version":
 ok(_r71m and "first cut at 4.76s" in _r71m,
    "the same board WITH the marker would fail (the marker is what scopes the check)")
 
+# --- Series chip from the real topic (P1 e: Shipping #1308/#1311 showed "Copilot Credits") ---
+# Live data (read-only API, 2026-09-29): both on topic 45 "Shipping", channel 1 (OS);
+# stored endcard chip "Subscribe · Copilot Credits" while the VO said "next Shipping trap".
+_v1308_title = "You still can't tell if it works. · Shipping 4"
+_v1308_subject = "You're looking at a builder teaser, not a live walkthrough. · Shipping 4"
+_v1311_title = "You left the craft and the script edit vanished. · Shipping 3"
+for _t in (_v1308_title, _v1308_subject, _v1311_title):
+    for _b in ("os", None):
+        ok(craft.series_of(_t, _b, "Shipping") == "Shipping",
+           "series_of(%r…, brand=%s, topic=Shipping) → Shipping" % (_t[:24], _b))
+# Pre-#33 failure mode: the series suffix isn't recognised (no suffix / unknown) and the
+# brand is unknown → used to fall to "Copilot Credits". The topic now wins.
+ok(craft.series_of("You still can't tell if it works.", None) == "Copilot Credits",
+   "(baseline) no suffix + no brand + no topic → Copilot Credits fallback unchanged")
+ok(craft.series_of("You still can't tell if it works.", None, "Shipping") == "Shipping",
+   "#1308 failure mode: no recognised suffix + no brand → topic 'Shipping', not Copilot Credits")
+ok(craft.series_of("You left the craft and the script edit vanished.", "os", "Shipping") == "Shipping",
+   "#1311 failure mode: OS brand default (Agent memory) loses to the real topic")
+ok(craft.series_of("Chat set limit 3. Prod looped 30 calls. · Agent memory 36", "os", "Shipping")
+   == "Agent memory", "a real title suffix still wins over the topic")
+ok(craft.series_from_topic("Agent memory and state in production") == "Agent memory"
+   and craft.series_from_topic("Claude Code production workflows") == "Claude Code"
+   and craft.series_from_topic("Agent traps") == "Agent traps"
+   and craft.series_from_topic("ia") == "IA"
+   and craft.series_from_topic("Copilot Credits: the invoice you missed") == "Copilot Credits",
+   "series_from_topic: exact label or leading whole-word label (live topic names)")
+ok(craft.series_from_topic("Engenheiro de IA no Brasil") is None
+   and craft.series_from_topic("MCP Model Context Protocol") is None
+   and craft.series_from_topic("Localhost tricks") is None
+   and craft.series_from_topic("") is None and craft.series_from_topic(None) is None,
+   "series_from_topic: no substring / partial-word matches → None (brand default)")
+ok(craft.series_of("x", "rr", "Rodar IA local em 2026 (Ollama, VRAM, quantização)") == "IA",
+   "unmapped topic name → brand default (RR → IA), unchanged")
+_card = craft.series_endcard("You still can't tell if it works.", None, None, topic_name="Shipping")
+ok(_card["chip"] == "Subscribe · Shipping" and "next Shipping" in _card["vo"],
+   "series_endcard: chip and VO both follow the topic (they can no longer disagree)")
+ok("next Shipping" in craft.ensure_series_endcard_vo("A. B.", "You still can't tell.", topic_name="Shipping"),
+   "ensure_series_endcard_vo: topic_name reaches the pinned VO")
+
 print(f"\nALL {_checks} CHECKS PASSED")

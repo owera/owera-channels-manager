@@ -559,6 +559,7 @@ def _submit_new(session: Session) -> None:
         )
         params["content_format"] = fmt
         params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
+        params["topic_name"] = topic.name if topic else ""  # endcard series chip (P1 e)
         params["brand"] = brand
         if provided_script:
             # Spoken verbatim: HyperFrames worker skips _generate_script on

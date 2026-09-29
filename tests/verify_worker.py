@@ -1156,6 +1156,19 @@ try:
        "topic_id + content_format reach compose")
     ok(kw["llm"] is worker._llm_compose,
        "compose is given worker._llm_compose (HARD timeout + pinned reasoning effort)")
+    ok(kw.get("topic_name") is None, "topic_name defaults to None at compose")
+    with patch("app.services.engines.storyboard.compose",
+               return_value="<html>from-compose</html>") as compose_tn:
+        worker._generate_composition("subj", "script", [], "portrait", 1080, 1920, 12.0,
+                                     topic_name="Shipping")
+    ok(compose_tn.call_args.kwargs["topic_name"] == "Shipping",
+       "series chip (P1 e): topic_name reaches compose")
+    ok('topic_name=params.get("topic_name")' in inspect.getsource(worker.run_job)
+       and 'topic_name=params.get("topic_name")' in inspect.getsource(worker._generate_script),
+       "series chip (P1 e): run_job + _generate_script pass params.topic_name (chip == VO series)")
+    from app.services import render_loop as _rl_e
+    ok('params["topic_name"] = topic.name if topic else ""' in inspect.getsource(_rl_e._submit_new),
+       "series chip (P1 e): render_loop passes the real topic name")
 
     with patch("app.services.engines.storyboard.compose",
                return_value="<html>from-compose</html>") as compose_en:
