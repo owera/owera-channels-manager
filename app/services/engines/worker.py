@@ -862,7 +862,7 @@ def _fallback_composition(subject: str, script: str, resolution: str,
     output is malformed or its render fails."""
     th = theme.resolve(topic_id, subject, brand=brand)
     k = max(4, min(8, int(duration // 18)))            # more reveals for longer videos
-    lines = _key_lines(script, k=k)
+    lines = _dedupe_fallback_lines(subject, _key_lines(script, k=k))
     pad = max(60, int(width * 0.08))
     segments = [("seg-title", _esc(subject))] + [("seg-line", _esc(l)) for l in lines]
     n = len(segments)
@@ -937,6 +937,22 @@ def _fallback_composition(subject: str, script: str, resolution: str,
   </script>
 </body></html>
 """
+
+
+def _dedupe_fallback_lines(subject: str, lines: list[str]) -> list[str]:
+    """No repeated card in the fallback either: drop a key line whose normalized
+    text equals (or nearly equals) the previous segment — the title lock makes
+    line 1 == subject, and "X. Isso X." scripts repeat a line back-to-back."""
+    from app.services import craft
+    prev = craft.screen_text_key({"text": subject})
+    out = []
+    for line in lines:
+        key = craft.screen_text_key({"text": line})
+        if not key or craft.screen_text_near(key, prev):
+            continue
+        out.append(line)
+        prev = key
+    return out or ["Watch to the end"]
 
 
 def _key_lines(script: str, k: int = 4) -> list[str]:
