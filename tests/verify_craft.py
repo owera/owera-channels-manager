@@ -876,4 +876,97 @@ ok(v3.error and "craft gate FAIL" in v3.error and "[A]" in v3.error,
 youtube.get_service, youtube.upload_video = _orig_get, _orig_up
 
 
+print("Gate B repeated card (VM 2026-09-29 / RR publish check 2026-09-29)")
+
+
+def _rb(beats):
+    t = 0.0
+    out = []
+    for b in beats:
+        b = dict(b)
+        b["start"] = round(t, 3)
+        b["dur"] = 4.0 if b["type"] == "cta" else 3.0
+        t += b["dur"] + craft.BEAT_GAP_S
+        out.append(b)
+    return out
+
+
+_H = {"type": "hook", "text": "Ollama parado prende 7GB de VRAM", "object": "GPU meter",
+      "cue": "Ollama parado"}
+_E = {"type": "cta", "text": "Subscribe · IA", "cue": "Subscribe"}
+_S7 = {"type": "stat", "value": "7", "unit": "GB", "label": "presos na VRAM", "cue": "a"}
+_CMP = {"type": "compare", "title": "Peso na GPU vs Tokens", "cue": "b",
+        "left": {"title": "Peso", "items": ["7GB"]}, "right": {"title": "Tokens", "items": ["1GB"]}}
+_TD = {"type": "term_define", "term": "Keep-alive", "definition": "5 minutos na VRAM", "cue": "c"}
+_CMD = {"type": "command", "command": "pytest -q && git diff -U0", "cue": "d"}
+_S0 = {"type": "stat", "value": "0", "unit": "", "label": "teto fatura sem limite", "cue": "e"}
+_Q = {"type": "quote", "text": "Engenharia é escolher o byte", "cue": "f"}
+
+# #1372: cards 1–3 replayed as cards 4–6.
+g_replay = craft.video_maker_gate(_rb([_H, _S7, _CMP, _TD, _S7, _CMP, _TD, _Q, _E]))
+ok(g_replay["checks"]["B"] == "FAIL" and g_replay["result"] == "FAIL",
+   "cards 1–3 replayed as 4–6 (#1372) → Gate B FAIL")
+ok(any("[B] Repeated card" in r and "replays beat[1]" in r and "replays beat[3]" in r
+       for r in g_replay["reasons"]),
+   "replay reason names each replayed card")
+# #1373: double card back-to-back (pytest terminal ×2, 6.2s).
+g_double = craft.video_maker_gate(_rb([_H, _CMD, _CMD, _S7, _Q, _E]))
+ok(g_double["checks"]["B"] == "FAIL"
+   and any("beat[1]→beat[2]" in r and "back-to-back" in r for r in g_double["reasons"]),
+   "double card back-to-back (#1373) → Gate B FAIL")
+# #1375 / #1358: triple card (stat ×3, 9.4s).
+_trip_hits = craft.repeated_card_hits(_rb([_H, _S0, _S0, _S0, _CMD, _E]))
+ok(len(_trip_hits) == 2 and "beat[1]→beat[2]" in _trip_hits[0] and "beat[2]→beat[3]" in _trip_hits[1],
+   "triple card (#1375/#1358) → two back-to-back hits")
+ok(craft.video_maker_gate(_rb([_H, _S0, _S0, _S0, _CMD, _E]))["checks"]["B"] == "FAIL",
+   "triple card → Gate B FAIL")
+# Near-equality: punctuation and case trimmed.
+_q1 = {"type": "quote", "text": "Isso não é engenharia.", "cue": "x"}
+_q2 = {"type": "statement", "text": "isso NÃO é engenharia!", "cue": "y"}
+ok(craft.repeated_card_hits(_rb([_H, _q1, _q2, _E])) != [],
+   "neighbours equal after trimming punctuation/case/accents → repeat")
+ok(craft.screen_text_near("modelo no hd leva 4 minutos nao e engenharia",
+                          "modelo no hd leva 4 minutos nao engenharia"),
+   "near-equal: one dropped word ('é') still counts as the same card")
+ok(not craft.screen_text_near("2 bytes por token em fp16", "1 byte por token em fp16"),
+   "different numbers are different cards (not a repeat)")
+# Clean boards and legacy snapshots stay PASS.
+ok(craft.repeated_card_hits(_rb([_H, _S7, _CMP, _TD, _CMD, _Q, _E])) == [],
+   "distinct cards → no repeat")
+ok(craft.video_maker_gate(_rb([_H, _S7, _CMP, _TD, _CMD, _Q, _E]))["checks"]["B"] == "PASS",
+   "distinct cards → Gate B PASS")
+_legacy = [{"type": "stat", "start": 3.0, "dur": 3.0}, {"type": "stat", "start": 6.12, "dur": 3.0}]
+ok(craft.repeated_card_hits([{"type": "hook", "start": 0, "dur": 2.88}] + _legacy) == [],
+   "scraped legacy beats (no copy) never match (fail-open)")
+ok(craft.repeated_card_hits(_rb([_H, _S7, _CMP, _S7, _Q, _E])) != [],
+   "a single later replay of a mid card also FAILs (CoS rule: adjacent or later replay)")
+ok(craft.repeated_card_hits(_rb([_H, _S7, _CMP, _TD, _Q, _E, dict(_E)])) == [],
+   "two trailing cta beats with the same chip are not a repeated card")
+_hook_again = dict(_Q, text="Ollama parado prende 7GB de VRAM")
+ok(craft.repeated_card_hits(_rb([_H, _hook_again, _S7, _E])) != [],
+   "a mid card that repeats the hook text right after frame0 is a repeat")
+# Real #1370 stored board (creation_config.beats) → FAIL via review gate.
+_v1370 = [
+    {"type": "hook", "start": 0.0, "dur": 2.72, "text": "KV em FP16 estoura a 8GB, não é engenharia",
+     "cue": "KV em FP16 estoura", "object": "VRAM"},
+    {"type": "stat", "start": 2.84, "dur": 3.0, "value": "8", "unit": "GB",
+     "label": "KV FP16 na placa", "cue": "Isso não é engenharia"},
+    {"type": "stat", "start": 5.96, "dur": 3.0, "value": "8", "unit": "GB",
+     "label": "KV FP16 na placa", "cue": "Isso não é engenharia"},
+    {"type": "stat", "start": 9.08, "dur": 3.0, "value": "2", "unit": "bytes",
+     "label": "por token em FP16", "cue": "dois bytes por"},
+    {"type": "stat", "start": 12.2, "dur": 3.0, "value": "8", "unit": "GB",
+     "label": "KV FP16 na placa", "cue": "Isso não é engenharia"},
+    {"type": "cta", "start": 15.32, "dur": 4.0, "text": "Subscribe · IA", "cue": "Subscribe"},
+]
+_r1370 = craft.video_maker_gate_reason({"beats": _v1370}, "short")
+ok(_r1370 is not None and "Repeated card" in _r1370,
+   "#1370 stored board → review gate blocks with a Repeated card reason")
+ok("Repeated card" not in (craft.video_maker_gate_reason({"beats": _v1370}, "long") or ""),
+   "long-form stays exempt from the Video Maker gate")
+# Snapshot keeps the copy the check compares (compare columns / term_define).
+_snap = craft.snapshot_beats([_TD, _CMP])
+ok(_snap[0].get("term") == "Keep-alive" and _snap[1].get("left", {}).get("title") == "Peso",
+   "snapshot_beats keeps term/definition/left/right for the repeated-card check")
+
 print(f"\nALL {_checks} CHECKS PASSED")
