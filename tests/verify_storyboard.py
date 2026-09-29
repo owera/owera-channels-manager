@@ -678,16 +678,18 @@ ok(storyboard.validate_storyboard(penult, 18.72),
    "4.0s endcard + re-capped penultimate still validates")
 
 # Hook surplus fill (v1267/golden ch2-code): 3s mids + 4s CTA dump leftover
-# onto Gate-B-exempt frame0. Fill with copies of unique object mids, not
-# hook-claim quotes (09-17 R2 drop). Remainder stays on hook.
+# onto Gate-B-exempt frame0. Fill with NEW quote cards of the words spoken
+# in each slot — never clones of object mids (repeated-card FAIL, VM
+# 2026-09-29) and never hook-claim quotes (09-17 R2 drop). Remainder stays
+# on hook. Speech is continuous (real narration), so every slot has words;
+# the pre-2026-09-29 version of this test had only the 5 cue words (a
+# wordless 24s gap) because clones did not need any speech.
 print("align_storyboard hook-surplus fill")
-hook_dump_words = (
-    [{"text": "open", "start": 0.0, "dur": 0.4},
-     {"text": "code", "start": 4.0, "dur": 0.3},
-     {"text": "cmp", "start": 8.0, "dur": 0.3},
-     {"text": "stat", "start": 12.0, "dur": 0.3},
-     {"text": "follow", "start": 36.0, "dur": 0.3}]
-)
+_cue_at = {0.0: "open", 4.0: "code", 8.0: "cmp", 12.0: "stat", 36.0: "follow"}
+hook_dump_words = []
+for _k in range(0, 73):
+    _t = round(_k * 0.5, 2)
+    hook_dump_words.append({"text": _cue_at.get(_t, "w%d" % _k), "start": _t, "dur": 0.4})
 hook_dump = [
     {"type": "hook", "cue": "open", "text": "Você gastou R$80 no Cursor"},
     {"type": "code", "cue": "code", "lang": "python", "lines": ["x=1"]},
@@ -717,6 +719,39 @@ ok(hook_dump[-1]["dur"] <= storyboard._ENDCARD_MAX + 1e-6,
 ok(hook_dump[-1]["type"] == "cta", "CTA stays last")
 ok(storyboard.validate_storyboard(hook_dump, 40.0),
    "hook-fill layout still validates")
+fills = [b for b in hook_dump if b.get("_fill")]
+ok(fills and all(b["type"] == "quote" for b in fills),
+   "hook fill inserts NEW quote cards (no clones of object mids)")
+ok([b.get("type") for b in hook_dump].count("code") == 1
+   and [b.get("type") for b in hook_dump].count("compare") == 1
+   and [b.get("type") for b in hook_dump].count("stat") == 1,
+   "each object mid appears exactly once (no replayed cards)")
+ok(craft.repeated_card_hits(hook_dump) == [],
+   "hook-fill board has no repeated card (craft gate check)")
+_fill_texts = [b["text"] for b in fills]
+_first_word_at = {}
+for _b in fills:
+    _in = [w["text"] for w in hook_dump_words
+           if _b["start"] - 1e-9 <= w["start"] < _b["start"] + _b["dur"] + storyboard._GAP - 1e-9]
+    _first_word_at[_b["text"]] = _in[0] if _in else None
+ok(len(set(_fill_texts)) == len(_fill_texts)
+   and all(t.split()[0] == _first_word_at[t] for t in _fill_texts),
+   "fill quotes carry the words spoken in their own slot")
+_n_after = len(hook_dump)
+storyboard._cap_endcard(hook_dump, 40.0, hook_dump_words)
+ok(len(hook_dump) == _n_after and craft.repeated_card_hits(hook_dump) == [],
+   "second _cap_endcard pass (compose) is idempotent — never re-fills from "
+   "the fill (the v1370 8GB×2 root cause)")
+# No words (even-space / no TTS timings): no fill, never clones.
+no_words = [
+    {"type": "hook", "cue": "open", "text": "Hook"},
+    {"type": "stat", "cue": "s", "value": "8", "unit": "GB", "label": "KV"},
+    {"type": "code", "cue": "c", "lines": ["x=1"]},
+    {"type": "cta", "cue": "follow", "text": "Subscribe · IA"},
+]
+storyboard.align_storyboard(no_words, [], 40.0)
+ok(len(no_words) == 4 and craft.repeated_card_hits(no_words) == [],
+   "no word timings: hook fill does not clone mids")
 # Short hook is a no-op (ch1-code 5.2s class).
 short_hook_words = (
     [{"text": "open", "start": 0.0, "dur": 0.4},
@@ -1453,5 +1488,151 @@ ok(sum(1 for b in v1262_types if b["type"] == "statement") == 1,
    "v1262-shaped 3 statements collapse to 1")
 ok(craft.video_maker_gate(v1262_types, content_format="short")["checks"]["C"] == "PASS",
    "Gate C PASS after the statement cap (was FAIL on 3 statements)")
+
+print("repeated card (VM 2026-09-29: RR #1340/#1349/#1370/#1376 same card ×2 ~6.2s)")
+# v1370 shape: one 8GB stat donor cued on the repeated phrase "Isso não é
+# engenharia", a 2-bytes stat, then the rest. Old code filled the hook
+# surplus with clones (twice) → hook, 8GB, 8GB, 2B, 8GB, 2B, ...
+_v1370_script = ("KV em FP16 estoura a 8GB, não é engenharia. Isso não é engenharia. "
+                 "Cada token guarda dois bytes por valor no cache e o custo sobe com o "
+                 "contexto até não caber na placa. Quantiza o KV e cada token passa a "
+                 "custar metade. Qualidade fica. Engenharia é escolher o byte do cache.")
+_v1370_words = []
+_t = 0.0
+for _w in _v1370_script.replace(",", "").replace(".", "").split():
+    _v1370_words.append({"text": _w, "start": round(_t, 3), "dur": 0.3})
+    _t += 0.42
+_v1370_words.append({"text": "Subscribe", "start": 37.3, "dur": 0.3})
+_v1370_words.append({"text": "next", "start": 37.7, "dur": 0.3})
+
+
+def _v1370_beats():
+    return [
+        {"type": "hook", "cue": "KV em FP16 estoura",
+         "text": "KV em FP16 estoura a 8GB, não é engenharia"},
+        {"type": "stat", "cue": "Isso não é engenharia", "value": "8", "unit": "GB",
+         "label": "KV FP16 na placa"},
+        {"type": "stat", "cue": "dois bytes por", "value": "2",
+         "unit": "bytes", "label": "por token em FP16"},
+        {"type": "term_define", "cue": "o custo sobe", "term": "KV cache",
+         "definition": "memória por token"},
+        {"type": "compare", "cue": "caber na placa",
+         "left": {"title": "FP16", "items": ["estoura"]},
+         "right": {"title": "Q8", "items": ["cabe"]}},
+        {"type": "code", "cue": "Quantiza o KV", "lines": ["--cache-type-k q8_0"]},
+        {"type": "stat", "cue": "Cada token passa", "value": "1", "unit": "byte",
+         "label": "metade do FP16"},
+        {"type": "quote", "cue": "Engenharia é escolher",
+         "text": "Engenharia é escolher o byte do cache"},
+        {"type": "cta", "cue": "Subscribe next", "text": "Subscribe · IA"},
+    ]
+
+
+v1370 = _v1370_beats()
+storyboard.align_storyboard(v1370, _v1370_words, 41.17)
+storyboard._cap_list_holds(v1370)
+storyboard._cap_endcard(v1370, 41.17, _v1370_words)  # compose's second pass
+ok(storyboard.validate_storyboard(v1370, 41.17), "v1370-shaped board validates")
+ok(craft.repeated_card_hits(v1370) == [],
+   "v1370-shaped board: no card shown twice (was 8GB ×2 back-to-back, ×3 total)")
+_keys = [craft.screen_text_key(b) for b in v1370 if b.get("type") not in ("hook", "cta")]
+ok(len(_keys) == len(set(_keys)), "v1370-shaped board: no mid card replayed later")
+ok(sum(1 for b in v1370 if b.get("value") == "8") == 1,
+   "the 8GB stat renders exactly once")
+ok(v1370[0]["dur"] <= storyboard._HOOK_MAX + storyboard._MID_MAX + 1e-6,
+   "frame0 hold stays capped while filling with new cards")
+ok(craft.video_maker_gate(v1370)["checks"]["B"] == "PASS",
+   "v1370-shaped board passes Gate B incl. the repeated-card check")
+
+# Renderer backstop: the LLM itself emits the same card twice / three times
+# (double + triple card) or replays a 3-card block → the repeats become
+# quote cards of their own spoken window; the gate check then passes.
+_rep_words = [{"text": "w%d" % k, "start": round(k * 0.5, 2), "dur": 0.4} for k in range(0, 60)]
+
+
+def _stat(v, label, cue):
+    return {"type": "stat", "value": v, "unit": "GB", "label": label, "cue": cue}
+
+
+def _timed(beats):
+    t = 0.0
+    for b in beats:
+        b["start"] = round(t, 3)
+        b["dur"] = 3.0 if b["type"] != "cta" else 4.0
+        t += b["dur"] + storyboard._GAP
+    return beats
+
+
+double = _timed([{"type": "hook", "text": "Hook claim", "cue": "w0"},
+                 _stat("8", "KV na placa", "w6"), _stat("8", "KV na placa", "w12"),
+                 {"type": "code", "lines": ["x=1"], "cue": "w18"},
+                 {"type": "cta", "text": "Subscribe · IA", "cue": "w24"}])
+ok(len(craft.repeated_card_hits(double)) == 1, "double card: the gate sees 1 repeat before the fix")
+storyboard._break_repeated_cards(double, _rep_words)
+ok(craft.repeated_card_hits(double) == [] and double[2]["type"] == "quote",
+   "double card: the second copy becomes a quote (different beat type)")
+ok(double[2]["text"].startswith("w12") or double[2]["text"].startswith("w13"),
+   "double card: the quote carries the words spoken in its own window")
+
+triple = _timed([{"type": "hook", "text": "Hook claim", "cue": "w0"},
+                 _stat("0", "teto fatura sem limite", "a"),
+                 _stat("0", "teto fatura sem limite", "b"),
+                 _stat("0", "teto fatura sem limite", "c"),
+                 {"type": "code", "lines": ["x=1"], "cue": "d"},
+                 {"type": "cta", "text": "Subscribe · IA", "cue": "e"}])
+ok(len(craft.repeated_card_hits(triple)) == 2, "triple card: the gate sees 2 repeats before the fix")
+storyboard._break_repeated_cards(triple, _rep_words)
+ok(craft.repeated_card_hits(triple) == [], "triple card: no repeat left after the backstop")
+ok([b["type"] for b in triple[1:4]] == ["stat", "quote", "quote"],
+   "triple card: first stat kept, the two repeats are distinct quotes")
+
+block = _timed([{"type": "hook", "text": "Hook claim", "cue": "w0"},
+                _stat("7", "peso na GPU", "a"),
+                {"type": "compare", "title": "Peso vs tokens", "cue": "b",
+                 "left": {"title": "Peso", "items": ["7GB"]},
+                 "right": {"title": "Tokens", "items": ["1GB"]}},
+                {"type": "command", "command": "ollama stop", "cue": "c"},
+                _stat("7", "peso na GPU", "d"),
+                {"type": "compare", "title": "Peso vs tokens", "cue": "e",
+                 "left": {"title": "Peso", "items": ["7GB"]},
+                 "right": {"title": "Tokens", "items": ["1GB"]}},
+                {"type": "command", "command": "ollama stop", "cue": "f"},
+                {"type": "cta", "text": "Subscribe · IA", "cue": "g"}])
+ok(len(craft.repeated_card_hits(block)) == 3,
+   "cards 1–3 replayed as 4–6: the gate sees 3 replays before the fix")
+storyboard._break_repeated_cards(block, _rep_words)
+ok(craft.repeated_card_hits(block) == [], "cards 1–3 replay: none left after the backstop")
+ok([b["type"] for b in block[4:7]] == ["quote", "quote", "quote"],
+   "cards 4–6 become quotes of their own spoken windows")
+
+# compose() end to end: LLM draft with a double card → HTML snapshot passes.
+def dup_llm(*a, **k):
+    return json.dumps({"beats": [
+        {"type": "hook", "cue": "alpha bravo", "text": "Hook line"},
+        {"type": "stat", "cue": "charlie", "value": "8", "unit": "GB", "label": "KV"},
+        {"type": "stat", "cue": "delta", "value": "8", "unit": "GB", "label": "KV"},
+        {"type": "compare", "cue": "echo", "left": {"title": "A", "items": ["x"]},
+         "right": {"title": "B", "items": ["y"]}},
+        {"type": "cta", "cue": "golf hotel", "text": "Try it"},
+    ]})
+
+
+dup_html = _compose(dup_llm)
+ok(dup_html is not None, "compose with a double-card draft still renders")
+_dup_beats = craft.beats_from_html(dup_html)
+ok(craft.repeated_card_hits(_dup_beats) == [],
+   "compose output: repeated card broken before build_index_html")
+ok(craft.video_maker_gate(_dup_beats)["checks"]["B"] == "PASS",
+   "compose output passes Gate B incl. the repeated-card check")
+
+# Fallback composition never repeats a line back-to-back (title == line 1).
+_fb = worker._fallback_composition(
+    "KV em FP16 estoura a 8GB, não é engenharia.",
+    "KV em FP16 estoura a 8GB, não é engenharia. Isso não é engenharia. "
+    "Isso não é engenharia. Quantiza o KV.", "portrait", 1080, 1920, 20.0)
+_fb_lines = re.findall(r'class="clip seg-(?:title|line)"[^>]*>([^<]*)<', _fb)
+_fb_keys = [craft.screen_text_key({"text": x}) for x in _fb_lines]
+ok(all(not craft.screen_text_near(a, b) for a, b in zip(_fb_keys, _fb_keys[1:])),
+   "fallback composition: no neighbouring segments with the same text")
 
 print(f"\nALL {_checks} CHECKS PASSED")

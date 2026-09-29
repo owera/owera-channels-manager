@@ -19,6 +19,7 @@ Pré-pattern leftovers are parked via reject. Do not mass-retitle.
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 
@@ -680,7 +681,18 @@ LIST_REVEAL_PAD_S = 0.8  # matches storyboard.render_list win = dur - 0.8
 _BEAT_SNAP_KEYS = (
     "type", "start", "dur", "cue", "text", "sub", "object", "prop", "emoji",
     "items", "value", "unit", "label", "title", "lines", "command", "nodes",
+    # On-screen copy the repeated-card check compares (term_define / compare /
+    # command output / quote attribution). Older snapshots lack these keys —
+    # screen_text_key then sees less copy and never over-matches (fail-open).
+    "term", "definition", "left", "right", "output", "attribution",
 )
+# Repeated card (VM 2026-09-29: RR #1340/#1349/#1370/#1376 held one card
+# ~6.2s back-to-back; #1354/#1357/#1372 replayed cards 1-3 as 4-6).
+# Freezedetect misses it because the inter-beat fade blink resets the freeze.
+# Neighbouring beats FAIL on normalized on-screen text equality, or
+# near-equality (same digits + ratio >= REPEAT_NEAR_RATIO). A later
+# non-adjacent replay of a mid card FAILs on exact normalized equality.
+REPEAT_NEAR_RATIO = 0.9
 # Subscribe CTA regex lives above (never in BANNED_RE). Gate C uses it via
 # _subscribe_hits — legal only on the trailing cta/endcard series.
 _BEATS_SCRIPT_RE = re.compile(
@@ -837,6 +849,106 @@ def _visible_copy(beat: dict) -> str:
     return " ".join(parts)
 
 
+def beat_screen_text(beat: dict | None) -> str:
+    """Every piece of on-screen copy a beat renders (not the cue, not emoji)."""
+    if not isinstance(beat, dict):
+        return ""
+    parts: list[str] = []
+    for k in ("value", "unit", "text", "title", "label", "sub", "term",
+              "definition", "command", "attribution"):
+        v = beat.get(k)
+        if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            if str(v).strip():
+                parts.append(str(v))
+    for k in ("lines", "output"):
+        for x in beat.get(k) or [] if isinstance(beat.get(k), list) else []:
+            if str(x).strip():
+                parts.append(str(x))
+    for it in _list_items(beat):
+        if isinstance(it, dict):
+            if it.get("text"):
+                parts.append(str(it["text"]))
+        elif it:
+            parts.append(str(it))
+    for side in ("left", "right"):
+        col = beat.get(side)
+        if not isinstance(col, dict):
+            continue
+        if col.get("title"):
+            parts.append(str(col["title"]))
+        for x in col.get("items") or []:
+            parts.append(str(x))
+    for n in beat.get("nodes") or [] if isinstance(beat.get("nodes"), list) else []:
+        if isinstance(n, dict) and n.get("label"):
+            parts.append(str(n["label"]))
+    return " ".join(parts)
+
+
+def screen_text_key(beat: dict | None) -> str:
+    """Normalized on-screen copy: folded case/accents, punctuation dropped."""
+    return " ".join(re.findall(r"[a-z0-9]+", theme.fold(beat_screen_text(beat))))
+
+
+def screen_text_near(a: str | None, b: str | None) -> bool:
+    """Equal, or near-equal (same digits, SequenceMatcher >= REPEAT_NEAR_RATIO)."""
+    a, b = a or "", b or ""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if re.findall(r"\d+", a) != re.findall(r"\d+", b):
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= REPEAT_NEAR_RATIO
+
+
+_REPEAT_EXEMPT_REPLAY = frozenset({"hook"}) | CTA_TYPES
+
+
+def repeated_card_reason(board: list[dict], i: int,
+                         keys: list[str] | None = None) -> str | None:
+    """Why beat i repeats a card (None = it does not).
+
+    Adjacent: beat i shows the same (or near-same) on-screen text as beat i-1
+    — any type, except two trailing cta/endcard beats. Replay: a mid beat
+    (not hook/cta) shows exactly the text of an earlier non-adjacent mid beat.
+    Beats with no comparable copy (legacy scraped snapshots) never match.
+    """
+    if not (0 < i < len(board)):
+        return None
+    if keys is None:
+        keys = [screen_text_key(b) for b in board]
+    cur = keys[i]
+    if not cur:
+        return None
+    t_cur = board[i].get("type") or "?"
+    t_prev = board[i - 1].get("type") or "?"
+    shown = beat_screen_text(board[i])[:60]
+    if screen_text_near(keys[i - 1], cur) and not (
+            t_cur in CTA_TYPES and t_prev in CTA_TYPES):
+        return (f"beat[{i - 1}]→beat[{i}] ({t_prev}→{t_cur}) show the same card "
+                f"{shown!r} back-to-back")
+    if t_cur in _REPEAT_EXEMPT_REPLAY:
+        return None
+    for j in range(0, i - 1):
+        if (board[j].get("type") or "") in _REPEAT_EXEMPT_REPLAY:
+            continue
+        if keys[j] and keys[j] == cur:
+            return (f"beat[{i}] type={t_cur} replays beat[{j}] card {shown!r}")
+    return None
+
+
+def repeated_card_hits(beats) -> list[str]:
+    """All repeated-card findings on a board (see repeated_card_reason)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    keys = [screen_text_key(b) for b in board]
+    hits = []
+    for i in range(1, len(board)):
+        r = repeated_card_reason(board, i, keys)
+        if r:
+            hits.append(r)
+    return hits
+
+
 def _subscribe_hits(text: str) -> list[str]:
     return [m.group(0) for m in SUBSCRIBE_CTA_RE.finditer(text or "")]
 
@@ -936,6 +1048,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             f". Mid cards/slides must be ≤{MID_BEAT_MAX_S:.1f}s; "
             f"cta/endcard series ≤{CTA_BEAT_MAX_S:.1f}s "
             "(not a Follow-tomorrow hold)."
+        )
+    # Repeated card: an identical card split only by the fade blink reads as
+    # one ~6s frozen visual (freezedetect misses it). Gate B territory.
+    rep_hits = repeated_card_hits(board)
+    if rep_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Repeated card: FAIL — " + "; ".join(rep_hits) +
+            ". Neighbouring beats must change the on-screen text, and a mid "
+            "card must not be replayed later; a repeated spoken phrase needs "
+            "a visual change (different beat type/layout/emphasis)."
         )
 
     # --- C: kill spoken list/slide spam ------------------------------------
