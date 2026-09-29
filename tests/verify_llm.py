@@ -90,8 +90,13 @@ ok(cmd_sys == [settings.grok_bin, "-p", "system bit\n\nuser bit"],
 
 
 # Model / reasoning-effort pins (grok >= 1.0.41 `-m` / `--reasoning-effort`).
-ok(settings.grok_model == "", "default grok_model is empty (CLI default model, no -m)")
-ok(settings.grok_compose_reasoning_effort == "medium",
+# Assert the CODE default (Settings field), not the live value: claw0's .env
+# pins MANAGER_GROK_MODEL=grok-4.7 on purpose (approved by Rodrigo), so
+# settings.grok_model is not "" in production and must not fail this suite.
+from app.config import Settings as _Settings
+ok(_Settings.model_fields["grok_model"].default == "",
+   "default grok_model is empty (CLI default model, no -m); .env may pin it")
+ok(_Settings.model_fields["grok_compose_reasoning_effort"].default == "medium",
    "default compose reasoning effort is medium (2026-09-22 grok-4.7 compose timeouts)")
 cmd_pin = llm.build_cmd("u", system="s", model="grok-4.6", reasoning_effort="medium")
 ok(cmd_pin == [settings.grok_bin, "-m", "grok-4.6", "--reasoning-effort", "medium",
@@ -285,6 +290,9 @@ _captured.clear()
 _orig_model = settings.grok_model
 with tempfile.TemporaryDirectory() as td3:
     settings.storage_dir = td3
+    # Pin the code default for this leg: a .env MANAGER_GROK_MODEL pin
+    # (grok-4.7 on claw0) must not change what this unit test asserts.
+    settings.grok_model = _Settings.model_fields["grok_model"].default
     with patch.object(llm.subprocess, "run", side_effect=_run_ok):
         llm.complete("plain")
     ok(_captured["cmd"] == [settings.grok_bin, "-p", "plain"],
