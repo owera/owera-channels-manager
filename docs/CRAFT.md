@@ -378,3 +378,15 @@ titles with a real ` · Agent memory|IA|Local N` suffix:
 - Never applied when the operator provided a thumbnail (`thumb_source=provided`, #39),
   on long-form, or on other series (Shipping keeps the object-over-type card).
 - Thumbnail cards sit in 9%–72% of the height; no first-word chip, O ring hidden on the card.
+
+## RR hook pace (P1 d, council 2026-09-29)
+
+RR channel shorts (brand `rr`) only:
+
+- **Compose:** the first cut lands by 2.5 s (`storyboard._pull_first_cut`). Frame0 keeps the whole claim and ends at the cut.
+  - A long window becomes a new quote card of the words spoken there.
+  - A short window lets the first card lead the VO; capped cards push the next card earlier.
+  - It is all-or-nothing: if the endcard would overflow, the board is left as it was.
+- **Gate B (`[B] RR hook pace`):** the claim (hook text) must be ≤8 words and fully spoken by 3.0 s (TTS word timings), with the first cut by 2.5 s.
+- **Marker:** new RR renders store `creation_config.hook_pace = {"version": "rr_v1", "claim_words", "claim_spoken_end"}`. Boards without the marker are never checked, so approved inventory is not rejected at publish.
+- Compose cannot shorten the claim: the title and script are upstream. An over-long RR head fails Gate B.

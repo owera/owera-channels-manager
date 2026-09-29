@@ -1565,6 +1565,61 @@ def _split_long_mids(beats, words=None) -> None:
         i += 1 + k
 
 
+def _pull_first_cut(beats, duration: float, words=None, cut_by: float | None = None) -> None:
+    """RR hook pace (P1 d): the first cut lands by craft.HOOK_FIRST_CUT_BY_S.
+
+    Frame0 keeps the whole claim (#45) and ends at the cut. The window
+    [cut, old first card) becomes a NEW quote card of the words spoken there
+    when it is long enough and not a repeat (never a hook-claim echo);
+    otherwise the first card starts early (visual leads the VO). A card that
+    then exceeds its cap keeps the cap and pushes the next card earlier
+    (split, never stretch). All-or-nothing: if the endcard would overflow or
+    the board becomes invalid, the board is restored and Gate B reports it.
+    """
+    from app.services import craft
+    cut = craft.HOOK_FIRST_CUT_BY_S if cut_by is None else float(cut_by)
+    if len(beats) < 3 or (beats[0].get("type") or "") != "hook":
+        return
+    first = float(beats[1].get("start") or 0.0)
+    if first <= cut + 1e-9:
+        return
+    snap = copy.deepcopy(beats)
+    beats[0]["dur"] = round(max(_MIN_DUR, cut - _GAP), 3)
+    if first - cut >= _MID_MIN + _GAP - 1e-9 and words:
+        text = _window_text(words, cut, first)
+        nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
+              "_cut": True, "start": round(cut, 3), "dur": round(first - _GAP - cut, 3)}
+        key = craft.screen_text_key(nb)
+        hook_toks = set(craft.screen_text_key(beats[0]).split())
+        taken = {craft.screen_text_key(b) for b in beats[1:]}
+        taken.discard("")
+        if (key and key not in taken and set(key.split()) - hook_toks
+                and not craft.screen_text_near(key, craft.screen_text_key(beats[1]))):
+            beats.insert(1, nb)
+    beats[1]["start"] = round(cut, 3)
+    i = 1
+    while True:
+        cur = beats[i]
+        last = i == len(beats) - 1
+        cur_start = float(cur["start"])
+        if last:
+            end = float(snap[-1].get("start") or 0.0) + float(snap[-1].get("dur") or 0.0)
+        else:
+            end = float(beats[i + 1].get("start") or 0.0) - _GAP
+        cap = _ENDCARD_MAX if (cur.get("type") or "") == "cta" else _MID_MAX
+        if end - cur_start <= cap + 1e-9:
+            cur["dur"] = round(end - cur_start, 3)
+            break
+        if last:
+            beats[:] = snap
+            return
+        cur["dur"] = round(cap, 3)
+        beats[i + 1]["start"] = round(cur_start + cap + _GAP, 3)
+        i += 1
+    if not validate_storyboard(beats, duration):
+        beats[:] = snap
+
+
 def _cap_endcard(beats, duration: float, words=None) -> None:
     """Craft gate: last cta/endcard ≤ 4.0s, after the claim, not on frame0.
 
@@ -1760,5 +1815,8 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None
     _break_repeated_cards(beats, words)
+    from app.services import craft as _craft
+    if (content_format or "short") != "long" and (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS:
+        _pull_first_cut(beats, duration, words)
     return build_index_html(beats, th, resolution, width, height, duration,
                             content_format=content_format)

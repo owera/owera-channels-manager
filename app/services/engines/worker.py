@@ -377,14 +377,16 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         _mux(silent, narration, bgm, float(params.get("bgm_volume") or 0.2), job_dir / "final.mp4")
 
         # Record the creative choices (the "treatment" signal) for later analytics joins.
-        cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback)
+        cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,
+                              words=words, brand=brand)
         cc["script_source"] = "provided" if provided else "generated"
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
 
 
-def _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback) -> dict:
+def _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,
+                     *, words=None, brand=None) -> dict:
     """Snapshot the creative choices this video was made with — the 'treatment' signal the
     growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
     raises (a bad snapshot must not fail a render)."""
@@ -394,8 +396,12 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         beat_types = re.findall(r'class="beat ([a-z_]+)"', html)
         fmt = params.get("content_format") or "short"
         beats = craft.beats_from_html(html)
+        # RR hook pace marker (P1 d): only new RR renders are checked for
+        # claim ≤8 words / spoken by 3.0s / first cut by 2.5s.
+        pace = (craft.hook_pace_marker(beats, words, brand or params.get("brand"), fmt)
+                if not used_fallback else None)
         gate = craft.video_maker_gate(beats, content_format=fmt,
-                                      used_fallback=used_fallback)
+                                      used_fallback=used_fallback, hook_pace=pace)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -408,6 +414,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             "craft_gate": gate,
             # Aligner caps cards INCLUDING the fade (craft Gate B strict timing).
             "beat_timing": craft.BEAT_TIMING_INCL_FADE,
+            **({"hook_pace": pace} if pace else {}),
             "bgm": (bgm.name if bgm else None),
             "bgm_volume": float(params.get("bgm_volume") or 0.2),
             "script_words": len(script.split()),
