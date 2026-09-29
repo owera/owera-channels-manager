@@ -258,7 +258,8 @@ ok(already.endswith("Subscribe — next Local drop."),
    "already-shaped last sentence is canonicalized, not doubled")
 ok(already.count("Subscribe —") == 1, "VO is pinned once")
 
-ok(craft.ENDCARD_MAX_S == 4.0, "endcard duration ceiling is 4.0s")
+ok(craft.ENDCARD_MAX_S == 3.78 and craft.ENDCARD_CARD_MAX_S == 3.9,
+   "endcard ≤3.9s incl. fade → hold ceiling 3.78s (VM 2026-09-29; was 4.0s hold)")
 for bad in ("Follow tomorrow", "amanhã", "waitlist", "owera.com",
             "Owera Cloud", "part 2 coming", "SMY", "💸", "neon"):
     ok(craft.endcard_scan_banned(bad), f"endcard bans {bad!r}")
@@ -508,7 +509,7 @@ ok("Subscribe · Copilot Credits" in cta_html,
    "endcard chip paints Subscribe · {series}")
 m = re.search(r'class="beat cta"[^>]*data-duration="([0-9.]+)"', html)
 ok(m and float(m.group(1)) <= craft.ENDCARD_MAX_S + 1e-6,
-   "compose endcard hold is ≤4.0s")
+   "compose endcard hold is ≤3.78s (3.9s incl. fade)")
 ok('data-object="RAG"' in hook_html and 'data-kind="object"' in hook_html,
    "frame0 object is the spoken noun (RAG), not a generic RECEIPT/emoji")
 ok('class="hobj"' in hook_html and 'class="htext"' in hook_html,
@@ -660,16 +661,59 @@ ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
    "B FAIL: mid command held 5.80s (over the 3.0s HARD cap)")
 ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
 
-# B — aligner-capped mid at 3.0 + fade must PASS (fade is not hold).
+# B — aligner-capped mid: hold 2.88 + 0.12 fade = 3.0s card must PASS.
+# (VM 2026-09-29: the 3.0s limit INCLUDES the fade; a 3.0s hold is a 3.12s
+# card and now FAILs — see below.)
 b_cap = _pass_beats()
-b_cap[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
-b_cap[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
-b_cap[3] = {"type": "cta", "start": 7.2, "dur": 3.0, "text": "Go", "cue": "go"}
+b_cap[1] = {"type": "code", "start": 2.0, "dur": 2.88, "lines": ["x"], "cue": "code"}
+b_cap[2] = {"type": "stat", "start": 5.0, "dur": 2.0, "value": "1", "cue": "one"}
+b_cap[3] = {"type": "cta", "start": 7.12, "dur": 3.0, "text": "Go", "cue": "go"}
 gcap = craft.video_maker_gate(b_cap)
 ok(gcap["checks"]["B"] == "PASS",
-   "B PASS: code dur=3.0 with next.start 3.12 later (0.12s fade is not hold)")
+   "B PASS: code hold 2.88 + 0.12 fade = 3.0s card (at the cap)")
 ok(gcap["result"] == "PASS",
-   "board sitting on the 3.0s mid cap + 3.0s cta is a full PASS")
+   "board sitting on the 3.0s-incl-fade mid cap + 3.0s cta is a full PASS")
+b_old3 = _pass_beats()
+b_old3[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
+b_old3[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
+b_old3[3] = {"type": "cta", "start": 7.2, "dur": 3.0, "text": "Go", "cue": "go"}
+g_old3 = craft.video_maker_gate(b_old3)
+ok(g_old3["checks"]["B"] == "FAIL" and "beat[1]" in g_old3["reasons"][0]
+   and "3.12s incl. fade" in g_old3["reasons"][0],
+   "B FAIL: the old 3.0s hold is a 3.12s card incl. fade (VM measured 3.05–3.20s)")
+b_end = _pass_beats()
+b_end[3] = {"type": "cta", "start": 7.0, "dur": 4.0, "text": "Go", "cue": "go"}
+g_end = craft.video_maker_gate(b_end)
+ok(g_end["checks"]["B"] == "FAIL" and "cta" in g_end["reasons"][0]
+   and "limit 3.9s" in g_end["reasons"][0],
+   "B FAIL: 4.0s endcard hold = 4.12s card > 3.9s incl. fade (RR 4.05–4.08s)")
+b_end[3]["dur"] = 3.78
+ok(craft.video_maker_gate(b_end)["checks"]["B"] == "PASS",
+   "B PASS: endcard hold 3.78 + 0.12 fade = 3.9s")
+# Stored inventory: boards without the beat_timing marker were rendered under
+# the old 3.0/4.0 HOLD caps (CoS: WARN, not FAIL) → the review/publish gate
+# re-checks them with the legacy caps; new renders carry the marker → strict.
+_legacy_board = _pass_beats()
+_legacy_board[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
+_legacy_board[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
+_legacy_board[3] = {"type": "cta", "start": 7.24, "dur": 4.0, "text": "Go", "cue": "go"}
+ok(craft.video_maker_gate_reason({"beats": _legacy_board}, "short") is None,
+   "legacy stored board (3.0 hold / 4.0 endcard, no marker) is not auto-failed by timing")
+_strict_cc = {"beats": _legacy_board, "beat_timing": craft.BEAT_TIMING_INCL_FADE}
+_sr = craft.video_maker_gate_reason(_strict_cc, "short")
+ok(_sr is not None and "incl. fade" in _sr,
+   "new render (beat_timing marker) with a 3.0s hold FAILs the incl.-fade timing")
+_legacy_long = [dict(b) for b in _legacy_board]
+_legacy_long[1]["dur"] = 5.8
+ok(craft.video_maker_gate_reason({"beats": _legacy_long}, "short") is not None,
+   "legacy boards still FAIL the old HARD caps (5.8s mid)")
+_legacy_rep = [dict(b) for b in _legacy_board]
+_legacy_rep[2] = {"type": "code", "start": 5.12, "dur": 2.0, "lines": ["x"], "cue": "code2"}
+_lr = craft.video_maker_gate_reason({"beats": _legacy_rep}, "short")
+ok(_lr is not None and "Repeated card" in _lr,
+   "legacy boards still FAIL the repeated-card check (CoS strict, #40)")
+ok(craft.video_maker_gate(_legacy_board)["checks"]["B"] == "FAIL",
+   "render-time gate (worker, no legacy flag) is strict")
 
 # Legacy 7.5s quote shape must now FAIL Gate B (new queue HARD).
 b_old = _pass_beats()
@@ -697,14 +741,14 @@ b_cta[-1] = {"type": "cta", "start": 7.0, "dur": 5.5, "text": "Go", "cue": "go"}
 # last beat span falls back to dur
 gbc = craft.video_maker_gate(b_cta)
 ok(gbc["checks"]["B"] == "FAIL" and "cta" in gbc["reasons"][0],
-   "B FAIL: cta held 5.50s (limit 4.0s)")
-ok("4.0" in gbc["reasons"][0] and "Follow" in gbc["reasons"][0],
-   "B fail reason cites the 4.0s endcard cap (not Follow-tomorrow)")
+   "B FAIL: cta held 5.50s (limit 3.9s incl. fade)")
+ok("3.9" in gbc["reasons"][0] and "Follow" in gbc["reasons"][0],
+   "B fail reason cites the 3.9s-incl-fade endcard cap (not Follow-tomorrow)")
 
 b_cta_ok = _pass_beats()
-b_cta_ok[-1] = {"type": "cta", "start": 7.0, "dur": 4.0, "text": "Go", "cue": "go"}
+b_cta_ok[-1] = {"type": "cta", "start": 7.0, "dur": 3.78, "text": "Go", "cue": "go"}
 ok(craft.video_maker_gate(b_cta_ok)["checks"]["B"] == "PASS",
-   "B PASS: cta exactly 4.0s is allowed")
+   "B PASS: cta hold exactly 3.78s (3.9s incl. fade) is allowed")
 
 # C — ≥2 statements
 c_stmt = [
@@ -885,7 +929,7 @@ def _rb(beats):
     for b in beats:
         b = dict(b)
         b["start"] = round(t, 3)
-        b["dur"] = 4.0 if b["type"] == "cta" else 3.0
+        b["dur"] = craft.CTA_BEAT_MAX_S if b["type"] == "cta" else craft.MID_BEAT_MAX_S
         t += b["dur"] + craft.BEAT_GAP_S
         out.append(b)
     return out

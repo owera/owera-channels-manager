@@ -35,13 +35,17 @@ _GAP = 0.12
 _MIN_DUR = 0.5
 _TAIL_MIN = 2.0  # floor for each of the last two beats (payoff + CTA) — see align_storyboard
 _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_storyboard
-_MID_MAX = 3.0   # mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S (Gate B HARD)
+# Mid-body visual-hold cap — MUST equal craft.MID_BEAT_MAX_S (Gate B HARD).
+# VM 2026-09-29: a mid card is ≤3.0s INCLUDING its fade, so hold = 3.0 − _GAP.
+_MID_MAX = 2.88
 # Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
 # claim. Surplus stays on the payoff / earlier mids — never back on frame0
 # and never a long neon Follow card. Mid-body still dumps into the CTA first
 # (so a penultimate 8s+ list can shrink); _cap_endcard then slides the chip
 # to the last 4s and re-caps the penultimate at _MID_MAX.
-_ENDCARD_MAX = 4.0
+# VM 2026-09-29: endcard ≤3.9s INCLUDING its fade → hold 3.9 − _GAP = 3.78
+# (was 4.0 → measured 4.05–4.08s on every RR endcard). = craft.ENDCARD_MAX_S.
+_ENDCARD_MAX = 3.78
 # Frame0 visual-hold target. Gate B exempts hook, so _MID_MAX recap walks
 # leftover onto beat 0 (a 40s short with 3s mids + 4s CTA freezes frame0
 # for 12–17s — v1265/v1267, golden ch2-code). Surplus is later speech,
@@ -630,6 +634,16 @@ def render_hook(b, ctx):
     obj = '<div class="hobj">' + craft.object_markup(spec) + "</div>"
     # Hook emoji is a hard-FAIL as the object — never render 💸/🔥 as a punch.
     inner = obj + '<div class="htext">' + _words_html(b["text"]) + "</div>"
+    if s <= 1e-9:
+        # Frame0 (VM 2026-09-29, P0 a): the t=0 frame showed only the gradient
+        # on 17/17 masters because the hook faded in. The first card is at
+        # FULL opacity at t=0 (inline style, not a zero-time tl.set) and the
+        # whole claim is readable; motion is a small scale settle only.
+        track = 'data-track-index="' + str(i) + '"'
+        html = _shell(i, b, "hook", inner).replace(track, track + ' style="opacity:1"', 1)
+        tw = [_from(bid + " .hobj", s, "scale:0.94", "scale:1", dur=0.35),
+              _from(bid + " .htext", s, "scale:0.97", "scale:1", dur=0.35)]
+        return html, _wrap(i, ctx, tw)
     tw = [_from(bid + " .hobj", s, "opacity:0,y:16", "opacity:1,y:0", dur=0.22)]
     tw.append(_from(bid + " .word", s + 0.05, "opacity:0,y:30", "opacity:1,y:0", dur=0.3, stagger=0.045))
     return _shell(i, b, "hook", inner), _wrap(i, ctx, tw)
@@ -1229,6 +1243,44 @@ def _lock_opening_hook(beats, script, subject) -> None:
             b1["w"] = 1
 
 
+_SERIES_SUFFIX_RE = re.compile(r"\s+·\s+.*$")
+_HOOK_CLAIM_MAX_WORDS = 12
+
+
+def _title_head(subject) -> str:
+    """Title text before the ' · Series N' suffix."""
+    return _SERIES_SUFFIX_RE.sub("", str(subject or "").strip()).strip()
+
+
+def _show_whole_claim(beats, script, subject) -> None:
+    """Frame0 shows the WHOLE claim — both halves of a two-part title.
+
+    VM 2026-09-29: 9/17 hooks printed only sentence 1 ('Chat routed to Maya.')
+    and the payoff ('Prod paged Lee.') only reached the thumb. When the
+    narration opens on the full title head (≤12 words) and the current hook
+    is a prefix of it, the hook card shows the head verbatim (punctuation and
+    digits kept). Separate from _lock_opening_hook on purpose: once
+    #38's overlay claim lands, the hook already equals the head → no-op.
+    """
+    from app.services import craft
+    if not beats or (beats[0].get("type") or "") != "hook":
+        return
+    head = _title_head(subject)
+    if not head or len(head.split()) > _HOOK_CLAIM_MAX_WORDS:
+        return
+    ht = _tok(head)
+    hk = _tok(beats[0].get("text") or "")
+    if not ht or ht == hk:
+        return
+    if hk and ht[:len(hk)] != hk:
+        return  # a different claim — never swap frame0 for another sentence
+    if _tok(script)[:len(ht)] != ht:
+        return  # shown must be spoken: the narration opens on the whole head
+    if craft.contains_subscribe_cta(head) or craft.is_endcard_vo(head):
+        return
+    beats[0]["text"] = head
+
+
 def _last_sentence(script: str) -> str:
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if p.strip()]
     return parts[-1] if parts else (script or "").strip()
@@ -1315,7 +1367,12 @@ def _window_text(words, t0: float, t1: float, max_words: int = 8) -> str:
             t = str(w.get("text") or "").strip()
             if t:
                 toks.append(t)
-    return _words_clip(" ".join(toks), max_words)
+    text = " ".join(toks)
+    from app.services import craft
+    if craft.contains_subscribe_cta(text):
+        # Endcard VO words never land on a mid quote card (Subscribe = endcard only).
+        text = craft.strip_subscribe_cta(text)
+    return _words_clip(text, max_words)
 
 
 def _fill_hook_surplus(beats, duration: float, words=None) -> None:
@@ -1415,6 +1472,56 @@ def _break_repeated_cards(beats, words=None) -> None:
             b.update(old)
 
 
+def _split_long_mids(beats, words=None) -> None:
+    """Split, don't stretch (VM 2026-09-29, P0 b): a mid whose hold exceeds
+    _MID_MAX keeps its first _MID_MAX and the rest of its window becomes NEW
+    quote card(s) of the words spoken there, each ≤ _MID_MAX. Never a copy
+    (repeated-card gate). All-or-nothing per beat: if a piece has no words or
+    would repeat a card, the beat is left to the backward walk in _cap_endcard.
+    """
+    if not words or len(beats) < 3:
+        return
+    from app.services import craft
+    slot = _MID_MAX + _GAP
+    i = 1
+    while i < len(beats) - 1:
+        b = beats[i]
+        if (b.get("type") or "") in ("hook", "cta"):
+            i += 1
+            continue
+        s0 = float(b.get("start") or 0.0)
+        rem = float(b.get("dur") or 0.0) - _MID_MAX - _GAP
+        if rem < _MID_MIN - 1e-9:
+            i += 1
+            continue
+        k = int(-(-(rem + _GAP) // slot))  # ceil
+        piece = (rem + _GAP) / k - _GAP
+        taken = {craft.screen_text_key(x) for x in beats}
+        taken.discard("")
+        prev_key = craft.screen_text_key(b)
+        next_key = craft.screen_text_key(beats[i + 1])
+        inserts = []
+        t = s0 + _MID_MAX + _GAP
+        for j in range(k):
+            text = _window_text(words, t, t + piece + _GAP)
+            nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
+                  "_split": True, "start": round(t, 3), "dur": round(piece, 3)}
+            key = craft.screen_text_key(nb)
+            if (not key or key in taken or craft.screen_text_near(key, prev_key)
+                    or (j == k - 1 and craft.screen_text_near(key, next_key))):
+                break
+            inserts.append(nb)
+            taken.add(key)
+            prev_key = key
+            t += piece + _GAP
+        if len(inserts) != k:
+            i += 1
+            continue
+        b["dur"] = round(_MID_MAX, 3)
+        beats[i + 1:i + 1] = inserts
+        i += 1 + k
+
+
 def _cap_endcard(beats, duration: float, words=None) -> None:
     """Craft gate: last cta/endcard ≤ 4.0s, after the claim, not on frame0.
 
@@ -1441,6 +1548,10 @@ def _cap_endcard(beats, duration: float, words=None) -> None:
             prev["dur"] = round(max(_MIN_DUR, last["start"] - _GAP - prev_start), 3)
     elif dur >= _MIN_DUR:
         last["dur"] = round(dur, 3)
+
+    # Split, don't stretch: long mids (incl. the penultimate that just absorbed
+    # the endcard slide) become card + new quote cards before the walk below.
+    _split_long_mids(beats, words)
 
     # Walk surplus backward so a 4s chip does not revive R4 DRAG on mids.
     for i in range(len(beats) - 2, 0, -1):
@@ -1586,6 +1697,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             beats = rb
 
     _lock_opening_hook(beats, script, subject)
+    _show_whole_claim(beats, script, subject)
     _demote_nonsense_diagrams(beats, content_format)
     _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
     _strip_mid_subscribe_beats(beats)
@@ -1595,7 +1707,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _cap_list_holds(beats)
     _cap_endcard(beats, duration, words)
     if not validate_storyboard(beats, duration):
-        beats[:] = [b for b in beats if not b.get("_fill")]
+        beats[:] = [b for b in beats if not (b.get("_fill") or b.get("_split"))]
         _even_space(beats, duration)
         _cap_list_holds(beats)
         _cap_endcard(beats, duration, words)
