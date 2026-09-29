@@ -1,11 +1,10 @@
 #!/bin/sh
 # Autonomous code-agent runner — invoked by launchd (com.owera.code-agent.plist).
 #
-# Runs headless Grok against this repo with run/code-agent-playbook.md. Fully
-# autonomous but bounded by the guardrails in the playbook: gated, reversible commits
-# straight to main (growth-agent trust model), one change per cycle, deployed and
-# observed live, self-reverted on post-deploy failure. Draft PR only as the fallback
-# for changes the gate can't fully verify.
+# Runs headless Grok against this repo with run/code-agent-playbook.md. Autonomous
+# but bounded by the guardrails in the playbook. FREEZE (GO 2026-09-29): PR only —
+# gated branch + `gh pr create`, never a commit/push on main, never a merge, never a
+# restart of the manager; nothing at all between 18:00 and 02:00 BRT.
 #
 # Kill switches (either stops the next run, no unload needed):
 #   touch run/code-agent.disabled      # hard off
@@ -34,6 +33,21 @@ if [ -f "$REPO/run/code-agent.disabled" ]; then
   log "disabled (run/code-agent.disabled present) — skipping"
   exit 0
 fi
+
+# --- FREEZE guard (GO Chief of Staff 2026-09-29) — HARD lock ------------------
+# No run inside the 18:00-02:00 BRT night freeze, no start at/after 16:00, watchdog
+# stops the agent at 17:55, and OWERA_AGENT is exported so the local git hooks refuse
+# agent commits on main / in the window and any push to main. Fail closed.
+if [ ! -r "$REPO/run/agent-freeze.sh" ]; then
+  log "FREEZE: run/agent-freeze.sh missing — refusing to run (fail closed)"
+  exit 1
+fi
+. "$REPO/run/agent-freeze.sh"
+if ! freeze_start_guard code-agent; then
+  exit 0
+fi
+OWERA_AGENT=code-agent
+export OWERA_AGENT
 
 # --- Single-run lock (mkdir is atomic) ------------------------------------
 if ! mkdir "$LOCK" 2>/dev/null; then
@@ -74,7 +88,7 @@ log "starting code-agent sprint"
 # { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) code-agent run ================"
-  grok --prompt-file "$REPO/run/code-agent-playbook.md" \
+  freeze_run_with_watchdog grok --prompt-file "$REPO/run/code-agent-playbook.md" \
     --permission-mode bypassPermissions \
     --cwd "$REPO"
   STATUS=$?
