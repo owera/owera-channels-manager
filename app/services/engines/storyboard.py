@@ -1186,7 +1186,11 @@ _GENERIC_NODE = re.compile(
 
 
 def _lock_opening_hook(beats, script, subject) -> None:
-    """Decolar: frame0 text = first spoken sentence (safety-clip 12w), no second hook.
+    """Decolar: frame0 text = the spoken title claim (safety-clip 12w), no second hook.
+
+    The claim is the title head when the narration opens on it (a two-sentence
+    head stays two sentences), else the first spoken sentence. Punctuation and
+    digits are kept verbatim (``craft.overlay_claim``).
 
     The title lock already pins YouTube title to that sentence. An 8-word first-N
     clip dropped PT objects (e.g. 'Sua RAG busca lixo e você culpa o' without
@@ -1197,16 +1201,20 @@ def _lock_opening_hook(beats, script, subject) -> None:
     share the same widget (bill / receipt / GPU meter / app / terminal).
     """
     from app.services import craft
-    claim = craft.spoken_hook_source(None, script, subject)
-    hook = craft.compress_claim(claim, 12) or craft.compress_claim(subject, 12)
+    # Overlay copy keeps the claim as written: every sentence of the title head
+    # the narration opens on (not just sentence 1), . , ? ! and every digit.
+    # compress_claim (rstrip punctuation) dropped "Prod paged Lee." / "Sem, 11."
+    # and the final period on #1363 / #1354.
+    claim = craft.overlay_hook_source(None, script, subject)
+    hook = craft.overlay_claim(claim) or craft.overlay_claim(craft.title_head(subject))
     # Frame0 is the claim — never the endcard Subscribe VO or a mid-body ask.
     if hook and (craft.contains_subscribe_cta(hook) or craft.is_endcard_vo(hook)):
-        hook = craft.compress_claim(craft.spoken_hook_source(subject, None, subject), 12)
+        hook = craft.overlay_claim(craft.title_head(subject))
     if not beats or not hook:
         return
     if claim and hook and not craft.preserves_dollar_numerals(claim, hook):
         # Frame0 must keep $79 as $79 — never "seventy-nine dollars".
-        hook = craft.compress_claim(claim, 12) or hook
+        hook = craft.overlay_claim(claim) or hook
     derived = craft.opening_object(claim or hook)
     b0 = beats[0]
     b0["type"] = "hook"

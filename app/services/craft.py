@@ -310,6 +310,108 @@ def compress_claim(text: str | None, max_words: int = 8) -> str:
     return " ".join(words[:max_words]).strip().rstrip(".!?…,;:").strip()
 
 
+# ---------------------------------------------------------------------------
+# On-screen overlay copy (frame0 hook + thumbnail). Unlike ``compress_claim``
+# (endcard chip: clip + rstrip punctuation), the overlay keeps the claim as
+# written: sentence punctuation . , ? ! and EVERY digit, including a leading
+# one ("16GB rodou…", "48 tok/s. Sem, 11."). 2026-09-28 (#1354 / #1363):
+# frame0 showed only sentence 1 with its period stripped, and the thumb LLM
+# flattened "Chat routed to Maya. Prod paged Lee." into one run-on line.
+# ---------------------------------------------------------------------------
+
+OVERLAY_MAX_WORDS = 12          # wrap-safe ceiling (same as the frame0 clip)
+_OVERLAY_SENT_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+_OVERLAY_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+_OVERLAY_MARKS = ".,?!"
+_OVERLAY_TAIL = ",;:—–- "
+
+
+def title_head(text: str | None) -> str:
+    """Spoken claim of a title/subject: the text before `` · <series> <nn>``."""
+    return ((text or "").split("·", 1)[0] or "").strip()
+
+
+def _overlay_norm(text: str | None) -> str:
+    return " ".join(theme.fold(text or "").split())
+
+
+def script_opens_with(script: str | None, head: str | None) -> bool:
+    """True when the narration starts with ``head`` (case/diacritic-folded,
+    whitespace-collapsed; the head's terminal punctuation is optional)."""
+    h = _overlay_norm(head).rstrip(".!?… ")
+    return bool(h) and _overlay_norm(script).startswith(h)
+
+
+def overlay_hook_source(title: str | None = None, script: str | None = None,
+                        subject: str | None = None) -> str:
+    """The claim frame0 / thumb show — the whole title head, not just sentence 1.
+
+    Head = title (else subject) before `` · Series N`` (the series episode
+    number is intentionally not overlay copy). With a script: use the head
+    when the narration opens on it (two-sentence heads like "Chat routed to
+    Maya. Prod paged Lee." stay two sentences), else the first spoken sentence
+    (unchanged Decolar rule for unpatterned subjects).
+    """
+    head = title_head(title) or title_head(subject)
+    if script is None:
+        return head
+    if head and script_opens_with(script, head):
+        return head
+    return first_spoken_sentence(script) or head
+
+
+def overlay_claim(text: str | None, max_words: int = OVERLAY_MAX_WORDS) -> str:
+    """Overlay copy: the claim verbatim (punctuation + digits kept) up to
+    ``max_words``. Longer text keeps whole sentences that fit; a single
+    over-long sentence is word-clipped and only a dangling ``, ; : —`` is
+    trimmed. Never strips . ? ! or digits."""
+    s = " ".join((text or "").split())
+    if not s:
+        return ""
+    words = s.split(" ")
+    if len(words) <= max_words:
+        return s.rstrip(_OVERLAY_TAIL) or s
+    kept: list[str] = []
+    n = 0
+    for sent in _OVERLAY_SENT_SPLIT_RE.split(s):
+        w = len(sent.split())
+        if n + w > max_words:
+            break
+        kept.append(sent)
+        n += w
+    if kept:
+        return " ".join(kept).rstrip(_OVERLAY_TAIL)
+    return " ".join(words[:max_words]).rstrip(_OVERLAY_TAIL)
+
+
+def overlay_numbers(text: str | None) -> list[str]:
+    """Every number in the text (``32B`` → 32, ``tok/s. Sem, 11`` → 11, ``1.5x`` → 1.5)."""
+    return _OVERLAY_NUMBER_RE.findall(text or "")
+
+
+def _overlay_marks(text: str | None) -> dict[str, int]:
+    # Decimal/thousand separators inside numbers are digits, not punctuation.
+    bare = _OVERLAY_NUMBER_RE.sub("0", text or "")
+    return {m: bare.count(m) for m in _OVERLAY_MARKS}
+
+
+def overlay_preserves_claim(claim: str | None, shown: str | None) -> bool:
+    """True when overlay copy keeps every number and every . , ? ! of the claim.
+
+    Used to reject an LLM thumb compression that flattens sentences into a
+    run-on or drops a digit (including a leading one). Case is free.
+    """
+    shown_nums = overlay_numbers(shown)
+    pool = list(shown_nums)
+    for num in overlay_numbers(claim):
+        if num in pool:
+            pool.remove(num)
+        else:
+            return False
+    want, got = _overlay_marks(claim), _overlay_marks(shown)
+    return all(got[m] >= want[m] for m in _OVERLAY_MARKS)
+
+
 def claim_aligned(hook: str | None, spoken: str | None) -> bool:
     """True when hook is the same claim (echo/compression), not a second slogan."""
     h = theme.fold(hook or "")

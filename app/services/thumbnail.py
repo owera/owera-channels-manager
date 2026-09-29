@@ -48,8 +48,11 @@ def _hook_text(subject: str, title: str | None,
     Typography of the hook STAYS (P1) — the object widget proves the angle.
     """
     from app.services import craft
-    spoken = craft.spoken_hook_source(title, None, subject)
-    fallback = craft.compress_claim(spoken, 8) or "Watch This"
+    # Title head (else subject head) before " · Series N" — every sentence and
+    # digit of the claim. The fallback keeps it verbatim (≤12 words, . , ? !
+    # and digits intact); compress_claim's rstrip dropped the final period.
+    spoken = craft.overlay_hook_source(title, None, subject)
+    fallback = craft.overlay_claim(spoken) or "Watch This"
     try:
         fmt_hint = ("long-form YouTube video" if content_format == "long"
                     else "short-form vertical video")
@@ -60,7 +63,11 @@ def _hook_text(subject: str, title: str | None,
             "Repeating the title is REQUIRED — do not invent a curiosity gap, "
             "a second slogan, or a different angle. Do NOT withhold the claim. "
             "Do NOT tell the viewer something the title does not already say. "
-            "No emojis, no hashtags, no quotes, no trailing punctuation. "
+            "No emojis, no hashtags, no quotes. "
+            "Keep the title's punctuation exactly: every period, comma, question mark "
+            "and exclamation mark stays — two sentences stay two sentences, never a "
+            "run-on. Keep EVERY number exactly as written, including a leading one "
+            "(32B, 16GB, 48 tok/s, 11). "
             "Keep the title's language and distinctive words (the tool, the number, "
             "the object of the claim: receipt, terminal, bill). "
             "Prefer naming the object of the angle (receipt, terminal, invoice) "
@@ -80,7 +87,8 @@ def _hook_text(subject: str, title: str | None,
         words = out.split()
         if (2 <= len(words) <= 8 and len(out) <= 60 and craft.claim_aligned(out, spoken)
                 and not craft.emoji_first(out) and not craft.emoji_soup(out)
-                and craft.preserves_dollar_numerals(spoken, out)):
+                and craft.preserves_dollar_numerals(spoken, out)
+                and craft.overlay_preserves_claim(spoken, out)):
             return out
     except Exception as e:
         logger.info("thumbnail hook LLM failed, using spoken claim: %s", e)
@@ -233,7 +241,7 @@ def make_thumbnail_png(subject: str, title: str | None, out_png: Path,
         theme_mod.stage_brand_assets(work, brand)
         from app.services import craft
         hook = _hook_text(subject, title, content_format=content_format)
-        spoken = craft.spoken_hook_source(title, None, subject)
+        spoken = craft.overlay_hook_source(title, None, subject)
         obj = craft.opening_object(spoken or hook)
         (work / "index.html").write_text(
             _thumbnail_html(hook, accent=accent, bg_deep=bg_deep, brand=brand,

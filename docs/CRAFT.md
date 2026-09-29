@@ -60,6 +60,27 @@ pré-pattern leftovers via reject.
 thumbnail to echo the spoken claim. Repeating the title is required.
 Curiosity-gap / “don’t reuse the title’s words” is inverted.
 
+Overlay copy keeps the claim **as written** (`craft.overlay_hook_source` +
+`craft.overlay_claim`, since 2026-09-29):
+
+- Frame 0 shows the title head (the text before ` · Series N`) when the
+  narration opens on it, so a two-sentence head like `Chat routed to Maya. Prod
+  paged Lee.` stays two sentences. Otherwise it shows the first spoken
+  sentence. The thumb uses the title head, or the subject head when there's
+  no title.
+- `. , ? !` and **every digit** are kept, including a leading one (`16GB …`,
+  `48 tok/s. Sem, 11.`). Up to 12 words are shown verbatim. Longer copy keeps
+  the whole sentences that fit; a single over-long sentence is clipped at 12
+  words, and only a dangling `, ; :` is trimmed.
+- An LLM thumb compression is accepted only if
+  `craft.overlay_preserves_claim` holds: every number and every `. , ? !` of
+  the claim is still there. A run-on or a dropped digit falls back to the
+  verbatim claim.
+- The series episode number (` · Local 57`) is not overlay copy. The endcard
+  chip still uses `compress_claim`.
+
+Regression: `tests/verify_overlay_text.py`.
+
 The opening visual is **1 concrete object** on frame0 AND the thumb
 (`craft.opening_object` + `object_markup`). The object **is the noun of the
 spoken first phrase**; hook typography stays (P1). Object sits **above**

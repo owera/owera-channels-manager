@@ -1130,8 +1130,9 @@ ok(all(f'<span class="word">{w}</span>' in hook_html
 pt_opener = [{"type": "hook", "text": "old slogan", "cue": "x", "emoji": "x"}]
 storyboard._lock_opening_hook(
     pt_opener, "Sua RAG busca lixo e você culpa o modelo. O modelo não errou.", "subject")
-ok(pt_opener[0]["text"] == "Sua RAG busca lixo e você culpa o modelo",
-   "Decolar: 9-word PT opener keeps the object (8w clip used to drop 'modelo')")
+ok(pt_opener[0]["text"] == "Sua RAG busca lixo e você culpa o modelo.",
+   "Decolar: 9-word PT opener keeps the object (8w clip used to drop 'modelo') "
+   "and its period (overlay keeps punctuation)")
 ok(pt_opener[0]["emoji"] == "" and pt_opener[0]["type"] == "hook",
    "lock forces hook type and strips emoji")
 keep_obj = [{"type": "hook", "text": "old", "object": "receipt", "emoji": "x"}]
