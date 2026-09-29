@@ -283,7 +283,29 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
                           video: Video, video_id: str) -> None:
     """Generate + upload a custom thumbnail. Best-effort: never raises, never fails a
     publish. Custom thumbnails require a phone-verified channel — an unverified channel
-    returns 403, which is logged like any other thumbnail error and otherwise ignored."""
+    returns 403, which is logged like any other thumbnail error and otherwise ignored.
+
+    An operator-provided thumbnail (provided_thumb) is uploaded as-is and the
+    template generation is skipped; thumb_path is never rewritten for it. If
+    the provided file vanished from disk, fall back to the template (logged)."""
+    from app.services import provided_thumb
+    if provided_thumb.is_provided(video):
+        path = provided_thumb.provided_path(video)
+        if path is not None:
+            try:
+                youtube.set_thumbnail(service, video_id, str(path))
+                quota.log(session, kind="thumbnail", status="success", video_id=video.id,
+                          channel_id=channel.id, quota_cost=QUOTA_THUMBNAIL_SET,
+                          detail=f"provided thumbnail uploaded ({path.name})")
+            except Exception as e:
+                quota.log(session, kind="thumbnail", status="error", video_id=video.id,
+                          channel_id=channel.id,
+                          detail=f"provided thumbnail upload failed: {str(e)[:260]}")
+            return
+        quota.log(session, kind="thumbnail", status="error", video_id=video.id,
+                  channel_id=channel.id,
+                  detail=f"provided thumbnail missing on disk ({video.thumb_path}) — "
+                         "falling back to the template")
     if not video.video_path:
         return
     out_png = Path(video.video_path).parent / "thumb_custom.png"
@@ -304,7 +326,8 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
                       channel_id=channel.id, detail="thumbnail generation failed")
             return
         youtube.set_thumbnail(service, video_id, str(png))
-        video.thumb_path = str(png)
+        if not provided_thumb.is_provided(video):
+            video.thumb_path = str(png)
         quota.log(session, kind="thumbnail", status="success", video_id=video.id,
                   channel_id=channel.id, quota_cost=QUOTA_THUMBNAIL_SET)
     except Exception as e:

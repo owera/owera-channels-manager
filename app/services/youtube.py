@@ -459,7 +459,9 @@ def insert_comment(service, video_id: str, text: str) -> str:
 def set_thumbnail(service, video_id: str, png_path: str) -> None:
     """Upload a custom thumbnail for a video (requires a phone-verified channel —
     otherwise YouTube returns 403, which callers treat as best-effort)."""
-    media = MediaFileUpload(png_path, mimetype="image/png")
+    # Provided thumbnails can be JPEG; the template is always PNG.
+    mimetype = "image/jpeg" if str(png_path).lower().endswith((".jpg", ".jpeg")) else "image/png"
+    media = MediaFileUpload(png_path, mimetype=mimetype)
     try:
         service.thumbnails().set(videoId=video_id, media_body=media).execute()
     except HttpError as e:

@@ -233,9 +233,15 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
                   "script_edits": prior_cc.get("script_edits") or []}
         video.creation_config = json.dumps(cc)
 
-    thumb = dest_dir / "thumb.jpg"
-    if _make_thumbnail(dest, thumb):
-        video.thumb_path = str(thumb)
+    # An operator-provided thumbnail (thumb_provided.*) is never replaced by the
+    # 1s still — skip the still entirely and keep the marker on the new blob.
+    from app.services import provided_thumb
+    if provided_thumb.is_provided(video):
+        video.creation_config = provided_thumb.carry_marker(video, video.creation_config)
+    else:
+        thumb = dest_dir / "thumb.jpg"
+        if _make_thumbnail(dest, thumb):
+            video.thumb_path = str(thumb)
 
     if not video.metadata_generated:
         from app.services import video_gen
