@@ -117,6 +117,8 @@ def select_candidates(session: Session, channel: Channel, top: int) -> list[dict
     latest_views: dict[int, tuple] = {}
     for m in session.exec(select(VideoMetric).where(
             VideoMetric.video_id.in_([v.id for v, _ in rows]))):  # type: ignore[union-attr]
+        if m.views is None:                 # not reported yet (<72h) — no data
+            continue
         cur = latest_views.get(m.video_id)
         if cur is None or m.captured_at > cur[0]:
             latest_views[m.video_id] = (m.captured_at, m.views)

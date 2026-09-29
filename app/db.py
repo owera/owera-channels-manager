@@ -73,9 +73,41 @@ def _add_missing_columns() -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
 
 
+# VideoMetric columns that may hold NULL ("not reported yet", P1 2026-09-29).
+# Tables created before that have them NOT NULL; SQLite cannot drop NOT NULL
+# with ALTER, so the table is rebuilt once (same rows, same ids, same indexes).
+_VIDEOMETRIC_NULLABLE = ("views", "impressions", "ctr", "avg_view_pct",
+                         "watch_time_minutes", "average_view_duration", "likes",
+                         "comments", "subscribers_gained")
+
+
+def _relax_videometric_notnull() -> bool:
+    """Rebuild ``videometric`` if any metric column is still NOT NULL.
+    Idempotent (no-op once relaxed); one transaction. Returns True if rebuilt."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        info = list(conn.execute(text("PRAGMA table_info(videometric)")))
+        if not info or not any(r[1] in _VIDEOMETRIC_NULLABLE and r[3] for r in info):
+            return False
+        old_cols = [r[1] for r in info]
+        for idx in list(conn.execute(text("PRAGMA index_list(videometric)"))):
+            if idx[3] == "c":                      # explicit CREATE INDEX (ix_…)
+                conn.execute(text(f'DROP INDEX IF EXISTS "{idx[1]}"'))
+        conn.execute(text("ALTER TABLE videometric RENAME TO _videometric_pre_null"))
+        table = SQLModel.metadata.tables["videometric"]
+        table.create(conn)                         # new schema + its indexes
+        cols = ", ".join(c for c in old_cols if c in table.c)
+        conn.execute(text(f"INSERT INTO videometric ({cols}) "
+                          f"SELECT {cols} FROM _videometric_pre_null"))
+        conn.execute(text("DROP TABLE _videometric_pre_null"))
+    return True
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _relax_videometric_notnull()
     with Session(engine) as s:
         if s.get(models.Settings, 1) is None:
             s.add(models.Settings(id=1))
