@@ -1518,15 +1518,42 @@ def _canonical_series(raw: str) -> str:
     return raw.strip()
 
 
-def series_of(title: str | None, brand: str | None = None) -> str:
-    """Series label for the endcard. Title suffix wins; else brand default.
+def series_from_topic(topic_name: str | None) -> str | None:
+    """Series label named by the video's topic, or None.
 
-    OS → Agent memory; RR → IA. Unknown brand → Copilot Credits (English
-    public YT). Never invent a third CTA — only swap {series}/{noun}.
+    Exact label ("Shipping", "IA", "Agent traps") or a topic name that starts
+    with a label as whole words ("Agent memory and state in production" →
+    Agent memory, "Claude Code production workflows" → Claude Code). Never a
+    substring match inside a longer name ("Engenheiro de IA no Brasil" → None).
+    """
+    folded = " ".join(theme.fold(topic_name or "").split())
+    if not folded:
+        return None
+    for label in sorted(SERIES_LABELS, key=len, reverse=True):
+        fl = theme.fold(label)
+        if folded == fl or re.match(re.escape(fl) + r"(?![\w])", folded):
+            return label
+    return None
+
+
+def series_of(title: str | None, brand: str | None = None,
+              topic_name: str | None = None) -> str:
+    """Series label for the endcard chip + VO.
+
+    Order: title suffix `` · <series> <nn>`` → the video's real topic
+    (``series_from_topic``) → brand default (OS → Agent memory; RR → IA) →
+    Copilot Credits (unknown brand). Shipping #1308/#1311 (rendered 22 Sep,
+    before #33 taught SPOKEN_TITLE_RE "Shipping" and before the OS brand
+    default) fell through to "Copilot Credits" although their topic is
+    "Shipping" — the topic now wins over any default. Never invent a third
+    CTA — only swap {series}/{noun}.
     """
     m = SPOKEN_TITLE_RE.search(title or "")
     if m:
         return _canonical_series(m.group(1))
+    from_topic = series_from_topic(topic_name)
+    if from_topic:
+        return from_topic
     return DEFAULT_SERIES.get(brand or "", DEFAULT_SERIES_FALLBACK)
 
 
@@ -1565,12 +1592,14 @@ def series_endcard_micro(series: str) -> str:
 
 
 def series_endcard(title: str | None, script: str | None = None,
-                   brand: str | None = None, noun: str | None = None) -> dict:
+                   brand: str | None = None, noun: str | None = None,
+                   topic_name: str | None = None) -> dict:
     """VO + chip + optional micro for the series endcard.
 
-    Defaults: OS / Agent memory / trap; RR / IA / trap.
+    Defaults: OS / Agent memory / trap; RR / IA / trap. The topic name wins
+    over the brand default when the title carries no series suffix.
     """
-    series = series_of(title, brand)
+    series = series_of(title, brand, topic_name)
     n = noun if noun in NEXT_CLAIM_NOUNS else next_claim_noun(title, script)
     vo = series_endcard_vo(series, n)
     chip = series_endcard_chip(series)
@@ -1609,10 +1638,11 @@ def endcard_clean(card: dict) -> bool:
 
 def ensure_series_endcard_vo(script: str | None, subject: str | None,
                              brand: str | None = None,
-                             noun: str | None = None) -> str:
+                             noun: str | None = None,
+                             topic_name: str | None = None) -> str:
     """Pin the last spoken sentence to the series endcard VO. No TTS overhaul —
     one appended (or replaced) English line. Long-form callers should skip this."""
-    card = series_endcard(subject, script, brand, noun)
+    card = series_endcard(subject, script, brand, noun, topic_name=topic_name)
     vo = card["vo"]
     raw = strip_mid_subscribe(script)
     if not raw:

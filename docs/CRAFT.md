@@ -390,3 +390,14 @@ RR channel shorts (brand `rr`) only:
 - **Gate B (`[B] RR hook pace`):** the claim (hook text) must be ≤8 words and fully spoken by 3.0 s (TTS word timings), with the first cut by 2.5 s.
 - **Marker:** new RR renders store `creation_config.hook_pace = {"version": "rr_v1", "claim_words", "claim_spoken_end"}`. Boards without the marker are never checked, so approved inventory is not rejected at publish.
 - Compose cannot shorten the claim: the title and script are upstream. An over-long RR head fails Gate B.
+
+## Series endcard chip source (P1 e, 2026-09-29)
+
+The endcard chip and the pinned VO take their series from `craft.series_of(title, brand, topic_name)`, in this order:
+
+1. The title suffix ` · <series> <nn>`.
+2. The video's real topic name, as an exact label or a leading whole-word label (for example "Agent memory and state in production" → Agent memory).
+3. The brand default (OS → Agent memory, RR → IA).
+4. Copilot Credits.
+
+`render_loop` passes `params.topic_name`. Shipping #1308/#1311 (rendered 22 Sep, before #33 and before the OS default) showed "Copilot Credits" even though their topic is "Shipping".

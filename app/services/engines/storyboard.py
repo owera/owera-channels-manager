@@ -1329,7 +1329,8 @@ def _last_sentence(script: str) -> str:
     return parts[-1] if parts else (script or "").strip()
 
 
-def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short") -> None:
+def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short",
+                  topic_name=None) -> None:
     """Shorts: lock the last card to the series chip. Longs: punch + CTA ban.
 
     Subscribe is a Rodrigo/CoS exception on the series endcard
@@ -1342,7 +1343,7 @@ def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short
     banned_verbs = {theme.fold(v) for v in _FOLLOW_VERBS.values()} | {"subscribe", "inscreva"}
     shorts = (content_format or "short") != "long"
     if shorts:
-        card = craft.series_endcard(subject, script, brand)
+        card = craft.series_endcard(subject, script, brand, topic_name=topic_name)
         chip, micro = card["chip"], card["micro"]
         if craft.endcard_scan_banned(chip) or craft.endcard_scan_banned(micro):
             chip, micro = craft.series_endcard_chip(card["series"]), ""
@@ -1742,7 +1743,7 @@ def _cap_list_holds(beats) -> None:
 def compose(*, subject, script, words, duration, resolution, width, height,
             topic_id=None, content_format="short", allowed_types=None, language=None,
             llm, brand=None, channel_id=None, channel_slug=None,
-            provided_thumb=False) -> str | None:
+            provided_thumb=False, topic_name=None) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -1799,7 +1800,8 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _show_whole_claim(beats, script, subject)
     _apply_split_card(beats, subject, provided_thumb=provided_thumb)
     _demote_nonsense_diagrams(beats, content_format)
-    _sanitize_cta(beats, script, subject=subject, brand=brand, content_format=content_format)
+    _sanitize_cta(beats, script, subject=subject, brand=brand or th.get("brand"),
+                  content_format=content_format, topic_name=topic_name)
     _strip_mid_subscribe_beats(beats)
     _cap_statements(beats, content_format)
 
