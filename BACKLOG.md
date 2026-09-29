@@ -1926,3 +1926,21 @@ flag the operator step in the commit body.
 - **acceptance:** `channel_id` `true`/`false` and a bool inside
   `ordered_ids` are 4xx and write nothing; an integer list still
   reorders that channel and still bulk-produces those drafts.
+
+### 61. ✅ DONE (code shipped to main 2026-09-29) under_publish pages only craft-ready review — normal
+- **resolution (2026-09-29):** `publish_signals` sets `under_publish` only
+  when `review_ready_n > 0` (the same count `review_ready_reason` already
+  builds). A REVIEW row with no artifact, a craft fail, or a currency
+  title is not on that list, so it no longer raises a `needs_operator`
+  page whose action is "decide review_ready now". `runway_low` is
+  unchanged. Suite: `tests/verify_rr_refill.py` 119 → 123. A `review > 0`
+  mutant dies on the no-artifact check; the in-window craft-ready page
+  still fires, and one ready sibling among unready rows reports
+  `review_ready == 1`.
+- **why (found 2026-09-29 auditing the RR refill after #60):** the page
+  keyed off every REVIEW row. The growth agent was told to approve items
+  the publish gate will refuse, during the window, as `needs_operator`.
+- **caution:** normal (`issues.py` digest only; not a money-path file).
+- **acceptance:** in-window, budget short, a review row with no artifact
+  does not page; a craft-ready sibling still does, and the ready count
+  is 1.

@@ -14,7 +14,9 @@ Pins:
      decide_by of 10:45 America/Fortaleza (the morning pass's decision list).
   2. review age measured from last_attempt_at (fallback updated_at/created_at).
   3. under_publish escalation: in-window, approved + published_today < budget
-     while review waits — and silent outside the window.
+     while craft-ready review waits — silent outside the window, and silent
+     when every waiting review item fails review_ready (no artifact / craft
+     fail). `review > 0` alone must not page needs_operator.
   4. _auto_produce subject guard: stripped-number / bare-unit / currency subjects
      stay DRAFT (reason recorded once), the next valid draft takes the slot;
      `node_modules …` and normal PT/EN subjects pass.
@@ -222,6 +224,30 @@ s = fresh_session()
 ch, t = rr_channel(s, paused=True)
 ready_review(s, ch, t)
 ok(issues.detect(s, now=in_win)["under_publish"] == [], "a paused channel never fires")
+
+# Defect: under_publish keyed off review_waiting > 0. A REVIEW row with no
+# artifact (or a craft fail) cannot be approved, but the page is auto=False
+# and tells the growth agent to "decide review_ready now". That list is empty.
+s = fresh_session()
+ch, t = rr_channel(s)
+make_video(s, ch, t, status=VideoStatus.REVIEW, video_path=None,
+           title=GOOD_TITLE, script="O 14B no NVMe rodou. No HDD, travou.",
+           last_attempt_at=in_win)
+d_unready = issues.detect(s, now=in_win)
+ok(d_unready["review_ready"] == [],
+   "precondition: a review row with no artifact is not review_ready")
+ok(d_unready["under_publish"] == [],
+   "unready review does not page under_publish (review > 0 would)")
+sig = issues.publish_signals(s, ch, in_win)
+ok(sig["review_waiting"] == 1 and sig["review_ready"] == 0
+   and sig["under_publish"] is False,
+   "dashboard signal agrees: 1 waiting, 0 ready, not under_publish")
+ready_review(s, ch, t, last_attempt_at=in_win)
+d_mixed = issues.detect(s, now=in_win)
+ok(len(d_mixed["under_publish"]) == 1
+   and d_mixed["under_publish"][0]["review_waiting"] == 2
+   and d_mixed["under_publish"][0]["review_ready"] == 1,
+   "one craft-ready sibling still pages, and the count is the ready one")
 
 s = fresh_session()
 ch = make_channel(s)                      # no windows configured: loop publishes any time

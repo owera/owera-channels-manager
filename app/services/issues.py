@@ -188,8 +188,13 @@ def publish_signals(session: Session, ch: Channel, now: datetime | None = None,
 
     - under_publish: inside the channel's publish window (its publish_windows /
       publish_tz; none configured = the loop publishes any time), approved +
-      published_today < daily_publish_budget while REVIEW items wait. That is the
-      2026-09-27 RR shape: 4/5 published, approved 0, review 2 from 13:04 to 22:00.
+      published_today < daily_publish_budget while craft-ready REVIEW items wait
+      (review_ready > 0). A review row that cannot be approved (no artifact,
+      craft fail, currency title) does not page — the suggested action is
+      "decide review_ready", and paging needs_operator when that list is empty
+      sends the growth agent at items the publish gate will refuse. The
+      2026-09-27 RR shape is 4/5 published, approved 0, two craft-PASS reviews
+      idle from 13:04 to 22:00.
     - runway_low: approved + published_today (≈ the approved stock the publish
       day started with) < daily_publish_budget + settings.runway_buffer.
     Paused channels, publish budget <= 0, and never-published channels signal nothing.
@@ -223,7 +228,7 @@ def publish_signals(session: Session, ch: Channel, now: datetime | None = None,
         "review_ready": review_ready_n, "in_publish_window": in_window,
         "runway": runway, "runway_target": target,
         "under_publish": bool(operating and in_window and not cooling
-                              and runway < budget and review > 0),
+                              and runway < budget and review_ready_n > 0),
         "runway_low": bool(operating and runway < target),
     }
 
@@ -519,7 +524,9 @@ def detect(session: Session, now: datetime | None = None) -> dict:
             })
 
     # Publish runway (2026-09-28 RR refill): escalate an under-publishing channel
-    # while review items wait, and flag a thin approved runway.
+    # while craft-ready review items wait, and flag a thin approved runway.
+    # Unready review rows (no artifact / craft fail) do not page — there is
+    # nothing to approve, and the page is needs_operator.
     under_publish, runway_low = [], []
     for ch in channels:
         sig = publish_signals(session, ch, now, ready_by_channel.get(ch.id, 0))
