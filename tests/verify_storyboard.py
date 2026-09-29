@@ -1876,4 +1876,75 @@ storyboard._apply_split_card(_eq, _os_title)
 ok(_eq[0].get("split", {}).get("head") == "Chat routed to Maya. Prod paged Lee.",
    "split: _apply_split_card sets the spec when claim == head")
 
+
+# --- RR hook pace (P1 d): first cut by 2.5s on RR, claim ≤8 / spoken by 3.0s ---
+print("RR hook pace: first cut by 2.5s (P1 d)")
+_rrb0 = craft.beats_from_html(_rr_html)
+ok(float(_rrb0[1]["start"]) <= 2.5 + 1e-6,
+   "compose RR (brand rr): first cut at %.2fs ≤ 2.5s" % float(_rrb0[1]["start"]))
+ok(_rrb0[0]["text"] == "O prompt processa no CPU por 8 segundos, não é engenharia."
+   and 'style="opacity:1"' in re.search(r'<div class="beat hook" id="b0"[^>]*>', _rr_html).group(0),
+   "compose RR: frame0 still carries the whole claim at full opacity (#45 kept)")
+ok(craft.repeated_card_hits(_rrb0) == [] and all(
+       float(b["dur"]) + storyboard._GAP <= 3.0 + 1e-6
+       for b in _rrb0 if b.get("type") not in ("hook", "cta")),
+   "compose RR after the cut: no repeated card, every mid ≤3.0s incl. fade")
+_pace = craft.hook_pace_marker(_rrb0, _rr_words, "rr")
+ok(_pace["version"] == craft.HOOK_PACE_V1 and _pace["claim_words"] == 11,
+   "hook_pace marker on the RR board (11-word claim)")
+_g = craft.video_maker_gate(_rrb0, hook_pace=_pace)
+ok(_g["checks"]["B"] == "FAIL" and any("claim 11 words" in r for r in _g["reasons"])
+   and not any("first cut at" in r for r in _g["reasons"]),
+   "RR 11-word claim (#1376 title) → Gate B FAIL on the claim, not on the first cut (compose fixed it)")
+_os_b = craft.beats_from_html(_os_html38)
+ok(craft.hook_pace_marker(_os_b, _os_words, "os") is None,
+   "OS (brand os) is out of hook-pace scope (no marker, no check)")
+
+
+def _pace_board(hook_end, n_mid=4, dur=24.0, slack=True):
+    # Cue-aligned board: card 3 holds 2.0s (slack), the rest sit at the cap;
+    # the endcard fills the tail up to `dur`.
+    b = [{"type": "hook", "start": 0.0, "dur": round(hook_end - storyboard._GAP, 3),
+          "text": "Claim one two three four", "cue": "Claim"}]
+    t = hook_end
+    for k in range(n_mid):
+        hold = 2.0 if (slack and k == 2) else 2.88
+        b.append({"type": "stat", "start": round(t, 3), "dur": hold, "value": str(k + 1),
+                  "unit": "GB", "label": "card %d" % k, "cue": "c%d" % k})
+        t += hold + storyboard._GAP
+    b.append({"type": "cta", "start": round(t, 3), "dur": round(dur - t, 3),
+              "text": "Subscribe · IA", "cue": "Subscribe"})
+    return b
+
+
+_pw = _words_of("Claim one two three four " + " ".join("w%d" % k for k in range(80)), step=0.3)
+_pb = _pace_board(3.3, dur=3.3 + 3 * 3.0 + 2.12 + 3.6)
+_pbd = 3.3 + 3 * 3.0 + 2.12 + 3.6
+storyboard._pull_first_cut(_pb, _pbd, _pw)
+ok(abs(float(_pb[1]["start"]) - 2.5) < 1e-6 and abs(float(_pb[0]["dur"]) - 2.38) < 1e-6,
+   "_pull_first_cut: hook ends at the cut, first card starts at 2.5s")
+ok(all(float(b["dur"]) <= storyboard._MID_MAX + 1e-6 for b in _pb[1:-1])
+   and float(_pb[-1]["dur"]) <= storyboard._ENDCARD_MAX + 1e-6,
+   "_pull_first_cut: short window → first card leads the VO; caps kept (split, never stretch)")
+ok(storyboard.validate_storyboard(_pb, _pbd), "_pull_first_cut: board still valid")
+ok([b.get("value") for b in _pb[1:-1]] == ["1", "2", "3", "4"], "_pull_first_cut: no card dropped or copied")
+_pb2 = _pace_board(4.76, dur=4.76 + 3 * 3.0 + 2.12 + 3.6)
+_pb2d = 4.76 + 3 * 3.0 + 2.12 + 3.6
+storyboard._pull_first_cut(_pb2, _pb2d, _pw)
+ok(_pb2[1].get("type") == "quote" and _pb2[1].get("_cut") and abs(float(_pb2[1]["start"]) - 2.5) < 1e-6,
+   "_pull_first_cut: long window (#1371 shape, hook 4.64s) → NEW quote card of the words spoken there")
+ok(not (set(craft.screen_text_key(_pb2[1]).split()) <= set(craft.screen_text_key(_pb2[0]).split())),
+   "_pull_first_cut: the quote is not a hook-claim echo")
+ok(craft.repeated_card_hits(_pb2) == [] and storyboard.validate_storyboard(_pb2, _pb2d),
+   "_pull_first_cut: quote insert leaves no repeated card, board valid")
+_pb3 = _pace_board(2.4)
+_before3 = json.dumps(_pb3)
+storyboard._pull_first_cut(_pb3, 24.0, _pw)
+ok(json.dumps(_pb3) == _before3, "_pull_first_cut: first cut already ≤2.5s → no-op")
+_pb4 = _pace_board(3.3, dur=3.3 + 4 * 3.0 + 3.78, slack=False)
+_before4 = json.dumps(_pb4)
+storyboard._pull_first_cut(_pb4, 3.3 + 4 * 3.0 + 3.78, [])
+ok(json.dumps(_pb4) == _before4,
+   "_pull_first_cut: every card at its cap and endcard full → restored (Gate B reports it)")
+
 print(f"\nALL {_checks} CHECKS PASSED")

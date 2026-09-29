@@ -1054,4 +1054,60 @@ ok("SAVE20." in _mk and "charged full price." in _mk, "split: markup carries the
 _mke = craft.split_card_markup({"top": "<b>", "bottom": "a&b"}, 1080, 1920)
 ok("&lt;b&gt;" in _mke and "a&amp;b" in _mke, "split: markup escapes HTML")
 
+# --- RR hook pace (P1 d): claim ≤8 words, spoken by 3.0s, first cut by 2.5s ---
+ok(craft.claim_word_count("Com ReBAR o 14B fez 48 tok/s. Sem, 11.") == 9
+   and craft.claim_word_count("num_ctx em 32k come a VRAM, não é engenharia.") == 9
+   and craft.claim_word_count("Jogar o node_modules no contexto não é engenharia.") == 8
+   and craft.claim_word_count("a — b") == 2,
+   "claim_word_count counts tokens with a letter/digit (dash is not a word)")
+_w = [{"text": t, "start": round(0.35 * k, 3), "dur": 0.3}
+      for k, t in enumerate("Jogar o node_modules no contexto não é engenharia Isso".split())]
+ok(craft.claim_spoken_end("Jogar o node_modules no contexto não é engenharia.", _w) == 2.75,
+   "claim_spoken_end = end of the last claim word (edge-tts boundaries, folded)")
+_w2 = [{"text": t, "start": round(0.4 * k, 3), "dur": 0.3}
+       for k, t in enumerate("Com ReBAR o quatorze B fez quarenta e oito tok s Sem onze".split())]
+ok(craft.claim_spoken_end("Com ReBAR o 14B fez 48 tok/s. Sem, 11.", _w2) == round(0.4 * 8 + 0.3, 3),
+   "claim_spoken_end: TTS tokens differ (numbers read out) → end of the n-th spoken word")
+ok(craft.claim_spoken_end("x y", []) is None and craft.claim_spoken_end("", _w) is None,
+   "claim_spoken_end: no word timings → None")
+_hb = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Jogar o node_modules no contexto não é engenharia."},
+       {"type": "stat", "start": 2.5, "dur": 2.88, "value": "0", "unit": "passos", "label": "x"},
+       {"type": "cta", "start": 5.5, "dur": 3.5, "text": "Subscribe · IA"}]
+_m = craft.hook_pace_marker(_hb, _w, "rr")
+ok(_m == {"version": craft.HOOK_PACE_V1, "claim_words": 8, "claim_spoken_end": 2.75},
+   "hook_pace_marker (rr short): version + claim words + spoken end")
+ok(craft.hook_pace_marker(_hb, _w, "os") is None and craft.hook_pace_marker(_hb, _w, None) is None
+   and craft.hook_pace_marker(_hb, _w, "rr", "long") is None,
+   "hook_pace_marker: OS / unknown brand / long-form → None (out of scope)")
+ok(craft.hook_pace_hits(_hb, _m) == [], "8 words, spoken 2.75s, cut 2.5s → in spec")
+ok(craft.hook_pace_hits(_hb, None) == [] and craft.hook_pace_hits(_hb, {"version": "x"}) == [],
+   "no/unknown marker → never checked (approved inventory)")
+_hb9 = [dict(_hb[0], text="Com ReBAR o 14B fez 48 tok/s. Sem, 11.")] + [dict(_hb[1], start=2.62)] + _hb[2:]
+_h = craft.hook_pace_hits(_hb9, {"version": craft.HOOK_PACE_V1, "claim_spoken_end": 3.2})
+ok(len(_h) == 3 and "claim 9 words" in _h[0] and "3.20s" in _h[1] and "2.62s" in _h[2],
+   "9 words + spoken 3.20s + cut 2.62s → three hook-pace hits")
+_gr = craft.video_maker_gate_reason({"beats": _hb9, "beat_timing": craft.BEAT_TIMING_INCL_FADE,
+                                     "hook_pace": {"version": craft.HOOK_PACE_V1,
+                                                   "claim_spoken_end": 3.2}}, "short")
+ok(_gr and "RR hook pace: FAIL" in _gr, "marked RR board out of spec → review/publish gate blocks")
+# Approved RR #1371 stored board (no marker): hook 4.64s, first cut 4.76s → still allowed.
+_v1371 = [
+    {"type": "hook", "start": 0.0, "dur": 4.64, "text": "Jogar o node_modules no contexto não é engenharia",
+     "cue": "Jogar o node_modules", "object": "JOGAR"},
+    {"type": "stat", "start": 4.76, "dur": 3.0, "value": "0", "unit": "passos",
+     "label": "a pasta não compila", "cue": "Isso não é engenharia"},
+    {"type": "command", "start": 7.88, "dur": 3.0, "cue": "O modelo não compila",
+     "command": "npm ls --depth=0"},
+    {"type": "stat", "start": 11.0, "dur": 3.0, "value": "100", "unit": "%",
+     "label": "refeito pelo npm", "cue": "o npm reinstala"},
+    {"type": "quote", "start": 14.12, "dur": 3.0,
+     "text": "Quem escolhe o contexto manda na resposta.", "cue": "Quem escolhe o contexto"},
+    {"type": "cta", "start": 17.24, "dur": 4.0, "text": "Subscribe · IA", "cue": "Subscribe — next"},
+]
+ok(craft.video_maker_gate_reason({"beats": _v1371}, "short") is None,
+   "approved #1371 (no hook_pace marker) is not retroactively rejected at publish")
+_r71m = craft.video_maker_gate_reason({"beats": _v1371, "hook_pace": {"version": craft.HOOK_PACE_V1}}, "short")
+ok(_r71m and "first cut at 4.76s" in _r71m,
+   "the same board WITH the marker would fail (the marker is what scopes the check)")
+
 print(f"\nALL {_checks} CHECKS PASSED")

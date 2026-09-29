@@ -856,6 +856,34 @@ ok((not cc_raised) and cc_err is not None
    and "error" in cc_err and "RuntimeError" in cc_err["error"],
    "creation_config never raises — error dict on theme.resolve failure")
 
+# RR hook pace marker (P1 d): new RR shorts carry creation_config.hook_pace.
+from app.services import craft as _craft_hp
+_hp_board = [
+    {"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três quatro cinco seis sete oito nove"},
+    {"type": "stat", "start": 2.5, "dur": 2.88, "value": "8", "unit": "GB", "label": "x"},
+    {"type": "cta", "start": 5.5, "dur": 3.5, "text": "Subscribe · IA"},
+]
+_hp_words = [{"text": t, "start": 0.4 * k, "dur": 0.35}
+             for k, t in enumerate("Um dois três quatro cinco seis sete oito nove Isso".split())]
+with patch.object(_craft_hp, "beats_from_html", return_value=_hp_board):
+    cc_rr = worker._creation_config("s", {"content_format": "short"}, "<html>", "x", 9.0,
+                                    "portrait", None, False, words=_hp_words, brand="rr")
+    cc_os = worker._creation_config("s", {"content_format": "short"}, "<html>", "x", 9.0,
+                                    "portrait", None, False, words=_hp_words, brand="os")
+    cc_fb = worker._creation_config("s", {"content_format": "short"}, "<html>", "x", 9.0,
+                                    "portrait", None, True, words=_hp_words, brand="rr")
+ok(cc_rr.get("hook_pace") == {"version": _craft_hp.HOOK_PACE_V1, "claim_words": 9,
+                              "claim_spoken_end": 3.55},
+   "RR render records hook_pace (claim words + TTS spoken end)")
+ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
+   and any("RR hook pace" in r for r in cc_rr["craft_gate"]["reasons"]),
+   "RR render-time craft_gate flags a 9-word claim spoken by 3.55s")
+ok("hook_pace" not in cc_os and cc_os["craft_gate"]["checks"]["B"] == "PASS",
+   "OS render: no hook_pace marker, no hook-pace check")
+ok("hook_pace" not in cc_fb, "fallback render: no hook_pace marker (A/C already FAIL)")
+ok("words=words, brand=brand" in inspect.getsource(worker.run_job),
+   "run_job passes TTS words + resolved brand into _creation_config")
+
 
 # ---------------------------------------------------------------------------
 # _pick_bgm

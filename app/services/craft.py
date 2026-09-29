@@ -909,6 +909,17 @@ CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
 BEAT_TIMING_INCL_FADE = "card_incl_fade"
 LEGACY_MID_BEAT_MAX_S = 3.0
 LEGACY_CTA_BEAT_MAX_S = 4.0
+# RR hook pace (P1 d, council 2026-09-29): on the RR channel the claim is
+# ≤8 words, fully spoken by 3.0s, and the first cut lands by 2.5s (PULSE:
+# RR first cut 4.12–5.83s, claim spoken 3.72–5.66s on 5/7). New RR renders
+# carry creation_config["hook_pace"] = {"version": HOOK_PACE_V1, ...}; boards
+# without the marker (approved inventory, OS) are never checked (same marker
+# trick as beat_timing), so nothing already approved is rejected at publish.
+HOOK_PACE_V1 = "rr_v1"
+HOOK_PACE_BRANDS = frozenset({"rr"})
+HOOK_CLAIM_MAX_WORDS = 8
+HOOK_CLAIM_SPOKEN_BY_S = 3.0
+HOOK_FIRST_CUT_BY_S = 2.5
 STATEMENT_MAX_SHORTS = 1
 LIST_MAX_PER_SHORT = 1
 LIST_MAX_ITEMS = 3
@@ -1211,12 +1222,82 @@ def _echoes_narration(beat: dict) -> bool:
     return tw <= cw or text in cue or cue in text
 
 
+def _alnum_fold(text: str | None) -> str:
+    return "".join(ch for ch in theme.fold(text or "") if ch.isalnum())
+
+
+def claim_word_count(text: str | None) -> int:
+    """Words in the on-screen/spoken claim (tokens that carry a letter/digit)."""
+    return sum(1 for w in (text or "").split() if any(ch.isalnum() for ch in w))
+
+
+def _word_end(w) -> float | None:
+    try:
+        return round(float(w.get("start") or 0.0) + float(w.get("dur") or 0.0), 3)
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def claim_spoken_end(claim: str | None, words) -> float | None:
+    """End time (s) of the last TTS word of ``claim``. Matches the folded
+    letters/digits of the edge-tts word boundaries against the claim; when the
+    TTS tokens differ (e.g. a number read out), falls back to the end of the
+    n-th spoken word (n = claim words). None only without word timings."""
+    target = _alnum_fold(claim)
+    words = [w for w in (words or []) if isinstance(w, dict)]
+    if not target or not words:
+        return None
+    acc = ""
+    for w in words:
+        acc += _alnum_fold(w.get("text") or w.get("word") or "")
+        if not target.startswith(acc[: len(target)]):
+            break
+        if len(acc) >= len(target):
+            return _word_end(w)
+    n = claim_word_count(claim)
+    return _word_end(words[min(n, len(words)) - 1]) if n else None
+
+
+def hook_pace_marker(beats, words, brand: str | None,
+                     content_format: str | None = "short") -> dict | None:
+    """creation_config["hook_pace"] for a new render, or None (not in scope)."""
+    if (content_format or "short") == "long" or (brand or "") not in HOOK_PACE_BRANDS:
+        return None
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    if not board or (board[0].get("type") or "") != "hook":
+        return None
+    claim = board[0].get("text") or ""
+    return {"version": HOOK_PACE_V1, "claim_words": claim_word_count(claim),
+            "claim_spoken_end": claim_spoken_end(claim, words)}
+
+
+def hook_pace_hits(board, hook_pace: dict | None) -> list[str]:
+    """Gate B hook-pace hits for a marked board (empty when unmarked/in spec)."""
+    if not isinstance(hook_pace, dict) or hook_pace.get("version") != HOOK_PACE_V1:
+        return []
+    if not board or (board[0].get("type") or "") != "hook":
+        return []
+    hits = []
+    n = claim_word_count(board[0].get("text") or "")
+    if n > HOOK_CLAIM_MAX_WORDS:
+        hits.append(f"claim {n} words (max {HOOK_CLAIM_MAX_WORDS})")
+    end = hook_pace.get("claim_spoken_end")
+    if isinstance(end, (int, float)) and float(end) > HOOK_CLAIM_SPOKEN_BY_S + 1e-6:
+        hits.append(f"claim spoken by {float(end):.2f}s (max {HOOK_CLAIM_SPOKEN_BY_S:.1f}s)")
+    if len(board) > 1:
+        cut = _cue_start(board[1])
+        if cut > HOOK_FIRST_CUT_BY_S + 1e-6:
+            hits.append(f"first cut at {cut:.2f}s (max {HOOK_FIRST_CUT_BY_S:.1f}s)")
+    return hits
+
+
 def _pass_fail(ok: bool) -> str:
     return "PASS" if ok else "FAIL"
 
 
 def video_maker_gate(beats, *, content_format: str | None = "short",
-                     used_fallback: bool = False, legacy_timing: bool = False) -> dict:
+                     used_fallback: bool = False, legacy_timing: bool = False,
+                     hook_pace: dict | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1303,6 +1384,16 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Neighbouring beats must change the on-screen text, and a mid "
             "card must not be replayed later; a repeated spoken phrase needs "
             "a visual change (different beat type/layout/emphasis)."
+        )
+    # RR hook pace (marked new RR renders only; see HOOK_PACE_V1).
+    pace_hits = hook_pace_hits(board, hook_pace)
+    if pace_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] RR hook pace: FAIL — " + "; ".join(pace_hits) +
+            f". RR claim ≤{HOOK_CLAIM_MAX_WORDS} words, fully spoken by "
+            f"{HOOK_CLAIM_SPOKEN_BY_S:.1f}s, first cut by {HOOK_FIRST_CUT_BY_S:.1f}s "
+            "(shorter title head / opening line)."
         )
 
     # --- C: kill spoken list/slide spam ------------------------------------
@@ -1400,8 +1491,10 @@ def video_maker_gate_reason(creation_config=None,
             return format_craft_gate_reason(stored)
         return None  # no snapshot (pré-gate inventory) — fail-open
     legacy = cc.get("beat_timing") != BEAT_TIMING_INCL_FADE
+    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
-                            used_fallback=used_fallback, legacy_timing=legacy)
+                            used_fallback=used_fallback, legacy_timing=legacy,
+                            hook_pace=pace)
     return format_craft_gate_reason(gate)
 
 
