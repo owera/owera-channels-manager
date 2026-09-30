@@ -2359,6 +2359,34 @@ for _vid in ("1380", "1381", "1382", "1383", "1386"):
         ok(_gg["checks"]["B"] == "PASS" and float(_bb[1]["start"]) <= craft.HOOK_FIRST_CUT_BY_S + 1e-6,
            "%s: Gate B PASS (card_hold_280), first cut ≤2.5s: %s" % (_tag, _gg["reasons"]))
         ok(storyboard.validate_storyboard(_bb, _dur), "%s: board valid" % _tag)
+        _sy = craft.card_sync_marker(_bb, _ww)
+        ok(not craft.card_sync_hits(_sy)
+           and all(n["status"] in ("ok", "late_capped") for n in _sy["notes"])
+           and all(n["lead"] is None or n["lead"] >= -craft.SYNC_TOL_S for n in _sy["notes"]
+                   if n["status"] != "late_capped")
+           and max(n["lead"] for n in _sy["notes"] if n["lead"] is not None) <= craft.SYNC_LEAD_MAX_S + craft.SYNC_TOL_S,
+           "%s: every card in sync — never after its speech, lead ≤1.1s (CoS): %s"
+           % (_tag, [(n["i"], n["status"], n["lead"]) for n in _sy["notes"] if n["status"] != "ok"]))
         ok(not any(t == "obedece" for _, t in _txt), "%s: no lone 'obedece' card (#1382)" % _tag)
+
+# _sync_board: a late card is moved to lead its speech; a gap gets a sentence card.
+_sy_script = "Um dois três. O peso do modelo é só parte da conta. O cache cresce. Subscribe — next IA trap."
+_sy_words = storyboard.annotate_sentences(_words_of(_sy_script, step=0.5), _sy_script)
+_sy_b = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três.", "cue": "Um dois"},
+         {"type": "stat", "start": 2.5, "dur": 2.8, "value": "1", "unit": "x", "label": "peso", "cue": "O peso"},
+         {"type": "compare", "start": 5.42, "dur": 1.3, "cue": "O cache cresce", "title": "Cache",
+          "left": {"title": "a", "items": ["b"]}, "right": {"title": "c", "items": ["d"]}},
+         {"type": "cta", "start": 6.84, "dur": 3.0, "text": "Subscribe · IA", "cue": "Subscribe"}]
+_sy_d = round(_sy_words[-1]["start"] + 1.0, 2)
+ok(any(n["status"] == "late" for n in craft.card_sync_notes(_sy_b, _sy_words)),
+   "_sync_board fixture: the compare starts 0.9s after 'O cache cresce' is spoken")
+ok(storyboard._sync_board(_sy_b, _sy_words, _sy_d, 2.38)
+   and not craft.card_sync_hits(craft.card_sync_marker(_sy_b, _sy_words))
+   and storyboard.validate_storyboard(_sy_b, _sy_d),
+   "_sync_board re-times the board: no card after its speech, lead ≤1.1s: %s"
+   % [(b["type"], b["start"], b["dur"]) for b in _sy_b])
+ok(all(float(b["dur"]) <= craft.MID_BEAT_MAX_S + 1e-6 for b in _sy_b[1:-1])
+   and any(b.get("type") == "quote" for b in _sy_b),
+   "_sync_board: the 1.8s hole between cards becomes a NEW sentence card (holds stay ≤2.80)")
 
 print(f"\nALL {_checks} CHECKS PASSED")

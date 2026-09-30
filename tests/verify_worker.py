@@ -923,6 +923,10 @@ ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
    "RR render-time craft_gate flags a 9-word claim spoken by 3.55s")
 ok("hook_pace" not in cc_os and cc_os["craft_gate"]["checks"]["B"] == "PASS",
    "OS render: no hook_pace marker, no hook-pace check")
+ok(cc_rr.get("card_sync", {}).get("version") == _craft_hp.SYNC_V1
+   and [n_["i"] for n_ in cc_rr["card_sync"]["notes"]] == [1, 2]
+   and "card_sync" not in cc_fb,
+   "render records card_sync notes per card (CoS 2026-09-30); fallback renders do not")
 ok("hook_pace" not in cc_fb, "fallback render: no hook_pace marker (A/C already FAIL)")
 cc_split = worker._creation_config("s", {"content_format": "short"},
                                    '<div class="beat hook" id="b0" data-split="1" style="opacity:1"></div>',

@@ -401,9 +401,14 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         # claim ≤8 words / spoken by 3.0s / first cut by 2.5s.
         pace = (craft.hook_pace_marker(beats, words, brand or params.get("brand"), fmt)
                 if not used_fallback else None)
+        # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
+        # after its own words or leading them by more than 1.1s.
+        sync = (craft.card_sync_marker(beats, words, fmt)
+                if not used_fallback else None)
         gate = craft.video_maker_gate(beats, content_format=fmt,
                                       used_fallback=used_fallback, hook_pace=pace,
-                                      beat_timing=craft.BEAT_TIMING_CURRENT)
+                                      beat_timing=craft.BEAT_TIMING_CURRENT,
+                                      card_sync=sync)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -418,6 +423,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             # 2026-09-30); older renders keep their own marker's cap.
             "beat_timing": craft.BEAT_TIMING_CURRENT,
             **({"hook_pace": pace} if pace else {}),
+            **({"card_sync": sync} if sync else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
             **({"frame0_split": True} if 'data-split="1"' in html else {}),

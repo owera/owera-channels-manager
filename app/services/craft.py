@@ -1390,6 +1390,136 @@ def hook_pace_hits(board, hook_pace: dict | None) -> list[str]:
     return hits
 
 
+# Card ↔ speech sync (CoS 2026-09-30): a card may LEAD its own speech by at
+# most SYNC_LEAD_MAX_S, and must NEVER appear after its words begin. New
+# renders carry creation_config["card_sync"] = {"version": SYNC_V1, "notes":
+# [...]} (one note per card: start, speech_start, lead, status); Gate B fails
+# a "late" or "early" note. Unmarked boards (older renders) are not checked.
+SYNC_V1 = "sync_v1"
+SYNC_LEAD_MAX_S = 1.1
+SYNC_TOL_S = 0.05
+_SYNC_TOK_RE = re.compile(r"[a-z0-9]+")
+
+
+def _sync_toks(text) -> list[str]:
+    return _SYNC_TOK_RE.findall(theme.fold(str(text or "")))
+
+
+def _find_run(stream: list[str], needle: list[str], start: int) -> int:
+    m = len(needle)
+    if not m:
+        return -1
+    for p in range(max(0, start), len(stream) - m + 1):
+        if stream[p:p + m] == needle:
+            return p
+    return -1
+
+
+def card_speech_starts(beats, words) -> list[float | None]:
+    """Start (s) of each card's own speech: the first spoken word of its text
+    (quote/statement) or cue, matched in order in the TTS words. The hook is
+    the claim (0.0). None = not found in the narration (unverifiable)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    toks, starts = [], []
+    for w in words or []:
+        if not isinstance(w, dict):
+            continue
+        try:
+            t0 = float(w.get("start") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        for t in _sync_toks(w.get("text") or w.get("word")):
+            toks.append(t)
+            starts.append(t0)
+    out: list[float | None] = []
+    cursor = 0
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if i == 0 and typ == "hook":
+            ht = _sync_toks(b.get("text") or b.get("cue"))
+            if ht and toks[:len(ht)] == ht:
+                cursor = len(ht)
+            out.append(0.0)
+            continue
+        cands = []
+        if typ in ("quote", "statement"):
+            cands.append(_sync_toks(b.get("text")))
+        cands.append(_sync_toks(b.get("cue")))
+        pos = -1
+        for c in cands:
+            pos = _find_run(toks, c, cursor)
+            if pos >= 0:
+                break
+        if pos < 0:
+            out.append(None)
+            continue
+        out.append(round(starts[pos], 3))
+        # the next card may not claim speech that began before this one's
+        # (a card continuing the same sentence is "late", never unmatched)
+        cursor = pos
+    return out
+
+
+def _hold(b) -> float:
+    try:
+        return float(b.get("dur") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def card_sync_notes(beats, words) -> list[dict]:
+    """Per-card sync note (index, type, start, speech_start, lead, status)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    v = card_speech_starts(board, words)
+    notes = []
+    for i, b in enumerate(board):
+        if i == 0 and (b.get("type") or "") == "hook":
+            continue
+        st = _cue_start(b)
+        note = {"i": i, "type": b.get("type") or "?", "start": round(st, 3),
+                "speech_start": v[i]}
+        if v[i] is None:
+            note.update(lead=None, status="unmatched")
+        else:
+            lead = round(float(v[i]) - st, 3)
+            status = ("late" if lead < -SYNC_TOL_S else
+                      "early" if lead > SYNC_LEAD_MAX_S + SYNC_TOL_S else "ok")
+            last_cta = i == len(board) - 1 and (b.get("type") or "") in CTA_TYPES
+            if status == "late" and last_cta and _hold(b) >= CTA_BEAT_MAX_S - SYNC_TOL_S:
+                # the endcard already starts as early as its cap allows
+                status = "late_capped"
+            note.update(lead=lead, status=status)
+        notes.append(note)
+    return notes
+
+
+def card_sync_marker(beats, words, content_format: str | None = "short") -> dict | None:
+    """creation_config["card_sync"] for a new render (None: long / no timings)."""
+    if (content_format or "short") == "long" or not words:
+        return None
+    return {"version": SYNC_V1, "lead_max": SYNC_LEAD_MAX_S,
+            "notes": card_sync_notes(beats, words)}
+
+
+def card_sync_hits(card_sync: dict | None) -> list[str]:
+    """Gate B hits for a marked board: a card after its speech, or leading it
+    by more than SYNC_LEAD_MAX_S. Unmatched cards are noted, not failed."""
+    if not isinstance(card_sync, dict) or card_sync.get("version") != SYNC_V1:
+        return []
+    hits = []
+    for n in card_sync.get("notes") or []:
+        if not isinstance(n, dict):
+            continue
+        st, sp, lead = n.get("start"), n.get("speech_start"), n.get("lead")
+        if n.get("status") == "late":
+            hits.append(f"card {n.get('i')} ({n.get('type')}) at {st:.2f}s appears "
+                        f"{-float(lead):.2f}s AFTER its speech ({sp:.2f}s)")
+        elif n.get("status") == "early":
+            hits.append(f"card {n.get('i')} ({n.get('type')}) at {st:.2f}s leads its "
+                        f"speech ({sp:.2f}s) by {float(lead):.2f}s (max {SYNC_LEAD_MAX_S:.1f}s)")
+    return hits
+
+
 def _pass_fail(ok: bool) -> str:
     return "PASS" if ok else "FAIL"
 
@@ -1406,7 +1536,8 @@ def _timing_caps(legacy_timing: bool, beat_timing: str | None) -> tuple[float, f
 def video_maker_gate(beats, *, content_format: str | None = "short",
                      used_fallback: bool = False, legacy_timing: bool = False,
                      hook_pace: dict | None = None,
-                     beat_timing: str | None = None) -> dict:
+                     beat_timing: str | None = None,
+                     card_sync: dict | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1508,6 +1639,16 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             "(shorter title head / opening line)."
         )
 
+    # Card ↔ speech sync (marked new renders only; see SYNC_V1).
+    sync_hits = card_sync_hits(card_sync)
+    if sync_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card sync: FAIL — " + "; ".join(sync_hits) +
+            f". A card never appears after its own words; it may lead them by "
+            f"≤{SYNC_LEAD_MAX_S:.1f}s."
+        )
+
     # --- C: kill spoken list/slide spam ------------------------------------
     types = [b.get("type") or "" for b in board]
     n_stmt = types.count("statement")
@@ -1605,9 +1746,10 @@ def video_maker_gate_reason(creation_config=None,
     bt = cc.get("beat_timing")
     legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
     pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
+    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
                             used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace, beat_timing=bt)
+                            hook_pace=pace, beat_timing=bt, card_sync=sync)
     return format_craft_gate_reason(gate)
 
 

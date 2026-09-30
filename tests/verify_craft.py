@@ -1244,4 +1244,68 @@ _b305 = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três."},
 ok(craft.video_maker_gate(_b305, beat_timing=craft.BEAT_TIMING_CURRENT)["checks"]["B"] == "FAIL",
    "2.85s mid hold (≈3.05 incl. fade) → Gate B FAIL on a card_hold_280 render")
 
+# --- Card ↔ speech sync (CoS 2026-09-30): never after its words, lead ≤1.1s ---
+print("card sync: a card never appears after its own speech; lead ≤ 1.1s (CoS 2026-09-30)")
+_sw = [{"text": t, "start": round(0.4 * k, 3), "dur": 0.35} for k, t in enumerate(
+    "Contexto come a VRAM O peso do modelo é só parte O cache cresce com cada token "
+    "Mede a VRAM antes Subscribe next IA trap".split())]
+# word starts: O peso 1.6 · O cache 4.4 · Mede 6.8 · Subscribe 8.4
+
+
+def _sb(q1, q2, q3, cta, cta_dur=3.0):
+    return [{"type": "hook", "start": 0.0, "dur": 1.38, "text": "Contexto come a VRAM", "cue": "Contexto",
+             "object": "GPU"},
+            {"type": "quote", "start": q1, "dur": 2.0, "text": "O peso do modelo é só parte", "cue": "O peso"},
+            {"type": "stat", "start": q2, "dur": 2.0, "value": "4", "unit": "x", "label": "cache",
+             "cue": "O cache cresce"},
+            {"type": "quote", "start": q3, "dur": 1.0, "text": "Mede a VRAM antes", "cue": "Mede a VRAM"},
+            {"type": "cta", "start": cta, "dur": cta_dur, "text": "Subscribe · IA", "cue": "Subscribe"}]
+
+
+ok(craft.card_speech_starts(_sb(1.5, 4.0, 6.6, 8.2), _sw) == [0.0, 1.6, 4.4, 6.8, 8.4],
+   "card_speech_starts: each card's own words (quote text / cue), in narration order")
+_sync_ok = craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.2), _sw)
+ok(_sync_ok["version"] == craft.SYNC_V1 and [n["status"] for n in _sync_ok["notes"]] == ["ok"] * 4
+   and [n["lead"] for n in _sync_ok["notes"]] == [0.1, 0.4, 0.2, 0.2]
+   and all(set(n) >= {"i", "type", "start", "speech_start", "lead", "status"} for n in _sync_ok["notes"]),
+   "card_sync marker: one note per card (start, speech_start, lead, status)")
+ok(craft.video_maker_gate(_sb(1.5, 4.0, 6.6, 8.2), card_sync=_sync_ok)["checks"]["B"] == "PASS",
+   "in sync (leads 0.1–0.4s) → Gate B PASS")
+_late = craft.card_sync_marker(_sb(1.5, 4.6, 6.6, 8.2), _sw)
+_gl = craft.video_maker_gate(_sb(1.5, 4.6, 6.6, 8.2), card_sync=_late)
+ok(_gl["checks"]["B"] == "FAIL" and any("AFTER its speech" in r and "card 2 (stat)" in r for r in _gl["reasons"]),
+   "card 0.2s AFTER its own speech → Gate B FAIL (hard rule)")
+_early = craft.card_sync_marker(_sb(1.5, 3.1, 6.6, 8.2), _sw)
+_ge = craft.video_maker_gate(_sb(1.5, 3.1, 6.6, 8.2), card_sync=_early)
+ok(_ge["checks"]["B"] == "FAIL" and any("leads its speech" in r and "1.30s" in r for r in _ge["reasons"]),
+   "card leading its speech by 1.3s (> 1.1s ceiling) → Gate B FAIL")
+_lead11 = craft.card_sync_marker(_sb(1.5, 3.3, 6.6, 8.2), _sw)
+ok(craft.video_maker_gate(_sb(1.5, 3.3, 6.6, 8.2), card_sync=_lead11)["checks"]["B"] == "PASS",
+   "lead of 1.1s (the ceiling) → PASS")
+_capd = craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.6, cta_dur=craft.CTA_BEAT_MAX_S), _sw)
+ok(_capd["notes"][-1]["status"] == "late_capped"
+   and craft.video_maker_gate(_sb(1.5, 4.0, 6.6, 8.6, cta_dur=craft.CTA_BEAT_MAX_S), card_sync=_capd)["checks"]["B"] == "PASS",
+   "endcard after the Subscribe VO only because it sits at its 3.78s cap → noted late_capped, not failed")
+_capl = craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.6, cta_dur=2.0), _sw)
+ok(_capl["notes"][-1]["status"] == "late", "endcard late while under its cap → late (fails)")
+_um = _sb(1.5, 4.0, 6.6, 8.2)
+_um[2]["cue"] = "palavras que ninguém falou"
+_umk = craft.card_sync_marker(_um, _sw)
+ok(_umk["notes"][1]["status"] == "unmatched" and craft.card_sync_hits(_umk) == [],
+   "card whose words are not in the narration → noted 'unmatched' for the VM, not failed")
+_cont = _sb(1.5, 4.0, 6.6, 8.2)
+_cont.insert(3, {"type": "quote", "start": 5.9, "dur": 0.58, "text": "O cache cresce com cada token", "cue": "x"})
+ok(craft.card_sync_notes(_cont, _sw)[2]["status"] == "late",
+   "a card continuing a sentence that started under the previous card is 'late', never unmatched")
+ok(craft.video_maker_gate(_sb(1.5, 4.6, 6.6, 8.2))["checks"]["B"] == "PASS",
+   "unmarked board (older renders): no sync check — nothing rejected retroactively")
+ok(craft.video_maker_gate_reason({"beats": _sb(1.5, 4.6, 6.6, 8.2), "beat_timing": craft.BEAT_TIMING_CURRENT,
+                                  "card_sync": _late}) is not None
+   and craft.video_maker_gate_reason({"beats": _sb(1.5, 4.0, 6.6, 8.2), "beat_timing": craft.BEAT_TIMING_CURRENT,
+                                      "card_sync": _sync_ok}) is None,
+   "review/publish gate reads creation_config.card_sync")
+ok(craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.2), _sw, "long") is None
+   and craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.2), [], "short") is None,
+   "card_sync: long-form and no word timings → no marker")
+
 print(f"\nALL {_checks} CHECKS PASSED")

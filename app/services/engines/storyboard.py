@@ -1544,7 +1544,7 @@ def _wfold(w: str) -> str:
     return theme.fold(w).strip(",.;:!?\"'()—–")
 
 
-def _split_point(ws: list[str], lo: int = 2) -> int | None:
+def _split_point(ws: list[str], lo: int = 2, min_side: int = 3) -> int | None:
     """Best word index k to split ws into ws[:k] / ws[k:] at a clause seam.
 
     Tiers: clause punctuation, then before a conjunction, then before a
@@ -1552,7 +1552,7 @@ def _split_point(ws: list[str], lo: int = 2) -> int | None:
     not end on a function word. Nearest the middle wins within a tier."""
     n = len(ws)
     ks = range(lo, n - lo + 1)
-    ks3 = [k for k in range(3, n - 2) if _wfold(ws[k]) not in _BINDING]
+    ks3 = [k for k in range(min_side, n - min_side + 1) if _wfold(ws[k]) not in _BINDING]
     tiers = [
         [k for k in ks if ws[k - 1][-1:] in ",;:" or ws[k] in ("—", "–")],
         [k for k in ks3 if _wfold(ws[k]) in _CONJ_SPLIT],
@@ -1566,7 +1566,7 @@ def _split_point(ws: list[str], lo: int = 2) -> int | None:
     return None
 
 
-def _speech_units(words, split_over: float | None = None) -> list[dict]:
+def _speech_units(words, split_over: float | None = None, min_side: int = 3) -> list[dict]:
     """Display units {start, end, text} from sentence-annotated words.
 
     One unit per script sentence; a sentence spoken longer than a card
@@ -1590,7 +1590,7 @@ def _speech_units(words, split_over: float | None = None) -> list[dict]:
         # tws: display tokens (script text); wws: the TTS words spoken for them
         span = t_of(wws[-1], True) - t_of(wws[0]) if wws else 0.0
         if (span > over + 1e-9 or len(tws) > _SENT_CARD_MAX_WORDS) and len(tws) >= 4:
-            k = _split_point(tws)
+            k = _split_point(tws, min_side=min_side)
             if k:
                 need = len(_tok(" ".join(tws[:k])))
                 got, m = 0, 0
@@ -2103,6 +2103,163 @@ def _insert_slack_card(beats, words, surplus: float) -> bool:
     return False
 
 
+_GEN_FLAGS = ("_fill", "_split", "_cut")
+
+
+def _card_min(b) -> float:
+    """Shortest hold a card may get when the sync solver squeezes it."""
+    t = b.get("type") or ""
+    if t == "hook":
+        return _MIN_DUR
+    return _QUOTE_MIN if t in ("quote", "statement") else 1.4
+
+
+def _sync_solve_once(beats, v, duration: float, hook_max: float):
+    """Starts that put every card within [speech - lead max, speech] (never
+    after its own words) with holds in [card min, cap]; endcard ≤ _ENDCARD_MAX.
+    Returns ("ok", starts) or ("gap"|"crowd", i): no solution between card i
+    and card i+1 (too far apart → needs a card; too close → drop one)."""
+    from app.services import craft
+    n = len(beats)
+    lead = craft.SYNC_LEAD_MAX_S
+    D = float(duration)
+    inf = float("inf")
+    A = []
+    for i, b in enumerate(beats):
+        if i == 0 and (b.get("type") or "") == "hook":
+            A.append((0.0, 0.0))
+            continue
+        lo, hi = 0.0, D - _MIN_DUR
+        if v[i] is not None:
+            lo, hi = max(lo, float(v[i]) - lead), min(hi, float(v[i]))
+        if i == n - 1 and (b.get("type") or "") == "cta":
+            # the endcard cap wins over its own VO start: when the Subscribe
+            # line starts earlier than the cap allows, the chip sits at the
+            # cap (Gate B notes it as late_capped, never a mid card).
+            lo = max(lo, D - _ENDCARD_MAX)
+            hi = max(hi, lo)
+        A.append((lo, hi))
+
+    def dmax(i):
+        return (hook_max if (beats[i].get("type") or "") == "hook" else _MID_MAX) + _GAP
+
+    def dmin(i):
+        return _card_min(beats[i]) + _GAP
+
+    B = [None] * n
+    B[n - 1] = A[n - 1]
+    if B[n - 1][0] > B[n - 1][1] + 1e-9:
+        return "crowd", n - 2
+    for i in range(n - 2, -1, -1):
+        lo = max(A[i][0], B[i + 1][0] - dmax(i))
+        hi = min(A[i][1], B[i + 1][1] - dmin(i))
+        if lo > hi + 1e-9:
+            return ("gap" if A[i][1] < B[i + 1][0] - dmax(i) - 1e-9 else "crowd"), i
+        B[i] = (lo, hi)
+    st = []
+    for i, b in enumerate(beats):
+        cur = float(b.get("start") or 0.0)
+        lo, hi = B[i]
+        if i:
+            lo = max(lo, st[-1] + dmin(i - 1))
+            hi = min(hi, st[-1] + dmax(i - 1))
+        st.append(min(max(cur, lo), hi))
+    return "ok", st
+
+
+def _sync_board(beats, words, duration: float, hook_max: float) -> bool:
+    """CoS 2026-09-30: no card after its own speech; lead ≤ 1.1s.
+
+    Re-times the board on the speech starts Gate B measures
+    (craft.card_speech_starts). Where cards are too far apart a NEW sentence
+    card (unit not yet on screen) is inserted; where they are too close a
+    generated card is dropped. All-or-nothing: False leaves the board as it
+    was (Gate B then reports the out-of-sync cards)."""
+    from app.services import craft
+    if len(beats) < 2:
+        return False
+    snap = copy.deepcopy(beats)
+    levels = [_speech_units(words, over) for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP)]
+    levels.append(_speech_units(words, 2 * _QUOTE_MIN + _GAP, min_side=2))
+    for _ in range(24):
+        v = craft.card_speech_starts(beats, words)
+        state, res = _sync_solve_once(beats, v, duration, hook_max)
+        if state == "ok":
+            for i, b in enumerate(beats):
+                b["start"] = round(res[i], 3)
+            for i in range(len(beats) - 1):
+                beats[i]["dur"] = round(res[i + 1] - _GAP - res[i], 3)
+            beats[-1]["dur"] = round(float(duration) - res[-1], 3)
+            if validate_storyboard(beats, duration) and not craft.repeated_card_hits(beats) \
+                    or craft.repeated_card_hits(beats) == craft.repeated_card_hits(snap):
+                return True
+            break
+        i = res
+        if state == "crowd":
+            gen = [j for j in (i + 1, i) if 0 < j < len(beats) - 1
+                   and any(beats[j].get(f) for f in _GEN_FLAGS)]
+            if not gen:
+                break
+            del beats[gen[0]]
+            continue
+        # gap: a unit whose speech starts between card i and card i+1
+        lo_t = float(v[i]) if v[i] is not None else float(beats[i].get("start") or 0.0)
+        hi_t = float(v[i + 1]) if v[i + 1] is not None else float(
+            beats[i + 1].get("start") or duration)
+        keys = [craft.screen_text_key(b) for b in beats]
+        taken = {k for k in keys if k}
+        hook_toks = set(keys[0].split()) if (beats[0].get("type") or "") == "hook" else set()
+        mid = (lo_t + hi_t) / 2
+
+        def gate_clash(k, j):
+            # what Gate B itself rejects next to beat j (near-same text; a
+            # fragment only between text cards)
+            return craft.screen_text_near(k, keys[j]) or (
+                (beats[j].get("type") or "") in craft.FRAGMENT_TYPES
+                and craft.screen_text_fragment(k, keys[j]))
+
+        best = None
+        for units, strict in [(lv, st_) for st_ in (True, False) for lv in levels]:
+            for u in units:
+                t = float(u["start"])
+                if not (lo_t + 0.1 <= t <= hi_t - 0.1):
+                    continue
+                k = craft.screen_text_key({"type": "quote", "text": u["text"]})
+                clash = ((_clashes(k, keys[i]) or _clashes(k, keys[i + 1])) if strict
+                         else (gate_clash(k, i) or gate_clash(k, i + 1)))
+                if not k or k in taken or set(k.split()) <= hook_toks or clash:
+                    continue
+                if best is None or abs(t - mid) < abs(float(best["start"]) - mid):
+                    best = u
+            if best is not None:
+                break
+        if best is None and (beats[i].get("type") or "") in ("quote", "statement") and i > 0:
+            # the quote itself holds the long sentence: it keeps the head
+            # segment and the tail segment becomes the new card (#1386
+            # "Primeiro você descobre" | "o que o arquivo é.")
+            ct = (beats[i].get("text") or "").split()
+            for u in levels[-1]:
+                t = float(u["start"])
+                ut = u["text"].split()
+                if not (lo_t + 0.1 <= t <= hi_t - 0.1):
+                    continue
+                if (len(ut) >= len(ct) - 1 or _tok(" ".join(ct[-len(ut):])) != _tok(u["text"])):
+                    continue
+                head = " ".join(ct[:-len(ut)]).rstrip(",;:—–").strip()
+                if len(head.split()) < 2 or _wfold(head.split()[-1]) in _DANGLING:
+                    continue
+                beats[i]["text"] = head
+                best = u
+                break
+        if best is None:
+            break
+        beats.insert(i + 1, {"type": "quote", "cue": best["text"], "text": best["text"],
+                             "attribution": "", "_split": True,
+                             "start": round(float(best["start"]), 3), "dur": _QUOTE_MIN})
+    beats[:] = snap
+    return False
+
+
 def _cap_statements(beats, content_format=None) -> None:
     """Gate C backstop: Shorts keep ≤1 statement. Extra cards become quotes.
 
@@ -2250,7 +2407,13 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             return None
     _break_repeated_cards(beats, words)
     from app.services import craft as _craft
-    if (content_format or "short") != "long" and (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS:
+    rr_pace = ((content_format or "short") != "long"
+               and (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS)
+    if rr_pace:
         _pull_first_cut(beats, duration, words)
+    if (content_format or "short") != "long" and _is_annotated(words):
+        # Card ↔ speech sync (CoS 2026-09-30): never after its words, lead ≤ 1.1s.
+        _sync_board(beats, words, duration,
+                    (_craft.HOOK_FIRST_CUT_BY_S - _GAP) if rr_pace else _HOOK_MAX)
     return build_index_html(beats, th, resolution, width, height, duration,
                             content_format=content_format)
