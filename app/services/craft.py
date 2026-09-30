@@ -1284,20 +1284,73 @@ def _ident_parts(ident: str) -> list[str]:
     return [p for p in ident.split("_") if p]
 
 
-def tts_spoken_text(text: str | None) -> str:
+# Brand pronunciation lexicon (OS 2026-09-30, #1385 Gate B): edge-tts
+# en-US voices say "Owera's" as "Ora's/Aura's" (whisper small/medium on the
+# #1385 master), dropping the "we" syllable. Only the audio input is
+# respelled; cards/titles keep "Owera". "Oh-weh-ruh" was picked because
+# faster-whisper small AND medium transcribe it as "Oweru"/"Oweru's" (3
+# syllables, o-WEH-ruh) in both the bare and the possessive form, and edge-tts
+# returns it as ONE WordBoundary token. URLs/handles (owera.com, @owera) are
+# left untouched. Portuguese voices read "Owera" phonetically, so the lexicon
+# is English-only (voice None → applied; "pt-*" → skipped).
+TTS_LEXICON = {"owera": "Oh-weh-ruh"}
+_TTS_LEX_RE = re.compile(
+    r"(?<![\w./@\-])(" + "|".join(TTS_LEXICON) + r")(?=(?:['\u2019]s)?(?![\w/@\-]|\.\w))",
+    re.IGNORECASE)
+
+
+def _lexicon_applies(voice: str | None) -> bool:
+    return not (voice or "").lower().startswith("pt")
+
+
+def tts_spoken_text(text: str | None, voice: str | None = None) -> str:
     """Text for edge-tts: identifiers with underscores are spoken as words
-    (n_batch → "n batch", num_gpu → "num gpu", NUM_PARALLEL → "num parallel")."""
+    (n_batch → "n batch", num_gpu → "num gpu", NUM_PARALLEL → "num parallel"),
+    and brand words are respelled for English voices (Owera → "Oh-weh-ruh")."""
     def _say(m):
         ident = m.group(1)
         spoken = " ".join(_ident_parts(ident))
         return spoken.lower() if ident.isupper() else spoken
-    return _TTS_IDENT_RE.sub(_say, text or "")
+    out = _TTS_IDENT_RE.sub(_say, text or "")
+    if _lexicon_applies(voice):
+        out = _TTS_LEX_RE.sub(lambda m: TTS_LEXICON[m.group(1).lower()], out)
+    return out
 
 
-def remerge_tts_words(words, text: str | None) -> list[dict]:
+def _remerge_lexicon(out: list[dict], text: str | None) -> list[dict]:
+    """Map respelled brand words back to the displayed word. edge-tts may
+    return the respelling as one token ("Oh-weh-ruh's") or several ("Oh",
+    "weh", "ruh's"); consecutive tokens whose letters add up to the respelling
+    (+ optional possessive) collapse into one word with the display text."""
+    k = 0
+    for m in _TTS_LEX_RE.finditer(text or ""):
+        disp = m.group(1)
+        tail = (text or "")[m.end():m.end() + 2]
+        poss = tail if tail[:1] in ("'", "\u2019") and tail[1:2].lower() == "s" else ""
+        target = _alnum_fold(TTS_LEXICON[disp.lower()] + poss)
+        for j in range(k, len(out)):
+            acc, n = "", 0
+            while j + n < len(out) and len(acc) < len(target):
+                acc += _alnum_fold(out[j + n].get("text") or "")
+                n += 1
+                if not target.startswith(acc):
+                    break
+            if acc == target and n:
+                start = float(out[j].get("start") or 0.0)
+                end = _word_end(out[j + n - 1]) or start
+                out[j:j + n] = [{**out[j], "text": disp + poss, "start": start,
+                                 "dur": round(max(0.0, end - start), 4)}]
+                k = j + 1
+                break
+    return out
+
+
+def remerge_tts_words(words, text: str | None, voice: str | None = None) -> list[dict]:
     """Merge the WordBoundary words of a normalized identifier back into one
     word carrying the displayed identifier ("n" + "batch" → "n_batch"), with
-    the first word's start and the last word's end. Unmatched → unchanged."""
+    the first word's start and the last word's end, and map lexicon
+    respellings back to the brand word ("Oh-weh-ruh's" → "Owera's").
+    Unmatched → unchanged."""
     out = [dict(w) for w in (words or []) if isinstance(w, dict)]
     idents = [m.group(1) for m in _TTS_IDENT_RE.finditer(text or "")]
     k = 0
@@ -1318,6 +1371,8 @@ def remerge_tts_words(words, text: str | None) -> list[dict]:
                                  "dur": round(max(0.0, end - start), 4)}]
                 k = j + 1
                 break
+    if _lexicon_applies(voice):
+        out = _remerge_lexicon(out, text)
     return out
 
 
@@ -1467,10 +1522,37 @@ def _hold(b) -> float:
         return 0.0
 
 
-def card_sync_notes(beats, words) -> list[dict]:
-    """Per-card sync note (index, type, start, speech_start, lead, status)."""
+def endcard_vo_content_end(words, script: str | None) -> float | None:
+    """End (s) of the last spoken word BEFORE the series endcard VO (the last
+    Subscribe sentence of ``script``). None when there is no endcard VO or
+    the words don't carry it."""
+    sents = [x.strip() for x in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if x.strip()]
+    cta = next((x for x in reversed(sents)
+                if is_endcard_vo(x) or contains_subscribe_cta(x)), None)
+    need = _sync_toks(cta)
+    if not need:
+        return None
+    toks, owner = [], []
+    ws = [w for w in (words or []) if isinstance(w, dict)]
+    for wi, w in enumerate(ws):
+        for t in _sync_toks(w.get("text") or w.get("word")):
+            toks.append(t)
+            owner.append(wi)
+    for p in range(len(toks) - len(need), 0, -1):
+        if toks[p:p + len(need)] == need:
+            return _word_end(ws[owner[p - 1]])
+    return None
+
+
+def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
+    """Per-card sync note (index, type, start, speech_start, lead, status).
+    With ``script``, the endcard also gets ``content_end`` (end of the last
+    word before the Subscribe line) and status "straddle" when it cuts in
+    while that content sentence is still being spoken (#1385: "Coming soon"
+    22.84–23.50 under an endcard at 23.20)."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     v = card_speech_starts(board, words)
+    c_end = endcard_vo_content_end(words, script) if script else None
     notes = []
     for i, b in enumerate(board):
         if i == 0 and (b.get("type") or "") == "hook":
@@ -1478,27 +1560,32 @@ def card_sync_notes(beats, words) -> list[dict]:
         st = _cue_start(b)
         note = {"i": i, "type": b.get("type") or "?", "start": round(st, 3),
                 "speech_start": v[i]}
+        last_cta = i == len(board) - 1 and (b.get("type") or "") in CTA_TYPES
         if v[i] is None:
             note.update(lead=None, status="unmatched")
         else:
             lead = round(float(v[i]) - st, 3)
             status = ("late" if lead < -SYNC_TOL_S else
                       "early" if lead > SYNC_LEAD_MAX_S + SYNC_TOL_S else "ok")
-            last_cta = i == len(board) - 1 and (b.get("type") or "") in CTA_TYPES
             if status == "late" and last_cta and _hold(b) >= CTA_BEAT_MAX_S - SYNC_TOL_S:
                 # the endcard already starts as early as its cap allows
                 status = "late_capped"
             note.update(lead=lead, status=status)
+        if last_cta and c_end is not None:
+            note["content_end"] = c_end
+            if note["status"] in ("ok", "early", "unmatched") and st < c_end - SYNC_TOL_S:
+                note["status"] = "straddle"
         notes.append(note)
     return notes
 
 
-def card_sync_marker(beats, words, content_format: str | None = "short") -> dict | None:
+def card_sync_marker(beats, words, content_format: str | None = "short",
+                     script: str | None = None) -> dict | None:
     """creation_config["card_sync"] for a new render (None: long / no timings)."""
     if (content_format or "short") == "long" or not words:
         return None
     return {"version": SYNC_V1, "lead_max": SYNC_LEAD_MAX_S,
-            "notes": card_sync_notes(beats, words)}
+            "notes": card_sync_notes(beats, words, script)}
 
 
 def card_sync_hits(card_sync: dict | None) -> list[str]:
@@ -1517,6 +1604,80 @@ def card_sync_hits(card_sync: dict | None) -> list[str]:
         elif n.get("status") == "early":
             hits.append(f"card {n.get('i')} ({n.get('type')}) at {st:.2f}s leads its "
                         f"speech ({sp:.2f}s) by {float(lead):.2f}s (max {SYNC_LEAD_MAX_S:.1f}s)")
+        elif n.get("status") == "straddle":
+            hits.append(f"endcard at {st:.2f}s cuts in before the last content "
+                        f"sentence ends ({float(n.get('content_end') or 0):.2f}s)")
+    return hits
+
+
+# Product teasers (OS "· Shipping N", CoS/CMO 2026-09-30, #1385 Gate B):
+# no invented CLI on screen. The compose prompt required a code/command beat
+# on every 9:16 board, so #1385 showed "$ channels thumb cover.png" — a
+# command that does not exist (v4/CMO: no API or path names on screen). New
+# teaser renders carry creation_config["cli_check"] = {"version": CLI_V1,
+# "hits": [...]}: every command/code card whose command, output or code lines
+# are not literally in the narration. Gate B fails any hit. Scope: product
+# teasers only (RR/OS explainers keep their illustrative terminal stills).
+PRODUCT_TEASER_SERIES = "Shipping"
+CLI_V1 = "cli_v1"
+CLI_BEAT_TYPES = frozenset({"command", "code"})
+
+
+def is_product_teaser(title: str | None = None, topic_name: str | None = None) -> bool:
+    """Shipping series: title suffix " · Shipping N" or topic "Shipping"."""
+    m = SPOKEN_TITLE_RE.search(title or "")
+    if m and _canonical_series(m.group(1)) == PRODUCT_TEASER_SERIES:
+        return True
+    return series_from_topic(topic_name) == PRODUCT_TEASER_SERIES
+
+
+def cli_lines(beat: dict | None) -> list[str]:
+    """On-screen terminal/code text of a command/code card."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") not in CLI_BEAT_TYPES:
+        return []
+    if beat.get("type") == "command":
+        raw = [beat.get("command")] + list(beat.get("output") or [])
+    else:
+        raw = list(beat.get("lines") or [])
+    return [str(x).strip() for x in raw if str(x or "").strip()]
+
+
+def text_in_script(text: str | None, script: str | None) -> bool:
+    """True when ``text`` (letters/digits, in order) is said in ``script``."""
+    need = _sync_toks(text)
+    if not need:
+        return True
+    return f" {' '.join(need)} " in f" {' '.join(_sync_toks(script))} "
+
+
+def fabricated_cli(beats, script: str | None) -> list[dict]:
+    """Command/code cards showing text the narration never says."""
+    out = []
+    for i, b in enumerate(b for b in (beats or []) if isinstance(b, dict)):
+        bad = [ln for ln in cli_lines(b) if not text_in_script(ln, script)]
+        if bad:
+            out.append({"i": i, "type": b.get("type"), "text": bad[:3]})
+    return out
+
+
+def cli_check_marker(beats, script: str | None, *, title: str | None = None,
+                     topic_name: str | None = None,
+                     content_format: str | None = "short") -> dict | None:
+    """creation_config["cli_check"] for a new product-teaser short (else None)."""
+    if (content_format or "short") == "long" or not is_product_teaser(title, topic_name):
+        return None
+    return {"version": CLI_V1, "hits": fabricated_cli(beats, script)}
+
+
+def cli_check_hits(cli_check: dict | None) -> list[str]:
+    if not isinstance(cli_check, dict) or cli_check.get("version") != CLI_V1:
+        return []
+    hits = []
+    for h in cli_check.get("hits") or []:
+        if isinstance(h, dict):
+            shown = " / ".join(str(x) for x in (h.get("text") or []))
+            hits.append(f"card {h.get('i')} ({h.get('type')}) shows {shown!r}, "
+                        "which the narration never says")
     return hits
 
 
@@ -1537,7 +1698,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      used_fallback: bool = False, legacy_timing: bool = False,
                      hook_pace: dict | None = None,
                      beat_timing: str | None = None,
-                     card_sync: dict | None = None) -> dict:
+                     card_sync: dict | None = None,
+                     cli_check: dict | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1648,6 +1810,15 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             f". A card never appears after its own words; it may lead them by "
             f"≤{SYNC_LEAD_MAX_S:.1f}s."
         )
+    # Product teaser: no invented CLI (marked new teaser renders; CLI_V1).
+    cli_hits = cli_check_hits(cli_check)
+    if cli_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Fabricated CLI: FAIL — " + "; ".join(cli_hits) +
+            ". Product teasers never show a command, CLI, file path or API "
+            "output that the script does not literally contain."
+        )
 
     # --- C: kill spoken list/slide spam ------------------------------------
     types = [b.get("type") or "" for b in board]
@@ -1747,9 +1918,11 @@ def video_maker_gate_reason(creation_config=None,
     legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
     pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
     sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
+    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
                             used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace, beat_timing=bt, card_sync=sync)
+                            hook_pace=pace, beat_timing=bt, card_sync=sync,
+                            cli_check=cli)
     return format_craft_gate_reason(gate)
 
 

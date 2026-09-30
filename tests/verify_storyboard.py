@@ -2368,6 +2368,9 @@ for _vid in ("1380", "1381", "1382", "1383", "1386"):
            "%s: every card in sync — never after its speech, lead ≤1.1s (CoS): %s"
            % (_tag, [(n["i"], n["status"], n["lead"]) for n in _sy["notes"] if n["status"] != "ok"]))
         ok(not any(t == "obedece" for _, t in _txt), "%s: no lone 'obedece' card (#1382)" % _tag)
+        _sys = craft.card_sync_marker(_bb, _ww, script=_f["script"])
+        ok(not any(n["status"] == "straddle" for n in _sys["notes"]),
+           "%s: endcard never cuts into the last content sentence: %s" % (_tag, _sys["notes"][-1]))
 
 # _sync_board: a late card is moved to lead its speech; a gap gets a sentence card.
 _sy_script = "Um dois três. O peso do modelo é só parte da conta. O cache cresce. Subscribe — next IA trap."
@@ -2388,5 +2391,139 @@ ok(storyboard._sync_board(_sy_b, _sy_words, _sy_d, 2.38)
 ok(all(float(b["dur"]) <= craft.MID_BEAT_MAX_S + 1e-6 for b in _sy_b[1:-1])
    and any(b.get("type") == "quote" for b in _sy_b),
    "_sync_board: the 1.8s hole between cards becomes a NEW sentence card (holds stay ≤2.80)")
+
+# --- Product teasers (OS Shipping, #1385 Gate B 2026-09-30) ---
+print("product teaser: no invented CLI, soft product card, endcard after the content")
+_tp_all = PHASE_A + ["code", "command", "diagram"]
+_sp_rr = storyboard._system_prompt(_tp_all)
+_sp_tz = storyboard._system_prompt(_tp_all, product_teaser=True)
+ok("2b. MUST include exactly one `code` or `command`" in _sp_rr
+   and "2b. MUST include" not in _sp_tz and "9:16 MUST carry the claim" not in _sp_tz
+   and "PRODUCT TEASER: NEVER invent commands, CLI" in _sp_tz
+   and "the required code beat" not in _sp_tz,
+   "teaser system prompt: no required snippet, explicit no-invented-CLI rule (explainers unchanged)")
+ok("PRODUCT TEASER: no terminal/CLI/code" in storyboard._user_prompt("t", "a b.", "short", product_teaser=True)
+   and "PRODUCT TEASER" not in storyboard._user_prompt("t", "a b.", "short"),
+   "teaser user prompt adds the no-CLI line; explainers unchanged")
+
+_s1385 = ("Your thumbnail, not a template, in Channels Manager. Channels Manager is Owera's builder for "
+          "YouTube channels, and it's still in development. Drop in your own PNG or JPEG, and it goes to "
+          "YouTube as the thumbnail. Before, every video got the auto template. Too small, or not an image, "
+          "and it stops before upload. Now your design wins. Still building. Coming soon. Subscribe — next "
+          "Shipping drop.")
+_t1385 = "Your thumbnail, not a template, in Channels Manager. · Shipping 8"
+# the live #1385 LLM draft (creation_config beats, timing stripped)
+_b1385 = [
+    {"type": "hook", "cue": "Your thumbnail, not a", "text": "Your thumbnail, not a template, in Channels Manager.",
+     "object": "thumbnail"},
+    {"type": "command", "cue": "Channels Manager is Owera's", "prompt": "$", "command": "channels thumb cover.png",
+     "output": ["image/png accepted", "youtube thumbnail set", "auto template skipped"]},
+    {"type": "term_define", "cue": "and it's still in", "term": "In development",
+     "definition": "built now, not shipped yet"},
+    {"type": "stat", "cue": "Drop in your own", "value": "2", "unit": "formats", "label": "PNG or JPEG"},
+    {"type": "stat", "cue": "it goes to YouTube", "value": "1280×720", "unit": "px", "label": "YouTube thumbnail frame"},
+    {"type": "compare", "cue": "Before, every video got", "left": {"title": "Auto template", "items": ["every video"]},
+     "right": {"title": "Your image", "items": ["your design"]}},
+    {"type": "term_define", "cue": "Too small, or not", "term": "Upload gate",
+     "definition": "fails the size or image-type check"},
+    {"type": "statement", "cue": "and it stops before", "text": "Upload never starts", "w": 2},
+    {"type": "quote", "cue": "Now your design wins", "text": "Now your design wins"},
+    {"type": "cta", "cue": "Subscribe — next", "text": "Subscribe · Shipping"},
+]
+
+
+def _paced(script, step=0.3, pause=0.45):
+    out, t = [], 0.0
+    for w in script.split():
+        if not any(ch.isalnum() for ch in w):
+            continue
+        out.append({"text": w.strip(".,!?"), "start": round(t, 3), "dur": round(step - 0.05, 3)})
+        t += step
+        if w.endswith((".", "!", "?")):
+            t += pause
+    return out
+
+
+_w1385 = _paced(_s1385)
+_d1385 = round(_w1385[-1]["start"] + 0.9, 2)
+_tz_calls = []
+
+
+def _tz_llm(user, system=None, max_tokens=None):
+    _tz_calls.append(system)
+    return json.dumps({"beats": _b1385})
+
+
+_tz_html = _compose(_tz_llm, subject=_t1385, script=_s1385, words=_w1385, duration=_d1385, brand="os",
+                    topic_id=45, topic_name="Shipping", allowed_types=_tp_all)
+_tz = craft.beats_from_html(_tz_html)
+ok(len(_tz_calls) == 1 and "PRODUCT TEASER" in _tz_calls[0],
+   "teaser compose: no forced code/command retry (R2 skipped), teaser rule in the prompt")
+ok(not any(b.get("type") in ("command", "code") for b in _tz)
+   and "channels thumb" not in _tz_html,
+   "#1385: the invented '$ channels thumb cover.png' card is gone from the board and the HTML")
+_q1 = [b for b in _tz if b.get("cue") == "Channels Manager is Owera's"]
+ok(_q1 and _q1[0]["type"] == "quote" and _q1[0]["text"] == "Channels Manager is Owera's builder for YouTube channels",
+   "#1385: its slot is a text card of the spoken clause: %r" % (_q1[0].get("text") if _q1 else None))
+_soft = [b for b in _tz if b.get("text") == "Still building · Coming soon"]
+ok(len(_soft) == 1 and _soft[0]["cue"] == "Still building" and _tz[-2] is _soft[0] and _tz[-1]["type"] == "cta",
+   "#1385: one 'Still building · Coming soon' card right before the endcard (v4 soft product card)")
+_st_sb = [w["start"] for w in _w1385 if w["text"] == "Still"][0]
+ok(abs(float(_soft[0]["start"]) - _st_sb) <= craft.SYNC_LEAD_MAX_S + 1e-6 and float(_soft[0]["start"]) <= _st_sb + 1e-6,
+   "soft card sits on the 'Still building' speech (lead ≤1.1s, never after)")
+_nq = sum(1 for b in _tz if b.get("type") == "quote")
+ok(_nq >= 3 and _tz_html.count('<div class="qmark">') == _nq - 1,
+   "soft card renders plain (no quote mark); other quotes keep theirs")
+_tz_sync = craft.card_sync_marker(_tz, _w1385, script=_s1385)
+_c_end = craft.endcard_vo_content_end(_w1385, _s1385)
+ok(float(_tz[-1]["start"]) >= _c_end - craft.SYNC_TOL_S and _tz_sync["notes"][-1]["status"] in ("ok", "late_capped"),
+   "#1385: endcard starts after 'Coming soon' ends (%.2f ≥ %.2f)" % (float(_tz[-1]["start"]), _c_end))
+_tz_cli = craft.cli_check_marker(_tz, _s1385, title=_t1385, topic_name="Shipping")
+_tz_gate = craft.video_maker_gate(_tz, beat_timing=craft.BEAT_TIMING_CURRENT, card_sync=_tz_sync, cli_check=_tz_cli)
+ok(_tz_cli["hits"] == [] and not craft.card_sync_hits(_tz_sync) and _tz_gate["result"] == "PASS",
+   "#1385 re-composed: Gate A+B+C PASS, no fabricated CLI, every card in sync: %s" % _tz_gate["reasons"])
+ok(storyboard.validate_storyboard(_tz, _d1385) and craft.repeated_card_hits(_tz) == [],
+   "#1385 re-composed: board valid, no repeated card")
+
+# explainers keep their command stills (scope: product teasers only)
+_rr_cmd = _compose(_tz_llm, subject="Your thumbnail, not a template · Agent memory 40", script=_s1385,
+                   words=_w1385, duration=_d1385, brand="os", topic_id=12, topic_name="Agent memory",
+                   allowed_types=_tp_all)
+ok("channels thumb cover.png" in _rr_cmd,
+   "non-teaser board: command card untouched (RR/OS explainers unchanged)")
+
+# _replace_fabricated_cli keeps a command the narration says
+_rf = [{"type": "hook", "cue": "a", "text": "x"},
+       {"type": "command", "cue": "Run ollama ps", "prompt": "$", "command": "ollama ps", "output": []},
+       {"type": "code", "cue": "Set the flag", "lines": ["OLLAMA_NUM_PARALLEL=1"]},
+       {"type": "cta", "cue": "Subscribe", "text": "Subscribe · Shipping"}]
+storyboard._replace_fabricated_cli(_rf, "Run ollama ps. Set the flag to one. Subscribe — next Shipping drop.")
+ok(_rf[1]["type"] == "command" and _rf[2]["type"] == "quote" and _rf[2]["text"] == "Set the flag to one",
+   "_replace_fabricated_cli: said command kept; unsaid code → spoken clause card")
+
+# soft product card: replaces an LLM card on the soft lines; PT variant; no soft line → no-op
+_sp1 = [{"type": "hook", "cue": "Now", "text": "Now"},
+        {"type": "quote", "cue": "Now your design wins", "text": "Now your design wins"},
+        {"type": "statement", "cue": "Coming soon", "text": "Coming soon"},
+        {"type": "cta", "cue": "Subscribe", "text": "Subscribe · Shipping"}]
+storyboard._soft_product_card(_sp1, "Now your design wins. Still building. Coming soon. Subscribe — next Shipping drop.")
+ok([b.get("text") for b in _sp1] == ["Now", "Now your design wins", "Still building · Coming soon", "Subscribe · Shipping"],
+   "_soft_product_card: one card replaces the LLM's 'Coming soon' statement, before the endcard")
+_sp2 = [{"type": "hook", "cue": "a", "text": "a"}, {"type": "cta", "cue": "Inscreva", "text": "Inscreva-se · Shipping"}]
+storyboard._soft_product_card(_sp2, "Seu design vence. Ainda construindo. Em breve. Inscreva-se — próximo drop Shipping.")
+ok(_sp2[1].get("text") == "Ainda construindo · Em breve" and _sp2[1].get("plain"),
+   "_soft_product_card: PT 'Ainda construindo · Em breve'")
+_sp3 = [{"type": "hook", "cue": "a", "text": "a"}, {"type": "cta", "cue": "Subscribe", "text": "Subscribe · Shipping"}]
+storyboard._soft_product_card(_sp3, "Now your design wins. Subscribe — next Shipping drop.")
+ok(len(_sp3) == 2, "_soft_product_card: no soft line → board unchanged")
+
+# solver: the endcard waits for the end of the last content sentence
+_se_b = [{"type": "hook", "start": 0.0, "dur": 2.0, "text": "a"},
+         {"type": "quote", "start": 2.12, "dur": 1.5, "text": "b"},
+         {"type": "cta", "start": 3.74, "dur": 3.0, "text": "Subscribe · Shipping"}]
+_st0, _r0 = storyboard._sync_solve_once(_se_b, [0.0, 2.2, 4.6], 7.0, 2.38)
+_st1, _r1 = storyboard._sync_solve_once(_se_b, [0.0, 2.2, 4.6], 7.0, 2.38, content_end=4.3)
+ok(_st0 == "ok" and _r0[2] < 4.3 and _st1 == "ok" and 4.3 - 1e-6 <= _r1[2] <= 4.6 + 1e-6,
+   "_sync_solve_once: content_end keeps the endcard off the last content sentence (%.2f → %.2f)" % (_r0[2], _r1[2]))
 
 print(f"\nALL {_checks} CHECKS PASSED")
