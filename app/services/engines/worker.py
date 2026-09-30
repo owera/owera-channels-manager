@@ -1132,27 +1132,68 @@ def _render(job_dir: Path, out_path: Path) -> None:
         raise RuntimeError("hyperframes render reported success but produced no file")
 
 
+_AUDIO_EXTS = (".mp3", ".m4a", ".wav")
+
+
+def _audio_in_pool(root: Path, candidate: Path) -> bool:
+    """True when `candidate` resolves to an audio file inside the resolved pool root.
+
+    `root` must already be resolved. On macOS `/tmp` is a symlink to `/private/tmp`;
+    comparing a resolved file to an unresolved root rejects every file in a temp pool.
+    """
+    try:
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if not resolved.is_file() or not resolved.is_relative_to(root):
+        return False
+    return resolved.suffix.lower() in _AUDIO_EXTS
+
+
+def _named_track(bgm_dir: Path, root: Path, name: object) -> Path | None:
+    """A single pool filename, or None.
+
+    `Path(dir) / "/abs"` is `/abs` (pathlib drops the left operand) and
+    `Path(dir) / "../x.wav"` leaves the pool. A symlink inside the pool that
+    resolves outside is refused too. A hardlink inside the pool to an outside
+    file still matches — creating that link requires write access to the pool.
+    """
+    if not isinstance(name, str) or not name or name != Path(name).name:
+        return None
+    candidate = bgm_dir / name
+    if not _audio_in_pool(root, candidate):
+        return None
+    return candidate
+
+
 def _pick_bgm(params: dict, handle: str) -> Path | None:
     bgm_type = params.get("bgm_type")
-    if bgm_type == "":                       # explicitly disabled
+    if bgm_type == "":                       # explicitly disabled (wins over bgm_file)
         return None
     bgm_dir = Path(settings.bgm_dir)
     if not bgm_dir.exists():
         bgm_dir = REPO_DIR / "channel" / "music"
     if not bgm_dir.exists():
         return None
-    wav_tracks = sorted(p for p in bgm_dir.glob("techno_*.wav"))
-    all_tracks = sorted(p for p in bgm_dir.glob("*") if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
-    # Rotate the full bed pool (techno_* used to starve every other track). Named
-    # files still win; explicit-off is bgm_type="".
-    tracks = all_tracks or wav_tracks
+    try:
+        root = bgm_dir.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    # The profile editor stores the operator's chosen track on bgm_file.
+    # HyperFrames used to ignore that field and hash-rotate instead.
+    chosen = _named_track(bgm_dir, root, params.get("bgm_file"))
+    if chosen is not None:
+        return chosen
+    # Rotate the full bed pool (techno_* used to starve every other track).
+    # A symlink that resolves outside the pool is not a bed.
+    tracks = sorted(p for p in bgm_dir.glob("*") if _audio_in_pool(root, p))
     if not tracks:
         return None
+    # Legacy: a profile that put the filename in bgm_type (not "random").
     if isinstance(bgm_type, str) and bgm_type not in ("", "random"):
-        named = bgm_dir / bgm_type
-        if named.exists():
+        named = _named_track(bgm_dir, root, bgm_type)
+        if named is not None:
             return named
-    # Deterministic pick (no Math.random equivalent needed): hash the handle.
     idx = int(hashlib.sha1(handle.encode()).hexdigest(), 16) % len(tracks)
     return tracks[idx]
 

@@ -29,8 +29,8 @@ Covers, dependency-free (no network, no HyperFrames CLI, no live ffmpeg/TTS/LLM)
     clip + ellipsis, empty → sentinel
   - ``_voice``: default, -Male/-Female strip, already-bare, case-sensitive
   - ``_creation_config``: never-raises, beat scrape, bgm name, volume-0 pin
-  - ``_pick_bgm``: explicit-off, missing dir, techno_* preferred, named file,
-    handle-hash pick
+  - ``_pick_bgm``: explicit-off, missing dir, full-pool rotate, named
+    bgm_type, bgm_file (profile editor), path escape refused, handle-hash pick
   - ``_probe_duration`` / ``_has_visible_frames`` (subprocess stubbed):
     parse/fail, dur<=0 does not block, uniform vs varied 32x32 gray
   - ``_render`` / ``_mux`` command contracts
@@ -993,7 +993,7 @@ try:
     with tempfile.TemporaryDirectory() as td:
         settings.bgm_dir = td
         ok(worker._pick_bgm({}, "h") is None, "empty bgm_dir → None")
-        # Foreign stems + mp3 must lose to techno_*.wav
+        # Full bed: mp3 and non-techno wavs stay in the rotation.
         Path(td, "other.wav").write_bytes(b"x")
         Path(td, "song.mp3").write_bytes(b"x")
         Path(td, "techno_aaa.wav").write_bytes(b"x")
@@ -1019,6 +1019,50 @@ try:
            "missing named file falls through to the hash pick")
         rand = worker._pick_bgm({"bgm_type": "random"}, "handle-one")
         ok(rand == picked, "bgm_type='random' uses the hash pick, not a name")
+
+    # Profile editor writes the chosen track to bgm_file. Silence still wins.
+    # A name that leaves the pool (absolute, "..", symlink out) is not opened.
+    # One legal audio file so every fallthrough hash pick is bed.wav.
+    with tempfile.TemporaryDirectory() as outer:
+        outer_p = Path(outer)
+        secret = outer_p / "secret.wav"
+        secret.write_bytes(b"SECRET")
+        pool = outer_p / "pool"
+        pool.mkdir()
+        bed = pool / "bed.wav"
+        bed.write_bytes(b"bed")
+        (pool / "notes.txt").write_text("not audio")
+        (pool / "link.wav").symlink_to(secret)
+        settings.bgm_dir = str(pool)
+        ok(worker._pick_bgm({"bgm_type": "", "bgm_file": "bed.wav"}, "h") is None,
+           "bgm_type='' stays silence and ignores bgm_file")
+        missed = worker._pick_bgm({"bgm_file": "nope.wav"}, "handle-one")
+        ok(missed is not None and missed.resolve() == bed.resolve(),
+           "a missing bgm_file falls through to the in-pool hash pick")
+        ok(worker._pick_bgm({"bgm_file": "notes.txt"}, "handle-one").resolve() == bed.resolve(),
+           "a non-audio bgm_file is ignored")
+        escaped = worker._pick_bgm({"bgm_file": str(secret)}, "handle-one")
+        ok(escaped is not None and escaped.resolve() == bed.resolve()
+           and escaped.resolve() != secret.resolve(),
+           "an absolute bgm_file does not leave the pool")
+        hopped = worker._pick_bgm({"bgm_type": "../secret.wav"}, "handle-one")
+        ok(hopped is not None and hopped.resolve() == bed.resolve(),
+           "a bgm_type parent hop does not leave the pool")
+        via_link = worker._pick_bgm({"bgm_file": "link.wav"}, "handle-one")
+        ok(via_link is not None and via_link.resolve() == bed.resolve(),
+           "a bgm_file symlink that resolves outside the pool is ignored")
+        rotated = worker._pick_bgm({}, "handle-one")
+        ok(rotated is not None and rotated.resolve() == bed.resolve(),
+           "the rotation pool excludes a symlink that leaves the pool")
+        (pool / "song.mp3").write_bytes(b"song")
+        chosen = worker._pick_bgm(
+            {"bgm_type": "random", "bgm_file": "song.mp3"}, "handle-one")
+        ok(chosen is not None and chosen.name == "song.mp3" and chosen.parent == pool,
+           "bgm_file is the chosen track even when bgm_type is random")
+        over_named = worker._pick_bgm(
+            {"bgm_type": "bed.wav", "bgm_file": "song.mp3"}, "handle-one")
+        ok(over_named is not None and over_named.name == "song.mp3",
+           "bgm_file wins over a legacy filename in bgm_type")
 
     # No wav in dir: still pick any mp3/m4a/wav.
     with tempfile.TemporaryDirectory() as td:

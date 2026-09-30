@@ -1944,3 +1944,23 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 62. ✅ DONE (PR this cycle) HyperFrames honors profile `bgm_file` and keeps the pick inside the pool — normal
+- **resolution (2026-09-30):** `_pick_bgm` reads `params["bgm_file"]` (the
+  track the profile editor stores) before the handle-hash rotation.
+  `bgm_type=""` is still silence and ignores a file. A legacy filename in
+  `bgm_type` still wins when `bgm_file` is unset. A name that is not a
+  single pool filename — absolute (`Path(dir) / "/abs"` drops the left
+  side), `..`, or a symlink that resolves outside — is ignored, and so
+  is a symlink in the rotation pool. A hardlink inside the pool to an
+  outside file still matches; creating it takes write access to the pool.
+  Suite: `tests/verify_worker.py` 283 → 292.
+- **why:** the HyperFrames profile editor offers `bgm_file`, and the render
+  never read it, so a chosen bed was hash-rotated instead. The same join
+  (`bgm_dir / name`) follows an absolute path or `..` out of the pool.
+- **caution:** normal (`worker._pick_bgm` only). Isolated commit + extend
+  `tests/verify_worker.py`. Explicit silence and the existing hash/named
+  pins stay.
+- **acceptance:** `bgm_file` selects that track; silence still returns no
+  bed; an absolute path, a parent hop, and an outward symlink stay inside
+  the pool.
