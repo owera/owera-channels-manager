@@ -790,11 +790,13 @@ def render_quote(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
     attr = ('<div class="qattr">— ' + theme.esc(b["attribution"]) + "</div>") if b.get("attribution") else ""
-    inner = '<div class="qmark">“</div><div class="qtext">' + _words_html(b["text"]) + "</div>" + attr
-    tw = [
-        _from(bid + " .qmark", s, "opacity:0,scale:0.4", "opacity:1,scale:1", dur=0.25, ease="back.out(2)"),
-        _from(bid + " .word", s + 0.1, "opacity:0,y:18", "opacity:1,y:0", dur=0.3, stagger=0.035),
-    ]
+    # plain = a product status line ("Still building · Coming soon"), not a
+    # quotation: no quote mark.
+    qmark = "" if b.get("plain") else '<div class="qmark">“</div>'
+    inner = qmark + '<div class="qtext">' + _words_html(b["text"]) + "</div>" + attr
+    tw = [] if b.get("plain") else [
+        _from(bid + " .qmark", s, "opacity:0,scale:0.4", "opacity:1,scale:1", dur=0.25, ease="back.out(2)")]
+    tw.append(_from(bid + " .word", s + 0.1, "opacity:0,y:18", "opacity:1,y:0", dur=0.3, stagger=0.035))
     if b.get("attribution"):
         tw.append(_from(bid + " .qattr", s + 0.4, "opacity:0", "opacity:1", dur=0.3))
     return _shell(i, b, "quote", inner), _wrap(i, ctx, tw)
@@ -1080,9 +1082,18 @@ _TYPE_DOCS = {
 }
 
 
-def _system_prompt(allowed: list[str]) -> str:
+_TEASER_NO_CLI_RULE = (
+    "7. PRODUCT TEASER: NEVER invent commands, CLI, terminal sessions, file paths, code "
+    "or API output. A `command`/`code` beat is allowed ONLY when the narration literally "
+    "says that exact command/code; otherwise carry the claim with stat / compare / "
+    "term_define / quote. No API or path names on screen.\n\n")
+
+
+def _system_prompt(allowed: list[str], product_teaser: bool = False) -> str:
     types = "\n".join("- " + _TYPE_DOCS[t] for t in allowed if t in _TYPE_DOCS)
     has_bc = any(t in allowed for t in ("code", "command", "diagram"))
+    # Product teasers (OS Shipping): no required snippet, no invented CLI.
+    need_snippet = has_bc and not product_teaser
     rich = "stat / compare / list / term_define" + (" / code / command / diagram" if has_bc else "")
     return (
         "You design the VISUAL storyboard for a technical-explainer video. The narration "
@@ -1100,7 +1111,7 @@ def _system_prompt(allowed: list[str]) -> str:
          "(<=5 lines, <=30 chars per line) that demonstrates the narration's claim — even when "
          "the narration never reads code aloud. A technical explainer with no snippet on screen "
          "is WRONG: SHOW the thing the words only describe. Prefer replacing a `statement` over "
-         "dropping the snippet.\n" if has_bc else "") +
+         "dropping the snippet.\n" if need_snippet else "") +
         "3. Use `statement` SPARINGLY — at MOST 2 in the whole video. A storyboard that is mostly "
         "`statement` is WRONG: it just re-displays the spoken words. Convert those into the richer "
         "types (" + rich + ") instead.\n"
@@ -1127,26 +1138,28 @@ def _system_prompt(allowed: list[str]) -> str:
         "Endcard visual hold ≤4.0s. The payoff beat before it carries the lesson. "
         "NEVER anchor two beats inside the same short sentence. FORBIDDEN on the cta and anywhere "
         "on screen: Follow, Follow tomorrow, Siga, waitlist, owera.com, Cloud-as-product, "
-        "'part 2 coming', SMY, Instagram, LinkedIn, 💸, neon. Endcard also forbids amanhã.\n"
-        "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
-        "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
-        "boxes). Prefer code/command over diagram on vertical shorts.\n\n"
+        "'part 2 coming', SMY, Instagram, LinkedIn, 💸, neon. Endcard also forbids amanhã.\n" +
+        (_TEASER_NO_CLI_RULE if product_teaser else
+         "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
+         "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
+         "boxes). Prefer code/command over diagram on vertical shorts.\n\n") +
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues"
-        + (" — and the required code beat" if has_bc else "") + "):\n"
+        + (" — and the required code beat" if need_snippet else "") + "):\n"
         '{"beats":[\n'
         ' {"type":"hook","cue":"Your RAG pulls junk","text":"Your RAG pulls junk"},\n'
         ' {"type":"term_define","cue":"chunking by character count","term":"Fixed-size chunking","definition":"splitting text every N characters"},\n'
         ' {"type":"stat","cue":"five hundred characters","value":"500","unit":"chars","label":"cut mid-idea"},\n'
         ' {"type":"compare","cue":"chunk by meaning instead","left":{"title":"By characters","items":["splits ideas","loses context"]},"right":{"title":"By meaning","items":["whole thoughts","keeps context"]}},\n'
         + (' {"type":"code","cue":"split on sections paragraphs","lang":"python","lines":["split(text,","  by=\\"section\\",","  overlap=50)"],"highlight":[0]},\n'
-           if has_bc else
+           if need_snippet else
            ' {"type":"list","cue":"split on sections paragraphs","title":"Chunk by","ordered":false,"items":[{"text":"sections"},{"text":"paragraphs"},{"text":"with overlap"}]},\n')
         + ' {"type":"cta","cue":"Subscribe next","text":"Subscribe · Copilot Credits","sub":"same series"}\n]}'
     )
 
 
-def _user_prompt(subject: str, script: str, content_format: str) -> str:
+def _user_prompt(subject: str, script: str, content_format: str,
+                 product_teaser: bool = False) -> str:
     from app.services import craft
     first = craft.first_spoken_sentence(script) or subject
     obj = craft.opening_object(first)["label"]
@@ -1166,6 +1179,10 @@ def _user_prompt(subject: str, script: str, content_format: str) -> str:
             if content_format != "long" else
             "Long-form video: use more beats and richer visuals (code, terminal, comparisons) "
             "to sustain a longer narration. Still: frame 0 = first spoken sentence.")
+    if product_teaser:
+        pace += (" PRODUCT TEASER: no terminal/CLI/code/file path/API output unless the "
+                 "narration literally says it — show the product claim with stat / compare / "
+                 "term_define / quote instead.")
     return ("Video title: " + subject + "\n"
             "First spoken sentence (THIS is frame 0 — repeat or compress to ≤8 words, "
             "do NOT replace with a curiosity gap): " + first + "\n"
@@ -2114,7 +2131,8 @@ def _card_min(b) -> float:
     return _QUOTE_MIN if t in ("quote", "statement") else 1.4
 
 
-def _sync_solve_once(beats, v, duration: float, hook_max: float):
+def _sync_solve_once(beats, v, duration: float, hook_max: float,
+                     content_end: float | None = None):
     """Starts that put every card within [speech - lead max, speech] (never
     after its own words) with holds in [card min, cap]; endcard ≤ _ENDCARD_MAX.
     Returns ("ok", starts) or ("gap"|"crowd", i): no solution between card i
@@ -2137,6 +2155,10 @@ def _sync_solve_once(beats, v, duration: float, hook_max: float):
             # line starts earlier than the cap allows, the chip sits at the
             # cap (Gate B notes it as late_capped, never a mid card).
             lo = max(lo, D - _ENDCARD_MAX)
+            if content_end is not None:
+                # never cut in while the last content sentence is still being
+                # spoken (#1385: "Coming soon" straddled the endcard cut)
+                lo = max(lo, min(float(content_end), D - _MIN_DUR))
             hi = max(hi, lo)
         A.append((lo, hi))
 
@@ -2167,23 +2189,37 @@ def _sync_solve_once(beats, v, duration: float, hook_max: float):
     return "ok", st
 
 
-def _sync_board(beats, words, duration: float, hook_max: float) -> bool:
+def _sync_board(beats, words, duration: float, hook_max: float,
+                script: str | None = None) -> bool:
     """CoS 2026-09-30: no card after its own speech; lead ≤ 1.1s.
 
     Re-times the board on the speech starts Gate B measures
     (craft.card_speech_starts). Where cards are too far apart a NEW sentence
     card (unit not yet on screen) is inserted; where they are too close a
     generated card is dropped. All-or-nothing: False leaves the board as it
-    was (Gate B then reports the out-of-sync cards)."""
+    was (Gate B then reports the out-of-sync cards).
+
+    With ``script`` the endcard also waits for the end of the last content
+    sentence before the Subscribe line; if no board fits that, the solve is
+    retried without it (Gate B then notes the endcard as "straddle")."""
     from app.services import craft
     if len(beats) < 2:
         return False
+    c_end = craft.endcard_vo_content_end(words, script) if script else None
+    if c_end is not None and _sync_board_once(beats, words, duration, hook_max, c_end):
+        return True
+    return _sync_board_once(beats, words, duration, hook_max, None)
+
+
+def _sync_board_once(beats, words, duration: float, hook_max: float,
+                     content_end: float | None) -> bool:
+    from app.services import craft
     snap = copy.deepcopy(beats)
     levels = [_speech_units(words, over) for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP)]
     levels.append(_speech_units(words, 2 * _QUOTE_MIN + _GAP, min_side=2))
     for _ in range(24):
         v = craft.card_speech_starts(beats, words)
-        state, res = _sync_solve_once(beats, v, duration, hook_max)
+        state, res = _sync_solve_once(beats, v, duration, hook_max, content_end)
         if state == "ok":
             for i, b in enumerate(beats):
                 b["start"] = round(res[i], 3)
@@ -2258,6 +2294,83 @@ def _sync_board(beats, words, duration: float, hook_max: float) -> bool:
                              "start": round(float(best["start"]), 3), "dur": _QUOTE_MIN})
     beats[:] = snap
     return False
+
+
+# Product teasers (OS Shipping, #1385 Gate B 2026-09-30).
+def _script_sentences(script: str | None) -> list[str]:
+    return [x.strip() for x in _SENT_SPLIT_RE.split((script or "").strip()) if x.strip()]
+
+
+def _cue_clause(script: str | None, cue: str | None) -> str:
+    """The clause of the script sentence that holds ``cue`` (split at , ; : —),
+    ≤ _SENT_CARD_MAX_WORDS words, without trailing punctuation. "" = not found."""
+    ct = _tok(cue or "")
+    if not ct:
+        return ""
+    for sent in _script_sentences(script):
+        if _find_subseq(_tok(sent), ct, 0) < 0:
+            continue
+        parts = [x.strip() for x in _CLAUSE_RE.split(sent) if x.strip()]
+        for part in parts:
+            if _find_subseq(_tok(part), ct[:2], 0) >= 0:
+                words = part.rstrip(".!?…,;:—– ").split()
+                return " ".join(words[:_SENT_CARD_MAX_WORDS])
+        return " ".join(sent.rstrip(".!?…").split()[:_SENT_CARD_MAX_WORDS])
+    return ""
+
+
+def _replace_fabricated_cli(beats, script) -> None:
+    """A command/code card whose text the narration never says (#1385: "$
+    channels thumb cover.png", a CLI that does not exist) becomes a plain
+    text card of the spoken clause at its cue."""
+    from app.services import craft
+    for i, b in enumerate(beats):
+        if (b.get("type") or "") not in craft.CLI_BEAT_TYPES:
+            continue
+        if all(craft.text_in_script(ln, script) for ln in craft.cli_lines(b)):
+            continue
+        cue = b.get("cue") or ""
+        text = _cue_clause(script, cue) or cue
+        beats[i] = {"type": "quote", "cue": cue, "text": text, "attribution": ""}
+
+
+_SOFT_PRODUCT_RE = re.compile(
+    r"^(?:still building|coming soon|ainda (?:estamos )?(?:construindo|em construcao)|"
+    r"(?:chega )?em breve)\b")
+
+
+def _soft_product_card(beats, script) -> None:
+    """v4 "Still building · Coming soon": the soft product lines before the
+    endcard VO get ONE card of their own at the first line's speech, instead
+    of riding under the payoff quote and straddling the endcard cut (#1385)."""
+    from app.services import craft
+    sents = [x for x in _script_sentences(script)
+             if not (craft.is_endcard_vo(x) or craft.contains_subscribe_cta(x))]
+    soft = [x for x in sents if _SOFT_PRODUCT_RE.match(" ".join(_tok(x)))]
+    if not soft or not beats:
+        return
+    text = " · ".join(x.rstrip(".!?…").strip() for x in soft)
+    cue = soft[0].rstrip(".!?…").strip()
+    soft_toks = [_tok(x) for x in soft]
+
+    def _on_soft(b):
+        ct = _tok(b.get("cue") or "")
+        return bool(ct) and any(_find_subseq(st, ct, 0) >= 0 for st in soft_toks)
+
+    keep = [b for j, b in enumerate(beats)
+            if j == 0 or (b.get("type") or "") == "cta" or not _on_soft(b)]
+    card = {"type": "quote", "cue": cue, "text": text, "attribution": "", "plain": True}
+    # insert in script order: before the first card whose cue is spoken later
+    stream = _tok(script or "")
+    at = _find_subseq(stream, _tok(cue), 0)
+    pos = len(keep) - 1 if keep and (keep[-1].get("type") or "") == "cta" else len(keep)
+    for j in range(1, len(keep)):
+        cp = _find_subseq(stream, _tok(keep[j].get("cue") or ""), 0)
+        if (keep[j].get("type") or "") == "cta" or (at >= 0 and cp > at):
+            pos = j
+            break
+    keep.insert(max(1, pos), card)
+    beats[:] = keep
 
 
 def _cap_statements(beats, content_format=None) -> None:
@@ -2340,8 +2453,10 @@ def compose(*, subject, script, words, duration, resolution, width, height,
                                       "term_define", "quote", "cta"])
     th = theme.resolve(topic_id, subject, brand=brand,
                        channel_id=channel_id, channel_slug=channel_slug)
-    system = _system_prompt(allowed)
-    user = _user_prompt(subject, script, content_format)
+    from app.services import craft as _craft
+    teaser = _craft.is_product_teaser(subject, topic_name)
+    system = _system_prompt(allowed, product_teaser=teaser)
+    user = _user_prompt(subject, script, content_format, product_teaser=teaser)
 
     raw = llm(user, system=system, max_tokens=1500).strip()
     beats = parse_storyboard(raw, allowed)
@@ -2370,7 +2485,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
 
     # R2: if code/command is allowed but the draft has neither, push once for a snippet.
     # Keep the retry only when it actually adds one (otherwise keep the varied original).
-    if not _code_ok(beats, allowed):
+    if not teaser and not _code_ok(beats, allowed):
         retry = llm(
             user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
             "cta-last, keep variety (at most " +
@@ -2392,6 +2507,9 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _sanitize_cta(beats, script, subject=subject, brand=brand or th.get("brand"),
                   content_format=content_format, topic_name=topic_name)
     _strip_mid_subscribe_beats(beats)
+    if teaser:
+        _replace_fabricated_cli(beats, script)
+        _soft_product_card(beats, script)
     _cap_statements(beats, content_format)
 
     align_storyboard(beats, words, duration)
@@ -2406,7 +2524,6 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None
     _break_repeated_cards(beats, words)
-    from app.services import craft as _craft
     rr_pace = ((content_format or "short") != "long"
                and (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS)
     if rr_pace:
@@ -2414,6 +2531,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     if (content_format or "short") != "long" and _is_annotated(words):
         # Card ↔ speech sync (CoS 2026-09-30): never after its words, lead ≤ 1.1s.
         _sync_board(beats, words, duration,
-                    (_craft.HOOK_FIRST_CUT_BY_S - _GAP) if rr_pace else _HOOK_MAX)
+                    (_craft.HOOK_FIRST_CUT_BY_S - _GAP) if rr_pace else _HOOK_MAX,
+                    script=script)
     return build_index_html(beats, th, resolution, width, height, duration,
                             content_format=content_format)

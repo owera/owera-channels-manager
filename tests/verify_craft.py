@@ -1308,4 +1308,90 @@ ok(craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.2), _sw, "long") is None
    and craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.2), [], "short") is None,
    "card_sync: long-form and no word timings → no marker")
 
+# --- Brand pronunciation lexicon (OS 2026-09-30, #1385: "Owera's" heard as "Ora's") ---
+print("TTS lexicon: Owera respelled for English voices, merged back to the display word")
+ok(craft.tts_spoken_text("Channels Manager is Owera's builder.") == "Channels Manager is Oh-weh-ruh's builder.",
+   "tts_spoken_text: Owera's → Oh-weh-ruh's (possessive kept)")
+ok(craft.tts_spoken_text("OWERA ships. Owera’s plan.") == "Oh-weh-ruh ships. Oh-weh-ruh’s plan.",
+   "tts_spoken_text: any case, curly possessive")
+ok(craft.tts_spoken_text("Go to owera.com/channels or @owera.") == "Go to owera.com/channels or @owera.",
+   "tts_spoken_text: URL and handle untouched")
+ok(craft.tts_spoken_text("Owera's n_batch.", "pt-BR-AntonioNeural") == "Owera's n batch.",
+   "tts_spoken_text: PT voice keeps Owera (identifier rule still applies)")
+ok(craft.tts_spoken_text("Oweras and Owerabot stay.") == "Oweras and Owerabot stay.",
+   "tts_spoken_text: only the whole word Owera")
+_lw1 = [{"text": "is", "start": 1.0, "dur": 0.2}, {"text": "Oh-weh-ruh's", "start": 1.3, "dur": 0.57},
+        {"text": "builder", "start": 1.9, "dur": 0.4}]
+_lm1 = craft.remerge_tts_words(_lw1, "Channels Manager is Owera's builder")
+ok([w["text"] for w in _lm1] == ["is", "Owera's", "builder"] and _lm1[1]["start"] == 1.3,
+   "remerge: one-token respelling → display word Owera's")
+_lw2 = [{"text": "is", "start": 1.0, "dur": 0.2}, {"text": "Oh", "start": 1.3, "dur": 0.1},
+        {"text": "weh", "start": 1.4, "dur": 0.1}, {"text": "ruh", "start": 1.5, "dur": 0.3},
+        {"text": "builds", "start": 1.9, "dur": 0.4}]
+_lm2 = craft.remerge_tts_words(_lw2, "This is Owera builds")
+ok([w["text"] for w in _lm2] == ["is", "Owera", "builds"] and _lm2[1]["start"] == 1.3
+   and abs(_lm2[1]["dur"] - 0.5) < 1e-6,
+   "remerge: multi-token respelling → one word with both ends' time")
+ok(craft.remerge_tts_words(_lw1, "Channels Manager is Owera's builder", "pt-BR-AntonioNeural") == _lw1,
+   "remerge: PT voice → words unchanged")
+ok(craft.claim_spoken_end("Channels Manager is Owera's builder", [{"text": "Channels", "start": 0.0, "dur": 0.4},
+   {"text": "Manager", "start": 0.4, "dur": 0.4}] + _lm1) == 2.3,
+   "claim_spoken_end matches the displayed claim through the remerged brand word")
+
+# --- Product teaser: no invented CLI (OS Shipping, #1385 Gate B 2026-09-30) ---
+print("product teaser: fabricated CLI card → Gate B FAIL (marker-gated)")
+ok(craft.is_product_teaser("Your thumbnail, not a template, in Channels Manager. · Shipping 8")
+   and craft.is_product_teaser("x", topic_name="Shipping")
+   and not craft.is_product_teaser("n_batch estoura a VRAM · IA 3", topic_name="IA")
+   and not craft.is_product_teaser("Agent memory leaks", topic_name="Agent memory and state in production"),
+   "is_product_teaser: Shipping title suffix or topic; RR/OS explainers are not")
+_s85 = ("Your thumbnail, not a template, in Channels Manager. Channels Manager is Owera's builder for "
+        "YouTube channels, and it's still in development. Now your design wins. Subscribe — next Shipping drop.")
+_b85 = [{"type": "hook", "start": 0.0, "dur": 3.2, "text": "Your thumbnail, not a template", "object": "thumbnail"},
+        {"type": "command", "start": 3.4, "dur": 2.8, "cue": "Channels Manager is Owera's", "prompt": "$",
+         "command": "channels thumb cover.png", "output": ["image/png accepted", "youtube thumbnail set"]},
+        {"type": "quote", "start": 6.4, "dur": 2.0, "text": "Now your design wins", "cue": "Now your design wins"},
+        {"type": "cta", "start": 8.6, "dur": 3.0, "text": "Subscribe · Shipping", "cue": "Subscribe"}]
+_cli = craft.cli_check_marker(_b85, _s85, title="x · Shipping 8")
+ok(_cli["version"] == craft.CLI_V1 and len(_cli["hits"]) == 1 and _cli["hits"][0]["i"] == 1
+   and "channels thumb cover.png" in _cli["hits"][0]["text"],
+   "cli_check: '$ channels thumb cover.png' is not in the script → hit")
+_g85 = craft.video_maker_gate(_b85, card_sync=None, cli_check=_cli)
+ok(_g85["checks"]["B"] == "FAIL" and any(r.startswith("[B] Fabricated CLI: FAIL") for r in _g85["reasons"]),
+   "Gate B FAIL: fabricated CLI on a product teaser")
+_s85b = _s85.replace("Now your design wins.", "Run channels thumb cover png. Now your design wins.")
+_b85b = [dict(b) for b in _b85]
+_b85b[1] = dict(_b85b[1], output=[])
+ok(craft.cli_check_marker(_b85b, _s85b, topic_name="Shipping")["hits"] == [],
+   "cli_check: a command the narration literally says → no hit")
+ok(craft.cli_check_marker(_b85, _s85, title="n_batch · IA 3", topic_name="IA") is None
+   and craft.cli_check_marker(_b85, _s85, topic_name="Shipping", content_format="long") is None,
+   "cli_check: RR/OS explainers and longs carry no marker (illustrative stills unchanged)")
+ok(craft.video_maker_gate(_b85)["checks"]["B"] == "PASS",
+   "unmarked board (older renders, e.g. #1379/#1385): no CLI check — nothing rejected retroactively")
+ok(craft.video_maker_gate_reason({"beats": _b85, "beat_timing": craft.BEAT_TIMING_CURRENT, "cli_check": _cli})
+   and "Fabricated CLI" in craft.video_maker_gate_reason({"beats": _b85, "beat_timing": craft.BEAT_TIMING_CURRENT,
+                                                          "cli_check": _cli}),
+   "review/publish gate reads creation_config.cli_check")
+
+# --- Endcard straddle: the endcard never cuts into a content sentence (#1385) ---
+print("card sync: endcard straddling the last content sentence → Gate B FAIL")
+_ssc = "Contexto come a VRAM. O peso do modelo é só parte. O cache cresce com cada token. Mede a VRAM antes. Subscribe — next IA trap."
+ok(craft.endcard_vo_content_end(_sw, _ssc) == 6.8 + 1.2 + 0.35,
+   "endcard_vo_content_end: end of 'antes', the last word before the Subscribe line")
+ok(craft.endcard_vo_content_end(_sw, "Contexto come a VRAM.") is None,
+   "endcard_vo_content_end: no Subscribe line → None")
+_st_bad = craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 7.9), _sw, script=_ssc)
+ok(_st_bad["notes"][-1]["status"] == "straddle" and _st_bad["notes"][-1]["content_end"] == 8.35,
+   "endcard at 7.90 while 'antes' is spoken until 8.35 → straddle")
+_gst = craft.video_maker_gate(_sb(1.5, 4.0, 6.6, 7.9), card_sync=_st_bad)
+ok(_gst["checks"]["B"] == "FAIL" and any("cuts in before the last content sentence ends" in r for r in _gst["reasons"]),
+   "Gate B FAIL: endcard cuts into the last content sentence")
+_st_ok = craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 8.35), _sw, script=_ssc)
+ok(_st_ok["notes"][-1]["status"] == "ok"
+   and craft.video_maker_gate(_sb(1.5, 4.0, 6.6, 8.35), card_sync=_st_ok)["checks"]["B"] == "PASS",
+   "endcard after the content sentence ends, before the Subscribe word → ok")
+ok("content_end" not in craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 7.9), _sw)["notes"][-1],
+   "no script → no straddle note (Part 1 marker shape unchanged)")
+
 print(f"\nALL {_checks} CHECKS PASSED")

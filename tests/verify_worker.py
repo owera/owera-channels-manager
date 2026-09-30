@@ -843,6 +843,18 @@ with tempfile.TemporaryDirectory() as _td:
            "claim_spoken_end matches the displayed claim %r against the TTS words (%.2fs)" % (_claim, _end))
     ok([w["text"] for w in _w] == ["NUM_PARALLEL", "multiplica", "a", "VRAM"],
        "display text unchanged: word list reads like the title")
+    # Brand lexicon (OS 2026-09-30, #1385): English voice hears "Oh-weh-ruh", words say "Owera's".
+    _SpeakComm.seen = []
+    with patch.object(_edge_tts, "Communicate", _SpeakComm):
+        _w = worker._tts("Channels Manager is Owera's builder.", "en-US-AndrewNeural", _out)
+    ok(_SpeakComm.seen == ["Channels Manager is Oh-weh-ruh's builder."],
+       "edge-tts (en-US) gets the Owera respelling: %r" % _SpeakComm.seen)
+    ok([w["text"] for w in _w] == ["Channels", "Manager", "is", "Owera's", "builder"],
+       "WordBoundary respelling merged back to the displayed Owera's")
+    _SpeakComm.seen = []
+    with patch.object(_edge_tts, "Communicate", _SpeakComm):
+        worker._tts("O builder da Owera.", "pt-BR-AntonioNeural", _out)
+    ok(_SpeakComm.seen == ["O builder da Owera."], "PT voice: Owera sent as written")
 
 
 print("_creation_config: snapshot + never-raises")
@@ -928,6 +940,32 @@ ok(cc_rr.get("card_sync", {}).get("version") == _craft_hp.SYNC_V1
    and "card_sync" not in cc_fb,
    "render records card_sync notes per card (CoS 2026-09-30); fallback renders do not")
 ok("hook_pace" not in cc_fb, "fallback render: no hook_pace marker (A/C already FAIL)")
+
+# Product teaser: cli_check marker + endcard straddle note (OS 2026-09-30, #1385).
+_tz_board = [
+    {"type": "hook", "start": 0.0, "dur": 1.5, "text": "Your thumbnail wins", "object": "thumbnail"},
+    {"type": "command", "start": 1.2, "dur": 1.48, "cue": "Channels Manager", "prompt": "$",
+     "command": "channels thumb cover.png", "output": []},
+    {"type": "cta", "start": 2.8, "dur": 3.3, "text": "Subscribe · Shipping", "cue": "Subscribe"},
+]
+_tz_script = "Your thumbnail wins. Channels Manager ships it. Subscribe — next Shipping drop."
+_tz_words = [{"text": t, "start": 0.4 * k, "dur": 0.35}
+             for k, t in enumerate("Your thumbnail wins Channels Manager ships it Subscribe next Shipping drop".split())]
+with patch.object(_craft_hp, "beats_from_html", return_value=_tz_board):
+    cc_tz = worker._creation_config("Your thumbnail wins · Shipping 9",
+                                    {"content_format": "short", "topic_name": "Shipping"}, "<html>",
+                                    _tz_script, 6.1, "portrait", None, False, words=_tz_words, brand="os")
+    cc_ex = worker._creation_config("Your thumbnail wins · Agent memory 9",
+                                    {"content_format": "short", "topic_name": "Agent memory"}, "<html>",
+                                    _tz_script, 6.1, "portrait", None, False, words=_tz_words, brand="os")
+ok(cc_tz.get("cli_check", {}).get("version") == _craft_hp.CLI_V1 and len(cc_tz["cli_check"]["hits"]) == 1
+   and any(r.startswith("[B] Fabricated CLI: FAIL") for r in cc_tz["craft_gate"]["reasons"]),
+   "teaser render records cli_check and its craft_gate fails the invented command")
+ok("cli_check" not in cc_ex and not any("Fabricated CLI" in r for r in cc_ex["craft_gate"]["reasons"]),
+   "explainer render: no cli_check marker")
+ok(cc_tz["card_sync"]["notes"][-1].get("content_end") == 2.75
+   and cc_tz["card_sync"]["notes"][-1]["status"] == "ok",
+   "render passes the script to card_sync: endcard note carries content_end (end of 'it')")
 cc_split = worker._creation_config("s", {"content_format": "short"},
                                    '<div class="beat hook" id="b0" data-split="1" style="opacity:1"></div>',
                                    "x", 9.0, "portrait", None, False, brand="os")

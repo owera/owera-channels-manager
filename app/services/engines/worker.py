@@ -403,12 +403,16 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                 if not used_fallback else None)
         # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
         # after its own words or leading them by more than 1.1s.
-        sync = (craft.card_sync_marker(beats, words, fmt)
+        sync = (craft.card_sync_marker(beats, words, fmt, script=script)
                 if not used_fallback else None)
+        # Product teasers: no invented CLI on screen (CLI_V1).
+        cli = craft.cli_check_marker(beats, script, title=subject,
+                                     topic_name=params.get("topic_name"),
+                                     content_format=fmt)
         gate = craft.video_maker_gate(beats, content_format=fmt,
                                       used_fallback=used_fallback, hook_pace=pace,
                                       beat_timing=craft.BEAT_TIMING_CURRENT,
-                                      card_sync=sync)
+                                      card_sync=sync, cli_check=cli)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -424,6 +428,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             "beat_timing": craft.BEAT_TIMING_CURRENT,
             **({"hook_pace": pace} if pace else {}),
             **({"card_sync": sync} if sync else {}),
+            **({"cli_check": cli} if cli else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
             **({"frame0_split": True} if 'data-split="1"' in html else {}),
@@ -1017,12 +1022,14 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
     Only the audio input is normalized (craft.tts_spoken_text: ``n_batch`` is
     spoken "n batch", never "n underline batch"); the returned words are merged
     back to the displayed identifiers so cue alignment and the claim timing
-    (craft.claim_spoken_end) match the printed text."""
+    (craft.claim_spoken_end) match the printed text. Brand words are respelled
+    for English voices (craft.TTS_LEXICON: Owera → "Oh-weh-ruh") and merged
+    back to the displayed word the same way."""
     import edge_tts
     from app.services import craft
 
     display_text = text
-    text = craft.tts_spoken_text(text)
+    text = craft.tts_spoken_text(text, voice)
 
     words: list[dict] = []
 
@@ -1060,7 +1067,7 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
             time.sleep(delay)
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"edge-tts produced no audio for voice {voice}")
-    return craft.remerge_tts_words(words, display_text)
+    return craft.remerge_tts_words(words, display_text, voice)
 
 
 def _probe_duration(path: Path) -> float | None:
