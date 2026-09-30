@@ -802,6 +802,49 @@ settings.tts_attempts, settings.tts_retry_backoff_seconds = _orig_att, _orig_bo
 # ---------------------------------------------------------------------------
 # _creation_config
 # ---------------------------------------------------------------------------
+from app.services import craft  # noqa: E402
+print("_tts: spoken-text normalization (RR 2026-09-30: '_' read as 'underline')")
+
+
+class _SpeakComm:
+    seen: list = []
+
+    def __init__(self, text, voice, **kw):
+        _SpeakComm.seen.append(text)
+        self._text = text
+
+    async def stream(self):
+        t = 0.0
+        for w in self._text.split():
+            yield {"type": "WordBoundary", "text": w.strip(".,"), "offset": t * 1e7,
+                   "duration": 0.3 * 1e7}
+            t += 0.35
+        yield {"type": "audio", "data": b"ID3fake"}
+
+
+with tempfile.TemporaryDirectory() as _td:
+    _out = Path(_td) / "n.mp3"
+    settings.tts_attempts = 1
+    for _disp, _spoken, _ident, _end in [
+        ("n_batch alto estoura a prefill. Corta o n_batch e o n_ubatch junto.",
+         "n batch alto estoura a prefill. Corta o n batch e o n ubatch junto.", "n_batch", 2.05),
+        ("num_gpu 0 é só CPU.", "num gpu 0 é só CPU.", "num_gpu", 2.05),
+        ("NUM_PARALLEL multiplica a VRAM.", "num parallel multiplica a VRAM.", "NUM_PARALLEL", 1.7),
+    ]:
+        _SpeakComm.seen = []
+        with patch.object(_edge_tts, "Communicate", _SpeakComm):
+            _w = worker._tts(_disp, "pt-BR-AntonioNeural", _out)
+        ok(_SpeakComm.seen == [_spoken],
+           "edge-tts gets the spoken text: %r (no 'underline')" % _SpeakComm.seen[0])
+        ok(_w[0]["text"] == _ident and _w[0]["start"] == 0.0 and abs(_w[0]["dur"] - 0.65) < 1e-6,
+           "WordBoundary words merged back to the displayed identifier %r (one word, both parts' time)" % _ident)
+        _claim = _disp.split(". ")[0].rstrip(".") + "."
+        ok(abs(craft.claim_spoken_end(_claim, _w) - _end) < 1e-6,
+           "claim_spoken_end matches the displayed claim %r against the TTS words (%.2fs)" % (_claim, _end))
+    ok([w["text"] for w in _w] == ["NUM_PARALLEL", "multiplica", "a", "VRAM"],
+       "display text unchanged: word list reads like the title")
+
+
 print("_creation_config: snapshot + never-raises")
 
 html_beats = (
@@ -860,7 +903,7 @@ ok((not cc_raised) and cc_err is not None
 from app.services import craft as _craft_hp
 _hp_board = [
     {"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três quatro cinco seis sete oito nove"},
-    {"type": "stat", "start": 2.5, "dur": 2.88, "value": "8", "unit": "GB", "label": "x"},
+    {"type": "stat", "start": 2.5, "dur": 2.80, "value": "8", "unit": "GB", "label": "x"},
     {"type": "cta", "start": 5.5, "dur": 3.5, "text": "Subscribe · IA"},
 ]
 _hp_words = [{"text": t, "start": 0.4 * k, "dur": 0.35}
@@ -880,6 +923,10 @@ ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
    "RR render-time craft_gate flags a 9-word claim spoken by 3.55s")
 ok("hook_pace" not in cc_os and cc_os["craft_gate"]["checks"]["B"] == "PASS",
    "OS render: no hook_pace marker, no hook-pace check")
+ok(cc_rr.get("card_sync", {}).get("version") == _craft_hp.SYNC_V1
+   and [n_["i"] for n_ in cc_rr["card_sync"]["notes"]] == [1, 2]
+   and "card_sync" not in cc_fb,
+   "render records card_sync notes per card (CoS 2026-09-30); fallback renders do not")
 ok("hook_pace" not in cc_fb, "fallback render: no hook_pace marker (A/C already FAIL)")
 cc_split = worker._creation_config("s", {"content_format": "short"},
                                    '<div class="beat hook" id="b0" data-split="1" style="opacity:1"></div>',

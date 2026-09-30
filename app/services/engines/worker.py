@@ -401,8 +401,14 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         # claim ≤8 words / spoken by 3.0s / first cut by 2.5s.
         pace = (craft.hook_pace_marker(beats, words, brand or params.get("brand"), fmt)
                 if not used_fallback else None)
+        # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
+        # after its own words or leading them by more than 1.1s.
+        sync = (craft.card_sync_marker(beats, words, fmt)
+                if not used_fallback else None)
         gate = craft.video_maker_gate(beats, content_format=fmt,
-                                      used_fallback=used_fallback, hook_pace=pace)
+                                      used_fallback=used_fallback, hook_pace=pace,
+                                      beat_timing=craft.BEAT_TIMING_CURRENT,
+                                      card_sync=sync)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -413,9 +419,11 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             "beat_count": len(beat_types),
             "beats": beats or None,
             "craft_gate": gate,
-            # Aligner caps cards INCLUDING the fade (craft Gate B strict timing).
-            "beat_timing": craft.BEAT_TIMING_INCL_FADE,
+            # Aligner caps mid holds at 2.80s so hold + fade ≤ 3.0s (RR
+            # 2026-09-30); older renders keep their own marker's cap.
+            "beat_timing": craft.BEAT_TIMING_CURRENT,
             **({"hook_pace": pace} if pace else {}),
+            **({"card_sync": sync} if sync else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
             **({"frame0_split": True} if 'data-split="1"' in html else {}),
@@ -1004,8 +1012,17 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
     per spoken word — ``offset``/``duration`` in 100-ns ticks — interleaved with the
     audio chunks. The returned word list lets the composition step land each visual
     on the actual spoken word instead of guessing even spacing. The list may be empty
-    if the voice/service emits no boundaries; callers degrade gracefully."""
+    if the voice/service emits no boundaries; callers degrade gracefully.
+
+    Only the audio input is normalized (craft.tts_spoken_text: ``n_batch`` is
+    spoken "n batch", never "n underline batch"); the returned words are merged
+    back to the displayed identifiers so cue alignment and the claim timing
+    (craft.claim_spoken_end) match the printed text."""
     import edge_tts
+    from app.services import craft
+
+    display_text = text
+    text = craft.tts_spoken_text(text)
 
     words: list[dict] = []
 
@@ -1043,7 +1060,7 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
             time.sleep(delay)
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"edge-tts produced no audio for voice {voice}")
-    return words
+    return craft.remerge_tts_words(words, display_text)
 
 
 def _probe_duration(path: Path) -> float | None:
