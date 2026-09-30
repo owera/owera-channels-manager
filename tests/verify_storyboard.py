@@ -197,8 +197,8 @@ cc = worker._creation_config("x", {"topic_id": 1, "content_format": "short"}, ht
 ok(cc["beat_count"] == len(ALL), "creation_config captures the full beat mix")
 ok("code" in cc["beat_types"] and cc["theme"]["accent"] and cc["composition_version"],
    "creation_config records beat_types + theme + version")
-ok(cc.get("beat_timing") == craft.BEAT_TIMING_INCL_FADE,
-   "creation_config marks new renders as card-incl-fade timing (strict Gate B at review/publish)")
+ok(cc.get("beat_timing") == craft.BEAT_TIMING_CURRENT == craft.BEAT_TIMING_HOLD_280,
+   "creation_config marks new renders card_hold_280 (mid hold ≤2.80s, hold+fade ≤3.0s — RR 2026-09-30)")
 
 # --- variety guard (R2: no all-statement storyboards) ------------------------
 print("_variety_ok")
@@ -220,8 +220,8 @@ ok(storyboard._GAP == 0.12 and storyboard._MIN_DUR == 0.5,
    "inter-beat gap 0.12s + min duration 0.5s (matches worker clip tolerance)")
 ok(storyboard._TAIL_MIN == 2.0 and storyboard._MID_MIN == 1.8,
    "align floors: last two beats 2.0s, others 1.8s (14b1979 R4)")
-ok(storyboard._MID_MAX == 2.88 and abs(storyboard._MID_MAX + storyboard._GAP - 3.0) < 1e-9,
-   "align max-hold: mid card 3.0s INCLUDING its fade → hold 2.88s (VM 2026-09-29; was 3.0 hold)")
+ok(storyboard._MID_MAX == 2.80 == craft.MID_BEAT_MAX_S,
+   "align max-hold: mid hold 2.80s so hold + measured 0.20s fade ≤ 3.0s (RR 2026-09-30; was 2.88)")
 ok(storyboard._MID_MAX == craft.MID_BEAT_MAX_S,
    "gate B mid-hold cap matches the aligner (do not fail-close below _MID_MAX)")
 ok(storyboard._GAP == craft.BEAT_GAP_S,
@@ -1378,7 +1378,10 @@ try:
     ok(n_val[0] >= 2, "compose re-validates after even-spacing")
     even_starts = re.findall(
         r'class="beat [^"]+" id="b\d+" data-start="([^"]+)"', rescued)
-    ok(even_starts == ["0.0", "3.0", "6.0", "9.0"],
+    # even 0/3/6/9, then the 2.80s mid cap (RR 2026-09-30): a 0.08s overflow
+    # is too short for its own card, so the next card starts early (visual
+    # leads the VO) instead of stretching → 0/3/5.92/8.84.
+    ok(even_starts == ["0.0", "3.0", "5.92", "8.84"],
        "rescue even-spaces a 4-beat/12s board to 0/3/6/9 (word-sync was 0/1/2/3 — "
        "a retry-without-_even_space mutant keeps 1.0/2.0/3.0)")
 finally:
@@ -1735,8 +1738,8 @@ ok(any(b.get("_split") for b in _long_board),
 ok(all(b["type"] == "quote" for b in _long_board if b.get("_split")),
    "split pieces are quote cards of the spoken words")
 _code = next(b for b in _long_board if b["type"] == "code")
-ok(abs(float(_code["start"]) - 16.0) < 1e-6,
-   "the split card stays on its cue (code at w40 = 16.0s) — split keeps word-sync")
+ok(abs(float(_code["start"]) - 16.0) <= 0.4 + 1e-6,
+   "the split card stays on its cue (code within one word of w40 = 16.0s; 2.80s cap walk)")
 ok(craft.repeated_card_hits(_long_board) == [], "split never repeats a card (#40 gate)")
 ok(craft.video_maker_gate(_long_board)["checks"]["B"] == "PASS",
    "split board passes Gate B (timing incl. fade + repeated card)")
@@ -1908,7 +1911,7 @@ def _pace_board(hook_end, n_mid=4, dur=24.0, slack=True):
           "text": "Claim one two three four", "cue": "Claim"}]
     t = hook_end
     for k in range(n_mid):
-        hold = 2.0 if (slack and k == 2) else 2.88
+        hold = 2.0 if (slack and k == 2) else 2.80  # mid cap (RR 2026-09-30)
         b.append({"type": "stat", "start": round(t, 3), "dur": hold, "value": str(k + 1),
                   "unit": "GB", "label": "card %d" % k, "cue": "c%d" % k})
         t += hold + storyboard._GAP
@@ -1918,8 +1921,8 @@ def _pace_board(hook_end, n_mid=4, dur=24.0, slack=True):
 
 
 _pw = _words_of("Claim one two three four " + " ".join("w%d" % k for k in range(80)), step=0.3)
-_pb = _pace_board(3.3, dur=3.3 + 3 * 3.0 + 2.12 + 3.6)
-_pbd = 3.3 + 3 * 3.0 + 2.12 + 3.6
+_pb = _pace_board(3.3, dur=3.3 + 3 * 2.92 + 2.12 + 3.6)
+_pbd = 3.3 + 3 * 2.92 + 2.12 + 3.6
 storyboard._pull_first_cut(_pb, _pbd, _pw)
 ok(abs(float(_pb[1]["start"]) - 2.5) < 1e-6 and abs(float(_pb[0]["dur"]) - 2.38) < 1e-6,
    "_pull_first_cut: hook ends at the cut, first card starts at 2.5s")
@@ -1928,8 +1931,8 @@ ok(all(float(b["dur"]) <= storyboard._MID_MAX + 1e-6 for b in _pb[1:-1])
    "_pull_first_cut: short window → first card leads the VO; caps kept (split, never stretch)")
 ok(storyboard.validate_storyboard(_pb, _pbd), "_pull_first_cut: board still valid")
 ok([b.get("value") for b in _pb[1:-1]] == ["1", "2", "3", "4"], "_pull_first_cut: no card dropped or copied")
-_pb2 = _pace_board(4.76, dur=4.76 + 3 * 3.0 + 2.12 + 3.6)
-_pb2d = 4.76 + 3 * 3.0 + 2.12 + 3.6
+_pb2 = _pace_board(4.76, dur=4.76 + 3 * 2.92 + 2.12 + 3.6)
+_pb2d = 4.76 + 3 * 2.92 + 2.12 + 3.6
 storyboard._pull_first_cut(_pb2, _pb2d, _pw)
 ok(_pb2[1].get("type") == "quote" and _pb2[1].get("_cut") and abs(float(_pb2[1]["start"]) - 2.5) < 1e-6,
    "_pull_first_cut: long window (#1371 shape, hook 4.64s) → NEW quote card of the words spoken there")
@@ -1941,9 +1944,9 @@ _pb3 = _pace_board(2.4)
 _before3 = json.dumps(_pb3)
 storyboard._pull_first_cut(_pb3, 24.0, _pw)
 ok(json.dumps(_pb3) == _before3, "_pull_first_cut: first cut already ≤2.5s → no-op")
-_pb4 = _pace_board(3.3, dur=3.3 + 4 * 3.0 + 3.78, slack=False)
+_pb4 = _pace_board(3.3, dur=3.3 + 4 * 2.92 + 3.78, slack=False)
 _before4 = json.dumps(_pb4)
-storyboard._pull_first_cut(_pb4, 3.3 + 4 * 3.0 + 3.78, [])
+storyboard._pull_first_cut(_pb4, 3.3 + 4 * 2.92 + 3.78, [])
 ok(json.dumps(_pb4) == _before4,
    "_pull_first_cut: every card at its cap and endcard full → restored (Gate B reports it)")
 
@@ -1966,5 +1969,396 @@ _sx = [{"type": "cta", "text": "old", "cue": "Subscribe"}]
 storyboard._sanitize_cta(_sx, "A. Subscribe — next Shipping trap.", subject="No suffix here",
                          brand="os", topic_name="Shipping")
 ok(_sx[0]["text"] == "Subscribe · Shipping", "_sanitize_cta: topic beats the OS brand default")
+
+# --- RR batch 29/09 Gate B (P0 2026-09-30): sentence-bounded cards ----------
+print("RR P0 2026-09-30: cards end at sentence boundaries, no CTA leak, holds ≤2.80")
+# Live #1380/#1381/#1382/#1383/#1386 (script, LLM board without the synthetic
+# quotes, duration) — the per-sentence split leaked "next", fragments and cut clauses.
+_RR2909 = {'1380': {'title': 'Contexto 32k come a VRAM. · IA 212',
+          'script': 'Contexto 32k come a VRAM. O peso do modelo é só parte da conta. O cache KV '
+                    'cresce com cada token parado na conversa e ocupa memória na placa. De 8k para '
+                    '32k, esse cache quadruplica. Quantizar o peso emagrece o arquivo. O cache '
+                    'segue em 16 bits no padrão local. A placa aguenta o modelo e estoura na '
+                    'janela. Marque o contexto que a VRAM paga. Documento gigante sem uso é '
+                    'desperdício: corte, busque o trecho, gere de novo. Mede a VRAM antes do '
+                    'slider e a geração chega inteira. Subscribe — next IA trap.',
+          'duration': 46.8,
+          'beats': [{'type': 'hook',
+                     'cue': 'Contexto 32k come a VRAM',
+                     'text': 'Contexto 32k come a VRAM.',
+                     'object': 'GPU',
+                     'emoji': ''},
+                    {'type': 'code',
+                     'cue': 'O peso do modelo',
+                     'emoji': '',
+                     'lines': ['vram:', '  pesos: arquivo', '  kv: n_tokens']},
+                    {'type': 'term_define',
+                     'cue': 'cresce com cada token',
+                     'term': 'Cache KV',
+                     'definition': 'memória dos tokens parados na conversa'},
+                    {'type': 'stat',
+                     'cue': 'De 8k para 32k',
+                     'emoji': '',
+                     'value': '4',
+                     'unit': '×',
+                     'label': 'o cache de 8k'},
+                    {'type': 'compare',
+                     'cue': 'Quantizar o peso',
+                     'title': 'Na placa',
+                     'left': {'title': 'Peso', 'items': ['quantizado', 'arquivo encolhe']},
+                     'right': {'title': 'Cache KV', 'items': ['segue 16 bits', 'padrão local']}},
+                    {'type': 'compare',
+                     'cue': 'A placa aguenta o modelo',
+                     'title': 'Onde estoura',
+                     'left': {'title': 'Modelo', 'items': ['cabe na placa']},
+                     'right': {'title': 'Janela', 'items': ['estoura a VRAM']}},
+                    {'type': 'term_define',
+                     'cue': 'Marque o contexto',
+                     'term': 'Contexto pago',
+                     'definition': 'janela de tokens que a VRAM banca'},
+                    {'type': 'compare',
+                     'cue': 'Documento gigante sem uso',
+                     'title': 'Desperdício',
+                     'left': {'title': 'Doc gigante', 'items': ['sem uso', 'come a VRAM']},
+                     'right': {'title': 'No lugar',
+                               'items': ['corte', 'busque o trecho', 'gere de novo']}},
+                    {'type': 'quote',
+                     'cue': 'Mede a VRAM antes',
+                     'text': 'Mede a VRAM antes do slider',
+                     'emoji': '',
+                     'attribution': ''},
+                    {'type': 'cta',
+                     'cue': 'Subscribe — next',
+                     'text': 'Subscribe · IA',
+                     'sub': 'same series'}]},
+ '1381': {'title': 'Ollama sem CUDA não é engenharia. · IA 213',
+          'script': 'Ollama sem CUDA não é engenharia. O pull terminou e você chamou isso de '
+                    'stack. Sem CUDA o runtime cai na CPU: contexto curto, RAM comida pelo KV '
+                    'cache e token pingando. Modelo de sete bilhões já arrasta. O grande não fecha '
+                    'a frase. Placa NVIDIA na máquina e log sem CUDA é a mesma falha: GPU parada, '
+                    'latência de brinquedo. Quem constrói mede token por segundo, manda camada pra '
+                    'GPU e sabe o teto de VRAM antes de prometer resposta. Sem CUDA no log, você '
+                    'não tem stack. Subscribe — next IA trap.',
+          'duration': 44.54,
+          'beats': [{'type': 'hook',
+                     'cue': 'Ollama sem CUDA não é engenharia',
+                     'text': 'Ollama sem CUDA não é engenharia.',
+                     'object': 'OLLAMA',
+                     'emoji': ''},
+                    {'type': 'command',
+                     'cue': 'O pull terminou',
+                     'emoji': '',
+                     'command': 'ollama ps',
+                     'output': ['qwen2.5:7b   4.7 GB',
+                                'PROCESSOR    100% CPU',
+                                'CUDA         off']},
+                    {'type': 'term_define',
+                     'cue': 'Sem CUDA o runtime',
+                     'term': 'Runtime CPU',
+                     'definition': 'inferência sem GPU, presa na RAM'},
+                    {'type': 'term_define',
+                     'cue': 'RAM comida pelo',
+                     'term': 'KV cache',
+                     'definition': 'memória do contexto que devora a RAM'},
+                    {'type': 'stat',
+                     'cue': 'Modelo de sete bilhões',
+                     'emoji': '',
+                     'value': '7',
+                     'unit': 'B',
+                     'label': 'trava na frase'},
+                    {'type': 'compare',
+                     'cue': 'Placa NVIDIA na',
+                     'title': 'Máquina versus log',
+                     'left': {'title': 'Máquina', 'items': ['NVIDIA presente']},
+                     'right': {'title': 'Log', 'items': ['CUDA ausente']}},
+                    {'type': 'stat',
+                     'cue': 'é a mesma falha',
+                     'emoji': '',
+                     'value': '0',
+                     'unit': '%',
+                     'label': 'uso da GPU'},
+                    {'type': 'compare',
+                     'cue': 'Quem constrói mede',
+                     'title': 'Quem constrói',
+                     'left': {'title': 'Mede', 'items': ['tok/s real']},
+                     'right': {'title': 'Manda', 'items': ['camada na GPU']}},
+                    {'type': 'term_define',
+                     'cue': 'e sabe o teto',
+                     'term': 'VRAM',
+                     'definition': 'teto da GPU antes de prometer resposta'},
+                    {'type': 'term_define',
+                     'cue': 'Sem CUDA no log',
+                     'term': 'Stack',
+                     'definition': 'CUDA visível no log, não o pull'},
+                    {'type': 'cta',
+                     'cue': 'Subscribe — next',
+                     'text': 'Subscribe · IA',
+                     'sub': 'same series'}]},
+ '1382': {'title': 'n_batch alto estoura a prefill. · IA 214',
+          'script': 'n_batch alto estoura a prefill. n_batch é quantos tokens do prompt entram '
+                    'numa passada. Passou da VRAM, a prefill aloca tudo, dispara e morre. O '
+                    'estouro é memória de ativação na passada. O contexto mora no n_ctx. Corta o '
+                    'n_batch e o n_ubatch junto, até a passada caber na placa. Testa a prefill com '
+                    'o prompt longo de verdade. Você troca um pouco de velocidade no prompt pelo '
+                    'modelo no ar. A prefill manda. O n_batch obedece. Subscribe — next IA trap.',
+          'duration': 44.66,
+          'beats': [{'type': 'hook',
+                     'cue': 'n_batch alto estoura a prefill',
+                     'text': 'n_batch alto estoura a prefill.',
+                     'object': 'BATCH',
+                     'emoji': ''},
+                    {'type': 'stat',
+                     'cue': 'n_batch é quantos tokens',
+                     'emoji': '',
+                     'value': '2048',
+                     'unit': 'tokens',
+                     'label': 'exemplo numa passada'},
+                    {'type': 'compare',
+                     'cue': 'Passou da VRAM',
+                     'title': 'A prefill',
+                     'left': {'title': 'Cabe', 'items': ['aloca a passada', 'segue viva']},
+                     'right': {'title': 'Estoura', 'items': ['aloca tudo', 'dispara e morre']}},
+                    {'type': 'term_define',
+                     'cue': 'O estouro é memória',
+                     'term': 'Memória de ativação',
+                     'definition': 'a memória que a passada aloca na placa'},
+                    {'type': 'term_define',
+                     'cue': 'O contexto mora',
+                     'term': 'n_ctx',
+                     'definition': 'onde o contexto mora, não a passada'},
+                    {'type': 'code',
+                     'cue': 'Corta o n_batch e',
+                     'lines': ['# corta os dois', '--batch-size 512', '--ubatch-size 512']},
+                    {'type': 'term_define',
+                     'cue': 'Testa a prefill com',
+                     'term': 'Prompt longo',
+                     'definition': 'o tamanho real que o modelo vai servir'},
+                    {'type': 'compare',
+                     'cue': 'Você troca um pouco',
+                     'title': 'A troca',
+                     'left': {'title': 'Velocidade',
+                              'items': ['prompt mais rápido', 'risco de estouro']},
+                     'right': {'title': 'No ar', 'items': ['batch menor', 'modelo estável']}},
+                    {'type': 'quote',
+                     'cue': 'A prefill manda',
+                     'text': 'A prefill manda. O n_batch obedece.',
+                     'emoji': '',
+                     'attribution': ''},
+                    {'type': 'cta',
+                     'cue': 'Subscribe — next IA',
+                     'text': 'Subscribe · IA',
+                     'sub': 'same series'}]},
+ '1383': {'title': 'num_gpu 0 é só CPU. · IA 215',
+          'script': 'num_gpu 0 é só CPU. Zero é nenhuma camada na GPU. O modelo inteiro roda na '
+                    'CPU, token por token, com a placa ociosa. O índice da GPU é main_gpu. O '
+                    'padrão do Ollama descarrega sozinho o que cabe na VRAM. Zero no Modelfile ou '
+                    'na API é CPU de propósito. Sobe as camadas até a VRAM segurar o modelo. Quem '
+                    'conta camada manda na velocidade. Subscribe — next IA trap.',
+          'duration': 37.58,
+          'beats': [{'type': 'hook',
+                     'cue': 'num_gpu 0 é só CPU',
+                     'text': 'num_gpu 0 é só CPU.',
+                     'object': 'NUM',
+                     'emoji': ''},
+                    {'type': 'stat',
+                     'cue': 'Zero é nenhuma camada',
+                     'emoji': '',
+                     'value': '0',
+                     'unit': 'camadas',
+                     'label': 'na GPU'},
+                    {'type': 'stat',
+                     'cue': 'modelo inteiro roda',
+                     'emoji': '',
+                     'value': '100',
+                     'unit': '%',
+                     'label': 'modelo na CPU'},
+                    {'type': 'compare',
+                     'cue': 'token, com a placa',
+                     'title': 'Quem trabalha',
+                     'left': {'title': 'CPU', 'items': ['token por token']},
+                     'right': {'title': 'GPU', 'items': ['placa ociosa']}},
+                    {'type': 'term_define',
+                     'cue': 'da GPU é main_gpu',
+                     'term': 'main_gpu',
+                     'definition': 'índice da GPU que recebe as camadas'},
+                    {'type': 'compare',
+                     'cue': 'Ollama descarrega sozinho',
+                     'title': 'Padrão Ollama',
+                     'left': {'title': 'Cabe na VRAM', 'items': ['sobe pra GPU']},
+                     'right': {'title': 'Não cabe', 'items': ['fica na CPU']}},
+                    {'type': 'code',
+                     'cue': 'Zero no Modelfile',
+                     'lines': ['PARAMETER num_gpu 0', 'options.num_gpu: 0']},
+                    {'type': 'compare',
+                     'cue': 'CPU de propósito',
+                     'title': 'No controle',
+                     'left': {'title': 'num_gpu 0', 'items': ['força a CPU']},
+                     'right': {'title': 'Sobe camadas', 'items': ['devolve a GPU']}},
+                    {'type': 'term_define',
+                     'cue': 'até a VRAM segurar',
+                     'term': 'Teto de VRAM',
+                     'definition': 'máximo de camadas que a memória segura'},
+                    {'type': 'quote',
+                     'cue': 'Quem conta camada',
+                     'text': 'Quem conta camada manda na velocidade',
+                     'emoji': '',
+                     'attribution': ''},
+                    {'type': 'cta',
+                     'cue': 'Subscribe — next',
+                     'text': 'Subscribe · IA',
+                     'sub': 'same series'}]},
+ '1386': {'title': 'PDF escaneado não é engenharia. · IA 217',
+          'script': 'PDF escaneado não é engenharia. Página escaneada é foto. Não tem texto '
+                    'dentro. Você copia e vem vazio. Ou vem um OCR torto, com número trocado. E o '
+                    'modelo responde em cima disso com a mesma confiança. Eu testo antes, com '
+                    'pdftotext na página. Voltou vazio, a página vai como imagem pro modelo de '
+                    'visão. Voltou texto limpo, vai texto. Primeiro você descobre o que o arquivo '
+                    'é. Subscribe — next IA trap.',
+          'duration': 39.07,
+          'beats': [{'type': 'hook',
+                     'cue': 'PDF escaneado não é engenharia',
+                     'text': 'PDF escaneado não é engenharia.',
+                     'object': 'ESCANEADO',
+                     'emoji': ''},
+                    {'type': 'stat',
+                     'cue': 'Página escaneada é foto',
+                     'emoji': '',
+                     'value': '0',
+                     'unit': 'letras',
+                     'label': 'texto no PDF'},
+                    {'type': 'compare',
+                     'cue': 'Você copia e vem vazio',
+                     'title': 'Copiar a página',
+                     'left': {'title': 'Copia', 'items': ['seleciona a foto']},
+                     'right': {'title': 'Cola', 'items': ['campo vazio']}},
+                    {'type': 'compare',
+                     'cue': 'Ou vem um OCR',
+                     'title': 'Número trocado',
+                     'left': {'title': 'No papel', 'items': ['NF 1042']},
+                     'right': {'title': 'No OCR', 'items': ['NF 1842']}},
+                    {'type': 'compare',
+                     'cue': 'E o modelo responde',
+                     'title': 'Sem checagem',
+                     'left': {'title': 'Entrada', 'items': ['OCR torto']},
+                     'right': {'title': 'Saída', 'items': ['resposta firme']}},
+                    {'type': 'stat',
+                     'cue': 'com a mesma',
+                     'emoji': '',
+                     'value': '100',
+                     'unit': '%',
+                     'label': 'confiança no erro'},
+                    {'type': 'command',
+                     'cue': 'Eu testo antes',
+                     'command': 'pdftotext pagina.pdf -',
+                     'output': ['(vazio)']},
+                    {'type': 'compare',
+                     'cue': 'Voltou vazio',
+                     'title': 'O teste decide',
+                     'left': {'title': 'Vazio', 'items': ['vai a imagem', 'modelo de visão']},
+                     'right': {'title': 'Limpo', 'items': ['vai o texto']}},
+                    {'type': 'term_define',
+                     'cue': 'Voltou texto limpo',
+                     'term': 'Texto limpo',
+                     'definition': 'pdftotext achou texto de verdade'},
+                    {'type': 'quote',
+                     'cue': 'Primeiro você descobre',
+                     'text': 'Primeiro você descobre o que o arquivo é',
+                     'emoji': '',
+                     'attribution': ''},
+                    {'type': 'cta',
+                     'cue': 'Subscribe — next',
+                     'text': 'Subscribe · IA',
+                     'sub': 'same series'}]}}
+
+_DANGLE = {"de", "do", "da", "a", "o", "em", "no", "na", "por", "pra", "para", "com", "e", "ou",
+           "que", "isso", "pelo", "pela", "nao"}
+
+
+def _sent_list(script):
+    return [x for x in re.split(r"(?<=[.!?])\s+", script.strip()) if x]
+
+
+def _card_ok(text, script):
+    """None when the card text respects sentence bounds, else why not."""
+    sents = [s_ for s_ in _sent_list(script) if "subscribe" not in theme.fold(s_)]
+    stream = []  # (token, sentence id, first?, last?)
+    for sid, s_ in enumerate(sents):
+        tt = storyboard._tok(s_)
+        stream += [(t, sid, k == 0, k == len(tt) - 1) for k, t in enumerate(tt)]
+    ct = storyboard._tok(text)
+    toks = [x[0] for x in stream]
+    for j in range(len(toks) - len(ct) + 1):
+        if toks[j:j + len(ct)] == ct:
+            run = stream[j:j + len(ct)]
+            sids = {x[1] for x in run}
+            if len(sids) > 1 and not (run[0][2] and run[-1][3]):
+                return "spans sentences partially (%r)" % text
+            if not run[-1][3] and theme.fold(text.split()[-1]).strip(".,;:!?") in _DANGLE:
+                return "ends on a function word (%r)" % text
+            nxt = stream[j + len(ct)] if j + len(ct) < len(stream) else None
+            if nxt and not run[-1][3] and nxt[0] in ("de", "do", "da", "dos", "das"):
+                return "cuts a noun phrase (%r | %s)" % (text, nxt[0])
+            return None
+    return "not a contiguous script run (%r)" % text
+
+
+# (1)+(2)+(3) units: whole sentences / clause segments, never the endcard line.
+_sc80 = _RR2909["1380"]["script"]
+_aw80 = storyboard.annotate_sentences(_words_of(_sc80, step=0.46), _sc80)
+_u80 = storyboard._speech_units(_aw80)
+ok(_u80 and not any("subscribe" in theme.fold(u["text"]) or theme.fold(u["text"]).startswith("next")
+                    for u in _u80),
+   "speech units never include the 'Subscribe — next IA trap.' endcard line (item 1)")
+ok(all(_card_ok(u["text"], _sc80) is None for u in _u80),
+   "speech units stay inside one sentence and never end on a function word (items 2/3): %s"
+   % [_card_ok(u["text"], _sc80) for u in _u80 if _card_ok(u["text"], _sc80)])
+ok("no padrão local." in [u["text"] for u in _u80] or any(u["text"].endswith("no padrão local.") for u in _u80),
+   "#1380: 'O cache segue em 16 bits no padrão local.' ends at its period (never '…local A')")
+_sc81 = _RR2909["1381"]["script"]
+_aw81 = storyboard.annotate_sentences(_words_of(_sc81, step=0.46), _sc81)
+_wt81 = storyboard._window_text(_aw81, 0.46 * 5, 0.46 * 5 + 2.92)
+ok(_wt81 == "O pull terminou e você chamou isso de stack.",
+   "#1381: window text is the whole sentence, not 'O pull terminou e você chamou isso de' (item 3): %r" % _wt81)
+ok(storyboard._split_point("O pull terminou e você chamou isso de stack.".split()) == 3,
+   "_split_point: 'O pull terminou | e você chamou isso de stack.' (conjunction seam, never after 'de')")
+ok(storyboard._split_point("e sabe o teto de VRAM antes".split()) != 4,
+   "_split_point never starts a segment on a binding 'de' ('teto | de VRAM')")
+_uw = _words_of("Mede a VRAM antes do slider e a geração chega inteira. Subscribe — next IA trap.", step=0.4)
+ok("next" not in storyboard._window_text(_uw, 4.0, 6.4).split(),
+   "unannotated words: the window text stops at 'Subscribe' (no 'next' card)")
+ok(storyboard._clashes("a prefill manda o n batch obedece", "obedece")
+   and storyboard._clashes("no padrao local", "o cache segue em 16 bits no padrao local"),
+   "_clashes: a fragment of the neighbour counts as a clash (item 7)")
+
+# Regression: compose the live boards at the live pace and at a fast pace.
+for _vid in ("1380", "1381", "1382", "1383", "1386"):
+    _f = _RR2909[_vid]
+    _n = len(_f["script"].split())
+    for _step, _dur in ((round((_f["duration"] - 1.2) / _n, 3), _f["duration"]),
+                        (0.36, round(0.36 * _n + 1.2, 2))):
+        _ww = _words_of(_f["script"], step=_step)
+        _hh = _compose(lambda *a, _b=_f["beats"], **k: json.dumps({"beats": _b}), subject=_f["title"],
+                       script=_f["script"], words=_ww, duration=_dur, brand="rr",
+                       language="Brazilian Portuguese", allowed_types=PHASE_A + ["code", "command", "diagram"])
+        _bb = craft.beats_from_html(_hh)
+        _tag = "#%s @%.2fs/word" % (_vid, _step)
+        _mids = _bb[1:-1]
+        _txt = [(b.get("type"), b.get("text") or "") for b in _mids]
+        ok(not any(theme.fold(t).strip(" .") in ("next", "subscribe") or "subscribe" in theme.fold(t)
+                   or theme.fold(t).startswith("next") for _, t in _txt),
+           "%s: no 'next'/Subscribe card before the endcard (item 1)" % _tag)
+        _bad = [_card_ok(t, _f["script"]) for ty, t in _txt if ty == "quote"]
+        _bad = [x for x in _bad if x]
+        ok(not _bad, "%s: every quote card ends at a sentence/clause boundary (items 2/3): %s" % (_tag, _bad))
+        ok(all(float(b["dur"]) <= craft.MID_BEAT_MAX_S + 1e-6 for b in _mids),
+           "%s: every mid hold ≤2.80s (item 6): %s" % (_tag, max(float(b["dur"]) for b in _mids)))
+        ok(craft.repeated_card_hits(_bb) == [],
+           "%s: no repeated / fragment-of-neighbour card (item 7): %s" % (_tag, craft.repeated_card_hits(_bb)))
+        _pc = craft.hook_pace_marker(_bb, _ww, "rr", "short")
+        _gg = craft.video_maker_gate(_bb, hook_pace=_pc, beat_timing=craft.BEAT_TIMING_CURRENT)
+        ok(_gg["checks"]["B"] == "PASS" and float(_bb[1]["start"]) <= craft.HOOK_FIRST_CUT_BY_S + 1e-6,
+           "%s: Gate B PASS (card_hold_280), first cut ≤2.5s: %s" % (_tag, _gg["reasons"]))
+        ok(storyboard.validate_storyboard(_bb, _dur), "%s: board valid" % _tag)
+        ok(not any(t == "obedece" for _, t in _txt), "%s: no lone 'obedece' card (#1382)" % _tag)
 
 print(f"\nALL {_checks} CHECKS PASSED")

@@ -681,14 +681,34 @@ def split_card_text(spec: dict | None) -> str:
     return f"{top} {bot}".strip()
 
 
+# Heavy (900) sans glyph advance ≈ 0.62em incl. the -0.02em tracking; used to
+# keep the LONGEST word on one line (RR 2026-09-30: "engenha/ria.",
+# "escanea/do" broke mid-word at 2–3× size with overflow-wrap:anywhere).
+SPLIT_CHAR_EM = 0.62
+SPLIT_CAP_EM = 0.74  # capitals/digits are wider ("PARALLEL", "NVIDIA", "2048")
+SPLIT_TEXT_W_FRAC = 0.76  # card inner width (stage 88% − card padding 12%)
+
+
 def split_font_px(text: str | None, width: int, height: int) -> int:
-    """Card type size: 2–3× the old hook (≈78–90px at 1080w), fit to the card."""
+    """Card type size: 2–3× the old hook, fit to the card, and small enough
+    that the longest word fits one line (shrink, never break inside a word)."""
     n = max(1, len(" ".join((text or "").split())))
     avail_w = width * 0.80
     avail_h = height * 0.26
     px = (avail_w * avail_h / (0.58 * 1.05 * n)) ** 0.5
     lo, hi = int(width * 0.10), int(width * 0.205)
-    return int(max(lo, min(hi, px)))
+    px = max(lo, min(hi, px))
+    ems = [sum(SPLIT_CAP_EM if (c.isupper() or c.isdigit()) else SPLIT_CHAR_EM for c in w)
+           for w in re.split(r"[\s_/]+", text or "") if w]
+    fit = (width * SPLIT_TEXT_W_FRAC) / max(ems or [SPLIT_CHAR_EM])
+    return int(max(int(width * 0.05), min(px, fit)))
+
+
+def _split_text_html(text: str) -> str:
+    """Escaped card text; line breaks only between words or after "_" / "/"
+    inside an identifier (<wbr>), never inside a plain word."""
+    from app.services.engines.theme import esc
+    return re.sub(r"([_/])", r"\1<wbr>", esc(text))
 
 
 def split_card_markup(spec: dict, width: int, height: int) -> str:
@@ -701,7 +721,7 @@ def split_card_markup(spec: dict, width: int, height: int) -> str:
         x = '<div class="sc-x">✕</div>' if stamp else ""
         return ('<div class="sc ' + cls + '">' + x + lab +
                 '<div class="sc-text" style="font-size:' + str(px) + 'px">' +
-                esc(text) + "</div></div>")
+                _split_text_html(text) + "</div></div>")
 
     return ('<div class="split">' +
             card("sc-top", spec.get("top_label") or "", spec.get("top") or "", False) +
@@ -718,7 +738,8 @@ SPLIT_CSS = (
     ".sc-bot{border-color:var(--split-bot,#e5484d);background:rgba(229,72,77,.10)}"
     ".sc-label{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:800;"
     "letter-spacing:.14em;text-transform:uppercase;font-size:44px;opacity:.78;margin-bottom:.25em}"
-    ".sc-text{font-weight:900;line-height:1.04;letter-spacing:-.02em;overflow-wrap:anywhere}"
+    ".sc-text{font-weight:900;line-height:1.04;letter-spacing:-.02em;"
+    "overflow-wrap:normal;word-break:normal;hyphens:manual}"
     ".sc-x{position:absolute;right:5%;top:6%;font-size:96px;font-weight:900;line-height:1;"
     "color:var(--split-bot,#e5484d);transform:rotate(-8deg)}"
 )
@@ -897,7 +918,12 @@ MID_CARD_MAX_S = 3.0
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
-MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)      # 2.88 visual hold
+# RR publish check 2026-09-30: with the real fade a 2.88s hold still measured
+# 3.05–3.08s card-to-card (blank midpoint to blank midpoint). Content hold is
+# now ≤2.80s so hold + fade ≤ 3.0s. MUST equal storyboard._MID_MAX.
+MID_BEAT_MAX_S = 2.80                                        # visual hold (current)
+MID_FADE_S = round(MID_CARD_MAX_S - MID_BEAT_MAX_S, 2)       # 0.20 measured fade
+INCL_FADE_MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)  # 2.88 (card_incl_fade boards)
 CTA_CARD_MAX_S = ENDCARD_CARD_MAX_S                          # 3.9 incl. fade
 CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
 # creation_config["beat_timing"] marker: boards rendered by the aligner that
@@ -907,6 +933,11 @@ CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
 # re-checks them with the legacy hold caps instead of auto-rejecting the
 # approved inventory. Every new render is checked strictly.
 BEAT_TIMING_INCL_FADE = "card_incl_fade"
+# New renders (2026-09-30): mid hold ≤2.80s. Boards stamped card_incl_fade
+# (rendered 29 Sep, some already in review/approved) keep their 2.88s cap —
+# same marker trick, nothing already rendered is rejected retroactively.
+BEAT_TIMING_HOLD_280 = "card_hold_280"
+BEAT_TIMING_CURRENT = BEAT_TIMING_HOLD_280
 LEGACY_MID_BEAT_MAX_S = 3.0
 LEGACY_CTA_BEAT_MAX_S = 4.0
 # RR hook pace (P1 d, council 2026-09-29): on the RR channel the claim is
@@ -1150,6 +1181,21 @@ def screen_text_near(a: str | None, b: str | None) -> bool:
 
 
 _REPEAT_EXEMPT_REPLAY = frozenset({"hook"}) | CTA_TYPES
+# Text cards whose copy can be a fragment of a neighbour (RR 2026-09-30:
+# #1382 card 13 "obedece" = the tail of card 12 "A prefill manda. O n_batch
+# obedece."). Object cards (stat/compare/…) legitimately reuse a word.
+FRAGMENT_TYPES = frozenset({"hook", "quote", "statement"})
+
+
+def screen_text_fragment(a: str | None, b: str | None) -> bool:
+    """True when one normalized card text is a contiguous word run (prefix,
+    suffix or middle) of the other, and they are not equal."""
+    ta, tb = (a or "").split(), (b or "").split()
+    if not ta or not tb or ta == tb:
+        return False
+    short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    m = len(short)
+    return any(long_[k:k + m] == short for k in range(len(long_) - m + 1))
 
 
 def repeated_card_reason(board: list[dict], i: int,
@@ -1175,6 +1221,10 @@ def repeated_card_reason(board: list[dict], i: int,
             t_cur in CTA_TYPES and t_prev in CTA_TYPES):
         return (f"beat[{i - 1}]→beat[{i}] ({t_prev}→{t_cur}) show the same card "
                 f"{shown!r} back-to-back")
+    if (t_cur in FRAGMENT_TYPES and t_prev in FRAGMENT_TYPES
+            and screen_text_fragment(keys[i - 1], cur)):
+        return (f"beat[{i - 1}]→beat[{i}] ({t_prev}→{t_cur}) card {shown!r} is a "
+                "fragment of its neighbour (partial-text echo)")
     if t_cur in _REPEAT_EXEMPT_REPLAY:
         return None
     for j in range(0, i - 1):
@@ -1220,6 +1270,55 @@ def _echoes_narration(beat: dict) -> bool:
     if not tw:
         return False
     return tw <= cw or text in cue or cue in text
+
+
+# TTS spoken-text normalization (RR 2026-09-30): edge-tts reads "_" as
+# "underline" (n_batch → "N underline batch"). Only the audio input changes;
+# the displayed text (title, cards, thumb) keeps the identifier, and the
+# WordBoundary words are merged back to the displayed identifier so cue
+# alignment and claim_spoken_end match the printed claim.
+_TTS_IDENT_RE = re.compile(r"(?<![\w])([A-Za-z0-9]+(?:_+[A-Za-z0-9]+)+)(?![\w])")
+
+
+def _ident_parts(ident: str) -> list[str]:
+    return [p for p in ident.split("_") if p]
+
+
+def tts_spoken_text(text: str | None) -> str:
+    """Text for edge-tts: identifiers with underscores are spoken as words
+    (n_batch → "n batch", num_gpu → "num gpu", NUM_PARALLEL → "num parallel")."""
+    def _say(m):
+        ident = m.group(1)
+        spoken = " ".join(_ident_parts(ident))
+        return spoken.lower() if ident.isupper() else spoken
+    return _TTS_IDENT_RE.sub(_say, text or "")
+
+
+def remerge_tts_words(words, text: str | None) -> list[dict]:
+    """Merge the WordBoundary words of a normalized identifier back into one
+    word carrying the displayed identifier ("n" + "batch" → "n_batch"), with
+    the first word's start and the last word's end. Unmatched → unchanged."""
+    out = [dict(w) for w in (words or []) if isinstance(w, dict)]
+    idents = [m.group(1) for m in _TTS_IDENT_RE.finditer(text or "")]
+    k = 0
+    for ident in idents:
+        parts = [_alnum_fold(p) for p in _ident_parts(ident)]
+        n = len(parts)
+        for j in range(k, len(out)):
+            if _alnum_fold(out[j].get("text") or "") == "".join(parts):
+                out[j] = {**out[j], "text": ident}  # service kept it as one word
+                k = j + 1
+                break
+            if j > len(out) - n:
+                continue
+            if [_alnum_fold(out[j + x].get("text") or "") for x in range(n)] == parts:
+                start = float(out[j].get("start") or 0.0)
+                end = _word_end(out[j + n - 1]) or start
+                out[j:j + n] = [{**out[j], "text": ident, "start": start,
+                                 "dur": round(max(0.0, end - start), 4)}]
+                k = j + 1
+                break
+    return out
 
 
 def _alnum_fold(text: str | None) -> str:
@@ -1295,9 +1394,19 @@ def _pass_fail(ok: bool) -> str:
     return "PASS" if ok else "FAIL"
 
 
+def _timing_caps(legacy_timing: bool, beat_timing: str | None) -> tuple[float, float]:
+    """(mid hold cap, cta hold cap) for a board's timing marker."""
+    if legacy_timing:
+        return LEGACY_MID_BEAT_MAX_S, LEGACY_CTA_BEAT_MAX_S
+    if beat_timing == BEAT_TIMING_INCL_FADE:
+        return INCL_FADE_MID_BEAT_MAX_S, CTA_BEAT_MAX_S
+    return MID_BEAT_MAX_S, CTA_BEAT_MAX_S
+
+
 def video_maker_gate(beats, *, content_format: str | None = "short",
                      used_fallback: bool = False, legacy_timing: bool = False,
-                     hook_pace: dict | None = None) -> dict:
+                     hook_pace: dict | None = None,
+                     beat_timing: str | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1348,30 +1457,33 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     # card = visual hold (dur) + the 0.12s fade gap it owns, which is what the
     # VM measures card-to-card (3.05–3.20s on a 3.0s hold, 2026-09-29).
     b_hits = []
+    mid_hold, cta_hold = _timing_caps(legacy_timing, beat_timing)
     for i, b in enumerate(board):
         btype = b.get("type") or "?"
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
         span = _cue_span(board, i)
-        card = span + BEAT_GAP_S
-        cap = CTA_CARD_MAX_S if btype in CTA_TYPES else MID_CARD_MAX_S
-        if legacy_timing:  # pre-2026-09-29 render: old HOLD caps (see marker)
-            cap = BEAT_GAP_S + (LEGACY_CTA_BEAT_MAX_S if btype in CTA_TYPES
-                                else LEGACY_MID_BEAT_MAX_S)
-        if card > cap + 1e-6:
-            label = "cta/endcard" if btype in CTA_TYPES else "mid"
+        is_cta = btype in CTA_TYPES
+        hold_cap = cta_hold if is_cta else mid_hold
+        if span > hold_cap + 1e-6:
+            label = "cta/endcard" if is_cta else "mid"
+            # fade as measured for this hold cap (0.20s on ≤2.80s mids, 0.12s
+            # otherwise); card = hold + fade vs the card limit.
+            fade = (MID_FADE_S if (not is_cta and hold_cap == MID_BEAT_MAX_S)
+                    else BEAT_GAP_S)
+            limit = hold_cap + fade
             b_hits.append(
-                f"beat[{i}] type={btype} {label} card {card:.2f}s incl. fade "
-                f"(hold {span:.2f}s + {BEAT_GAP_S:.2f}s fade; limit {cap:.1f}s)"
+                f"beat[{i}] type={btype} {label} card {span + fade:.2f}s incl. fade "
+                f"(hold {span:.2f}s + {fade:.2f}s fade; limit {limit:.1f}s)"
             )
     if b_hits:
         checks["B"] = "FAIL"
         reasons.append(
             f"[B] Beats ≤{MID_CARD_MAX_S:.1f}s incl. fade: FAIL — " + "; ".join(b_hits) +
             f". Mid cards/slides must be ≤{MID_CARD_MAX_S:.1f}s including the fade "
-            f"(hold ≤{MID_BEAT_MAX_S:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
-            f"including the fade (hold ≤{CTA_BEAT_MAX_S:.2f}s) — split or add "
+            f"(hold ≤{mid_hold:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
+            f"including the fade (hold ≤{cta_hold:.2f}s) — split or add "
             "beats, never stretch a card (not a Follow-tomorrow hold)."
         )
     # Repeated card: an identical card split only by the fade blink reads as
@@ -1421,9 +1533,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             c_hits.append(
                 f"list beat[{i}] has {n_items} items (max {LIST_MAX_ITEMS})"
             )
-        if span > MID_BEAT_MAX_S + 1e-9:
+        if span > mid_hold + 1e-9:
             c_hits.append(
-                f"list beat[{i}] held {span:.2f}s (max {MID_BEAT_MAX_S:.2f}s hold)"
+                f"list beat[{i}] held {span:.2f}s (max {mid_hold:.2f}s hold)"
             )
         if stagger > LIST_STAGGER_MAX_S + 1e-9:
             c_hits.append(
@@ -1490,11 +1602,12 @@ def video_maker_gate_reason(creation_config=None,
         if isinstance(stored, dict) and stored.get("result") == "FAIL":
             return format_craft_gate_reason(stored)
         return None  # no snapshot (pré-gate inventory) — fail-open
-    legacy = cc.get("beat_timing") != BEAT_TIMING_INCL_FADE
+    bt = cc.get("beat_timing")
+    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
     pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
                             used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace)
+                            hook_pace=pace, beat_timing=bt)
     return format_craft_gate_reason(gate)
 
 

@@ -661,26 +661,41 @@ ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
    "B FAIL: mid command held 5.80s (over the 3.0s HARD cap)")
 ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
 
-# B — aligner-capped mid: hold 2.88 + 0.12 fade = 3.0s card must PASS.
-# (VM 2026-09-29: the 3.0s limit INCLUDES the fade; a 3.0s hold is a 3.12s
-# card and now FAILs — see below.)
+# B — aligner-capped mid: hold 2.80 + 0.20 measured fade = 3.0s card must PASS.
+# (VM 2026-09-29: the 3.0s limit INCLUDES the fade; RR check 2026-09-30: a
+# 2.88s hold still measured 3.05–3.08s → current hold cap 2.80s.)
 b_cap = _pass_beats()
-b_cap[1] = {"type": "code", "start": 2.0, "dur": 2.88, "lines": ["x"], "cue": "code"}
-b_cap[2] = {"type": "stat", "start": 5.0, "dur": 2.0, "value": "1", "cue": "one"}
-b_cap[3] = {"type": "cta", "start": 7.12, "dur": 3.0, "text": "Go", "cue": "go"}
+b_cap[1] = {"type": "code", "start": 2.0, "dur": 2.80, "lines": ["x"], "cue": "code"}
+b_cap[2] = {"type": "stat", "start": 4.92, "dur": 2.0, "value": "1", "cue": "one"}
+b_cap[3] = {"type": "cta", "start": 7.04, "dur": 3.0, "text": "Go", "cue": "go"}
 gcap = craft.video_maker_gate(b_cap)
 ok(gcap["checks"]["B"] == "PASS",
-   "B PASS: code hold 2.88 + 0.12 fade = 3.0s card (at the cap)")
+   "B PASS: code hold 2.80 + 0.20 fade = 3.0s card (at the cap)")
 ok(gcap["result"] == "PASS",
    "board sitting on the 3.0s-incl-fade mid cap + 3.0s cta is a full PASS")
+b_288 = _pass_beats()
+b_288[1] = {"type": "code", "start": 2.0, "dur": 2.88, "lines": ["x"], "cue": "code"}
+b_288[2] = {"type": "stat", "start": 5.0, "dur": 2.0, "value": "1", "cue": "one"}
+b_288[3] = {"type": "cta", "start": 7.12, "dur": 3.0, "text": "Go", "cue": "go"}
+g288 = craft.video_maker_gate(b_288)
+ok(g288["checks"]["B"] == "FAIL" and "3.08s incl. fade" in g288["reasons"][0],
+   "B FAIL (new renders): 2.88s hold = 3.08s card (RR 2026-09-30 measured 3.05–3.08s)")
+ok(craft.video_maker_gate(b_288, beat_timing=craft.BEAT_TIMING_INCL_FADE)["checks"]["B"] == "PASS",
+   "boards stamped card_incl_fade (29 Sep renders) keep the 2.88s cap — no retroactive reject")
+ok(craft.video_maker_gate_reason({"beats": b_288, "beat_timing": craft.BEAT_TIMING_INCL_FADE}) is None
+   and craft.video_maker_gate_reason({"beats": b_288, "beat_timing": craft.BEAT_TIMING_HOLD_280}),
+   "review/publish gate: marker card_incl_fade → 2.88 cap; card_hold_280 → 2.80 cap")
+ok(craft.BEAT_TIMING_CURRENT == craft.BEAT_TIMING_HOLD_280 and craft.MID_BEAT_MAX_S == 2.80
+   and abs(craft.MID_BEAT_MAX_S + craft.MID_FADE_S - 3.0) < 1e-9,
+   "current timing marker = card_hold_280; hold 2.80 + fade 0.20 = 3.0")
 b_old3 = _pass_beats()
 b_old3[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
 b_old3[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
 b_old3[3] = {"type": "cta", "start": 7.2, "dur": 3.0, "text": "Go", "cue": "go"}
 g_old3 = craft.video_maker_gate(b_old3)
 ok(g_old3["checks"]["B"] == "FAIL" and "beat[1]" in g_old3["reasons"][0]
-   and "3.12s incl. fade" in g_old3["reasons"][0],
-   "B FAIL: the old 3.0s hold is a 3.12s card incl. fade (VM measured 3.05–3.20s)")
+   and "3.20s incl. fade" in g_old3["reasons"][0],
+   "B FAIL: the old 3.0s hold is a 3.20s card incl. the measured fade (VM 3.05–3.20s)")
 b_end = _pass_beats()
 b_end[3] = {"type": "cta", "start": 7.0, "dur": 4.0, "text": "Go", "cue": "go"}
 g_end = craft.video_maker_gate(b_end)
@@ -807,7 +822,7 @@ c_echo = [
     {"type": "cta", "start": 4.5, "dur": 3.0, "text": "Go", "cue": "go"},
 ]
 ge = craft.video_maker_gate(c_echo)
-ok(ge["checks"]["C"] == "FAIL" and "re-displays narration" in ge["reasons"][0],
+ok(ge["checks"]["C"] == "FAIL" and any("re-displays narration" in r for r in ge["reasons"]),
    "C FAIL: statement only re-displays narration without a rich type")
 
 # C — Subscribe CTA on mid cards (legal only on trailing cta/endcard)
@@ -1046,7 +1061,7 @@ ok(craft.contrast_split("A. B. C. · IA 3") is None, "split: three sentences →
 ok(craft.contrast_split(None) is None and craft.contrast_split("") is None, "split: empty → None")
 _fs = craft.split_font_px("applied SAVE20.", 1080, 1920)
 ok(108 <= _fs <= 221, "split: type size is 2–3× the old hook at 1080w (%d px)" % _fs)
-ok(craft.split_font_px("x" * 80, 1080, 1920) >= 108, "split: long card never drops below 10% width")
+ok(craft.split_font_px("xx " * 40, 1080, 1920) >= 108, "split: long card of short words never drops below 10% width")
 _mk = craft.split_card_markup(_sp, 1080, 1920)
 ok(_mk.count('class="sc ') == 2 and _mk.count("✕") == 1 and 'sc-bot"><div class="sc-x"' in _mk,
    "split: shared markup has 2 cards, the ✕ stamp on the bottom card only")
@@ -1148,5 +1163,85 @@ ok(_card["chip"] == "Subscribe · Shipping" and "next Shipping" in _card["vo"],
    "series_endcard: chip and VO both follow the topic (they can no longer disagree)")
 ok("next Shipping" in craft.ensure_series_endcard_vo("A. B.", "You still can't tell.", topic_name="Shipping"),
    "ensure_series_endcard_vo: topic_name reaches the pinned VO")
+
+# --- RR batch 29/09 Gate B (P0 2026-09-30) ----------------------------------
+print("RR P0 2026-09-30: frame0 word fit, TTS underscore, fragment cards, 2.80 hold")
+# (4) frame0/thumb split card never breaks inside a word (#1381 "engenha/ria",
+# #1386 "escanea/do"): the font shrinks so the longest word fits one line.
+ok("overflow-wrap:anywhere" not in craft.SPLIT_CSS and "word-break:break" not in craft.SPLIT_CSS
+   and "overflow-wrap:normal" in craft.SPLIT_CSS,
+   "split CSS: no overflow-wrap:anywhere / break-all (a word is never split by the browser)")
+for _t in ("não é engenharia.", "PDF escaneado", "Ollama sem CUDA", "NUM_PARALLEL multiplica a VRAM.",
+           "Placa NVIDIA na máquina", "desproporcionalmente", "n_batch alto estoura a prefill."):
+    _px = craft.split_font_px(_t, 1080, 1920)
+    _ems = max(sum(craft.SPLIT_CAP_EM if (c.isupper() or c.isdigit()) else craft.SPLIT_CHAR_EM
+                   for c in w) for w in re.split(r"[\s_/]+", _t) if w)
+    ok(_px * _ems <= 1080 * craft.SPLIT_TEXT_W_FRAC + 1e-6,
+       "split font %dpx: longest word of %r fits one line of the card" % (_px, _t))
+ok(craft.split_font_px("não é engenharia.", 1080, 1920) < craft.split_font_px("não é bom.", 1080, 1920),
+   "split font shrinks for a long word ('engenharia.') instead of breaking it")
+_mk = craft.split_card_markup({"top": "NUM_PARALLEL multiplica", "bottom": "a VRAM.", "stamp": True},
+                              1080, 1920)
+ok("NUM_<wbr>PARALLEL" in _mk and "engenha<wbr>" not in _mk,
+   "split markup: an identifier may wrap only after '_' (<wbr>); plain words never get a break point")
+ok("escanea" not in craft._split_text_html("PDF escaneado").replace("escaneado", ""),
+   "split markup keeps 'escaneado' whole")
+
+# (5) TTS reads '_' as 'underline': spoken text is normalized, display is not.
+ok(craft.tts_spoken_text("n_batch alto estoura a prefill.") == "n batch alto estoura a prefill.",
+   "tts_spoken_text: n_batch → 'n batch'")
+ok(craft.tts_spoken_text("num_gpu 0 é só CPU.") == "num gpu 0 é só CPU.", "tts_spoken_text: num_gpu → 'num gpu'")
+ok(craft.tts_spoken_text("NUM_PARALLEL multiplica a VRAM.") == "num parallel multiplica a VRAM.",
+   "tts_spoken_text: NUM_PARALLEL → 'num parallel' (VRAM/CPU untouched)")
+ok(craft.tts_spoken_text("O contexto mora no n_ctx. Corta o n_ubatch.") ==
+   "O contexto mora no n ctx. Corta o n ubatch.", "tts_spoken_text: every identifier in the script")
+ok(craft.tts_spoken_text("Sem underscore aqui. Subscribe — next IA trap.") ==
+   "Sem underscore aqui. Subscribe — next IA trap.", "tts_spoken_text: text without identifiers unchanged")
+_tw = [{"text": "n", "start": 0.1, "dur": 0.2}, {"text": "batch", "start": 0.35, "dur": 0.4},
+       {"text": "alto", "start": 0.8, "dur": 0.3}, {"text": "estoura", "start": 1.15, "dur": 0.45},
+       {"text": "a", "start": 1.65, "dur": 0.1}, {"text": "prefill", "start": 1.8, "dur": 0.5}]
+_rw = craft.remerge_tts_words(_tw, "n_batch alto estoura a prefill.")
+ok([w["text"] for w in _rw] == ["n_batch", "alto", "estoura", "a", "prefill"]
+   and _rw[0]["start"] == 0.1 and abs(_rw[0]["dur"] - 0.65) < 1e-6,
+   "remerge_tts_words: 'n'+'batch' → one 'n_batch' word spanning both")
+ok(craft.claim_spoken_end("n_batch alto estoura a prefill.", _rw) == 2.3
+   and craft.claim_spoken_end("n_batch alto estoura a prefill.", _tw) == 2.3,
+   "claim_spoken_end: displayed claim matches normalized TTS words (merged or not)")
+ok(craft.remerge_tts_words(_tw[2:], "alto estoura") == _tw[2:], "remerge_tts_words: no identifier → unchanged")
+ok([w["text"] for w in craft.remerge_tts_words([{"text": "n batch", "start": 0.1, "dur": 0.6}], "n_batch")]
+   == ["n_batch"], "remerge_tts_words: one boundary for 'n batch' → displayed 'n_batch'")
+ok([w["text"] for w in craft.remerge_tts_words(
+    [{"text": t, "start": k * 0.3, "dur": 0.25} for k, t in enumerate(
+        "O contexto mora no n ctx Corta o n batch e o n ubatch junto".split())],
+    "O contexto mora no n_ctx. Corta o n_batch e o n_ubatch junto.")]
+   == "O contexto mora no n_ctx Corta o n_batch e o n_ubatch junto".split(),
+   "remerge_tts_words: every identifier in a script, in order (live edge-tts shape)")
+
+# (7) no card is a suffix/fragment duplicate of its neighbour (#1382 'obedece').
+_fr = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "n_batch alto estoura a prefill."},
+       {"type": "quote", "start": 2.5, "dur": 2.8, "text": "A prefill manda. O n_batch obedece."},
+       {"type": "quote", "start": 5.42, "dur": 1.4, "text": "obedece"},
+       {"type": "cta", "start": 6.94, "dur": 3.0, "text": "Subscribe · IA"}]
+ok(any("fragment of its neighbour" in h for h in craft.repeated_card_hits(_fr)),
+   "repeated card: #1382 card 'obedece' after 'A prefill manda. O n_batch obedece.' is a fragment")
+ok(craft.video_maker_gate(_fr)["checks"]["B"] == "FAIL", "fragment neighbour → Gate B FAIL")
+ok(craft.screen_text_fragment("a prefill manda o n batch obedece", "obedece")
+   and craft.screen_text_fragment("no padrao local", "o cache segue em 16 bits no padrao local")
+   and not craft.screen_text_fragment("o cache segue em 16 bits", "no padrao local")
+   and not craft.screen_text_fragment("obedece", "obedece"),
+   "screen_text_fragment: prefix/suffix/middle runs only, equal/unrelated texts are not fragments")
+_ok_board = [dict(_fr[0]), dict(_fr[1]), {"type": "quote", "start": 5.42, "dur": 1.4,
+                                           "text": "Testa a prefill com o prompt longo."}, dict(_fr[3])]
+ok(craft.repeated_card_hits(_ok_board) == [], "distinct sentence cards are not fragments")
+
+# (6) new renders: mid hold ≤2.80 so hold + fade ≤3.0s; marker set by the worker.
+ok(craft.BEAT_TIMING_CURRENT == craft.BEAT_TIMING_HOLD_280 and craft.MID_BEAT_MAX_S == 2.80
+   and craft.MID_BEAT_MAX_S + craft.MID_FADE_S <= 3.0 + 1e-9,
+   "new renders: 2.80s hold + 0.20s fade ≤ 3.0s (Gate B strict, card_incl_fade measured 3.05–3.08)")
+_b305 = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três."},
+         {"type": "stat", "start": 2.5, "dur": 2.85, "value": "1", "unit": "x", "label": "a"},
+         {"type": "cta", "start": 5.47, "dur": 3.0, "text": "Subscribe · IA"}]
+ok(craft.video_maker_gate(_b305, beat_timing=craft.BEAT_TIMING_CURRENT)["checks"]["B"] == "FAIL",
+   "2.85s mid hold (≈3.05 incl. fade) → Gate B FAIL on a card_hold_280 render")
 
 print(f"\nALL {_checks} CHECKS PASSED")
