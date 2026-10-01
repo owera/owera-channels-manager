@@ -1944,3 +1944,25 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 64. ✅ DONE (PR autoimprove/2026-10-01-music-list-stat) music list skips an unreadable pool entry — normal
+- **resolution (2026-10-01):** `list_tracks` catches `OSError` from
+  `stat()` and skips that name. `stat()` follows symlinks, so a broken
+  link, a symlink loop (`ELOOP`), or a file that disappears between
+  `iterdir` and `stat` used to raise out of `GET /api/music` and 500
+  the whole list. A symlink whose target is a real file is still
+  listed. Suite: `tests/verify_music_gen.py` 538 → 544. TestClient
+  `GET /api/music` with `keep.wav` plus `gone.wav` → missing is 200,
+  `count == 1`, names `["keep.wav"]`.
+- **why (found 2026-10-01):** one bad directory entry hid every other
+  track. Reproduced: `list_tracks` raised `FileNotFoundError` on
+  `gone.wav` → a missing target.
+- **caution:** normal (`music_gen.list_tracks` only). Not a
+  publish/oauth path.
+- **accepted:** the skipped name is absent from the list. On main,
+  DELETE of a broken symlink is still 404 (`exists()` follows), so
+  the API does not remove that link.
+- **deploy:** `app/**` needs a manager restart after merge. No frontend
+  build.
+- **acceptance:** a pool with one broken symlink and one real wav lists
+  the real wav; `GET /api/music` is 200; a live symlink is still listed.
