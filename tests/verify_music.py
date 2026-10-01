@@ -26,6 +26,12 @@ Pins:
     and only yields matching descs (kills exact-match-only)
   - case + surrounding whitespace still match
   - unauthenticated is still 401
+  - DELETE /api/music/{name} removes one pool file (204, then 404)
+  - a directory name, ".", an overlong segment, an absolute path, a
+    parent hop, and a symlink that resolves outside are 400 and delete
+    nothing (those used to raise out of unlink/resolve and 500)
+  - a single-segment name that merely contains ".." (foo..bar.wav) deletes
+  - a symlink to another file inside the pool unlinks the link only
 
 Uses FastAPI's TestClient; ``music_gen.generate_and_save`` is stubbed
 so the suite never synthesises audio or touches the live bgm_dir.
@@ -40,6 +46,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app.main as main
@@ -288,6 +295,133 @@ try:
     ok('_reject_bool_count' in body_src and 'mode="before"' in body_src,
        "GenerateBody._reject_bool_count is mode=before "
        "(a comment containing 'before' is not the decorator)")
+
+    print("DELETE /api/music: pool file, auth, miss")
+    bed = _TMP / "bed.wav"
+    bed.write_bytes(b"bed-bytes")
+    r = client.delete("/api/music/bed.wav")
+    ok(r.status_code == 401, "delete still requires auth")
+    ok(bed.read_bytes() == b"bed-bytes", "unauthenticated delete leaves the file")
+    r = client.delete("/api/music/bed.wav", auth=auth)
+    ok(r.status_code == 204, "delete of a pool wav is 204")
+    ok(not bed.exists(), "the pool wav is gone")
+    r = client.delete("/api/music/bed.wav", auth=auth)
+    ok(r.status_code == 404, "a second delete of the same name is 404")
+
+    dotted = _TMP / "foo..bar.wav"
+    dotted.write_bytes(b"dots")
+    r = client.delete("/api/music/foo..bar.wav", auth=auth)
+    ok(r.status_code == 204,
+       "a single-segment name containing '..' deletes "
+       "('..' substring reject would 400 a legal pool file)")
+    ok(not dotted.exists(), "foo..bar.wav is gone")
+
+    print("DELETE /api/music: directory / dot / overlong are 400, not 500")
+    sub = _TMP / "subdir"
+    sub.mkdir()
+    (sub / "keep.wav").write_bytes(b"keep")
+
+    def _status(resp_or_exc) -> str:
+        if isinstance(resp_or_exc, HTTPException):
+            return f"HTTP {resp_or_exc.status_code}"
+        if isinstance(resp_or_exc, BaseException):
+            return type(resp_or_exc).__name__
+        return f"HTTP {resp_or_exc.status_code}"
+
+    def _http_delete(url: str):
+        try:
+            return client.delete(url, auth=auth)
+        except Exception as e:
+            return e
+
+    sub_res = _http_delete("/api/music/subdir")
+    ok(_status(sub_res) == "HTTP 400",
+       f"a directory name is 400, not an uncaught unlink error ({_status(sub_res)})")
+    ok(sub.is_dir() and (sub / "keep.wav").read_bytes() == b"keep",
+       "the directory and the file inside it are untouched")
+
+    dot_res = _http_delete("/api/music/%2e")
+    ok(_status(dot_res) == "HTTP 400",
+       f"filename '.' via %2e is 400, not an uncaught unlink of the pool ({_status(dot_res)})")
+    try:
+        music_router.delete_music(".")
+        dot_direct = "returned"
+    except Exception as e:
+        dot_direct = _status(e)
+    ok(dot_direct == "HTTP 400",
+       f"delete_music('.') is 400 ({dot_direct})")
+    ok(_TMP.is_dir() and (sub / "keep.wav").is_file(),
+       "refusing '.' leaves the pool directory in place")
+
+    long_name = "a" * 300 + ".wav"
+    try:
+        music_router.delete_music(long_name)
+        long_result = "returned"
+    except Exception as e:
+        long_result = _status(e)
+    ok(long_result == "HTTP 400",
+       f"an overlong filename is 400, not an uncaught OSError ({long_result})")
+
+    try:
+        music_router.delete_music("..")
+        dotdot_result = "returned"
+    except Exception as e:
+        dotdot_result = _status(e)
+    ok(dotdot_result == "HTTP 400",
+       f"filename '..' is 400 ({dotdot_result})")
+    ok(_TMP.is_dir(), "refusing '..' leaves the pool directory in place")
+
+    planted = _TMP / "a\\b.wav"
+    planted.write_bytes(b"slash")
+    try:
+        music_router.delete_music("a\\b.wav")
+        slash_result = "returned"
+    except Exception as e:
+        slash_result = _status(e)
+    ok(slash_result == "HTTP 400",
+       f"a backslash in the name is 400 ({slash_result})")
+    ok(planted.read_bytes() == b"slash", "the backslash-named file is not deleted")
+
+    print("DELETE /api/music: paths that leave the pool delete nothing")
+    secret_root = Path(tempfile.mkdtemp(prefix="verify-music-outside-"))
+    atexit.register(shutil.rmtree, secret_root, ignore_errors=True)
+    secret = secret_root / "secret.wav"
+    secret.write_bytes(b"SECRET")
+    link = _TMP / "link.wav"
+    link.symlink_to(secret)
+    link_res = _http_delete("/api/music/link.wav")
+    ok(_status(link_res) == "HTTP 400",
+       f"a symlink that resolves outside the pool is 400 ({_status(link_res)})")
+    ok(link.is_symlink(), "the outward symlink is left in place")
+    ok(secret.read_bytes() == b"SECRET",
+       "the outside target is untouched (unlink must not follow the resolved path)")
+
+    inner = _TMP / "inner.wav"
+    inner.write_bytes(b"inner")
+    inner_link = _TMP / "inner-link.wav"
+    inner_link.symlink_to(inner.name)  # relative link, stays inside the pool
+    r = client.delete("/api/music/inner-link.wav", auth=auth)
+    ok(r.status_code == 204, "a symlink to a file inside the pool is 204")
+    ok(inner.is_file() and inner.read_bytes() == b"inner",
+       "unlinking that symlink does not remove its inside target")
+    ok(not inner_link.is_symlink(),
+       "the inside symlink itself is removed")
+
+    try:
+        music_router.delete_music(str(secret))
+        abs_result = "returned"
+    except Exception as e:
+        abs_result = _status(e)
+    ok(abs_result == "HTTP 400", f"an absolute filename is 400 ({abs_result})")
+    ok(secret.read_bytes() == b"SECRET", "an absolute filename did not delete the outside file")
+
+    try:
+        music_router.delete_music("../" + secret.name)
+        hop_result = "returned"
+    except Exception as e:
+        hop_result = _status(e)
+    ok(hop_result == "HTTP 400", f"a parent-hop filename is 400 ({hop_result})")
+    ok(secret.read_bytes() == b"SECRET", "a parent hop did not delete the outside file")
 finally:
     music_gen.generate_and_save = _orig_save
     if _orig_router_save is not None:

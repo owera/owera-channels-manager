@@ -102,19 +102,49 @@ def generate_music(body: GenerateBody):
     }
 
 
-@router.delete("/{filename}", status_code=204)
-def delete_music(filename: str):
-    """Remove a track from bgm_dir."""
-    # Guard against path traversal
-    if "/" in filename or "\\" in filename or ".." in filename:
+def _contained_track(filename: str) -> Path:
+    """A single filename inside bgm_dir, or HTTPException.
+
+    `Path(dir) / "/abs"` is `/abs` (pathlib drops the left operand) and `..`
+    resolves outside the pool. stat of an overlong segment raises OSError
+    (`resolve()` may only join the path); `unlink()` on `.` or a subdirectory
+    raises too. Both used to escape as a traceback 500. A symlink that
+    resolves outside is refused — the link stays, and the target is not
+    unlinked. A hardlink inside the pool to an outside file still matches;
+    creating that link takes write access to the pool.
+    """
+    if (not isinstance(filename, str) or not filename
+            or filename != Path(filename).name
+            or "/" in filename or "\\" in filename):
         raise HTTPException(400, "invalid filename")
     bgm_dir = Path(settings.bgm_dir)
-    target = bgm_dir / filename
-    # Resolve both and ensure target is inside bgm_dir
     try:
-        target.resolve().relative_to(bgm_dir.resolve())
-    except ValueError:
+        # Resolved root: on macOS /tmp → /private/tmp, and an unresolved
+        # root rejects every file in a temp pool.
+        root = bgm_dir.resolve()
+        target = bgm_dir / filename
+        resolved = target.resolve()
+        inside = resolved.is_relative_to(root)
+        is_file = resolved.is_file()
+        exists = target.exists() or target.is_symlink()
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(400, "invalid filename")
-    if not target.exists():
+    if not inside:
+        raise HTTPException(400, "invalid filename")
+    if is_file:
+        return target
+    if exists:
+        raise HTTPException(400, "invalid filename")
+    raise HTTPException(404, "file not found")
+
+
+@router.delete("/{filename}", status_code=204)
+def delete_music(filename: str):
+    """Remove one track from bgm_dir. Names that leave the pool are 400."""
+    target = _contained_track(filename)
+    try:
+        target.unlink()
+    except FileNotFoundError:
         raise HTTPException(404, "file not found")
-    target.unlink()
+    except OSError:
+        raise HTTPException(400, "invalid filename")

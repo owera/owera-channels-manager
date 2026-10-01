@@ -1944,3 +1944,30 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 63. ✅ DONE (PR autoimprove/2026-10-01-music-delete-contain) music delete 400s on a directory or overlong name — normal
+- **resolution (2026-10-01):** `DELETE /api/music/{filename}` goes through
+  `_contained_track`. A name that is not a single path segment is 400
+  (this drops the `".." in filename` substring, which rejected a legal
+  `foo..bar.wav`). The pool root is resolved before `is_relative_to`
+  (macOS `/tmp` → `/private/tmp`). `OSError` / `RuntimeError` /
+  `ValueError` from stat of an overlong segment are 400, not a traceback
+  500 — `resolve()` on a missing overlong name only joins the path; the
+  stat that raises is `is_file()`. A directory, `.`, `..`, a backslash,
+  an absolute path, a parent hop, and a symlink that resolves outside are
+  400 and delete nothing. An inside symlink is unlinked as the link; the
+  target file stays. Suite: `tests/verify_music.py` 71 → 98.
+- **why:** a directory name made `unlink` raise, and an overlong filename
+  raised `OSError` [Errno 63]. Both escaped the handler as HTTP 500.
+- **caution:** normal (`app/routers/music.py` delete only). Not a
+  publish/oauth path.
+- **accepted:** a hardlink inside the pool to an outside file still
+  matches (creating it takes write access to the pool). The unlink
+  `OSError` handler covers the check/unlink race. A symlink to a
+  directory, a broken symlink, and a non-regular file inside the pool
+  are 400 and left in place.
+- **deploy:** `app/**` needs a manager restart after merge. No frontend
+  build.
+- **acceptance:** directory / `.` / overlong / escape names are 400 and
+  delete nothing; `foo..bar.wav` is 204; a second delete is 404;
+  unauthenticated delete is 401 and leaves the file.
