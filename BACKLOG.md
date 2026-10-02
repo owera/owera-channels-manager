@@ -1944,3 +1944,22 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 65. ✅ DONE (PR autoimprove/2026-10-01-runs-limit) runs query limits stay inside 1..100 — normal
+- **resolution (2026-10-01):** `GET /api/runs` `limit` and
+  `GET /api/agent/state` `runs_limit` go through `_bounded_runs_limit`
+  before `.limit()`. SQLite `LIMIT -1` is unbounded (confirmed: 5 seeded
+  rows all came back). `0` is 400 rather than an empty audit page.
+  `True` is 400 rather than `LIMIT 1`. The ceiling is 100, which still
+  fits the dashboard's `limit=60` and the growth playbook's `limit=100`.
+  Defaults stay 100 and 40. A channel filter with a legal limit is
+  unchanged. Suite: `tests/verify_runs_limit.py` (22 checks, new).
+- **why:** a negative query int dumped every JobRun. A huge positive
+  limit did the same on a table smaller than that.
+- **caution:** normal (`queue.py` query bounds only). Not a
+  publish/oauth path.
+- **deploy:** `app/**` needs a manager restart after merge. No frontend
+  build.
+- **acceptance:** `limit=-1`, `0`, and `101` are 400; `60`, `100`, and
+  the default still return the page; `runs_limit=-1` is 400 and
+  `runs_limit=1` is the newest row; unauthenticated is 401.

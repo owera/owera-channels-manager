@@ -1,6 +1,6 @@
 from datetime import datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
 from app.config import settings
@@ -13,6 +13,28 @@ from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
+
+# The dashboard asks for 60 and the growth playbook for 100. SQLite treats
+# LIMIT -1 as "no upper bound", and a huge positive limit is the same dump
+# on a table smaller than that. Both query params stop at this ceiling.
+_RUNS_LIMIT_MAX = 100
+
+
+def _bounded_runs_limit(limit: int, name: str = "limit") -> int:
+    """Reject a query limit SQLite would treat as unbounded.
+
+    ``True`` is an int equal to 1, so a bare range check would let it
+    through as LIMIT 1. Query strings already 422 on non-integers; the
+    bool check is for a direct caller.
+    """
+    if (isinstance(limit, bool) or not isinstance(limit, int)
+            or limit < 1 or limit > _RUNS_LIMIT_MAX):
+        raise HTTPException(
+            400,
+            f"{name} must be an integer from 1 to {_RUNS_LIMIT_MAX} "
+            "(SQLite LIMIT -1 is unbounded)")
+    return limit
+
 
 _STATUSES = [VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING, VideoStatus.RENDERED,
              VideoStatus.REVIEW, VideoStatus.APPROVED, VideoStatus.PUBLISHING,
@@ -107,6 +129,7 @@ def dashboard(session: Session = Depends(get_session)):
 @router.get("/runs")
 def runs(channel_id: int | None = None, video_id: int | None = None, limit: int = 100,
          session: Session = Depends(get_session)):
+    limit = _bounded_runs_limit(limit)
     q = select(JobRun)
     if channel_id is not None:
         q = q.where(JobRun.channel_id == channel_id)
@@ -130,6 +153,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     full dashboard, the per-topic/format analytics leaderboard per channel, the topic
     control surface (active/weight/pending), and the recent run audit. The agent acts
     through the existing PATCH/POST endpoints; this is its single observation call."""
+    runs_limit = _bounded_runs_limit(runs_limit, "runs_limit")
     # Lazy import avoids any import-order coupling with the youtube-admin router.
     from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
 
