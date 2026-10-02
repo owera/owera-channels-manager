@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api", tags=["profiles"])
 
 _VOICES_JSON = MPT_DIR / "app" / "services" / "data" / "azure_voices.json"
 _FONTS_DIR = MPT_DIR / "resource" / "fonts"
+_FONT_SUFFIXES = (".ttf", ".ttc", ".otf")
 
 
 @router.get("/profiles")
@@ -71,15 +72,47 @@ def delete_profile(profile_id: int, session: Session = Depends(get_session)):
         session.commit()
 
 
+def _contained_font(name: str) -> Path | None:
+    """A readable font file inside `_FONTS_DIR`, or None.
+
+    `basename` + `exists()` handed `FileResponse` a directory (it raises
+    `RuntimeError: ... is not a file`) and followed a symlink out of the
+    fonts dir. Resolve the root and the candidate, then require a regular
+    file that stays inside. The substring `..` is a legal font name
+    (`foo..bar.ttf`); only a path that leaves the dir is refused.
+    Containment is by path, so a hardlink inside the dir to an outside
+    file still matches — creating that link already takes write access here.
+    """
+    if (not isinstance(name, str) or not name or name in (".", "..")
+            or name != Path(name).name
+            or "/" in name or "\\" in name or "\x00" in name):
+        return None
+    if Path(name).suffix.lower() not in _FONT_SUFFIXES:
+        return None
+    try:
+        # Resolved root: on macOS /tmp → /private/tmp, and an unresolved
+        # root rejects every file in a temp fonts dir.
+        root = _FONTS_DIR.resolve()
+        candidate = (root / name).resolve()
+        if not candidate.is_relative_to(root) or not candidate.is_file():
+            return None
+        if candidate.suffix.lower() not in _FONT_SUFFIXES:
+            return None
+        return candidate if os.access(candidate, os.R_OK) else None
+    except (OSError, ValueError, RuntimeError):
+        # An over-long segment or a symlink loop. A NUL is rejected above.
+        return None
+
+
 @router.get("/params/font/{name}")
 def get_font(name: str):
-    """Serve a font file so the profile editor can preview it (WYSIWYG)."""
-    safe = os.path.basename(name)
-    p = _FONTS_DIR / safe
-    if not p.exists():
+    """Serve one font file so the profile editor can preview it."""
+    p = _contained_font(name)
+    if p is None:
         raise HTTPException(404, "font not found")
     ext = p.suffix.lower()
-    media = {"ttf": "font/ttf", "otf": "font/otf", "ttc": "font/collection"}.get(ext[1:], "application/octet-stream")
+    media = {"ttf": "font/ttf", "otf": "font/otf", "ttc": "font/collection"}.get(
+        ext[1:], "application/octet-stream")
     return FileResponse(p, media_type=media)
 
 
@@ -94,9 +127,15 @@ def params_options():
         voices = ["en-US-AndrewNeural-Male", "en-US-AvaNeural-Female"]
 
     fonts = []
-    if _FONTS_DIR.exists():
-        fonts = sorted(p.name for p in _FONTS_DIR.iterdir()
-                       if p.suffix.lower() in (".ttf", ".ttc", ".otf"))
+    try:
+        if _FONTS_DIR.exists():
+            # Same predicate as the preview, so a listed name is servable.
+            fonts = sorted(
+                p.name for p in _FONTS_DIR.iterdir()
+                if _contained_font(p.name) is not None
+            )
+    except OSError:
+        fonts = []
 
     # Read BGM files directly from the musicgen pool (same source as the render worker).
     bgm_dir = Path(settings.bgm_dir)
