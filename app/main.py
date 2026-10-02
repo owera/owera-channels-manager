@@ -98,12 +98,16 @@ async def basic_auth(request: Request, call_next):
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Basic "):
         try:
+            # Decode only. call_next stays outside this try: a raise from a
+            # route (FileResponse on a directory, a DB error) used to be
+            # swallowed into an empty 401 with no traceback.
             decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
             _username, _, password = decoded.partition(":")
+        except Exception:
+            password = None
+        else:
             if secrets.compare_digest(password, settings.app_password):
                 return await call_next(request)
-        except Exception:
-            pass
     return Response(
         status_code=401,
         headers={"WWW-Authenticate": 'Basic realm="Owera Channels Manager"'},

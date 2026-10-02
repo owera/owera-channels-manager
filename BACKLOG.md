@@ -1944,3 +1944,31 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 67. ✅ DONE (PR autoimprove/2026-10-02-auth-error) basic_auth no longer turns a handler exception into a silent 401 — high-caution
+- **resolution (2026-10-02):** `basic_auth` decodes the `Authorization`
+  header inside `try`, and awaits `call_next` only after
+  `compare_digest` succeeds, outside that `try`. A bad header or a
+  wrong password is still 401 and does not run the route. A route that
+  raises with a valid password is a generic 500 (`Internal Server
+  Error`); the exception text is not in the body. `HTTPException` still
+  renders (a missing channel is 404). `/health` and the oauth callback
+  exemption are unchanged. Suite: `tests/verify_health.py` 62 → 67.
+  On the previous middleware the new check failed: the same request
+  was 401.
+- **why (found while shipping #66):** the `try` wrapped `call_next`.
+  `FileResponse` raising `RuntimeError` on a directory became an empty
+  401 with no traceback. Any other unexpected raise on an authenticated
+  route took the same path. #66 stops that one font route from raising;
+  this closes the class.
+- **caution:** HIGH (`app/main.py` auth middleware only). Password
+  compare, `/health`, and the oauth callback exemption are unchanged.
+- **deploy:** `app/**` needs a manager restart after merge. No frontend
+  build.
+- **acceptance:** wrong password, a malformed Basic header, and no
+  credentials are 401 and do not run the route; a valid password on a
+  raising route is 500 with a generic body; a missing channel is still
+  404.
+- **tail:** PR #59 also appends after #61 and files this item as open.
+  This is the resolution. Keep this section if the two backlog tails
+  conflict.
