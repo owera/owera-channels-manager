@@ -1944,3 +1944,42 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 66. ✅ DONE (PR autoimprove/2026-10-02-font-preview) font preview stays inside the fonts dir — normal
+- **resolution (2026-10-02):** `GET /api/params/font/{name}` and the font
+  half of `GET /api/params/options` share `_contained_font`. A name is
+  served only when it resolves to a readable `.ttf` / `.ttc` / `.otf`
+  that stays inside the fonts directory. A directory, an outward
+  symlink, a symlink loop, a non-font, and a font-named symlink to a
+  non-font are 404 `font not found` and are left off the options list.
+  `foo..bar.ttf` and a name containing a space still preview. The BGM
+  half of options is unchanged. Suite: `tests/verify_profiles.py`
+  55 → 86.
+- **why:** `basename` + `exists()` handed `FileResponse` a directory,
+  which raises `RuntimeError`. With the app password set, `basic_auth`
+  swallows that exception and the editor gets an empty 401. An outward
+  symlink was followed and the target bytes were returned. The live
+  fonts directory (9 files, no subdirectory, no symlink) does not hit
+  this today. `UTM Kabel KT.ttf` still previews, bytes unchanged.
+- **caution:** normal (`profiles.py` font preview only). Not a
+  publish/oauth path. BGM listing left alone.
+- **deploy:** `app/**` needs a manager restart after merge. No frontend
+  build.
+- **acceptance:** a real font is 200 with its bytes; `pack.ttf` as a
+  directory is 404 `font not found`; an outward symlink is 404 and the
+  body is not the target; options lists only names the preview can serve.
+- **tail:** open PRs #51, #55, #56, and #57 also append after #61.
+  This item is #66.
+
+### 67. basic_auth turns a handler exception into a silent 401 — high-caution
+- **why (found while shipping #66):** `basic_auth` awaits `call_next`
+  inside `except Exception`. An authenticated route that raises becomes
+  HTTP 401 with an empty body and no traceback. `HTTPException` still
+  renders, because the route stack handles it before the middleware
+  sees it. Before #66, a directory under the fonts dir took this path.
+- **caution:** HIGH (`app/main.py` auth middleware only). Isolated
+  commit and a regression test. Do not change the password compare,
+  the `/health` exemption, or the oauth callback exemption.
+- **acceptance:** a wrong password stays 401 and does not run the route;
+  a valid password on a route that raises `RuntimeError` is a 500, not
+  a 401; `/health` and the oauth callback stay reachable with no credentials.

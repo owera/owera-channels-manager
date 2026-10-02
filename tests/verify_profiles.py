@@ -15,8 +15,10 @@ network, lifespan/scheduler never started). Exits non-zero on the first
 failed assertion.
 """
 import sys
+import tempfile
 from pathlib import Path
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -215,5 +217,138 @@ patched = by_name("OnB")
 ok(patched["channel_id"] == ch_b_id and patched["engine"] == "mpt",
    "PATCH integer left channel B and still applied engine")
 
+# Font preview (backlog #66): basename + exists() hands FileResponse a
+# directory (RuntimeError 500) and follows an outward symlink. A listed
+# name must be a readable font file that stays inside the fonts dir.
+_orig_fonts = profiles_router._FONTS_DIR
+try:
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td)
+        fonts = base / "fonts"
+        fonts.mkdir()
+        outside = base / "secret.txt"
+        outside.write_bytes(b"TOPSECRET")
+        (fonts / "Ok.ttf").write_bytes(b"FONTDATA")
+        (fonts / "My Font.ttf").write_bytes(b"SPACED")
+        (fonts / "foo..bar.ttf").write_bytes(b"DOTTED")
+        (fonts / "Upper.TTF").write_bytes(b"UPPER")
+        (fonts / "Serif.otf").write_bytes(b"OTFDATA")
+        (fonts / "Collection.ttc").write_bytes(b"TTCDATA")
+        (fonts / "notes.txt").write_bytes(b"NOTAFONT")
+        (fonts / "pack.ttf").mkdir()
+        (fonts / "Evil.ttf").symlink_to(outside)
+        (fonts / "Alias.ttf").symlink_to(fonts / "Ok.ttf")
+        (fonts / "Mask.ttf").symlink_to(fonts / "notes.txt")
+        (fonts / "loop.ttf").symlink_to(fonts / "loop.ttf")
+        profiles_router._FONTS_DIR = fonts
+
+        def _font_get(url, **kw):
+            try:
+                return client.get(url, **kw)
+            except Exception as e:
+                ok(False, f"{url} raised {type(e).__name__}: {e}")
+
+        r = _font_get("/api/params/font/Ok.ttf", auth=auth)
+        ok(r.status_code == 200 and r.content == b"FONTDATA",
+           "real ttf preview is 200 with the file bytes")
+        ok(r.headers.get("content-type", "").split(";")[0] == "font/ttf",
+           "ttf preview content-type is font/ttf")
+
+        r = _font_get("/api/params/font/Upper.TTF", auth=auth)
+        ok(r.status_code == 200 and r.content == b"UPPER",
+           "uppercase .TTF preview is 200")
+        ok(r.headers.get("content-type", "").split(";")[0] == "font/ttf",
+           "uppercase .TTF content-type is font/ttf")
+
+        r = _font_get("/api/params/font/Serif.otf", auth=auth)
+        ok(r.status_code == 200 and r.content == b"OTFDATA",
+           "otf preview is 200 with the file bytes")
+        ok(r.headers.get("content-type", "").split(";")[0] == "font/otf",
+           "otf preview content-type is font/otf")
+
+        r = _font_get("/api/params/font/Collection.ttc", auth=auth)
+        ok(r.status_code == 200 and r.content == b"TTCDATA",
+           "ttc preview is 200 with the file bytes")
+        ok(r.headers.get("content-type", "").split(";")[0] == "font/collection",
+           "ttc preview content-type is font/collection")
+
+        r = _font_get("/api/params/font/foo..bar.ttf", auth=auth)
+        ok(r.status_code == 200 and r.content == b"DOTTED",
+           "substring .. in a font name still previews")
+
+        r = _font_get("/api/params/font/My%20Font.ttf", auth=auth)
+        ok(r.status_code == 200 and r.content == b"SPACED",
+           "a space in the font name still previews")
+
+        r = _font_get("/api/params/font/Alias.ttf", auth=auth)
+        ok(r.status_code == 200 and r.content == b"FONTDATA",
+           "symlink to a font inside the dir previews the target bytes")
+
+        r = _font_get("/api/params/font/pack.ttf", auth=auth)
+        ok(r.status_code == 404 and r.json().get("detail") == "font not found",
+           "directory named pack.ttf is 404 font-not-found, not a raised FileResponse")
+
+        r = _font_get("/api/params/font/Evil.ttf", auth=auth)
+        ok(r.status_code == 404 and b"TOPSECRET" not in r.content
+           and r.json().get("detail") == "font not found",
+           "outward symlink is 404 and the body is not the target")
+
+        r = _font_get("/api/params/font/loop.ttf", auth=auth)
+        ok(r.status_code == 404 and r.json().get("detail") == "font not found",
+           "symlink loop preview is 404, not 500")
+
+        r = _font_get("/api/params/font/%2e%2e%2fsecret.ttf", auth=auth)
+        ok(r.status_code == 404 and b"TOPSECRET" not in r.content,
+           "percent-encoded parent hop does not serve the outside file")
+
+        r = _font_get("/api/params/font/notes.txt", auth=auth)
+        ok(r.status_code == 404 and b"NOTAFONT" not in r.content,
+           "non-font suffix inside the dir is 404")
+
+        r = _font_get("/api/params/font/Mask.ttf", auth=auth)
+        ok(r.status_code == 404 and b"NOTAFONT" not in r.content,
+           "font-named symlink to a non-font inside the dir is 404")
+
+        r = _font_get("/api/params/font/missing.ttf", auth=auth)
+        ok(r.status_code == 404, "missing font is 404")
+
+        r = _font_get("/api/params/font/" + ("a" * 300) + ".ttf", auth=auth)
+        ok(r is not None and r.status_code == 404, "overlong font name is 404")
+        ok(profiles_router._contained_font("a" * 300 + ".ttf") is None,
+           "overlong name is not a contained font")
+
+        r = _font_get("/api/params/font/Ok.ttf")
+        ok(r.status_code == 401, "unauthenticated font preview stays 401")
+
+        try:
+            profiles_router.get_font("..")
+            ok(False, "get_font('..') should 404")
+        except HTTPException as e:
+            ok(e.status_code == 404, "direct get_font('..') is 404")
+        ok(profiles_router._contained_font("..") is None, "contained '..' is None")
+        ok(profiles_router._contained_font(".") is None, "contained '.' is None")
+        ok(profiles_router._contained_font(str(outside)) is None,
+           "absolute path is not a contained font")
+        ok(profiles_router._contained_font("../secret.txt") is None,
+           "parent hop is not a contained font")
+        ok(profiles_router._contained_font("Ok.ttf\x00.ttf") is None,
+           "NUL in the name is not a contained font")
+
+        r = _font_get("/api/params/options", auth=auth)
+        ok(r.status_code == 200, "params options still 200 with a mixed fonts dir")
+        listed_fonts = r.json().get("fonts") or []
+        ok(listed_fonts == [
+               "Alias.ttf", "Collection.ttc", "My Font.ttf", "Ok.ttf",
+               "Serif.otf", "Upper.TTF", "foo..bar.ttf"],
+           "options lists only readable font files that stay inside the dir")
+        ok("pack.ttf" not in listed_fonts and "Evil.ttf" not in listed_fonts
+           and "loop.ttf" not in listed_fonts and "notes.txt" not in listed_fonts
+           and "Mask.ttf" not in listed_fonts,
+           "directory, outward symlink, loop, non-font, and masked symlink are not listed")
+        ok("bgm_files" in r.json() and isinstance(r.json()["bgm_files"], list),
+           "font containment did not drop the bgm file list")
+finally:
+    profiles_router._FONTS_DIR = _orig_fonts
+    settings.app_password = _orig_pw
+
 print(f"\nALL {_checks} CHECKS PASSED")
-settings.app_password = _orig_pw
