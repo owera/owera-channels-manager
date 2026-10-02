@@ -155,6 +155,7 @@ main.app.dependency_overrides[get_session] = _override_session
 _orig_pw = settings.app_password
 settings.app_password = "testpw"          # turn auth ON so the exemption is meaningful
 client = TestClient(main.app)
+quiet = TestClient(main.app, raise_server_exceptions=False)
 
 with _patched_process_headroom({"count": 100, "max": 2000, "pct_used": 5.0}):
     r = client.get("/health")
@@ -166,6 +167,44 @@ ok(r2.status_code == 401, "other API routes still require auth (exemption did no
 
 r3 = client.get("/api/channels", auth=("x", "testpw"))
 ok(r3.status_code == 200, "an authenticated API request still passes")
+
+r_missing = client.get("/api/channels/999999", auth=("x", "testpw"))
+ok(r_missing.status_code == 404 and r_missing.json().get("detail") == "channel not found",
+   "HTTPException still renders (a missing channel is 404, not 500 or 401)")
+
+# basic_auth used to await call_next inside `except Exception`, so a
+# dependency/route raise became an empty 401 and never reached the
+# server error handler. Bad credentials must still not enter the route.
+# The SPA catch-all is registered at import, so a route added here would
+# never run; the session dependency is inside the real /api/channels route.
+_raise_hits = {"n": 0}
+
+
+def _boom_session():
+    _raise_hits["n"] += 1
+    raise RuntimeError("boom-marker-not-for-clients")
+
+
+_saved_session = main.app.dependency_overrides[get_session]
+main.app.dependency_overrides[get_session] = _boom_session
+try:
+    r_raise_anon = client.get("/api/channels")
+    ok(r_raise_anon.status_code == 401 and _raise_hits["n"] == 0,
+       "a raising route stays 401 without credentials and does not run")
+    r_raise_bad = client.get("/api/channels", headers={"Authorization": "Basic !!!"})
+    ok(r_raise_bad.status_code == 401 and _raise_hits["n"] == 0,
+       "a malformed Basic header stays 401 and does not run the route")
+    r_raise_wrong = client.get("/api/channels", auth=("x", "wrong"))
+    ok(r_raise_wrong.status_code == 401 and _raise_hits["n"] == 0,
+       "a wrong password stays 401 and does not run the route")
+    r_raise = quiet.get("/api/channels", auth=("x", "testpw"))
+    ok(r_raise.status_code == 500
+       and r_raise.text == "Internal Server Error"
+       and "boom-marker-not-for-clients" not in r_raise.text
+       and _raise_hits["n"] == 1,
+       "a handler exception with a valid password is a generic 500, not a 401")
+finally:
+    main.app.dependency_overrides[get_session] = _saved_session
 
 # --- OAuth callback exemption (BACKLOG 8) -------------------------------------
 # Google's consent redirect lands in a browser that may hold no Basic Auth session,
