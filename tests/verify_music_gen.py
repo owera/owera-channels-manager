@@ -26,7 +26,10 @@ and replenish gate had zero direct tests. Covers:
   - pool_count: missing dir → 0; only techno_*.wav counts (mp3 / foreign stem /
     uppercase .WAV ok; nested dirs ignored)
   - list_tracks: missing dir → []; all three audio extensions; non-audio
-    ignored; sorted by name; size_kb / created present
+    ignored; sorted by name; size_kb / created present; a broken symlink
+    and a symlink loop are skipped (they used to raise and 500 the list)
+    while a live symlink and the readable sibling stay. GET /api/music
+    stays 200 in that pool.
   - _write_wav + generate_and_save: real mono 16-bit 44100 WAV named
     techno_<ms>.wav lands under bgm_dir; a matching prompt selects that
     preset (unknown prompt still random)
@@ -47,9 +50,11 @@ import wave
 from pathlib import Path
 
 import numpy as np
+from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
+import app.main as main
 from app.config import settings
 from app.models import JobRun
 from app.services import music_gen, quota
@@ -374,6 +379,63 @@ with tempfile.TemporaryDirectory() as td:
        "list_tracks size_kb is round(bytes/1024, 1)")
     ok(all(isinstance(t["created"], float) for t in tracks),
        "list_tracks created is a float (st_ctime)")
+
+
+print("list_tracks (one bad entry does not drop the pool)")
+
+with tempfile.TemporaryDirectory() as td:
+    d = Path(td)
+    (d / "keep.wav").write_bytes(b"x" * 1024)
+    (d / "gone.wav").symlink_to(d / "missing.wav")
+    (d / "alias.wav").symlink_to(d / "keep.wav")
+    (d / "loopA.wav").symlink_to(d / "loopB.wav")
+    (d / "loopB.wav").symlink_to(d / "loopA.wav")
+    try:
+        tracks = list_tracks(d)
+        listed = "ok"
+    except Exception as e:
+        tracks = []
+        listed = type(e).__name__
+    names = [t["name"] for t in tracks]
+    ok(listed == "ok" and "gone.wav" not in names and "loopA.wav" not in names
+       and "loopB.wav" not in names,
+       f"a broken symlink and a symlink loop are skipped, not a raise "
+       f"(status {listed}, names {names})")
+    ok(names == ["alias.wav", "keep.wav"],
+       f"a live symlink is still listed and the readable file stays (got {names})")
+    keep = next((t for t in tracks if t["name"] == "keep.wav"), None)
+    ok(keep is not None and keep["size_kb"] == round(1024 / 1024, 1),
+       "the readable sibling keeps its size_kb")
+
+
+print("GET /api/music stays 200 when one pool entry cannot be stat'd")
+
+_orig_pw = settings.app_password
+_orig_list_bgm = settings.bgm_dir
+settings.app_password = "testpw"
+with tempfile.TemporaryDirectory() as td:
+    d = Path(td)
+    settings.bgm_dir = str(d)
+    (d / "keep.wav").write_bytes(b"x" * 2048)
+    (d / "gone.wav").symlink_to(d / "missing.wav")
+    client = TestClient(main.app)
+    try:
+        r = client.get("/api/music", auth=("x", "testpw"))
+        status = r.status_code
+        body = r.json() if status == 200 else {}
+    except Exception as e:
+        status = type(e).__name__
+        body = {}
+    finally:
+        settings.app_password = _orig_pw
+        settings.bgm_dir = _orig_list_bgm
+names = [t.get("name") for t in body.get("tracks") or []]
+ok(status == 200,
+   f"GET /api/music is 200 with a broken symlink in the pool ({status})")
+ok(names == ["keep.wav"],
+   f"the route lists the readable track only (got {names})")
+ok(body.get("count") == 1,
+   f"count matches the listed tracks (got {body.get('count')})")
 
 
 # --------------------------------------------------------------------------- WAV IO

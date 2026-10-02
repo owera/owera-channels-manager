@@ -685,13 +685,24 @@ def pool_count(bgm_dir: Path) -> int:
 
 
 def list_tracks(bgm_dir: Path) -> list[dict]:
+    """Audio files in the pool. One unreadable name is skipped, not fatal.
+
+    ``stat()`` follows symlinks. A broken link, a symlink loop, or a file
+    that disappears between ``iterdir`` and ``stat`` raises ``OSError``
+    (``FileNotFoundError`` / ``ELOOP``). That used to escape
+    ``GET /api/music`` as a traceback 500 and hide every other track.
+    A symlink whose target is a real file is still listed.
+    """
     if not bgm_dir.exists():
         return []
     result = []
     for p in sorted(bgm_dir.iterdir()):
         if p.suffix.lower() not in _AUDIO_EXTS:
             continue
-        stat = p.stat()
+        try:
+            stat = p.stat()
+        except OSError:
+            continue
         result.append({"name": p.name, "size_kb": round(stat.st_size / 1024, 1),
                         "created": stat.st_ctime})
     return result
