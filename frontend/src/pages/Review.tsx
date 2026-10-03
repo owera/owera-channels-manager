@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMut, useVideo } from "../api";
+import { reviewPrivacyForApi, reviewPrivacySelectValue } from "../reviewPrivacy";
 import { StatusChip } from "../ui";
 
 export default function Review() {
@@ -13,7 +14,8 @@ export default function Review() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
-  const [privacy, setPrivacy] = useState("public");
+  const [privacy, setPrivacy] = useState("");
+  const [privacyFor, setPrivacyFor] = useState<number | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -22,15 +24,21 @@ export default function Review() {
       setTitle(t.title || t.subject);
       setDescription(t.description || "");
       setTags(t.tags_json ? JSON.parse(t.tags_json).join(", ") : "");
-      setPrivacy(t.privacy || "public");
     }
   }, [t?.id]);
 
   if (!t) return <div className="p-8 font-mono text-fog-400">loading…</div>;
 
+  // Sync before paint. An effect would leave the first click on "" and
+  // clear an explicit unlisted/private back to inherit.
+  if (privacyFor !== t.id) {
+    setPrivacyFor(t.id);
+    setPrivacy(reviewPrivacySelectValue(t.privacy));
+  }
+
   const tagList = tags.split(",").map((s) => s.trim()).filter(Boolean);
   const editable = t.status === "review" || t.status === "rendered";
-  const saveBody = () => ({ title, description, tags: tagList, privacy });
+  const saveBody = () => ({ title, description, tags: tagList, privacy: reviewPrivacyForApi(privacy) });
 
   return (
     <div className="p-8 max-w-[1200px]">
@@ -67,10 +75,11 @@ export default function Review() {
           <div className="label mb-1.5">tags <span className="text-fog-400">(comma separated)</span></div>
           <input className="input mb-4" value={tags} onChange={(e) => setTags(e.target.value)} disabled={!editable} />
 
-          <div className="w-40 mb-6">
+          <div className="w-52 mb-6">
             <div className="label mb-1.5">privacy</div>
             <select className="input" value={privacy} onChange={(e) => setPrivacy(e.target.value)} disabled={!editable}>
-              {["public", "unlisted", "private"].map((p) => <option key={p}>{p}</option>)}
+              <option value="">channel default</option>
+              {["public", "unlisted", "private"].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
 
