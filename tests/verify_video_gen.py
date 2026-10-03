@@ -627,6 +627,16 @@ ok(video_gen._strip_idea_cot(
     "Your agent wrote to production with the staging tool. · Agent traps 1"
 ) == "Your agent wrote to production with the staging tool. · Agent traps 1",
    "clean patterned title is unchanged")
+ok(video_gen._strip_idea_cot(
+    "The next episode number has to stay consistent with the titles already "
+    "published. I'll check the workspace for the series counter before writing "
+    "the five.Chat snoozed #oncall. Prod pinged Saturday. · Agent memory 51"
+) == "Chat snoozed #oncall. Prod pinged Saturday. · Agent memory 51",
+   "10-03 draft 1418: episode-counter CoT drops; glued Chat-vs-Prod claim stays")
+ok(video_gen._strip_idea_cot(
+    "I'll check the workspace for the series counter before writing the five."
+) is None,
+   "pure episode-counter CoT line is discarded")
 
 
 print()

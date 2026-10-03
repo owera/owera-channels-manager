@@ -487,6 +487,24 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-03 ch1-concept golden: unpatterned subject, sentence 1 was the
+# craft-brief leftover "The hook has to hit the forgetfulness pain…"
+_FLAKE_1003 = (
+    "The hook has to hit the forgetfulness pain in one short sentence, "
+    "then land a clear verdict. "
+    "Your AI agent forgets everything between chats. The model is stateless."
+)
+ok(worker._strip_script_preamble(_FLAKE_1003).startswith(
+    "Your AI agent forgets everything between chats."),
+   "10-03 ch1-concept flake: 'The hook has to hit the forgetfulness pain' drops")
+ok("forgetfulness pain" not in worker._strip_script_preamble(_FLAKE_1003).lower()
+   and "clear verdict" not in worker._strip_script_preamble(_FLAKE_1003).lower(),
+   "10-03 hook-has-to CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "The hook is the first three seconds. Rank what you found."
+).startswith("The hook is the first three seconds."),
+   "a real 'The hook is the first three seconds' claim is not treated as craft-brief CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
