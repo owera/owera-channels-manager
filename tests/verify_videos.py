@@ -47,7 +47,11 @@ non-zero on the first failed assertion.
 from __future__ import annotations
 
 import inspect
+import json
+import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -776,6 +780,52 @@ try:
        and n_produce_runs() == 3,
        "unauthenticated reorder/produce write nothing")
 
+    # Review approve used to POST privacy "public" whenever the column was
+    # null. Null inherits channel.default_privacy at publish. The API stores
+    # JSON null as NULL (clears an explicit level back to inherit) and an
+    # explicit level as that level. The stale-artifact check runs before the
+    # body is applied, so the fixture file has to exist; the series-pattern
+    # 409 still commits the body (setattr, then craft fail).
+    print("approve privacy null clears to inherit; explicit level is stored")
+    with tempfile.TemporaryDirectory() as td:
+        artifact = Path(td) / "video.mp4"
+        artifact.write_bytes(b"not-a-real-mp4")
+        with Session(engine) as s:
+            s.add(Channel(slug="ch-priv", name="Priv", oauth_status=OAuthStatus.CONNECTED,
+                          default_privacy="unlisted"))
+            s.commit()
+            ch = s.exec(select(Channel).where(Channel.slug == "ch-priv")).one()
+            s.add(Topic(channel_id=ch.id, name="T-priv", content_format="short"))
+            s.commit()
+            topic = s.exec(select(Topic).where(Topic.name == "T-priv")).one()
+            s.add(Video(channel_id=ch.id, topic_id=topic.id, subject="inherit-me",
+                        status=VideoStatus.REVIEW, privacy="public", title="Inherit me",
+                        video_path=str(artifact)))
+            s.add(Video(channel_id=ch.id, topic_id=topic.id, subject="explicit-me",
+                        status=VideoStatus.REVIEW, privacy=None, title="Explicit me",
+                        video_path=str(artifact)))
+            s.commit()
+            inherit_id = s.exec(select(Video).where(Video.subject == "inherit-me")).one().id
+            explicit_id = s.exec(select(Video).where(Video.subject == "explicit-me")).one().id
+            ch_priv = ch.default_privacy
+        ok(ch_priv == "unlisted", "fixture channel default_privacy is unlisted")
+        r = client.post(f"/api/videos/{inherit_id}/approve", auth=auth,
+                        json={"title": "Inherit me", "privacy": None})
+        ok(r.status_code == 409 and row(inherit_id).craft_review == "fail",
+           "approve with a real artifact reaches the craft commit (not the stale-path 409)")
+        ok(row(inherit_id).privacy is None,
+           "approve privacy=null clears a stored public back to NULL (inherit)")
+        r = client.post(f"/api/videos/{explicit_id}/approve", auth=auth,
+                        json={"title": "Explicit me", "privacy": "unlisted"})
+        ok(r.status_code == 409 and row(explicit_id).craft_review == "fail",
+           "explicit-level approve also reaches the craft commit")
+        ok(row(explicit_id).privacy == "unlisted",
+           "approve privacy='unlisted' stores unlisted")
+    _pub = Path(videos_router.__file__).resolve().parents[1] / "services" / "publish_loop.py"
+    _pub_src = _pub.read_text()
+    ok("privacy = video.privacy or channel.default_privacy" in _pub_src,
+       "publish still inherits channel.default_privacy when video.privacy is null")
+
     reorder_src = inspect.getsource(ReorderBody)
     ok('_reject_bool_channel' in reorder_src
        and '@field_validator("channel_id", mode="before")' in reorder_src,
@@ -786,6 +836,84 @@ try:
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw
+
+
+# Review.tsx used to coerce a null privacy to "public" and POST that on
+# approve and save. Null means inherit channel.default_privacy.
+print("Review.tsx null privacy stays channel default (not forced public)")
+_root = Path(__file__).resolve().parents[1]
+review_tsx = (_root / "frontend/src/pages/Review.tsx").read_text()
+ok("t.privacy || \"public\"" not in review_tsx,
+   "Review.tsx does not coerce a null privacy to public")
+ok("useState(\"public\")" not in review_tsx,
+   "Review privacy state does not start as public")
+ok("reviewPrivacySelectValue(t.privacy)" in review_tsx,
+   "Review seeds the select from reviewPrivacySelectValue")
+ok("reviewPrivacyForApi(privacy)" in review_tsx,
+   "save/approve send reviewPrivacyForApi(privacy), not the raw select string")
+ok('from "../reviewPrivacy"' in review_tsx,
+   "Review.tsx imports reviewPrivacy (not an inlined copy)")
+ok('<option value="">channel default</option>' in review_tsx,
+   "empty select value is the channel-default option")
+helper_path = _root / "frontend/src/reviewPrivacy.ts"
+ok(helper_path.is_file(), "reviewPrivacy.ts exists")
+helper_src = helper_path.read_text()
+_SEL = "export function reviewPrivacySelectValue(stored: string | null | undefined): string {"
+_API = "export function reviewPrivacyForApi(selected: string): string | null {"
+ok(_SEL in helper_src and _API in helper_src,
+   "helper keeps typed signatures (stripped only for the node drive)")
+
+
+def _drive_privacy(cases):
+    js = helper_src.replace(_SEL, "export function reviewPrivacySelectValue(stored) {", 1)
+    js = js.replace(_API, "export function reviewPrivacyForApi(selected) {", 1)
+    payload = json.dumps(cases)
+    with tempfile.TemporaryDirectory() as td:
+        mjs = Path(td) / "reviewPrivacy.mjs"
+        mjs.write_text(js)
+        script = (
+            f"import {{ reviewPrivacySelectValue, reviewPrivacyForApi }} "
+            f"from {json.dumps(mjs.resolve().as_uri())};\n"
+            f"const cases = {payload};\n"
+            "const out = cases.map((c) => ({\n"
+            "  select: reviewPrivacySelectValue(c.stored),\n"
+            "  api: reviewPrivacyForApi(c.selected),\n"
+            "}));\n"
+            "console.log(JSON.stringify(out));\n"
+        )
+        r = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True, text=True,
+        )
+    if r.returncode != 0:
+        print("FAIL: reviewPrivacy drive:", r.stderr.strip() or r.stdout.strip())
+        sys.exit(1)
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+_PRIV_CASES = [
+    {"stored": None, "selected": "", "select": "", "api": None,
+     "msg": "null column shows channel default and saves null"},
+    {"stored": "unlisted", "selected": "unlisted", "select": "unlisted", "api": "unlisted",
+     "msg": "stored unlisted round-trips"},
+    {"stored": "private", "selected": "private", "select": "private", "api": "private",
+     "msg": "stored private round-trips"},
+    {"stored": "public", "selected": "public", "select": "public", "api": "public",
+     "msg": "explicit public still saves public"},
+    {"stored": "Public", "selected": "yes", "select": "", "api": None,
+     "msg": "unknown level is inherit, not forced public"},
+]
+_got_priv = _drive_privacy(
+    [{"stored": c["stored"], "selected": c["selected"]} for c in _PRIV_CASES])
+ok(len(_got_priv) == len(_PRIV_CASES), "node drive returned one result per privacy case")
+for case, got in zip(_PRIV_CASES, _got_priv):
+    ok(got["select"] == case["select"] and got["api"] == case["api"], case["msg"])
+ok(re.search(r"privacy:\s*reviewPrivacyForApi\(privacy\)", review_tsx),
+   "saveBody privacy key is the helper result")
+ok("approveVideo.mutate({ id: t.id, body: saveBody() }" in review_tsx,
+   "approve posts saveBody (null privacy is not dropped for a public default)")
+ok("updateVideo.mutate({ id: t.id, body: saveBody() }" in review_tsx,
+   "save draft posts the same saveBody")
 
 
 print(f"\nALL {_checks} CHECKS PASSED")

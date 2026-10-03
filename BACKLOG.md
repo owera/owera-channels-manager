@@ -1944,3 +1944,28 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 68. ✅ DONE (PR `autoimprove/2026-10-03-review-privacy-inherit`, not merged) Review null privacy stays the channel default — normal
+- **resolution (2026-10-03):** Review seeded `useState("public")` and
+  `setPrivacy(t.privacy || "public")`, and both save and approve POST
+  that value. Null `Video.privacy` inherits `channel.default_privacy`
+  at publish, so an unlisted or private channel went out public. The
+  empty select value is "channel default"; `reviewPrivacyForApi` sends
+  JSON null. public / unlisted / private still write that level.
+  Unknown values inherit. The select syncs during render (same video
+  id) so a click cannot clear an explicit level back to inherit.
+  Suite: `tests/verify_videos.py` 227 → 250. Approve with a real
+  artifact: `privacy: null` clears a stored public to NULL and
+  `privacy: "unlisted"` stores unlisted; both still 409 at the craft
+  gate after the body commit (`craft_review` pending → fail). Publish
+  inherit line unchanged. Frontend build after merge; no manager
+  restart (no Python behavior change).
+- **why:** the review page was the only writer that turned "inherit"
+  into an explicit public. Board bulk approve sends no body and was
+  already safe.
+- **approach:** a tiny helper (`frontend/src/reviewPrivacy.ts`) plus
+  the select option. Do not edit `publish_loop.py`.
+- **caution:** normal (frontend + tests). Not a money-path edit.
+- **acceptance:** null stays null on save and approve; an explicit
+  level still persists; publish still uses
+  `video.privacy or channel.default_privacy`.
