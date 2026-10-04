@@ -1944,3 +1944,23 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 62. ✅ DONE (PR, 2026-10-04) Sync solver must not keep an invalid board — normal
+- **resolution (2026-10-04):** `_sync_board_once` accepted an "ok" solve when
+  `validate_storyboard` was False whenever the repeated-card list was
+  unchanged. `and` binds tighter than `or`, so
+  `valid and not hits or hits == snap` is true for `[] == []` on a clean
+  board. The inner `or` is now grouped under the `and`. An invalid solve
+  is rejected and the pre-sync board is restored (the all-or-nothing
+  contract). A valid solve still keeps a pre-existing non-adjacent replay.
+  Suite: `tests/verify_storyboard.py` 540 → 544.
+- **why (found 2026-10-04 auditing the card-sync solver after #61):** a
+  False from `validate_storyboard` was ignored on the common path, so
+  `compose` could render timings the validator had rejected. `_sync_board`
+  also skipped its no-content-end retry once that invalid solve returned
+  True.
+- **caution:** normal (`storyboard.py` only; not a money-path file).
+- **acceptance:** an "ok" solve that fails `validate_storyboard` returns
+  False and restores the board, for both an empty repeat list and a
+  pre-existing replay; a valid solve with that same pre-existing replay
+  still returns True.
