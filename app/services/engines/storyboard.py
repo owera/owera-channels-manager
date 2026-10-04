@@ -2230,6 +2230,41 @@ def _sync_board(beats, words, duration: float, hook_max: float,
     return _sync_board_once(beats, words, duration, hook_max, None)
 
 
+def _drop_sync_mid(beats, i, v) -> bool:
+    """Drop one mid so the sync solver can retry.
+
+    Production RR boards (2026-10-01..04) ship 12 even-grid cards whose speech
+    starts do not fit [speech-1.1, speech] at 1.4s min holds. The solver then
+    reported crowd/gap, and the old path only deleted *generated* cards
+    (`_fill`/`_split`/`_cut`). LLM-authored mids stayed, `_sync_board`
+    restored the grid, Gate B failed, ch2 published nothing. Prefer generated,
+    then unmatched, then quote/statement, then any mid. Never hook/cta; keep
+    at least one code/command if the board has any; keep ≥ `_MIN_BEATS`.
+    """
+    n = len(beats)
+    if n <= _MIN_BEATS:
+        return False
+    n_cli = sum(1 for b in beats if (b.get("type") or "") in ("code", "command"))
+    cand = []
+    for j in (i + 1, i):
+        if not (0 < j < n - 1):
+            continue
+        t = beats[j].get("type") or ""
+        if t in ("hook", "cta"):
+            continue
+        if n_cli == 1 and t in ("code", "command"):
+            continue
+        gen = any(beats[j].get(f) for f in _GEN_FLAGS)
+        unmatched = (j < len(v) and v[j] is None)
+        soft = t in ("quote", "statement")
+        cand.append((0 if gen else 1, 0 if unmatched else 1, 0 if soft else 1, j))
+    if not cand:
+        return False
+    cand.sort()
+    del beats[cand[0][-1]]
+    return True
+
+
 def _sync_board_once(beats, words, duration: float, hook_max: float,
                      content_end: float | None) -> bool:
     from app.services import craft
@@ -2251,11 +2286,8 @@ def _sync_board_once(beats, words, duration: float, hook_max: float,
             break
         i = res
         if state == "crowd":
-            gen = [j for j in (i + 1, i) if 0 < j < len(beats) - 1
-                   and any(beats[j].get(f) for f in _GEN_FLAGS)]
-            if not gen:
+            if not _drop_sync_mid(beats, i, v):
                 break
-            del beats[gen[0]]
             continue
         # gap: a unit whose speech starts between card i and card i+1
         lo_t = float(v[i]) if v[i] is not None else float(beats[i].get("start") or 0.0)
@@ -2307,7 +2339,9 @@ def _sync_board_once(beats, words, duration: float, hook_max: float,
                 best = u
                 break
         if best is None:
-            break
+            if not _drop_sync_mid(beats, i, v):
+                break
+            continue
         beats.insert(i + 1, {"type": "quote", "cue": best["text"], "text": best["text"],
                              "attribution": "", "_split": True,
                              "start": round(float(best["start"]), 3), "dur": _QUOTE_MIN})

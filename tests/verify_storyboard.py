@@ -2457,6 +2457,56 @@ ok(all(float(b["dur"]) <= craft.MID_BEAT_MAX_S + 1e-6 for b in _sy_b[1:-1])
    and any(b.get("type") == "quote" for b in _sy_b),
    "_sync_board: the 1.8s hole between cards becomes a NEW sentence card (holds stay ≤2.80)")
 
+# Production 1413-class board (ch2 2026-10-03): 12 even-grid LLM cards, no
+# generated flags. Speech starts do not fit [speech-1.1, speech] at 1.4s min
+# holds, so the solver used to restore the grid and Gate B failed (card 3
+# lead 2.05s). Dropping an LLM mid lets it solve; the command beat stays.
+_p1413_script = (
+    "Memória compartilhada não é VRAM. Não é. VRAM é memória soldada na GPU, "
+    "com banda larga e latência baixa. Memória compartilhada é RAM do sistema "
+    "que o driver empresta quando a VRAM acaba. O modelo até abre, mas cada "
+    "camada que cai fora do chip atravessa o barramento e a geração engasga. "
+    "Olhe o número dedicado antes de baixar o peso. O que o sistema empresta "
+    "não sustenta inferência. Subscribe — next IA trap.")
+_p1413_beats = [
+    {"type": "hook", "start": 0.0, "dur": 2.38, "cue": "Memória compartilhada não é VRAM",
+     "text": "Memória compartilhada não é VRAM."},
+    {"type": "stat", "start": 2.5, "dur": 2.8, "cue": "Não é"},
+    {"type": "compare", "start": 5.42, "dur": 2.8, "cue": "com banda larga"},
+    {"type": "term_define", "start": 8.34, "dur": 2.8, "cue": "é RAM do sistema"},
+    {"type": "stat", "start": 11.26, "dur": 2.8, "cue": "quando a VRAM acaba"},
+    {"type": "term_define", "start": 14.18, "dur": 2.8, "cue": "mas cada camada"},
+    {"type": "stat", "start": 17.1, "dur": 2.8, "cue": "atravessa o barramento"},
+    {"type": "quote", "start": 20.02, "dur": 1.803, "cue": "e a geração engasga.",
+     "text": "e a geração engasga."},
+    {"type": "command", "start": 21.943, "dur": 2.8, "cue": "Olhe o número dedicado"},
+    {"type": "compare", "start": 24.863, "dur": 2.8, "cue": "O que o sistema"},
+    {"type": "quote", "start": 27.783, "dur": 2.657,
+     "cue": "O que o sistema empresta não sustenta inferência",
+     "text": "O que o sistema empresta não sustenta inferência."},
+    {"type": "cta", "start": 30.56, "dur": 3.78, "cue": "Subscribe — next", "text": "Subscribe · IA"},
+]
+_p1413_n = len(_p1413_script.split())
+_p1413_step = round((34.34 - 1.2) / _p1413_n, 3)
+_p1413_w = storyboard.annotate_sentences(_words_of(_p1413_script, step=_p1413_step), _p1413_script)
+_p1413_before = _copy.deepcopy(_p1413_beats)
+ok(storyboard._sync_board(_p1413_beats, _p1413_w, 34.34, 2.38, script=_p1413_script),
+   "1413-class: _sync_board solves (was False / restore-grid)")
+_p1413_sy = craft.card_sync_marker(_p1413_beats, _p1413_w, script=_p1413_script)
+ok(not craft.card_sync_hits(_p1413_sy),
+   "1413-class: Gate B card-sync clean after drop/insert: %s"
+   % [(n["i"], n["status"], n.get("lead")) for n in _p1413_sy["notes"]
+      if n["status"] not in ("ok", "late_capped", "unmatched")])
+ok(any((b.get("type") or "") == "command" for b in _p1413_beats)
+   and len(_p1413_beats) >= 4
+   and float(_p1413_beats[1]["start"]) <= craft.HOOK_FIRST_CUT_BY_S + 1e-6,
+   "1413-class: kept the command beat, first cut ≤2.5s (n %s → %s, cut %s)"
+   % (len(_p1413_before), len(_p1413_beats), _p1413_beats[1]["start"]))
+ok(storyboard.validate_storyboard(_p1413_beats, 34.34),
+   "1413-class: board still valid")
+ok(_p1413_beats[0].get("type") == "hook" and _p1413_beats[-1].get("type") == "cta",
+   "1413-class: hook and cta stay")
+
 # --- Product teasers (OS Shipping, #1385 Gate B 2026-09-30) ---
 print("product teaser: no invented CLI, soft product card, endcard after the content")
 _tp_all = PHASE_A + ["code", "command", "diagram"]
