@@ -33,6 +33,11 @@ videos to the wrong series); ``false`` writes 0, which publish treats
 as unlinked but is not None. Create's ``if body.playlist_id`` skips
 the falsy 0 and returns 201 unbound. These checks pin both paths.
 
+#60 called ``ReorderBody`` the last bare JSON-body int. ``TopicCreate``
+still declares ``channel_id: int`` with no ``mode="before"`` guard, so
+``true`` creates the topic on channel 1 and ``false`` 404s only because
+no channel 0 exists. These checks pin that bool.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -168,6 +173,11 @@ def topic_profile(topic_id):
 def topic_playlist(topic_id):
     with Session(engine) as s:
         return s.get(Topic, topic_id).playlist_id
+
+
+def topic_channel(topic_id):
+    with Session(engine) as s:
+        return s.get(Topic, topic_id).channel_id
 
 
 def n_topics():
@@ -868,6 +878,103 @@ try:
     ok('_reject_bool_playlist' in tu_pl
        and '@field_validator("playlist_id", mode="before")' in tu_pl,
        "TopicUpdate._reject_bool_playlist is mode=before on playlist_id")
+
+    print("POST /api/topics: JSON bool channel_id is 4xx")
+    # TopicCreate.channel_id was still a bare int after #60. Lax int
+    # coerces false→0 / true→1 before create_topic. true creates the
+    # topic on channel id=1. false is 0 and 404s only because no
+    # channel 0 exists.
+    with Session(engine) as s:
+        s.add(Channel(slug="b", name="B", oauth_status=OAuthStatus.CONNECTED,
+                      daily_render_budget=20))
+        s.commit()
+        ch_b = s.exec(select(Channel).where(Channel.slug == "b")).one().id
+    ok(ch_b == 2, "precondition: second channel is id 2 (true coerces to 1)")
+
+    n_before_ch = n_topics()
+    names_before_ch = topic_names()
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 2, "name": "CreateOnTwo"})
+    ok(r.status_code == 201, "create channel_id=2 (integer) is 201")
+    ok(r.json().get("channel_id") == 2, "integer 2 persisted on channel 2")
+    ok(topic_channel(r.json()["id"]) == 2, "integer 2 row is channel 2, not 1")
+    create_ch_id = r.json()["id"]
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "CreateOnOne"})
+    ok(r.status_code == 201, "create channel_id=1 (integer) is 201")
+    ok(r.json().get("channel_id") == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+    ok(topic_channel(r.json()["id"]) == 1, "integer 1 row is channel 1")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 0, "name": "CreateOnZero"})
+    ok(r.status_code == 404, "create channel_id=0 (integer) is 404")
+    ok("channel not found" in r.text.lower(),
+       "integer 0 is the missing-channel 404, not a bool rejection")
+    ok("CreateOnZero" not in topic_names(), "integer 0 writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": False, "name": "BadFalseChannel"})
+    ok(r.status_code in (400, 422),
+       "create channel_id=false is 4xx (must not coerce to 0 and 404)")
+    ok("boolean" in r.text.lower(),
+       "false-channel create 4xx names the boolean rejection")
+    ok("BadFalseChannel" not in topic_names(),
+       "create channel_id=false writes no row")
+    ok(n_topics() == n_before_ch + 2,
+       "false-channel create did not add a row "
+       "(integer 2 and integer 1 already added 2)")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": True, "name": "BadTrueChannel"})
+    ok(r.status_code in (400, 422),
+       "create channel_id=true is 4xx (must not coerce to 1)")
+    ok("boolean" in r.text.lower(),
+       "true-channel create 4xx names the boolean rejection")
+    ok("BadTrueChannel" not in topic_names(),
+       "create channel_id=true writes no row")
+    ok(topic_channel(create_ch_id) == 2,
+       "true-channel 4xx left the integer-2 sibling on channel 2")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": True, "name": "SmuggledChannel", "content_format": "long"})
+    ok(r.status_code in (400, 422),
+       "mixed create with channel_id=true is 4xx")
+    ok("SmuggledChannel" not in topic_names(),
+       "4xx mixed channel create wrote none of the fields")
+
+    r = client.post("/api/topics", auth=auth, json={"name": "MissingChannel"})
+    ok(r.status_code == 422, "omitted channel_id is 422 (required int)")
+    ok("boolean" not in r.text.lower(),
+       "omitted channel_id does not take the boolean message")
+    ok("MissingChannel" not in topic_names(), "omitted channel_id writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": None, "name": "NullChannel"})
+    ok(r.status_code == 422, "channel_id=null is 422")
+    ok("boolean" not in r.text.lower(),
+       "null channel_id does not take the boolean message")
+    ok("NullChannel" not in topic_names(), "null channel_id writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 2, "name": "CreatePlaylistFlagOnTwo", "create_playlist": True})
+    ok(r.status_code == 201,
+       "create_playlist=true is 201 (bool field; the floor is channel_id only)")
+    ok(r.json().get("channel_id") == 2, "create_playlist=true stayed on channel 2")
+
+    ok(n_topics() == n_before_ch + 3,
+       "bool-channel 4xx created no extra rows (3 legal creates)")
+    ok(names_before_ch.isdisjoint(
+        {"BadFalseChannel", "BadTrueChannel", "SmuggledChannel",
+         "CreateOnZero", "MissingChannel", "NullChannel"}),
+       "precondition held: bool-channel names were not already seeded")
+
+    tc_ch = inspect.getsource(TopicCreate)
+    ok('_reject_bool_channel' in tc_ch
+       and '@field_validator("channel_id", mode="before")' in tc_ch,
+       "TopicCreate._reject_bool_channel is mode=before on channel_id")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()

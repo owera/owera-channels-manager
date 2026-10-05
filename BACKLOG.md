@@ -1944,3 +1944,27 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 69. ✅ DONE (PR autoimprove/2026-10-05-topic-bool-channel) POST /api/topics rejects JSON bool channel_id — normal
+- **resolution (2026-10-05):** `TopicCreate._reject_bool_channel` is
+  `mode="before"`. JSON `true`/`false` on `channel_id` are 422 before
+  lax `int` coerces `false→0` / `true→1`. `true` created the topic on
+  channel id=1. `false` became 0 and 404d only because no channel 0
+  exists. Integer ids, including 0 and 1, are unchanged: 2 creates on
+  channel 2, 1 creates on channel 1, 0 is still the missing-channel
+  404. Null and omitted stay the required-int 422 and do not use the
+  boolean message. `create_playlist=true` still succeeds. Mixed 4xx
+  writes nothing. Suite: `tests/verify_topics.py` 268 → 299. Isolated
+  commit; no money-path files. #60 called `ReorderBody` the last bare
+  JSON-body int; `TopicCreate.channel_id` was still bare.
+- **why (found 2026-10-05 auditing remaining lax ints after #60):** a
+  growth-agent / curl `{"channel_id": true}` lands a topic on channel 1.
+- **approach:** `mode="before"` on `TopicCreate.channel_id`, same as
+  the other JSON int floors. Integers, including 0, stay as they are.
+- **caution:** normal (`schemas.py` TopicCreate only). Isolated commit
+  + extend `tests/verify_topics.py`. Do not change create for real ids.
+- **acceptance:** POST `channel_id` `true`/`false` is 4xx and writes
+  nothing (no row on channel 1, no 404-as-success for 0); integer 2
+  still creates on channel 2; integer 1 still creates on channel 1;
+  integer 0 still 404s; null/omitted do not take the boolean message;
+  `create_playlist` still accepts a bool.
