@@ -2226,8 +2226,13 @@ def _sync_board_once(beats, words, duration: float, hook_max: float,
             for i in range(len(beats) - 1):
                 beats[i]["dur"] = round(res[i + 1] - _GAP - res[i], 3)
             beats[-1]["dur"] = round(float(duration) - res[-1], 3)
-            if validate_storyboard(beats, duration) and not craft.repeated_card_hits(beats) \
-                    or craft.repeated_card_hits(beats) == craft.repeated_card_hits(snap):
+            # Group the `or` under the `and`. `and` binds tighter, so an
+            # unchanged repeat list (including [] == []) used to accept a
+            # board validate_storyboard had just rejected.
+            if (validate_storyboard(beats, duration)
+                    and (not craft.repeated_card_hits(beats)
+                         or craft.repeated_card_hits(beats)
+                         == craft.repeated_card_hits(snap))):
                 return True
             break
         i = res

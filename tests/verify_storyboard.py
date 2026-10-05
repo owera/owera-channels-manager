@@ -2526,4 +2526,73 @@ _st1, _r1 = storyboard._sync_solve_once(_se_b, [0.0, 2.2, 4.6], 7.0, 2.38, conte
 ok(_st0 == "ok" and _r0[2] < 4.3 and _st1 == "ok" and 4.3 - 1e-6 <= _r1[2] <= 4.6 + 1e-6,
    "_sync_solve_once: content_end keeps the endcard off the last content sentence (%.2f → %.2f)" % (_r0[2], _r1[2]))
 
+# _sync_board_once must not keep an "ok" solve whose timings fail
+# validate_storyboard. `and` binds tighter than `or`, so
+# `valid and not hits or hits == snap` was True whenever the repeated-card
+# list was unchanged — including [] == [] — and the invalid board shipped.
+def _late_sync_board():
+    script = ("Um dois três. O peso do modelo é só parte da conta. "
+              "O cache cresce. Subscribe — next IA trap.")
+    words = storyboard.annotate_sentences(_words_of(script, step=0.5), script)
+    beats = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três.", "cue": "Um dois"},
+             {"type": "stat", "start": 2.5, "dur": 2.8, "value": "1", "unit": "x", "label": "peso",
+              "cue": "O peso"},
+             {"type": "compare", "start": 5.42, "dur": 1.3, "cue": "O cache cresce", "title": "Cache",
+              "left": {"title": "a", "items": ["b"]}, "right": {"title": "c", "items": ["d"]}},
+             {"type": "cta", "start": 6.84, "dur": 3.0, "text": "Subscribe · IA", "cue": "Subscribe"}]
+    return beats, words, round(words[-1]["start"] + 1.0, 2)
+
+def _sync_replay_board():
+    script = ("Opening claim here now. Shared card line stays. Middle different line here. "
+              "Shared card line stays. Subscribe next series trap.")
+    words = storyboard.annotate_sentences(_words_of(script, step=0.4), script)
+    beats = [
+        {"type": "hook", "start": 0.0, "dur": 1.6, "text": "Opening claim here now.",
+         "cue": "Opening claim"},
+        {"type": "quote", "start": 1.8, "dur": 1.4, "text": "Shared card line stays.",
+         "cue": "Shared card line"},
+        {"type": "quote", "start": 3.4, "dur": 1.4, "text": "Middle different line here.",
+         "cue": "Middle different"},
+        {"type": "quote", "start": 5.0, "dur": 1.4, "text": "Shared card line stays.",
+         "cue": "Shared card line stays"},
+        {"type": "cta", "start": 6.6, "dur": 2.4, "text": "Subscribe", "cue": "Subscribe"},
+    ]
+    dur = round(words[-1]["start"] + 1.2, 2)
+    return beats, words, dur
+
+_real_validate = storyboard.validate_storyboard
+_validate_calls = {"n": 0}
+def _never_valid(*_a, **_k):
+    _validate_calls["n"] += 1
+    return False
+_inv_b, _inv_words, _inv_d = _late_sync_board()
+_inv_before = _copy.deepcopy(_inv_b)
+storyboard.validate_storyboard = _never_valid
+try:
+    _inv_ok = storyboard._sync_board_once(_inv_b, _inv_words, _inv_d, 2.38, None)
+finally:
+    storyboard.validate_storyboard = _real_validate
+ok(_validate_calls["n"] >= 1 and _inv_ok is False and _inv_b == _inv_before,
+   "_sync_board_once: invalid timings are rejected and the board is restored "
+   "(unchanged empty repeat list must not skip validate; calls=%d)" % _validate_calls["n"])
+_rep_b, _rep_w, _rep_d = _sync_replay_board()
+ok(craft.repeated_card_hits(_rep_b) != [],
+   "_sync_board_once fixture: a non-adjacent mid replays an earlier card")
+_rep_inv = _copy.deepcopy(_rep_b)
+_rep_inv_before = _copy.deepcopy(_rep_inv)
+_validate_calls["n"] = 0
+storyboard.validate_storyboard = _never_valid
+try:
+    _rep_inv_ok = storyboard._sync_board_once(_rep_inv, _rep_w, _rep_d, 2.38, None)
+finally:
+    storyboard.validate_storyboard = _real_validate
+ok(_validate_calls["n"] >= 1 and _rep_inv_ok is False and _rep_inv == _rep_inv_before,
+   "_sync_board_once: a pre-existing repeat does not keep an invalid solve "
+   "(calls=%d)" % _validate_calls["n"])
+_rep_before_hits = craft.repeated_card_hits(_rep_b)
+_rep_ok = storyboard._sync_board_once(_rep_b, _rep_w, _rep_d, 2.38, None)
+ok(_rep_ok is True and storyboard.validate_storyboard(_rep_b, _rep_d)
+   and craft.repeated_card_hits(_rep_b) == _rep_before_hits,
+   "_sync_board_once: a valid solve keeps a pre-existing replay (not hits == [])")
+
 print(f"\nALL {_checks} CHECKS PASSED")
