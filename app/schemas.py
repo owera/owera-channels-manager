@@ -96,6 +96,16 @@ class TopicCreate(BaseModel):
     create_playlist: bool = True            # auto-create a YouTube playlist named after the topic
     playlist_id: Optional[int] = None       # or link an existing one instead
 
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # true creates the topic on channel id=1. false becomes 0 and
+        # 404s only because no channel 0 exists.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
     @field_validator("render_profile_id", mode="before")
     @classmethod
     def _reject_bool_profile(cls, v):
