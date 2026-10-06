@@ -280,11 +280,12 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     fmt = "long" if topic and topic.content_format == "long" else "short"
     # Full publish craft gate (title / A+B+C / script / VO / mute) so skip-gate
     # auto-approve writes an explicit craft_review=pass (or parks in review).
+    from app.services import episode_guard
     blocked = craft.publish_craft_block_reason(
         title=video.title, script=video.script,
         creation_config=video.creation_config, content_format=fmt,
         video_path=video.video_path,
-    )
+    ) or episode_guard.duplicate_episode_reason(session, video)
     if blocked:
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_FAIL

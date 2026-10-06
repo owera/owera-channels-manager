@@ -139,11 +139,12 @@ def review_ready_reason(session: Session, v: Video) -> str | None:
         return v.error or "craft_review=fail"
     if craft_gate_state(v.creation_config) == "FAIL":
         return "creation_config.craft_gate=FAIL"
+    from app.services import episode_guard
     return _craft.publish_craft_block_reason(
         title=v.title, script=v.script, creation_config=v.creation_config,
         content_format=_fmt_of(session, v), video_path=v.video_path,
         check_audio=False,
-    )
+    ) or episode_guard.duplicate_episode_reason(session, v)
 
 
 def _ops_tz():

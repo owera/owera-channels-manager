@@ -364,6 +364,20 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   channel_id=channel.id, detail=f"publish craft gate: {blocked}")
         session.commit()
         return
+    # Duplicate episode number (P1 council 06/10): never upload a second
+    # "Series N"; park it back in review (not rejected — renumber and approve).
+    from app.services import episode_guard
+    dup = episode_guard.duplicate_episode_reason(session, video)
+    if dup:
+        video.craft_review = craft.CRAFT_REVIEW_FAIL
+        video.status = VideoStatus.REVIEW
+        video.approved_at = None
+        video.error = dup
+        session.add(video)
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=f"publish episode gate: {dup}")
+        session.commit()
+        return
     if video.craft_review != craft.CRAFT_REVIEW_PASS:
         video.craft_review = craft.CRAFT_REVIEW_PASS
 

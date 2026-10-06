@@ -17,7 +17,7 @@ from app.schemas import (
     VideoScriptSet,
     VideoUpdate,
 )
-from app.services import metadata, quota, review_guard
+from app.services import episode_guard, metadata, quota, review_guard
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
 from app.services.youtube import QUOTA_UPLOAD
@@ -710,7 +710,7 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     blocked = craft.publish_craft_block_reason(
         title=v.title, script=v.script, creation_config=v.creation_config,
         content_format=fmt, video_path=v.video_path,
-    )
+    ) or episode_guard.duplicate_episode_reason(session, v)
     if blocked:
         v.craft_review = craft.CRAFT_REVIEW_FAIL
         session.add(v)
@@ -806,7 +806,7 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         blocked = craft.publish_craft_block_reason(
             title=v.title, script=v.script, creation_config=v.creation_config,
             content_format=fmt, video_path=v.video_path,
-        )
+        ) or episode_guard.duplicate_episode_reason(session, v)
         if blocked:
             v.craft_review = craft.CRAFT_REVIEW_FAIL
             session.add(v)
