@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
@@ -17,7 +17,7 @@ from app.schemas import (
     VideoScriptSet,
     VideoUpdate,
 )
-from app.services import metadata, quota
+from app.services import metadata, quota, review_guard
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
 from app.services.youtube import QUOTA_UPLOAD
@@ -644,7 +644,8 @@ def _publish_side_failure(session: Session, v: Video) -> bool:
 # fortnight's operator-vs-agent forensics started blind on these paths. The
 # log rides the same commit as the status flip; refused calls write nothing.
 @router.post("/{video_id}/approve")
-def approve(video_id: int, body: VideoUpdate | None = None, session: Session = Depends(get_session)):
+def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
+            session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
@@ -652,6 +653,12 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
     stale = _stale_artifact_reason(session, v)
     if stale:
         raise HTTPException(409, f"cannot approve: {stale}")
+    actor = review_guard.actor_of(request)
+    _topic = session.get(Topic, v.topic_id)
+    # CM teaser: Channels only, and only with the VM's Gate B PASS on this render
+    block = review_guard.teaser_approve_block(v, actor, _topic.name if _topic else None)
+    if block:
+        raise HTTPException(block[0], block[1])
     if body:
         data = body.model_dump(exclude_unset=True)
         if "tags" in data:
@@ -673,7 +680,7 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
         raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"approved via API: {v.status} -> approved; craft_review=pass")
+              detail=f"approved via API: {v.status} -> approved; craft_review=pass; actor={actor}")
     v.status = VideoStatus.APPROVED
     v.craft_review = craft.CRAFT_REVIEW_PASS
     v.approved_at = utcnow()
@@ -686,29 +693,65 @@ def approve(video_id: int, body: VideoUpdate | None = None, session: Session = D
 
 
 @router.post("/{video_id}/reject")
-def reject(video_id: int, body: RejectBody, session: Session = Depends(get_session)):
+def reject(video_id: int, body: RejectBody, request: Request,
+           session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
     _require_from(v, REJECT_FROM, "reject")
+    actor = review_guard.actor_of(request)
     quota.log(session, kind="reject", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"rejected via API: {v.status} -> rejected; reason={body.reason!r}")
+              detail=f"rejected via API: {v.status} -> rejected; reason={body.reason!r}; actor={actor}")
     return _set_status(session, video_id, VideoStatus.REJECTED, rejected_reason=body.reason,
                        held=False, held_at=None)
 
 
 @router.post("/{video_id}/requeue")
-def requeue(video_id: int, session: Session = Depends(get_session)):
+def requeue(video_id: int, request: Request, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
     _require_from(v, REQUEUE_FROM, "requeue")
+    actor = review_guard.actor_of(request)
+    _topic = session.get(Topic, v.topic_id)
+    block = review_guard.teaser_requeue_block(v, actor, _topic.name if _topic else None)
+    if block:
+        raise HTTPException(block[0], block[1])
     quota.log(session, kind="requeue", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"requeued via API: {v.status} -> queued (re-render; artifact cleared"
-                     f"{', was ' + v.video_path if v.video_path else ''})")
+                     f"{', was ' + v.video_path if v.video_path else ''}); actor={actor}")
     return _set_status(session, video_id, VideoStatus.QUEUED, **_clear_render_artifact(v))
+
+
+@router.post("/{video_id}/vm-pass")
+def vm_pass(video_id: int, request: Request, body: dict | None = None,
+            session: Session = Depends(get_session)):
+    """Record the Video Maker's Gate B PASS on the CURRENT render (Channels/VM
+    only; X-Actor: channels|vm). Required before a CM teaser can be approved.
+    Body (optional): {"note": "..."}. Bound to video_path: a re-render clears it."""
+    v = session.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "video not found")
+    actor = review_guard.actor_of(request)
+    if not review_guard.is_channels_actor(actor):
+        raise HTTPException(403, f"vm_pass is set by Channels/VM only (actor={actor!r}; "
+                                 "send X-Actor: channels or vm)")
+    if v.status != VideoStatus.REVIEW:
+        raise HTTPException(409, f"vm_pass needs a video in review (status={v.status})")
+    stale = _stale_artifact_reason(session, v)
+    if stale:
+        raise HTTPException(409, f"cannot set vm_pass: {stale}")
+    note = (body or {}).get("note") if isinstance(body, dict) else None
+    rec = review_guard.set_vm_pass(v, actor, str(note) if note else None)
+    quota.log(session, kind="vm_pass", status="success", video_id=v.id,
+              channel_id=v.channel_id,
+              detail=f"vm_pass via API: Gate B PASS on {v.video_path}; actor={actor}")
+    session.add(v)
+    session.commit()
+    session.refresh(v)
+    return {"id": v.id, "vm_pass": rec}
 
 
 @router.post("/{video_id}/retry")
