@@ -35,6 +35,10 @@ from sqlmodel import Session, SQLModel, create_engine, select
 # Importing app.models defines every table=True model, registering them all on
 # SQLModel.metadata so create_all() below builds the full schema.
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+# Duplicate-episode check is pinned in tests/verify_episode_dup.py; this suite's
+# fixtures share one passing "· <Series> N" title across rows, so it is off here.
+from app.services import episode_guard as _episode_guard  # noqa: E402
+_episode_guard.duplicate_episode_reason = lambda session, video: None
 from app.services import render_loop
 
 _checks = 0
