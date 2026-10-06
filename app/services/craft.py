@@ -2292,13 +2292,39 @@ def next_claim_noun(*blobs: str | None) -> str:
     return DEFAULT_NOUN
 
 
+# EN closer phrase per series when "{series} {noun}" reads wrong. CMO
+# 2026-10-06 (#1328): Agent traps → "Subscribe — next agent trap." (the
+# template gave "next Agent traps trap.").
+SERIES_CTA_PHRASE = {"Agent traps": "agent trap"}
+
+
+def series_cta_phrase(series: str, noun: str = DEFAULT_NOUN) -> str:
+    """The "{series} {noun}" part of the EN closer, never naming the noun twice.
+
+    Explicit SERIES_CTA_PHRASE first. Otherwise, when the series' last word is
+    already a closer noun (trap|receipt|bill|drop, singular or plural), that
+    word becomes the noun in the singular ("Cloud bills" → "Cloud bill");
+    else "{series} {noun}" as before ("Agent memory trap").
+    """
+    if series in SERIES_CTA_PHRASE:
+        return SERIES_CTA_PHRASE[series]
+    n = noun if noun in NEXT_CLAIM_NOUNS else DEFAULT_NOUN
+    words = (series or "").split()
+    if len(words) >= 2:
+        last = theme.fold(words[-1])
+        for nn in NEXT_CLAIM_NOUNS:
+            if last in (nn, nn + "s", nn + "es"):
+                return " ".join(words[:-1] + [nn])
+    return f"{series} {n}"
+
+
 def series_endcard_vo(series: str, noun: str = DEFAULT_NOUN) -> str:
-    """Spoken closer. EN: Subscribe — next {series} {noun}. PT (IA): Se
-    inscreve. Próxima armadilha de {series}."""
+    """Spoken closer. EN: Subscribe — next {series} {noun}. (noun said once —
+    see series_cta_phrase). PT (IA): Se inscreve. Próxima armadilha de {series}."""
     if series in PT_ENDCARD_SERIES:
         return f"Se inscreve. Próxima armadilha de {series}."
     n = noun if noun in NEXT_CLAIM_NOUNS else DEFAULT_NOUN
-    line = f"Subscribe — next {series} {n}."
+    line = f"Subscribe — next {series_cta_phrase(series, n)}."
     # Safety clip — live series labels are 1–2 words; never invent extra CTA.
     words = line.rstrip(".").split()
     if len(words) > 8:

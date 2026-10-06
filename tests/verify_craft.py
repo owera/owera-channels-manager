@@ -1203,6 +1203,42 @@ ok(_card["chip"] == "Subscribe · Shipping" and "next Shipping" in _card["vo"],
 ok("next Shipping" in craft.ensure_series_endcard_vo("A. B.", "You still can't tell.", topic_name="Shipping"),
    "ensure_series_endcard_vo: topic_name reaches the pinned VO")
 
+# --- Series CTA noun (CMO 2026-10-06, #1328) --------------------------------
+# "Subscribe — next {series} {noun}." with series=topic gave "next Agent traps
+# trap.". The noun is said once; Agent traps → "Subscribe — next agent trap.".
+ok(craft.series_endcard_vo("Agent traps", "trap") == "Subscribe — next agent trap.",
+   "Agent traps closer is the CMO line: 'Subscribe — next agent trap.'")
+ok(craft.series_endcard("Chat paged Lee · Agent traps 4")["vo"] == "Subscribe — next agent trap.",
+   "Agent traps title → clean closer")
+ok(craft.series_endcard("Chat paged Lee.", topic_name="Agent traps", brand="os")["vo"]
+   == "Subscribe — next agent trap.", "Agent traps topic → clean closer")
+ok(craft.series_endcard("x · Agent traps 5", "the receipt shows it")["vo"]
+   == "Subscribe — next agent trap.", "Agent traps keeps its noun even when the script says receipt")
+ok(craft.ensure_series_endcard_vo("Chat paged Lee. Subscribe — next Agent traps trap.",
+                                  "Chat paged Lee · Agent traps 4")
+   == "Chat paged Lee. Subscribe — next agent trap.",
+   "a doubled-noun closer in the script is re-pinned to the clean one")
+ok(craft.series_cta_phrase("Cloud bills", "trap") == "Cloud bill"
+   and craft.series_cta_phrase("Agent memory", "receipt") == "Agent memory receipt",
+   "generic: a series ending in a closer noun is singularised, not doubled; others unchanged")
+ok(craft.series_endcard_vo("Agent memory") == "Subscribe — next Agent memory trap."
+   and craft.series_endcard_vo("Copilot Credits", "receipt") == "Subscribe — next Copilot Credits receipt.",
+   "existing series closers unchanged")
+_fixture_topics = ["Shipping", "Agent traps", "IA", "Credits", "Deep dives", "OpenCode",
+                   "Windows", "Série", "Shorts", "Longs", "Agent memory and state in production",
+                   "Claude Code production workflows", "Rodar IA local em 2026 (Ollama, VRAM, quantização)"]
+_bad = []
+for _name in list(craft.SERIES_LABELS) + _fixture_topics:
+    for _brand in ("os", "rr", None):
+        for _noun in craft.NEXT_CLAIM_NOUNS:
+            _c = craft.series_endcard("Some claim.", None, _brand, _noun, topic_name=_name)
+            _w = [theme.fold(x).strip(".") for x in _c["vo"].split()]
+            _dup = any(_w[i] in (_w[i + 1], _w[i + 1] + "s") or _w[i].rstrip("s") == _w[i + 1]
+                       for i in range(len(_w) - 1) if _w[i + 1] in craft.NEXT_CLAIM_NOUNS)
+            if not (craft.endcard_clean(_c) and len(_w) <= 8) or _dup:
+                _bad.append((_name, _brand, _noun, _c["vo"]))
+ok(_bad == [], f"every series label + fixture topic gets a clean ≤8-word closer, noun once: {_bad[:3]}")
+
 # --- RR batch 29/09 Gate B (P0 2026-09-30) ----------------------------------
 print("RR P0 2026-09-30: frame0 word fit, TTS underscore, fragment cards, 2.80 hold")
 # (4) frame0/thumb split card never breaks inside a word (#1381 "engenha/ria",
