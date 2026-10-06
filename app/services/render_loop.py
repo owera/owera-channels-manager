@@ -233,6 +233,10 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
                   "script_edits": prior_cc.get("script_edits") or []}
         video.creation_config = json.dumps(cc)
 
+    # A completed re-render is the only thing that clears a PATCH /craft
+    # stale-render marker (2026-10-06): this mp4 was rendered from the saved text.
+    video.creation_config = _craft.clear_stale_render(video.creation_config)
+
     # An operator-provided thumbnail (thumb_provided.*) is never replaced by the
     # 1s still — skip the still entirely and keep the marker on the new blob.
     from app.services import provided_thumb

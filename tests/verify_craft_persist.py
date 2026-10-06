@@ -10,7 +10,9 @@ video used to require ``POST …/requeue``, which burns a render-budget
 slot. This suite pins the narrow craft-persist endpoint:
 
 - persists script and/or creation_config on approved|review|rendered
-- leaves status / video_path / mpt_task_id / render_progress untouched
+- leaves video_path / mpt_task_id / render_progress untouched; since
+  2026-10-06 an edit on a rendered video marks it stale_render and an
+  approved one drops back to review (verify_stale_render.py)
 - rejects draft/queued/published (and empty body / blank script)
 - wide PATCH still ignores script/creation_config (VideoUpdate pin)
 
@@ -34,6 +36,7 @@ from app.db import get_session
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import videos as videos_router
 from app.schemas import VideoCraftPersist, VideoUpdate
+from app.services import craft
 
 _checks = 0
 
@@ -162,6 +165,13 @@ def craft_snap(vid: int = 1):
     }
 
 
+def _cc_nomark(raw):
+    """creation_config dict without the 2026-10-06 stale_render marker."""
+    d = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    d.pop(craft.STALE_RENDER_KEY, None)
+    return d
+
+
 def patch_craft(vid: int = 1, **body):
     return client.patch(f"/api/videos/{vid}/craft", auth=auth, json=body)
 
@@ -198,12 +208,17 @@ try:
     ok(r.status_code == 200, "craft persist script is 200")
     ok(r.json().get("script") == new_script, "response script is the new value")
     ok(craft_snap(1)["script"] == new_script, "script persisted")
-    ok(craft_snap(1)["status"] == VideoStatus.APPROVED, "status stayed approved")
+    # 2026-10-06 stale render: an edit on a rendered video marks the mp4 stale
+    # and drops the approval back to review (see verify_stale_render.py).
+    ok(craft_snap(1)["status"] == VideoStatus.REVIEW,
+       "approved + text edit → back to review (render marked stale)")
     ok(craft_snap(1)["video_path"] == "/tmp/v1.mp4", "video_path untouched")
     ok(craft_snap(1)["mpt_task_id"] == "task-keep", "mpt_task_id untouched")
     ok(craft_snap(1)["render_progress"] == 100, "render_progress untouched")
-    ok(craft_snap(1)["creation_config"] == before["creation_config"],
-       "script-only persist left creation_config")
+    ok(_cc_nomark(craft_snap(1)["creation_config"]) == _cc_nomark(before["creation_config"]),
+       "script-only persist left creation_config (apart from the stale marker)")
+    ok(craft.stale_render_of(craft_snap(1)["creation_config"]) is not None,
+       "script edit on a rendered video writes the stale_render marker")
     ok(craft_snap(2) == before_sib, "sibling video 2 untouched")
     ok(len(jobruns()) >= 1, "craft_persist JobRun written")
     ok("no requeue" in (jobruns()[-1].detail or ""),
@@ -215,9 +230,9 @@ try:
     r = patch_craft(1, creation_config=new_cc)
     ok(r.status_code == 200, "craft persist creation_config dict is 200")
     stored = craft_snap(1)["creation_config"]
-    ok(json.loads(stored) == new_cc, "creation_config persisted as JSON object")
+    ok(_cc_nomark(stored) == new_cc, "creation_config persisted as JSON object")
     ok(craft_snap(1)["script"] == new_script, "cc-only persist left script")
-    ok(craft_snap(1)["status"] == VideoStatus.APPROVED, "status still approved after cc")
+    ok(craft_snap(1)["status"] == VideoStatus.REVIEW, "status stays review after cc (stale)")
     ok(craft_snap(1)["video_path"] == "/tmp/v1.mp4", "video_path still untouched")
 
     r = patch_craft(1, creation_config=json.dumps(

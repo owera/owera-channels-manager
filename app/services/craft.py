@@ -2520,6 +2520,45 @@ NONSENSE_TITLE_REASON = (
     "(e.g. billed $N head or bare series nn) — park via reject"
 )
 EMPTY_SCRIPT_REASON = "script is empty — craft persist or re-render before publish"
+
+# Stale render (2026-10-06, OS Agent traps #1319/#1328): PATCH /craft re-scores
+# craft_review from the SAVED text, so after a text fix a video could read
+# status=review + craft_review=pass while its mp4 is still the OLD render the
+# VM failed. PATCH /craft on a rendered video now writes this marker into
+# creation_config; every publish-gate caller (approve, skip-gate auto-approve
+# in _finalize, publish loop, review_ready digest, craft_review re-score)
+# refuses it until a re-render completes (_finalize drops the marker).
+STALE_RENDER_KEY = "stale_render"
+STALE_RENDER_REASON = (
+    "render is stale: script/creation_config were edited via PATCH /craft after "
+    "this mp4 was rendered — requeue and wait for the re-render before approve/publish")
+
+
+def stale_render_of(creation_config) -> dict | None:
+    """The stale-render marker when present (and truthy), else None."""
+    rec = _as_dict(creation_config).get(STALE_RENDER_KEY)
+    if not rec:
+        return None
+    return rec if isinstance(rec, dict) else {"marked": True}
+
+
+def mark_stale_render(creation_config, *, video_path: str | None, fields) -> str:
+    """creation_config JSON with the stale-render marker set."""
+    from app.models import utcnow
+    cc = dict(_as_dict(creation_config))
+    cc[STALE_RENDER_KEY] = {"video_path": video_path, "fields": sorted(fields),
+                            "at": utcnow().isoformat()}
+    return json.dumps(cc)
+
+
+def clear_stale_render(creation_config):
+    """Drop the marker (a re-render completed). Returns the input unchanged
+    when there is no marker, else JSON without it."""
+    cc = _as_dict(creation_config)
+    if STALE_RENDER_KEY not in cc:
+        return creation_config
+    cc = {k: v for k, v in cc.items() if k != STALE_RENDER_KEY}
+    return json.dumps(cc)
 MISSING_VO_BEATS_REASON = (
     "creation_config has no VO/beats — need beats[] (or omit creation_config for legacy)"
 )
@@ -2655,12 +2694,15 @@ def publish_craft_block_reason(
 ) -> str | None:
     """First publish-blocking craft reason, or None when eligible.
 
-    Order (operator-readable): nonsense title → existing review_gate (title
+    Order (operator-readable): stale render (PATCH /craft after the mp4) →
+    nonsense title → existing review_gate (title
     lock + Gate A/B/C) → empty script → provided-script hook alignment
     (``script_source=provided`` only) → optional VO/beats → mute audio.
     Long-form still requires script (+ audio when checkable); A/B/C stay exempt
     via review_gate_reason.
     """
+    if stale_render_of(creation_config):
+        return STALE_RENDER_REASON
     blocked = nonsense_title_reason(title)
     if blocked:
         return blocked

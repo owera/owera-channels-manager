@@ -365,9 +365,16 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
     #1257 ship-nit: PATCH /api/videos ignores script & creation_config because
     VideoUpdate omits them. Requeue was the only way to correct spoken $N /
     hook beats on an approved video — that spends a render budget slot.
-    This narrow endpoint writes those fields only, leaves status / video_path
-    / mpt_task_id / render_progress untouched, and is gated to
+    This narrow endpoint writes those fields only, leaves video_path /
+    mpt_task_id / render_progress untouched, and is gated to
     approved | review | rendered (pre-publish honesty for the new queue).
+
+    Stale render (2026-10-06): an edit that changes script/creation_config on a
+    rendered video marks creation_config.stale_render — approve, skip-gate
+    auto-approve, publish and the review_ready digest refuse it (craft gate
+    STALE_RENDER_REASON) until a requeue + re-render completes. An approved
+    video drops back to review. The saved text is still the input of the
+    next render; only the old mp4 stops being publishable.
     """
     v = session.get(Video, video_id)
     if not v:
@@ -417,13 +424,37 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
                 "creation_config must be a JSON object (dict) or JSON object string",
             )
 
-    # Only script / creation_config — never status, video_path, mpt_task_id,
-    # or render_progress (those would burn or fake a re-render slot).
+    # Only script / creation_config — never video_path, mpt_task_id, or
+    # render_progress (those would burn or fake a re-render slot).
+    from app.services import craft
+    was_stale = craft.stale_render_of(v.creation_config)
+    old_script = v.script
+    old_cc = craft._as_dict(craft.clear_stale_render(v.creation_config))
     for k, val in data.items():
         setattr(v, k, val)
     v.updated_at = utcnow()
-    # Re-score durable craft_review after honesty edits (does not flip status).
-    from app.services import craft
+    # Stale render (2026-10-06, #1319/#1328): the mp4 was rendered from the OLD
+    # text. When this edit changes what the render should say, mark the
+    # artifact stale so approve / auto-approve / publish refuse it until a
+    # re-render completes, and drop an existing approval back to review. An
+    # already-stale render stays stale (a PATCH cannot clear the marker).
+    edited = []
+    if "script" in data and v.script != old_script:
+        edited.append("script")
+    if "creation_config" in data and \
+            craft._as_dict(craft.clear_stale_render(v.creation_config)) != old_cc:
+        edited.append("creation_config")
+    stale_note = ""
+    if v.video_path and (edited or was_stale):
+        fields = sorted(set(edited) | set((was_stale or {}).get("fields") or []))
+        v.creation_config = craft.mark_stale_render(
+            v.creation_config, video_path=v.video_path, fields=fields)
+        stale_note = "; render marked stale (re-render before approve/publish)"
+        if v.status == VideoStatus.APPROVED:
+            v.status = VideoStatus.REVIEW
+            v.approved_at = None
+            stale_note += "; approval reset to review"
+    # Re-score durable craft_review after honesty edits.
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
     cr_status, cr_reason = craft.apply_craft_review_to_video(v, content_format=fmt)
@@ -432,7 +463,7 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
               channel_id=v.channel_id,
               detail=f"craft persist via API: {changed} (status={v.status}, "
                      f"craft_review={cr_status}, no requeue"
-                     + (f"; {cr_reason}" if cr_reason else "") + ")")
+                     + (f"; {cr_reason}" if cr_reason else "") + stale_note + ")")
     session.add(v)
     session.commit()
     session.refresh(v)
