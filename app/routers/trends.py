@@ -175,6 +175,12 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
         idea_count = min(idea_count, board_space)
     produce_count = min(body.produce_count, idea_count)
 
+    # CMO 2026-10-06: idea autogen never seeds a Shipping (CM teaser) topic.
+    from app.services import review_guard
+    blocked = review_guard.autogen_block_reason(t.term.strip())
+    if blocked:
+        raise HTTPException(409, blocked)
+
     # 1. Topic (same construction as topics.create_topic).
     mx_pos = session.exec(
         select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
@@ -199,6 +205,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
             regen=lambda extra: video_gen.generate_ideas(
                 topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
                 language=video_gen.channel_language(session, ch.id)))
+    ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.renumber_series(ideas, video_gen.channel_series_subjects(session, ch.id))
     mx_v = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == ch.id)).one() or 0

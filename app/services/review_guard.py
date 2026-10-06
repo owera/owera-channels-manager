@@ -143,3 +143,42 @@ def teaser_requeue_block(v, actor: str, topic_name: str | None = None):
         return (403, f"CM teaser: only Channels requeues it (actor={actor!r}; send "
                      "X-Actor: channels). The growth agent never requeues a CM teaser.")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Shipping autogen guard (CMO decision 2026-10-06, OS Gate B).
+#
+# #1400-#1402 were created by idea autogen on topic t45 "Shipping" with no
+# merged Channels Manager PR behind them: their claims were unverified product
+# behavior, VM Gate B failed and Channels rejected them. Shipping is reserved
+# for teasers backed by a real PR (the #37/#39 flow: the teaser is created from
+# the merged PR with a provided script). So idea generation (autofill tick,
+# POST /api/topics/{id}/generate, trend adopt) never creates a Shipping row,
+# and generated ideas that read as a CM teaser on any topic are dropped.
+AUTOGEN_SHIPPING_REASON = (
+    "Shipping (Channels Manager teaser) rows need a source Channels Manager PR: "
+    "create the teaser from the merged PR (POST /api/videos with the PR's provided "
+    "script), never by idea autogen (CMO 2026-10-06, #1400-#1402)")
+
+
+def autogen_block_reason(topic_name: str | None) -> str | None:
+    """Reason idea autogen must not create rows on this topic, else None."""
+    from app.services import craft
+
+    if craft.is_product_teaser(None, topic_name):
+        return AUTOGEN_SHIPPING_REASON
+    return None
+
+
+def drop_teaser_ideas(ideas) -> list:
+    """Generated idea subjects minus the ones that read as a CM teaser
+    ("· Shipping N" suffix or naming Channels Manager)."""
+    from types import SimpleNamespace
+
+    out = []
+    for idea in ideas or []:
+        probe = SimpleNamespace(title=None, subject=idea or "", script=None,
+                                overrides_json=None, creation_config=None)
+        if not is_cm_teaser(probe):
+            out.append(idea)
+    return out

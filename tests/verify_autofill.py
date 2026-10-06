@@ -731,17 +731,41 @@ ok(drafts_for(s, first.id) == 0, "raising topic produced nothing")
 ok(drafts_for(s, second.id) == 3, "later topic still refilled after the skip")
 
 print("case: P0 2026-10-03 — series numbers continue from the channel max (all statuses)")
+# Fixture moved from Shipping to Agent traps: since CMO 2026-10-06 autogen never
+# creates Shipping rows (see the Shipping case below); renumbering is per series.
+s = fresh_session()
+ch = make_channel(s, slug="owera-traps", daily_render_budget=5)
+t_trap = make_topic(s, ch, name="Agent traps", content_format="short")
+add_video(s, ch, t_trap, "Chat paged Lee · Agent traps 8", status=VideoStatus.PUBLISHED)
+add_video(s, ch, t_trap, "Old one · Agent traps 3", status=VideoStatus.REJECTED, position=2)
+run_tick(s, _Cfg(target=3, horizon=1),
+         lambda *_a, **_k: ["New A · Agent traps 3", "New B · Agent traps 4"])
+subs = sorted(v.subject for v in s.exec(select(Video).where(
+    Video.topic_id == t_trap.id, Video.status == VideoStatus.DRAFT)).all())
+ok(subs == ["New A · Agent traps 9", "New B · Agent traps 10"],
+   f"LLM-picked Agent traps 3/4 renumbered to 9/10 (max used 8, rejected 3 burnt): {subs}")
+
+print("case: CMO 2026-10-06 — autofill never creates a Shipping row (no source CM PR)")
 s = fresh_session()
 ch = make_channel(s, slug="owera-ship", daily_render_budget=5)
 t_ship = make_topic(s, ch, name="Shipping", content_format="short")
 add_video(s, ch, t_ship, "Thumbs land · Shipping 8", status=VideoStatus.PUBLISHED)
-add_video(s, ch, t_ship, "Old one · Shipping 3", status=VideoStatus.REJECTED, position=2)
-run_tick(s, _Cfg(target=3, horizon=1),
-         lambda *_a, **_k: ["New A · Shipping 3", "New B · Shipping 4"])
-subs = sorted(v.subject for v in s.exec(select(Video).where(
-    Video.topic_id == t_ship.id, Video.status == VideoStatus.DRAFT)).all())
-ok(subs == ["New A · Shipping 9", "New B · Shipping 10"],
-   f"LLM-picked Shipping 3/4 renumbered to 9/10 (max used 8, rejected 3 burnt): {subs}")
+rec = recording(lambda *_a, **_k: ["New A · Shipping 3", "New B · Shipping 4"])
+run_tick(s, _Cfg(target=3, horizon=1), rec)
+ok(rec.calls == [], "Shipping topic: generate_ideas never called")
+ok(pending_for(s, t_ship.id) == 0, "Shipping topic: no draft row created")
+ok(generate_runs(s, ch.id) == [], "Shipping topic: no 'generate' JobRun")
+
+print("case: CMO 2026-10-06 — teaser-shaped ideas on other topics are dropped")
+s = fresh_session()
+ch = make_channel(s, slug="owera-mem", daily_render_budget=5)
+t_mem = make_topic(s, ch, name="Agent memory", content_format="short")
+run_tick(s, _Cfg(target=3, horizon=1), lambda *_a, **_k: [
+    "Your caption saves itself · Shipping 3", "Channels Manager queues your render",
+    "Memory died between chats · Agent memory 2"])
+subs = [v.subject for v in s.exec(select(Video).where(Video.topic_id == t_mem.id)).all()]
+ok(subs == ["Memory died between chats · Agent memory 1"],
+   f"only the non-teaser idea lands (renumbered): {subs}")
 
 print("case: P0 2026-10-03 — RR (ch2) ideas are born passing hook pace")
 s = fresh_session()
