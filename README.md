@@ -53,6 +53,19 @@ videos and their status). A background **scheduler** does the work on a loop:
 The approval gate is just a status: a video in **review** won't publish until you approve
 it. Turn on a channel's *skip gate* and rendered videos jump straight to **approved**.
 
+**Channels Manager teasers** (series *Shipping*, a provided teaser naming *Channels
+Manager*, or a video with `cm_pr`) need the Video Maker's Gate B PASS on the final render:
+`POST /api/videos/{id}/vm-pass` (header `X-Actor: channels` or `vm`, optional body
+`{"note": "..."}`) records it with actor + timestamp in `creation_config.vm_pass`, bound to
+that render's `video_path` (a re-render clears it). Approve then requires `X-Actor:
+channels` (403 otherwise) and that `vm_pass` (409 otherwise); requeue of a CM teaser
+requires `X-Actor: channels` (403 otherwise).
+
+**Actor audit:** approve, requeue, reject and vm-pass record `actor=<name>` in the
+transition's JobRun detail (JobRun `created_at` = timestamp). The actor is the `X-Actor`
+request header, else the HTTP Basic auth username, else `unknown`. It is self-declared
+(one shared app password): a process guard and audit trail, not authentication.
+
 ![The Queue Board — ideas flow left to right toward published, and each card shows what it's waiting on](docs/screenshots/board.png)
 
 ## Requirements

@@ -218,7 +218,7 @@ back after and quote the after-state in the report; never claim a fix you didn't
 | `failed`/`rejected`, `suggested_action:"delete"` (dead, age > 7d) | `DELETE /api/videos/{id}` | ≤ 10 |
 | `stuck_rendering`/`stuck_publishing` (past timeout, loop didn't catch it) | `requeue` / `retry` | ≤ 5 |
 | `stuck_review` (gate backlog > 48h, age = since last render attempt) | approve the good ones / reject the bad ones | judgment |
-| `review_ready` (review + rendered + craft PASS, **any age**) | **decide every item by `decide_by` (10:45 local)**: `POST /api/videos/{id}/approve` the good ones, `reject` the bad. No age filter — a render that finished overnight is decided this morning, so approved stock is in place before the 11:00 window (2026-09-27 RR 4/5 miss) | judgment, all of them |
+| `review_ready` (review + rendered + craft PASS, **any age**) | **decide every item by `decide_by` (10:45 local)**: `POST /api/videos/{id}/approve` the good ones, `reject` the bad. No age filter — a render that finished overnight is decided this morning, so approved stock is in place before the 11:00 window (2026-09-27 RR 4/5 miss). **EXCEPT Channels Manager teasers — see the rule below the table: never approve or requeue them** | judgment, all of them |
 | `under_publish` (escalate: in window, approved + published today < budget, review waiting) | decide `review_ready` for that channel now; if nothing is craft-ready, say so under `⚠ Needs operator` | judgment |
 | `runway_low` (approved + published today < budget + 1) | decide `review_ready` first; keep drafts subject-valid so the 21:00 auto-produce refills. Never raise budgets for this | — |
 | `subject_held` (auto-produce kept a draft: stripped number / bare unit / currency in subject) | `PATCH /api/videos/{id}` `{"subject": …}` restoring the number/stake with no currency value, or `reject` | ≤ 10 |
@@ -227,6 +227,18 @@ back after and quote the after-state in the report; never claim a fix you didn't
 | `cooldown` / `quota` (escalate) | usually self-resets — monitor; only nudge `daily_publish_budget`↓ or `publish_drip_minutes`↑ a small step **with** a written reason | small step |
 | `oauth` ≠ connected (escalate) | **you cannot fix this** — lead the report with a `⚠ Needs operator` line: reconnect channel N | report-only |
 | `error_runs_24h` recurring signature | this is a real bug — fix the **root cause** in step 4 (counts toward the ≤2 code-change cap) | ≤2 code |
+
+**Channels Manager teasers are NEVER approved or requeued by the growth agent (2026-10-03,
+#1385 shipped with a Video Maker Gate B FAIL).** A CM teaser is any video in series
+**Shipping** (title `· Shipping N` or topic Shipping), a provided-path teaser whose
+title/script names **Channels Manager**, or a video tied to a CM PR (`cm_pr` in its
+overrides/creation_config). It ships ONLY with the Video Maker's Gate B PASS on the final
+render (`POST /api/videos/{id}/vm-pass`, set by Channels/VM) and ONLY Channels approves it.
+Leave it in review and list it under `⚠ Needs operator` as "CM teaser #N waiting for
+Channels/VM". The app enforces this: approve → 403 for non-Channels actors and 409 without
+`vm_pass` on that render; requeue → 403 for non-Channels actors. Every approve / requeue /
+reject / vm-pass records the actor (`X-Actor` header, else the Basic auth username) in the
+JobRun history — send `X-Actor: growth` on your calls.
 
 Rules: only touch `failed`/`rejected`/`review`/stuck rows — never `published` or in-flight
 videos. Re-render → `QUEUED`, re-publish → `APPROVED` (see the lifecycle map in step 4;
