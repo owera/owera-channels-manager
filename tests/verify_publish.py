@@ -8,6 +8,8 @@ regress:
   - stuck-'publishing' recovery + retry cap (the mislabeled ch2 "stalls")
   - a revoked OAuth token flips the channel to EXPIRED and returns the video to
     'approved' — never stranded in 'publishing' (the 362691a fix)
+  - invalid tags_json fails the row instead of escaping after the PUBLISHING
+    commit (a return to approved would re-pick that row and stall the drip)
   - upload-stall retry-then-fail, quota-exceeded cooldown, and drip spacing
   - custom thumbnail: content_format from Topic (not overrides_json), and a
     generation/upload failure never fails the publish
@@ -189,6 +191,111 @@ gs_runs = s.exec(select(JobRun).where(JobRun.video_id == v.id, JobRun.kind == "p
 ok(any("get_service failed" in (r.detail or "") for r in gs_runs),
    "get_service crash is logged as a publish error")
 youtube.get_service = _ORIG_GET
+
+# --- publish_one: invalid tags_json must not stick in PUBLISHING -------------
+# json.loads sits outside both try blocks, after PUBLISHING and the description
+# were committed. JSONDecodeError used to escape; tick() rolls back only the
+# open transaction, so the row stayed publishing until the 900s recovery cap
+# and the channel's in-flight gate published nothing. Bad tags do not heal, so
+# the row is FAILED (not APPROVED) and a publish error is logged for retry.
+print("publish_one: invalid tags_json fails closed")
+
+_tag_uploads = []
+
+
+def _tags_service(slug):
+    return object()
+
+
+def _tags_upload(service, video_path, title, description, tags, privacy="public", **k):
+    _tag_uploads.append(tags)
+    raise youtube.UploadStalled("socket read timed out")
+
+
+youtube.get_service = _tags_service
+youtube.upload_video = _tags_upload
+
+s = fresh_session()
+ch = make_channel(s)
+topic = Topic(channel_id=ch.id, name="Tags", theme_prompt="x")
+s.add(topic)
+s.commit()
+s.refresh(topic)
+bad = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+                 video_path="/tmp/x.mp4", title=_OK_TITLE, tags_json="not-json")
+sib = make_video(s, ch, status=VideoStatus.APPROVED, topic_id=topic.id,
+                 video_path="/tmp/y.mp4", title=_passing_title("Sibling"),
+                 tags_json='["ok"]')
+escaped = None
+try:
+    publish_loop._publish_one(s, ch, bad)
+except Exception as e:
+    escaped = type(e).__name__
+ok(escaped is None,
+   f"invalid tags_json does not escape _publish_one (got {escaped})")
+s.commit()
+s.refresh(bad)
+ok(bad.status == VideoStatus.FAILED,
+   "invalid tags_json is failed, not left PUBLISHING")
+ok("tags_json" in (bad.error or "") and "not valid JSON" in (bad.error or ""),
+   "failed video records that tags_json is not valid JSON")
+ok(bad.retry_count == 1, "invalid tags bumps retry_count")
+ok(bad.render_progress == 0, "invalid tags leaves upload progress at 0")
+ok(bad.video_path == "/tmp/x.mp4", "invalid tags keeps the rendered artifact")
+tag_runs = s.exec(select(JobRun).where(JobRun.video_id == bad.id,
+                                        JobRun.kind == "publish")).all()
+ok(any(r.status == "error" and "tags_json" in (r.detail or "") for r in tag_runs),
+   "invalid tags is logged as a publish error so retry keeps the artifact")
+ok(_tag_uploads == [], "invalid tags never calls upload_video")
+nxt = publish_loop._next_approved(s, ch.id)
+ok(nxt is not None and nxt.id == sib.id,
+   "a failed tags row is skipped so the next approved sibling is eligible")
+
+for raw in (" ", "{not"):
+    s = fresh_session()
+    ch = make_channel(s)
+    v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+                   title=_OK_TITLE, tags_json=raw)
+    escaped = None
+    try:
+        publish_loop._publish_one(s, ch, v)
+    except Exception as e:
+        escaped = type(e).__name__
+    ok(escaped is None, f"tags_json {raw!r} does not escape _publish_one (got {escaped})")
+    s.commit()
+    s.refresh(v)
+    ok(v.status == VideoStatus.FAILED, f"tags_json {raw!r} is failed, not left PUBLISHING")
+ok(_tag_uploads == [], "whitespace and broken JSON never call upload_video")
+
+_tag_uploads.clear()
+s = fresh_session()
+ch = make_channel(s)
+v = make_video(s, ch, status=VideoStatus.APPROVED, retry_count=0,
+               video_path="/tmp/x.mp4", title=_OK_TITLE, tags_json='["cache"]')
+publish_loop._publish_one(s, ch, v)
+ok(_tag_uploads == [["cache"]], "a JSON list of tags still reaches upload")
+ok(v.status == VideoStatus.APPROVED, "a stall after valid tags still returns to approved")
+ok(v.retry_count == 1, "a stall after valid tags still bumps retry_count")
+
+_tag_uploads.clear()
+s = fresh_session()
+ch = make_channel(s)
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+               title=_OK_TITLE, tags_json="")
+publish_loop._publish_one(s, ch, v)
+ok(_tag_uploads == [[]], "empty tags_json still uploads with no tags")
+ok(v.status == VideoStatus.APPROVED, "a stall after empty tags still returns to approved")
+
+_tag_uploads.clear()
+s = fresh_session()
+ch = make_channel(s)
+v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
+               title=_OK_TITLE, tags_json="null")
+publish_loop._publish_one(s, ch, v)
+ok(_tag_uploads == [None], "JSON null tags still reach upload (not a parse error)")
+
+youtube.get_service = _ORIG_GET
+youtube.upload_video = _ORIG_UPLOAD
 
 # --- publish_one: upload stall retry-then-fail -------------------------------
 print("publish_one: upload stall retry-then-fail")

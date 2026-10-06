@@ -434,7 +434,26 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     session.add(video)
     session.commit()
 
-    tags = json.loads(video.tags_json) if video.tags_json else []
+    try:
+        tags = json.loads(video.tags_json) if video.tags_json else []
+    except json.JSONDecodeError as e:
+        # Corrupt tags_json (truthy, not JSON) used to escape _publish_one
+        # after PUBLISHING was committed. tick() rolls back only the open
+        # transaction, so the row sat publishing until the 900s recovery cap
+        # and the channel published nothing (same class as the 2026-09-13
+        # get_service crash). Unlike a token parse error, bad tags will not
+        # heal on the next tick — returning to APPROVED would re-pick this
+        # row forever and stall the drip. Fail it; videos.retry sees the
+        # publish JobRun and re-approves without re-rendering.
+        video.status = VideoStatus.FAILED
+        video.render_progress = 0
+        video.error = f"tags_json is not valid JSON: {e}"
+        video.retry_count += 1
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=video.error)
+        logger.exception("tags_json is not valid JSON for channel %s video %s",
+                         channel.slug, video.id)
+        return
     privacy = video.privacy or channel.default_privacy
     try:
         video_id = youtube.upload_video(

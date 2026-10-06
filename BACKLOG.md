@@ -1944,3 +1944,36 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 70. ✅ DONE (PR autoimprove/2026-10-06-tags-json-publish) invalid tags_json fails the publish instead of sticking PUBLISHING — HIGH
+- **resolution (2026-10-06):** `_publish_one` catches only
+  `json.JSONDecodeError` around `json.loads(video.tags_json)`. The row
+  becomes FAILED (`tags_json is not valid JSON`), `retry_count` bumps,
+  `render_progress` is 0, and a `kind=publish` `status=error` JobRun is
+  logged. The handler returns without re-raising and without its own
+  commit, so `tick()` commits the failure. The PUBLISHING commit that
+  already happened is not left as the durable status. Empty and missing
+  tags stay `[]`. A JSON list still reaches upload. JSON `null` still
+  reaches upload as None. Suite: `tests/verify_publish.py` 239 → 259.
+  Red before the catch: `JSONDecodeError` escaped `_publish_one`.
+- **why (found 2026-10-06, same class as the 2026-09-13 get_service
+  crash):** truthy corrupt `tags_json` (`not-json`, whitespace, `{not`)
+  was parsed outside both try blocks, after status PUBLISHING and the
+  description had been committed. `tick()` rolls back only the open
+  transaction, so the row sat publishing until the 900s recovery cap
+  and the channel in-flight gate published nothing. Returning the row
+  to APPROVED would re-pick it every tick and stall the drip. FAILED
+  is not selected, so the next approved sibling can publish.
+  `videos.retry` sees the publish JobRun and re-approves without
+  re-rendering.
+- **approach:** catch only `JSONDecodeError` on that `loads`. Do not
+  wrap `finalize_description` or the description `session.commit()` —
+  a transient commit failure must not permanent-FAIL the video.
+- **caution:** HIGH (`publish_loop.py` only). Isolated commit plus
+  `tests/verify_publish.py`. No upload, privacy, quota, or schema
+  change.
+- **acceptance:** invalid tags do not escape `_publish_one`; after
+  commit and refresh the row is FAILED, not PUBLISHING; upload is not
+  called; a publish error JobRun names `tags_json`; the next approved
+  sibling is eligible. A JSON list, empty tags, and JSON `null` still
+  reach upload. A stall after valid tags still returns to APPROVED.
