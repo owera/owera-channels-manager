@@ -90,8 +90,8 @@ def statuses(session, ids):
     return [session.get(Video, i).status for i in ids]
 
 
-# --- fills free capacity, weight-first, shorts before extra longs -------------
-print("auto_produce: fills free render capacity weight-first")
+# --- fills free capacity; shorts by weight share (not weight-DESC monopoly) ---
+print("auto_produce: fills free render capacity; shorts by weight share")
 s = fresh_session()
 ch = make_channel(s)
 hi = make_topic(s, ch, name="winner", weight=3, content_format="short")
@@ -106,6 +106,33 @@ ok(statuses(s, [v_hi1.id, v_hi2.id, v_lo.id]) == [VideoStatus.QUEUED] * 3,
 runs = s.exec(select(JobRun).where(JobRun.kind == "produce")).all()
 ok(len(runs) == 3 and all(r.status == "success" for r in runs),
    "one 'produce' JobRun logged per promotion")
+
+# OS-like live mix under limited headroom: w=2 memory must not take all 5 slots
+# when CrewAI/Shipping/traps also have drafts (2026-10-05 skew audit).
+print("auto_produce: weight share mixes shorts under limited headroom")
+s = fresh_session()
+ch = make_channel(s, daily_render_budget=5)
+mem = make_topic(s, ch, name="memory", weight=2, content_format="short")
+crew = make_topic(s, ch, name="crew", weight=1, content_format="short")
+ship = make_topic(s, ch, name="ship", weight=1, content_format="short")
+trap = make_topic(s, ch, name="trap", weight=1, content_format="short")
+mem_drafts = [make_video(s, ch, mem, subject=f"Memory {i}") for i in range(4)]
+other_drafts = [
+    make_video(s, ch, crew, subject="Crew 1"),
+    make_video(s, ch, ship, subject="Ship 1"),
+    make_video(s, ch, trap, subject="Trap 1"),
+]
+render_loop._auto_produce(s)
+s.commit()
+queued = [v for v in (mem_drafts + other_drafts) if s.get(Video, v.id).status == VideoStatus.QUEUED]
+ok(len(queued) == 5, "exactly headroom=5 shorts queued")
+by_topic = {}
+for v in queued:
+    by_topic[s.get(Video, v.id).topic_id] = by_topic.get(s.get(Video, v.id).topic_id, 0) + 1
+ok(by_topic.get(mem.id, 0) == 2, "memory weight=2 gets 2/5 slots")
+ok(by_topic.get(crew.id, 0) == 1, "crew weight=1 gets 1/5")
+ok(by_topic.get(ship.id, 0) == 1, "ship weight=1 gets 1/5")
+ok(by_topic.get(trap.id, 0) == 1, "trap weight=1 gets 1/5")
 
 # --- headroom: budget minus rendered_today minus queued/rendering -------------
 print("auto_produce: respects budget and in-flight work")
