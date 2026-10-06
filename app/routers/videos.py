@@ -430,9 +430,16 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
     was_stale = craft.stale_render_of(v.creation_config)
     old_script = v.script
     old_cc = craft._as_dict(craft.clear_stale_render(v.creation_config))
+    _old_cap = craft._as_dict(v.creation_config).get(craft.MEASUREMENT_CAP_KEY)
     for k, val in data.items():
         setattr(v, k, val)
     v.updated_at = utcnow()
+    # The measurement cap belongs to the render, not the text: a PATCH that
+    # rewrites creation_config cannot drop it (CTO 06/10 2c).
+    if _old_cap and "creation_config" in data:
+        _cc = dict(craft._as_dict(v.creation_config))
+        _cc[craft.MEASUREMENT_CAP_KEY] = _old_cap
+        v.creation_config = json.dumps(_cc)
     # Stale render (2026-10-06, #1319/#1328): the mp4 was rendered from the OLD
     # text. When this edit changes what the render should say, mark the
     # artifact stale so approve / auto-approve / publish refuse it until a

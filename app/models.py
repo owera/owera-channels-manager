@@ -160,6 +160,12 @@ class Video(SQLModel, table=True):
     held: bool = Field(default=False, index=True)
     held_at: Optional[datetime] = None
 
+    # Consecutive renders whose Video Maker gate had a check classified
+    # kind="measurement" (unverifiable, #70). At MEASUREMENT_CAP_N the render is
+    # capped (craft gate FAIL → VM review). A render with no measurement entry
+    # resets it. Survives requeue and creation_config rewrites (CTO 06/10 2c).
+    measurement_streak: int = Field(default=0)
+
     # gate / metadata
     title: Optional[str] = None
     description: Optional[str] = None

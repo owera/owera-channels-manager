@@ -2320,9 +2320,112 @@ def format_craft_gate_reason(gate: dict | None) -> str | None:
     return "Video Maker craft gate FAIL: " + " ".join(reasons)
 
 
+# Measurement-fail cap (CTO council 06/10 item 2c). A check classified
+# kind="measurement" is "not verifiable (not failed)", so on its own it lets the
+# gate PASS. One such render behaves as before; MEASUREMENT_CAP_N consecutive
+# renders of the same video with a measurement entry never PASS silently: the
+# render gets creation_config.measurement_cap and the gate FAILs with a reason
+# that routes it to VM review. Only the VM's Gate B PASS recorded on THAT render
+# (POST /api/videos/{id}/vm-pass, bound to video_path) clears it; a render with
+# no measurement entry resets the streak (Video.measurement_streak).
+MEASUREMENT_CAP_N = 2
+MEASUREMENT_CAP_KEY = "measurement_cap"
+MEASUREMENT_CAP_REASON = (
+    "[B] Measurement cap: FAIL — {n} consecutive renders with unverifiable Gate "
+    "B/C checks ({checks}); not a silent PASS — route to VM review: needs the "
+    "Video Maker's Gate B PASS on this render (POST /api/videos/{{id}}/vm-pass)")
+
+
+def gate_measurement_kinds(gate: dict | None) -> list[dict]:
+    """The kind="measurement" entries of a video_maker_gate result."""
+    if not isinstance(gate, dict):
+        return []
+    return [k for k in (gate.get("kinds") or [])
+            if isinstance(k, dict) and k.get("kind") == "measurement"]
+
+
+def video_maker_gate_of(creation_config=None,
+                        content_format: str | None = "short") -> dict | None:
+    """The Video Maker gate for a render snapshot (same inputs as
+    video_maker_gate_reason), or None when exempt (long) / no snapshot."""
+    if (content_format or "short") == "long":
+        return None
+    cc = _as_dict(creation_config)
+    beats = cc.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+    used_fallback = bool(cc.get("used_fallback"))
+    if not beats and not used_fallback:
+        stored = cc.get("craft_gate")
+        return stored if isinstance(stored, dict) else None
+    bt = cc.get("beat_timing")
+    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
+    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
+    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
+    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
+    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
+    return video_maker_gate(beats, content_format=content_format,
+                            used_fallback=used_fallback, legacy_timing=legacy,
+                            hook_pace=pace, beat_timing=bt, card_sync=sync,
+                            cli_check=cli, card_text=ctext)
+
+
+def next_measurement_streak(prev: int | None, creation_config=None,
+                            content_format: str | None = "short") -> int:
+    """Streak after a render: +1 when its gate has a measurement entry, else 0."""
+    gate = video_maker_gate_of(creation_config, content_format)
+    return (int(prev or 0) + 1) if gate_measurement_kinds(gate) else 0
+
+
+def with_measurement_cap(creation_config, streak: int, *, video_path: str | None,
+                         content_format: str | None = "short"):
+    """creation_config with the cap marker set (streak ≥ N) or removed.
+    A vm_pass recorded for another render never carries over to a capped one."""
+    cc = dict(_as_dict(creation_config))
+    if int(streak or 0) >= MEASUREMENT_CAP_N and (content_format or "short") != "long":
+        checks = sorted({k.get("check") or "?" for k in gate_measurement_kinds(
+            video_maker_gate_of(cc, content_format))})
+        cc[MEASUREMENT_CAP_KEY] = {"streak": int(streak), "video_path": video_path,
+                                   "checks": checks}
+        vp = cc.get("vm_pass")
+        if isinstance(vp, dict) and vp.get("video_path") != video_path:
+            cc.pop("vm_pass", None)
+    elif MEASUREMENT_CAP_KEY in cc:
+        cc.pop(MEASUREMENT_CAP_KEY)
+    else:
+        return creation_config
+    return json.dumps(cc)
+
+
+def measurement_cap_reason(creation_config=None,
+                           content_format: str | None = "short") -> str | None:
+    """Gate FAIL reason while the cap is on and the VM has not passed THIS render."""
+    if (content_format or "short") == "long":
+        return None
+    cc = _as_dict(creation_config)
+    cap = cc.get(MEASUREMENT_CAP_KEY)
+    if not cap:
+        return None
+    cap = cap if isinstance(cap, dict) else {}
+    vp = cc.get("vm_pass")
+    if (isinstance(vp, dict) and vp.get("result") == "PASS"
+            and vp.get("video_path") and vp.get("video_path") == cap.get("video_path")):
+        return None
+    return "Video Maker craft gate FAIL: " + MEASUREMENT_CAP_REASON.format(
+        n=cap.get("streak") or MEASUREMENT_CAP_N,
+        checks=", ".join(cap.get("checks") or []) or "measurement")
+
+
 def video_maker_gate_reason(creation_config=None,
                             content_format: str | None = "short") -> str | None:
-    """None = allowed to leave review toward publish. Longs are exempt."""
+    """None = allowed to leave review toward publish. Longs are exempt.
+    A real gate FAIL wins; else the measurement cap (never a silent PASS)."""
+    return (_video_maker_gate_reason_core(creation_config, content_format)
+            or measurement_cap_reason(creation_config, content_format))
+
+
+def _video_maker_gate_reason_core(creation_config=None,
+                                  content_format: str | None = "short") -> str | None:
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
