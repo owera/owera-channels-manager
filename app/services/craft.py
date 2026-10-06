@@ -2051,8 +2051,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         checks["B"] = "FAIL"
         reasons.append(
             "[B] Card ⊂ VO: FAIL — " + "; ".join(vo_hits) +
-            ". Every text card shows one whole sentence the VO says, and each "
-            "spoken sentence gets exactly one card."
+            ". Every text card shows one whole sentence the VO says (a long "
+            "sentence may continue on the next card only with its literal next "
+            "words), and each spoken sentence gets one card."
         )
 
     # --- C: kill spoken list/slide spam ------------------------------------
@@ -3357,7 +3358,7 @@ def card_text_check_hits(card_text: dict | None) -> list[str]:
 
 # Card ⊂ VO (Video Maker P0, council 06/10). The VM reads every card and checks
 # it against the VO transcript: a text card must show one whole spoken
-# sentence, and each spoken sentence gets exactly one card. Fragment quotes
+# sentence, and each spoken sentence gets one card (continuation: see below). Fragment quotes
 # ("sends, and deploys."), half-sentence cards, cards joining two sentences,
 # a second card on the same sentence and card text the VO never says were the
 # bulk of the week's Gate B FAILs (#1328, #1401, #1402, #1423).
@@ -3368,11 +3369,18 @@ def card_text_check_hits(card_text: dict | None) -> list[str]:
 # New short renders carry creation_config["card_vo"]; older renders are not
 # re-judged (same pattern as CARD_TEXT_V1).
 CARD_VO_V1 = "card_vo_v1"
-# Continuation cards (#70) put two cards on one long sentence. The VM rule is
-# strict (one card per sentence); flip to True to exempt them (product call).
-CARD_VO_ALLOW_CONTINUATION = False
-CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment",
-                           "card_spans_sentences", "sentence_two_cards"})
+# Continuation (CoS 06/10): a long sentence may run over several cards, but a
+# further TEXT card only counts when it shows the literal NEXT words of the
+# same sentence — it starts exactly where the previous text card on that
+# sentence stopped (the #70 rule, made strict here). Repeating earlier words
+# (echo), skipping words (non-contiguous fragment), a loose tail that does not
+# start the sentence, a chain that stops before the sentence ends and an
+# unspoken quote still FAIL. A further RICH (object) card on a sentence keeps
+# the #70 rule (anchors later, not a near-duplicate). False = the VM's strict
+# one-card-per-sentence reading.
+CARD_VO_ALLOW_CONTINUATION = True
+CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment", "card_spans_sentences",
+                           "sentence_two_cards", "echo_card"})
 
 
 def _spoken_sentence_ids(sents: list[str]) -> list[int]:
@@ -3380,79 +3388,158 @@ def _spoken_sentence_ids(sents: list[str]) -> list[int]:
             if not (is_endcard_vo(s) or contains_subscribe_cta(s))]
 
 
-def card_vo_hits(beats, script: str | None) -> list[dict]:
+def card_vo_hits(beats, script: str | None, *,
+                 allow_continuation: bool | None = None) -> list[dict]:
     """Card ⊂ VO violations: [{"i","check","detail"}] (i=None for a sentence).
 
-    Text cards (statement/quote) must equal one whole spoken sentence after
-    normalising punctuation and case:
+    Text cards (statement/quote) are matched in the VO after normalising
+    punctuation and case:
       card_not_in_vo        the card's words are not spoken in that order;
-      card_fragment         only part of one sentence;
-      card_spans_sentences  the words run across two or more sentences.
+      card_spans_sentences  the words run across two or more sentences;
+      card_fragment         not a whole sentence: a loose part that does not
+                            start the sentence, a chain of cards that stops
+                            before the sentence ends, or (continuation) words
+                            skipped after the previous card;
+      echo_card             (continuation) repeats words the previous card on
+                            the sentence already showed.
     Every card (object cards via their cue, the hook = sentence 0) is mapped
     to a spoken sentence:
-      sentence_two_cards    a sentence carries a second card;
-      sentence_no_card      a spoken sentence has no card (informational —
-                            object cards are anchored by cue only, so this is
-                            not gated; see CARD_VO_GATED).
+      sentence_two_cards    a sentence carries a further card that is not a
+                            valid continuation;
+      sentence_no_card      a spoken sentence has no card (informational).
     The endcard/Subscribe sentence and cta/endcard cards are skipped."""
+    allow = CARD_VO_ALLOW_CONTINUATION if allow_continuation is None else allow_continuation
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
     if not board or not script:
         return out
     toks, sid, sents = _sentence_token_index(script)
     stoks = [_sync_toks(s) for s in sents]
+    s_start: dict[int, int] = {}
+    s_end: dict[int, int] = {}
+    for p, k in enumerate(sid):
+        s_start.setdefault(k, p)
+        s_end[k] = p + 1
     spoken = _spoken_sentence_ids(sents)
     anchors = card_anchors(board, script)
-    owner: dict[int, list[int]] = {}
+    cards_on: dict[int, list[dict]] = {}   # sentence → [{"i","text","pos","end","chain"}]
     cursor = 0
+    prev_entry: dict | None = None
+
+    def hit(i, check, detail):
+        out.append({"i": i, "check": check, "detail": detail})
+
     for i, b in enumerate(board):
         typ = b.get("type") or ""
         if typ in CTA_TYPES:
             continue
-        if i == 0 and typ == "hook":
-            owner.setdefault(0, []).append(i)
-            continue
         shown = str(b.get("text") or "")[:60]
+        if i == 0 and typ == "hook":
+            ht = _sync_toks(b.get("text") or b.get("cue"))
+            e = {"i": 0, "text": False, "pos": 0, "end": 0, "chain": False, "hook": True}
+            if ht and toks[:len(ht)] == ht and len(set(sid[:len(ht)])) == 1:
+                e.update(text=True, end=len(ht), chain=True)
+                cursor = len(ht)
+            cards_on.setdefault(0, []).append(e)
+            prev_entry = e
+            continue
         if typ in TEXT_CARD_TYPES:
             ct = _sync_toks(b.get("text"))
-            pos = _find_run(toks, ct, cursor)
+            pos = -1
+            # The literal next words of the previous text card come first.
+            if (allow and ct and prev_entry and prev_entry["text"]
+                    and toks[prev_entry["end"]:prev_entry["end"] + len(ct)] == ct):
+                pos = prev_entry["end"]
+            if pos < 0:
+                pos = _find_run(toks, ct, cursor)
             if pos < 0:
                 pos = _find_run(toks, ct, 0)
             if not ct or pos < 0:
-                out.append({"i": i, "check": "card_not_in_vo",
-                            "detail": f"card {i} {shown!r} is not a sentence the VO says"})
+                hit(i, "card_not_in_vo", f"card {i} {shown!r} is not a sentence the VO says")
                 s = anchors[i][0]
+                e = {"i": i, "text": False, "pos": -1, "end": -1, "chain": False}
                 if s is not None:
-                    owner.setdefault(s, []).append(i)
+                    cards_on.setdefault(s, []).append(e)
+                prev_entry = e
                 continue
             cursor = pos
-            ss = sorted(set(sid[pos:pos + len(ct)]))
+            end = pos + len(ct)
+            ss = sorted(set(sid[pos:end]))
             if len(ss) > 1:
-                out.append({"i": i, "check": "card_spans_sentences",
-                            "detail": f"card {i} {shown!r} runs across {len(ss)} spoken sentences"})
-            elif ct != stoks[ss[0]]:
-                out.append({"i": i, "check": "card_fragment",
-                            "detail": f"card {i} {shown!r} is part of the sentence "
-                                      f"{sents[ss[0]][:80]!r}, not the whole sentence"})
-            for k in ss:  # a spanning card sits on every sentence it covers
-                owner.setdefault(k, []).append(i)
-        else:
-            s = anchors[i][0]
-            if s is not None:
-                owner.setdefault(s, []).append(i)
+                hit(i, "card_spans_sentences", f"card {i} {shown!r} runs across {len(ss)} spoken sentences")
+                e = {"i": i, "text": False, "pos": pos, "end": end, "chain": False}
+                for k in ss:  # a spanning card sits on every sentence it covers
+                    cards_on.setdefault(k, []).append(e)
+                prev_entry = e
+                continue
+            k = ss[0]
+            on = cards_on.setdefault(k, [])
+            prev = on[-1] if on else None
+            e = {"i": i, "text": True, "pos": pos, "end": end, "chain": False}
+            whole = sents[k][:80]
+            if not allow:
+                if ct != stoks[k]:
+                    hit(i, "card_fragment", f"card {i} {shown!r} is part of the sentence {whole!r}, "
+                                            "not the whole sentence")
+            elif prev is None:
+                if pos != s_start[k]:
+                    hit(i, "card_fragment", f"card {i} {shown!r} is a loose part of the sentence "
+                                            f"{whole!r} (does not start it)")
+                else:
+                    e["chain"] = True
+            elif prev["text"]:
+                if pos == prev["end"]:
+                    e["chain"] = prev["chain"]  # literal next words: a continuation
+                    prev["continued"] = True
+                elif pos < prev["end"]:
+                    hit(i, "echo_card", f"card {i} {shown!r} repeats words card {prev['i']} already "
+                                        f"shows of the sentence {whole!r}")
+                else:
+                    hit(i, "card_fragment", f"card {i} {shown!r} skips words after card {prev['i']} "
+                                            f"in the sentence {whole!r} (not the next words)")
+            else:
+                if pos == s_start[k]:
+                    hit(i, "sentence_two_cards", f"card {i} {shown!r} re-cards the sentence {whole!r} "
+                                                 f"card {prev['i']} already carries")
+                else:
+                    hit(i, "card_fragment", f"card {i} {shown!r} is a loose part of the sentence "
+                                            f"{whole!r} (does not start it)")
+            on.append(e)
+            prev_entry = e
+            continue
+        # Rich / object card: anchored by its cue.
+        s, apos, _ = anchors[i]
+        e = {"i": i, "text": False, "pos": apos, "end": apos, "chain": False}
+        if s is not None:
+            on = cards_on.setdefault(s, [])
+            prev = on[-1] if on else None
+            if allow and prev is not None:
+                plen = (prev["end"] - prev["pos"]) if prev["text"] else 0
+                if not is_continuation_card(b, board[prev["i"]], script, pos=apos,
+                                            prev_pos=prev["pos"], prev_len=plen):
+                    hit(i, "sentence_two_cards", f"cards {prev['i']}, {i} both sit on the sentence "
+                                                 f"{sents[s][:80]!r} (not a continuation)")
+            on.append(e)
+        prev_entry = e
     for k in spoken:
-        cards = owner.get(k, [])
-        if len(cards) > 1:
-            extra = cards[1:]
-            if CARD_VO_ALLOW_CONTINUATION:
-                extra = [j for j in extra if not is_continuation_card(board[j], board[cards[0]], script)]
-            if extra:
-                out.append({"i": extra[0], "check": "sentence_two_cards",
-                            "detail": f"cards {', '.join(str(j) for j in cards)} all sit on the "
-                                      f"sentence {sents[k][:80]!r} (one card per sentence)"})
-        elif not cards:
-            out.append({"i": None, "check": "sentence_no_card",
-                        "detail": f"the sentence {sents[k][:80]!r} has no card"})
+        on = cards_on.get(k, [])
+        if not on:
+            hit(None, "sentence_no_card", f"the sentence {sents[k][:80]!r} has no card")
+            continue
+        if not allow:
+            if len(on) > 1:
+                hit(on[1]["i"], "sentence_two_cards",
+                    f"cards {', '.join(str(e['i']) for e in on)} all sit on the sentence "
+                    f"{sents[k][:80]!r} (one card per sentence)")
+            continue
+        # A chain of text cards must reach the end of its sentence (the hook
+        # is exempt: its claim may be the head of sentence 0).
+        for e in on:
+            if (e["text"] and e["chain"] and not e.get("continued") and not e.get("hook")
+                    and e["end"] != s_end[k]):
+                hit(e["i"], "card_fragment",
+                    f"card {e['i']} stops before the sentence {sents[k][:80]!r} ends "
+                    "(no card shows its next words)")
     return out
 
 
@@ -3462,6 +3549,7 @@ def card_vo_marker(beats, script: str | None,
     if (content_format or "short") == "long":
         return None
     return {"version": CARD_VO_V1, "source": "card_source_text+vo_script",
+            "continuation": CARD_VO_ALLOW_CONTINUATION,
             "hits": card_vo_hits(beats, script)}
 
 

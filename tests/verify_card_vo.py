@@ -3,9 +3,12 @@
 Run: PYTHONPATH=. .venv/bin/python tests/verify_card_vo.py
 
 Every text card (statement/quote) must show one WHOLE sentence the VO says
-(punctuation and case normalised), and each spoken sentence gets exactly one
-card: no card spanning two sentences, no sentence with two cards, no card
-text absent from the VO. No OCR runs in the pipeline, so the check reads the
+(punctuation and case normalised), and each spoken sentence gets one card:
+no card spanning two sentences, no sentence with two cards, no card text
+absent from the VO. Continuation (CoS 06/10, on by default): a long sentence
+may run over several text cards only when each further card shows the
+literal NEXT words of that sentence; echo, skipped words, loose fragments,
+chains that stop early and unspoken quotes still fail. No OCR runs in the pipeline, so the check reads the
 rendered card source text against the VO script (edge-tts speaks it
 verbatim). New short renders carry creation_config["card_vo"] (CARD_VO_V1)
 and the Video Maker gate (craft_review / publish gate) fails Gate B on it.
@@ -103,9 +106,13 @@ two = board(
     quote("no unsupervised call."),
 )
 h = craft.card_vo_hits(two, S1328)
+ok(checks(h) == ["card_fragment", "card_fragment"] and sorted(x["i"] for x in h) == [5, 6]
+   and "skips words after card 5" in h[0]["detail"] and "stops before" in h[1]["detail"],
+   "#1328 #9/#10: 'No undo' + 'no unsupervised call.' skip 'in the tool' → both fragments")
+h = craft.card_vo_hits(two, S1328, allow_continuation=False)
 ok(checks(h) == ["card_fragment", "card_fragment", "sentence_two_cards"]
    and h[-1]["i"] == 6 and "cards 5, 6" in h[-1]["detail"],
-   "one sentence split over two quote cards → 2 fragments + sentence_two_cards")
+   "strict mode: 2 fragments + sentence_two_cards")
 
 print("card spanning two sentences")
 span = board(
@@ -132,8 +139,10 @@ tail = board(
     stmt("success. The previous state is gone."),
     quote("No undo in the tool, no unsupervised call."),
 )
-ok(checks(craft.card_vo_hits(tail, S1328)) == ["card_spans_sentences", "sentence_two_cards"],
-   "a card straddling a sentence boundary is spanning (not a fragment) and doubles the stat's sentence")
+ok(checks(craft.card_vo_hits(tail, S1328)) == ["card_spans_sentences"],
+   "a card straddling a sentence boundary is spanning, not a fragment")
+ok(checks(craft.card_vo_hits(tail, S1328, allow_continuation=False)) == ["card_spans_sentences", "sentence_two_cards"],
+   "strict mode: …and it doubles the stat's sentence")
 
 print("card text absent from the VO (#1401 'Done cut owns the calendar', #1423 card 10)")
 absent = board(
@@ -179,13 +188,14 @@ echo = board(
     stmt("The previous state is gone."),
     quote("No undo in the tool, no unsupervised call."),
 )
-ok(checks(craft.card_vo_hits(echo, S1328)) == ["sentence_two_cards"],
-   "the same sentence carded twice (echo) → sentence_two_cards")
-ok(craft.CARD_VO_ALLOW_CONTINUATION is False,
-   "continuation cards are not exempt by default (VM rule is strict; product switch)")
+ok(checks(craft.card_vo_hits(echo, S1328)) == ["echo_card"],
+   "the same sentence carded twice → echo_card")
+ok(checks(craft.card_vo_hits(echo, S1328, allow_continuation=False)) == ["sentence_two_cards"],
+   "strict mode: the same sentence carded twice → sentence_two_cards")
+ok(craft.CARD_VO_ALLOW_CONTINUATION is True, "continuation is on by default (CoS 06/10)")
 hook_dup = [HOOK, stmt("The agent called undo on a tool with no undo."), *GOOD[1:]]
-ok(checks(craft.card_vo_hits(hook_dup, S1328)) == ["sentence_two_cards"],
-   "a mid card repeating the hook sentence is a second card on sentence 0")
+ok(checks(craft.card_vo_hits(hook_dup, S1328)) == ["echo_card"],
+   "a mid card repeating the hook sentence echoes the hook")
 gap = board(
     stmt("That tool never had an undo, and the model invented one."),
     quote("Agents copy editor habits onto deletes, sends, and deploys."),
@@ -197,6 +207,64 @@ ok(checks(h) == ["sentence_no_card"] and h[0]["i"] is None and "returns success"
    "a spoken sentence with no card → sentence_no_card")
 ok(craft.card_vo_check_hits(craft.card_vo_marker(gap, S1328)) == [],
    "sentence_no_card is informational: not gated (object cards anchor by cue only)")
+
+print("continuation: literal next words only (CoS 06/10)")
+SL = ("The agent called undo on a tool with no undo. Agents copy editor habits onto deletes, sends, "
+      "and deploys, and nobody checks the schema first. Subscribe — next agent trap.")
+A = "Agents copy editor habits onto deletes,"
+B = "sends, and deploys,"
+C = "and nobody checks the schema first."
+
+
+def lb(*mid):
+    return [HOOK, *mid, END]
+
+
+ok(craft.card_vo_hits(lb(stmt(A), quote(B), stmt(C)), SL) == [],
+   "valid continuation: 3 cards, each the literal next words, reaching the sentence end → pass")
+ok(craft.card_vo_hits(lb(stmt("agents copy editor habits onto deletes sends and deploys"),
+                         quote("“And nobody checks the schema first!”")), SL) == [],
+   "valid 2-card continuation with punctuation/case/quote marks normalised → pass")
+ok(craft.card_vo_hits(lb(stmt(A + " " + B + " " + C)), SL) == [], "the whole long sentence on one card → pass")
+h = craft.card_vo_hits(lb(stmt(A), quote("onto deletes, sends, and deploys,"), stmt(C)), SL)
+ok(h[0]["check"] == "echo_card" and h[0]["i"] == 2 and "repeats words card 1" in h[0]["detail"]
+   and all(x["check"] in craft.CARD_VO_GATED for x in h),
+   "echo: the next card repeats earlier words ('onto deletes') → echo_card")
+h = craft.card_vo_hits(lb(stmt(A), stmt(A + " " + B), stmt(C)), SL)
+ok("echo_card" in checks(h), "echo: the next card re-quotes the sentence from its first word (#1423 #3) → echo_card")
+h = craft.card_vo_hits(lb(stmt("Agents copy editor habits"), quote(B), stmt(C)), SL)
+ok("card_fragment" in checks(h) and any(x["i"] == 2 and "skips words" in x["detail"] for x in h),
+   "skipped words: 'onto deletes' never shown between cards → card_fragment (not the next words)")
+h = craft.card_vo_hits(lb(stmt(A), quote("sends and nobody checks"), stmt(C)), SL)
+ok("card_not_in_vo" in checks(h) and all(x["check"] in craft.CARD_VO_GATED for x in h if x["i"] == 2),
+   "non-contiguous fragment ('sends … nobody checks'): its words are not spoken in that order → gated")
+h = craft.card_vo_hits(lb(stmt("editor habits onto deletes, sends,")), SL)
+ok(checks(h) == ["card_fragment"] and "does not start" in h[0]["detail"],
+   "any substring is not enough: a mid-sentence piece on its own → card_fragment")
+h = craft.card_vo_hits(lb(quote(B + " " + C)), SL)
+ok(checks(h) == ["card_fragment"], "a loose tail (does not start the sentence) → card_fragment")
+h = craft.card_vo_hits(lb(stmt(A), quote(B)), SL)
+ok(checks(h) == ["card_fragment"] and h[0]["i"] == 2 and "stops before" in h[0]["detail"],
+   "a chain that stops before the sentence ends → card_fragment on its last card")
+h = craft.card_vo_hits(lb(stmt(A), quote(B), quote("and nobody reads the docs.")), SL)
+ok(checks(h)[0] == "card_not_in_vo" and h[0]["i"] == 3,
+   "unspoken quote in the continuation slot → card_not_in_vo")
+ok("card_fragment" in checks(h), "…and the chain before it no longer reaches the sentence end")
+h = craft.card_vo_hits(lb(stmt(A), {"type": "stat", "cue": "sends, and deploys", "value": "3"}, stmt(C)), SL)
+ok("card_fragment" in checks(h),
+   "a text card after an object card mid-sentence is a loose part, not a continuation")
+rich = lb({"type": "stat", "cue": "Agents copy editor habits", "value": "3", "label": "habits"},
+          {"type": "diagram", "cue": "and nobody checks the schema", "title": "Schema"})
+ok(craft.card_vo_hits(rich, SL) == [],
+   "object cards later on the same sentence keep the #70 rule (anchor later, not a near-duplicate) → pass")
+ok(checks(craft.card_vo_hits(lb(stmt(A), quote(B), stmt(C)), SL, allow_continuation=False))
+   == ["card_fragment", "card_fragment", "card_fragment", "sentence_two_cards"],
+   "strict mode (allow_continuation=False): the same valid chain fails")
+m_echo = craft.card_vo_marker(lb(stmt(A), quote("onto deletes, sends, and deploys,"), stmt(C)), SL)
+ok(m_echo["continuation"] is True and any(x.startswith("echo_card") for x in craft.card_vo_check_hits(m_echo)),
+   "marker records continuation=True; echo_card is gated")
+g = craft.video_maker_gate(lb(stmt(A), quote(B), stmt(C)), card_vo=craft.card_vo_marker(lb(stmt(A), quote(B), stmt(C)), SL))
+ok(not any("Card ⊂ VO" in r for r in g["reasons"]), "gate: a valid continuation chain passes")
 
 print("skips")
 ok(craft.card_vo_hits([], S1328) == [] and craft.card_vo_hits(GOOD, "") == []
