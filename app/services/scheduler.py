@@ -17,6 +17,7 @@ from app.services import (
     metrics_loop,
     music_gen,
     publish_loop,
+    reach_loop,
     render_loop,
 )
 
@@ -81,6 +82,15 @@ def start() -> None:
         id="analytics", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
+    # Thumbnail impressions + CTR from the YouTube Reporting API (daily bulk
+    # reports). Re-runs are no-ops (processed-report ledger), so a few ticks a day
+    # just pick each new report up within hours; first run 5 min after startup.
+    _scheduler.add_job(
+        _safe(reach_loop.tick, "reach"),
+        "interval", hours=settings.reach_tick_hours,
+        id="reach", max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=300),
+    )
     # Auto-refill low topic idea queues. The tick no-ops unless the setting is on,
     # so it's safe to always register; runs soon after start, then on its interval.
     _scheduler.add_job(
@@ -100,10 +110,10 @@ def start() -> None:
     )
     _scheduler.start()
     logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "
-                "analytics %sh / autofill %smin / music_replenish 24h)",
+                "analytics %sh / reach %sh / autofill %smin / music_replenish 24h)",
                 settings.render_tick_seconds, settings.publish_tick_seconds,
                 settings.metrics_tick_hours, settings.analytics_tick_hours,
-                settings.autofill_tick_minutes)
+                settings.reach_tick_hours, settings.autofill_tick_minutes)
     return None
 
 

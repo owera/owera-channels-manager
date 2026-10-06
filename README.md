@@ -217,7 +217,10 @@ this work:
 
 - **Per-video analytics.** The app records a daily YouTube Analytics snapshot per
   published video (views, impressions, CTR, average view %, watch time, likes,
-  comments, subscribers gained) and exposes a leaderboard:
+  comments, subscribers gained) and exposes a leaderboard. Impressions and CTR are not
+  available from the Analytics API's per-video queries, so they come from the **YouTube
+  Reporting API** daily bulk report `channel_reach_basic_a1` (`reach_loop`, one reporting
+  job per channel; first data ~24–48h after the job is created, plus ~30 days of history):
   `GET /api/channels/{id}/video-analytics` and `…/video-analytics/by-topic` (the core
   "which themes/formats actually perform" signal).
 - **Custom thumbnails.** On publish, a bold high-contrast "hook card" is generated and
@@ -232,8 +235,9 @@ this work:
 **One-time setup** (the agent is data-driven, so wire up its inputs first):
 
 1. In Google Cloud Console, for each channel's project: **enable the YouTube Analytics
-   API** (it's separate from the Data API) and add the **`yt-analytics.readonly`** scope
-   to the OAuth consent screen.
+   API** and the **YouTube Reporting API** (impressions/CTR; both separate from the Data
+   API) and add the **`yt-analytics.readonly`** scope to the OAuth consent screen (it
+   covers both). Without the Reporting API the reach loop just logs and skips.
 2. In the app, **Reconnect** each channel once to grant that scope (publishing keeps
    working before then — only analytics is gated). Analytics populate within 24–72h.
 3. **Phone-verify** each channel (youtube.com/verify) so custom thumbnails upload

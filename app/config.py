@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     youtube_daily_quota_cap: int = 9000       # safety cap below the ~10k API quota
     metrics_tick_hours: int = 6               # channel-stats snapshot cadence (≤1/day each)
     analytics_tick_hours: int = 12            # per-video analytics snapshot cadence (≤1/day each)
+    reach_tick_hours: int = 6                 # YouTube Reporting API reach sync (impressions/CTR); reports are daily, re-runs are no-ops
+    # Unit of video_thumbnail_impressions_ctr in the downloaded CSV. Google documents it
+    # as "percentage … calculated as clicks divided by impressions" (ambiguous):
+    # "auto" = per report, any value > 1 means percent, else fraction; or pin it.
+    reach_ctr_unit: str = "auto"              # auto | fraction | percent
     autofill_tick_minutes: int = 20           # how often to top up low topic idea queues
     autofill_batch: int = 8                   # ideas generated per topic refill
 

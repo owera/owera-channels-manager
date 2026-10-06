@@ -236,6 +236,46 @@ class VideoMetric(SQLModel, table=True):
     captured_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class ReachReport(SQLModel, table=True):
+    """One YouTube Reporting API report (``channel_reach_basic_a1``) that the reach
+    loop downloaded and applied — the processed-report ledger that makes the loop
+    safe to re-run. A report id is applied at most once; a *backfill* (Google
+    re-issuing the same day under a NEW report id, newer create_time) replaces
+    that day's VideoReachDaily rows wholesale (reach_loop._apply_report)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
+    report_id: str = Field(index=True, unique=True)   # Reporting API report id
+    job_id: str
+    report_date: str = Field(index=True)              # YYYY-MM-DD (Pacific day covered)
+    create_time: str                                  # RFC 3339, as returned by the API
+    rows: int = 0                                     # CSV data rows read
+    videos: int = 0                                   # distinct video ids aggregated
+    ctr_unit: Optional[str] = None                    # "fraction" | "percent" (as detected)
+    processed_at: datetime = Field(default_factory=utcnow)
+
+
+class VideoReachDaily(SQLModel, table=True):
+    """Thumbnail impressions + clicks for one YouTube video on one (Pacific) day,
+    from the Reporting API. The Analytics API v2 targeted queries cannot return
+    these (400 "Unknown identifier"), so this is their only source. Overwritten
+    per (channel, day) by the newest report for that day — never accumulated —
+    so re-runs and backfills cannot double count. ``clicks`` = impressions × CTR
+    is kept so multi-day CTR is the impression-weighted ratio, not a mean of
+    daily ratios. ``video_id`` is null for YouTube videos the manager does not
+    know (uploaded elsewhere)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
+    video_id: Optional[int] = Field(default=None, foreign_key="video.id", index=True)
+    yt_video_id: str = Field(index=True)
+    day: str = Field(index=True)                      # YYYY-MM-DD
+    impressions: int = 0
+    clicks: float = 0.0
+    ctr: float = 0.0                                  # (0..1) clicks / impressions
+    report_id: str
+    report_create_time: str
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class TrendStatus:
     RESEARCHED = "researched"     # found + scored this run
     WATCHING = "watching"         # promising but not adopted yet
