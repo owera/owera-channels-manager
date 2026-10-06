@@ -610,6 +610,46 @@ def _hold_invalid_subject(session: Session, video: Video, ch: Channel) -> bool:
     return True
 
 
+
+def _take_weighted_shorts(short_pairs: list[tuple[Video, Topic]], n: int) -> list[Video]:
+    """Take up to ``n`` short drafts proportional to ``topic.weight``.
+
+    Autofill already gives winners a deeper bench (``weight`` multiplies the
+    pending ceiling). Historically ``_auto_produce`` *also* ordered drafts by
+    ``Topic.weight.desc()`` and took a prefix — so a weight-2 topic with any
+    drafts monopolized every short render slot (Owera Software 2026-10-05:
+    live mix 2:1:1:1 but 14/15 recent publics were Agent memory).
+
+    Playbook semantics: weight steers *share* ("winner refills more"), not a
+    hard priority queue. Smooth weighted round-robin keeps within-topic
+    ``position``/``id`` order while giving weight=2 ~2× the slots of weight=1
+    when drafts exist on both.
+    """
+    from collections import defaultdict, deque
+
+    if n <= 0 or not short_pairs:
+        return []
+    bags: dict[int, deque[Video]] = defaultdict(deque)
+    weights: dict[int, int] = {}
+    for v, t in short_pairs:
+        bags[t.id].append(v)
+        weights[t.id] = max(1, int(t.weight or 1))
+    topic_ids = sorted(bags.keys())
+    credit = {tid: 0 for tid in topic_ids}
+    total_w = sum(weights[tid] for tid in topic_ids)
+    picks: list[Video] = []
+    while len(picks) < n:
+        eligible = [tid for tid in topic_ids if bags[tid]]
+        if not eligible:
+            break
+        for tid in eligible:
+            credit[tid] += weights[tid]
+        tid = max(eligible, key=lambda i: (credit[i], -i))
+        credit[tid] -= total_w
+        picks.append(bags[tid].popleft())
+    return picks
+
+
 def _auto_produce(session: Session) -> None:
     """Promote DRAFT -> QUEUED to fill today's free render capacity.
 
@@ -632,7 +672,7 @@ def _auto_produce(session: Session) -> None:
       Without this, a pure-short fill under a banked long leaves the queue with
       0 longs; after that long publishes, approved_longs hits 0 until the next
       overnight cycle (observed ch1 2026-08-11 noon: approved 0L+3S).
-    - Remaining headroom → shorts weight-first, then longs.
+    - Remaining headroom → shorts by topic-weight share (smooth WRR), then longs.
     """
     for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
         active = session.exec(
@@ -647,7 +687,9 @@ def _auto_produce(session: Session) -> None:
             select(Video, Topic).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == ch.id, Video.status == VideoStatus.DRAFT,
                    Topic.active == True, Topic.weight > 0)  # noqa: E712
-            .order_by(Topic.weight.desc(), Video.position, Video.id)
+            # position/id only — topic share is applied in _take_weighted_shorts
+            # (weight.desc() prefix caused winner monopoly; see helper docstring).
+            .order_by(Video.position, Video.id)
         ).all()
         # Subject guard (2026-09-28 RR refill): a draft whose subject lost its
         # leading number/stake ("B em…", "camadas na GPU…") or carries a currency
@@ -656,8 +698,9 @@ def _auto_produce(session: Session) -> None:
         rows = [(v, t) for v, t in rows if not _hold_invalid_subject(session, v, ch)]
         if not rows:
             continue
-        longs = [v for v, t in rows if t.content_format == "long"]
-        shorts = [v for v, t in rows if t.content_format != "long"]
+        long_pairs = [(v, t) for v, t in rows if t.content_format == "long"]
+        short_pairs = [(v, t) for v, t in rows if t.content_format != "long"]
+        longs = [v for v, _ in long_pairs]
         picks: list[Video] = []
         approved_longs = 0
         in_flight_longs = 0
@@ -690,11 +733,16 @@ def _auto_produce(session: Session) -> None:
         # Leave one slot for the long reserve when needed; consume shorts so
         # the fill-remainder pass cannot re-pick the same draft objects.
         short_slots = max(0, headroom - len(picks) - (1 if need_long_reserve else 0))
-        picks.extend(shorts[:short_slots])
-        shorts = shorts[short_slots:]
+        taken = _take_weighted_shorts(short_pairs, short_slots)
+        taken_ids = {id(v) for v in taken}
+        picks.extend(taken)
+        short_pairs = [(v, t) for v, t in short_pairs if id(v) not in taken_ids]
         if need_long_reserve and longs:
             picks.append(longs.pop(0))
-        picks.extend(shorts[: headroom - len(picks)])
+        more = _take_weighted_shorts(short_pairs, headroom - len(picks))
+        more_ids = {id(v) for v in more}
+        picks.extend(more)
+        short_pairs = [(v, t) for v, t in short_pairs if id(v) not in more_ids]
         picks.extend(longs[: headroom - len(picks)])
         for v in picks:
             v.status = VideoStatus.QUEUED
