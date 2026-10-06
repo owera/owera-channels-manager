@@ -198,7 +198,7 @@ def _thumbnail_html(hook: str, accent: str = "#5b8cff",
         top = int(rh * SAFE_TOP_FRAC)
         layout = (
             f"#stage{{position:absolute;left:0;right:0;top:{top}px;"
-            f"height:{int(rh * SAFE_BOTTOM_FRAC) - top}px;padding:0 {int(rw * 0.06)}px;box-sizing:border-box;"
+            f"height:{int(rh * SAFE_BOTTOM_FRAC) - top}px;padding:0 {int(rw * craft.SPLIT_PAD_X_FRAC)}px;box-sizing:border-box;"
             f"color:{fg};--split-top:{stroke}}}"
             f"#hook{{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}}"
         )

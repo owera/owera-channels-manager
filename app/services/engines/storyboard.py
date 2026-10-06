@@ -510,7 +510,11 @@ def _base_css(width: int, height: int, th: dict) -> str:
         ".hook .htext{position:relative;z-index:2;font-size:calc(var(--fs)*1.28);font-weight:800;"
         "line-height:1.12;letter-spacing:-1px;text-shadow:0 4px 24px rgba(0,0,0,.7)}"
         + craft.OBJECT_CSS + craft.SPLIT_CSS +
-        ".hook[data-split]{justify-content:flex-start;padding:9% 6% 0;"
+        # Split card on frame0 = the same 9%–72% box as the thumb #stage, 8%
+        # lateral padding (Designer council 06/10: the card started at 5–6%).
+        ".hook[data-split]{inset:auto;left:0;right:0;top:" + str(int(height * craft.SPLIT_BOX_TOP_FRAC)) +
+        "px;height:" + str(int(height * craft.SPLIT_BOX_BOTTOM_FRAC) - int(height * craft.SPLIT_BOX_TOP_FRAC)) +
+        "px;justify-content:flex-start;padding:0 " + str(int(width * craft.SPLIT_PAD_X_FRAC)) + "px;"
         "--split-top:var(--stroke);color:var(--fg)}" +
         ((".hook{flex-direction:row;align-items:center}"
           ".hook .hobj{width:38%;max-height:62%}") if height < width else "") +
