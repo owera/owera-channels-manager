@@ -433,10 +433,16 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         ctext = (craft.card_text_marker(beats, script, words,
                                         brand=brand or params.get("brand"), content_format=fmt)
                  if not used_fallback else None)
+        # Card ⊂ VO (VM P0, council 06/10): each text card = one whole spoken
+        # sentence, one card per sentence (CARD_VO_V1; no OCR in-pipeline —
+        # card source text vs the VO script).
+        cvo = (craft.card_vo_marker(beats, script, content_format=fmt)
+               if not used_fallback else None)
         gate = craft.video_maker_gate(beats, content_format=fmt,
                                       used_fallback=used_fallback, hook_pace=pace,
                                       beat_timing=craft.BEAT_TIMING_CURRENT,
-                                      card_sync=sync, cli_check=cli, card_text=ctext)
+                                      card_sync=sync, cli_check=cli, card_text=ctext,
+                                      card_vo=cvo)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -454,6 +460,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             **({"card_sync": sync} if sync else {}),
             **({"cli_check": cli} if cli else {}),
             **({"card_text": ctext} if ctext else {}),
+            **({"card_vo": cvo} if cvo else {}),
             **({"sentence_pace": space} if space else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
