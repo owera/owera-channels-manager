@@ -29,7 +29,7 @@ from sqlmodel import Session, func, select
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, Topic, Video, VideoStatus
-from app.services import quota, video_gen
+from app.services import quota, review_guard, video_gen
 
 logger = logging.getLogger("manager.autofill")
 
@@ -69,6 +69,11 @@ def _long_pending_count(session: Session, channel_id: int) -> int:
 
 
 def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
+    blocked = review_guard.autogen_block_reason(topic.name)
+    if blocked:
+        # CMO 2026-10-06: no Shipping row without a source CM PR (#1400-#1402).
+        logger.info("autofill skipped for topic '%s': %s", topic.name, blocked)
+        return 0
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic.id)).all()
     try:
         ideas = video_gen.generate_ideas(
@@ -86,6 +91,7 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
     except Exception as e:
         logger.info("autofill skipped for topic '%s': %s", topic.name, e)
         return 0
+    ideas = review_guard.drop_teaser_ideas(ideas)
     if not ideas:
         return 0
     ideas = ideas[:batch]  # board-space math assumes len <= batch; the LLM can return more

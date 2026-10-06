@@ -138,6 +138,10 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     weight = t.weight if t.weight is not None else 1
     if weight <= 0:
         return {"generated": 0, "reason": "topic is parked (weight <= 0)"}
+    from app.services import review_guard
+    blocked = review_guard.autogen_block_reason(t.name)
+    if blocked:
+        return {"generated": 0, "reason": blocked}
     # Empty-blur Number("")===0 (and a typed 0 / negative) used to look like
     # the idea-column cap: max(0, min(count, remaining)) then generated:0.
     _require_int({"count": body.count}, "count", 1,
@@ -184,6 +188,7 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
             regen=lambda extra: video_gen.generate_ideas(
                 t.name, (t.theme_prompt or "") + extra, list(existing) + list(ideas), count,
                 t.content_format, language=video_gen.channel_language(session, t.channel_id)))
+    ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.renumber_series(
         ideas, video_gen.channel_series_subjects(session, t.channel_id))
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0
