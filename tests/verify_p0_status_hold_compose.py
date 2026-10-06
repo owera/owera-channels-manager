@@ -25,7 +25,6 @@ import contextlib
 import json
 import sys
 import tempfile
-import time
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -485,13 +484,33 @@ ok(not script_compose.is_composing(vf), "claim released after failure")
 
 print("(iii) async mode")
 vasync = mk3(VideoStatus.QUEUED)
+# Deterministic: this harness shares ONE SQLite connection (StaticPool) across
+# threads. If the background thread starts while the request's session is
+# still being torn down, that session's close() ROLLBACK lands on the shared
+# connection and discards the thread's uncommitted JobRun/script writes (the
+# old sleep-poll flaked: ['success'] only, or ['started'] only). Production
+# (file DB, one pooled connection per session) has no such coupling. So:
+# capture the background start, let the request finish, then run the REAL
+# start_background and join its thread — awaiting the task, not sleeping.
+_bg_calls = []
+_real_start_background = script_compose.start_background
+
+
+def _defer_start(bind, video_id, *, force=False):
+    _bg_calls.append((bind, video_id, force))
+
+
 with patch("app.services.llm.complete", side_effect=fake_complete):
-    r = client.post(f"/api/videos/{vasync}/compose-script", auth=auth)
+    with patch.object(script_compose, "start_background", side_effect=_defer_start):
+        r = client.post(f"/api/videos/{vasync}/compose-script", auth=auth)
     ok(r.status_code == 202 and r.json()["status"] == "composing", "default async: 202 composing")
-    for _ in range(100):
-        if not script_compose.is_composing(vasync):
-            break
-        time.sleep(0.05)
+    ok(len(_bg_calls) == 1 and _bg_calls[0][1] == vasync and script_compose.is_composing(vasync),
+       "async: background compose handed off; claim held until the thread releases it")
+    _bind, _vid, _force = _bg_calls[0]
+    _t = _real_start_background(_bind, _vid, force=_force)
+    _t.join(timeout=60)
+    ok(not _t.is_alive() and not script_compose.is_composing(vasync),
+       "background compose thread finished and released the claim")
 ok(get(vasync).script and "PDF escaneado" in get(vasync).script
    and [j.status for j in runs("compose_script", vasync)] == ["started", "success"],
    "background compose stored the script and logged success")
