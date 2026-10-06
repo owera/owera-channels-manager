@@ -34,8 +34,14 @@ import json
 import re
 from datetime import datetime, timezone
 
-# Actors allowed to set vm_pass, approve a CM teaser, or requeue one.
-CHANNELS_ACTORS = frozenset({"channels", "vm", "video-maker", "videomaker"})
+# Who may do what on a CM teaser (CoS decision 2026-10-06):
+#   * approve            → Channels ONLY (CHANNELS_ACTORS);
+#   * record vm_pass     → Channels or the Video Maker (VM_PASS_ACTORS) — the
+#                          VM records its Gate B PASS but never approves;
+#   * requeue            → VM_PASS_ACTORS (unchanged from #71).
+CHANNELS_ACTORS = frozenset({"channels"})
+VM_ACTORS = frozenset({"vm", "video-maker", "videomaker"})
+VM_PASS_ACTORS = CHANNELS_ACTORS | VM_ACTORS
 _ACTOR_RE = re.compile(r"[^a-z0-9_.@\-]+")
 
 
@@ -56,7 +62,13 @@ def actor_of(request) -> str:
 
 
 def is_channels_actor(actor: str | None) -> bool:
+    """Channels only — the CM teaser approve allowlist."""
     return (actor or "").lower() in CHANNELS_ACTORS
+
+
+def can_record_vm_pass(actor: str | None) -> bool:
+    """Channels or the Video Maker — who may record the Gate B PASS."""
+    return (actor or "").lower() in VM_PASS_ACTORS
 
 
 def _cc(v) -> dict:
@@ -115,7 +127,8 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
         return None
     if not is_channels_actor(actor):
         return (403, f"CM teaser: only Channels approves it (actor={actor!r}; send "
-                     "X-Actor: channels). The growth agent never approves a CM teaser.")
+                     "X-Actor: channels). The growth agent and the Video Maker never "
+                     "approve a CM teaser (the VM records vm-pass).")
     if vm_pass_of(v) is None:
         return (409, "CM teaser: approve requires the VM's Gate B PASS on this final render "
                      "(POST /api/videos/{id}/vm-pass by Channels/VM first; a re-render "
@@ -126,7 +139,7 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
 def teaser_requeue_block(v, actor: str, topic_name: str | None = None):
     """(status, message) when requeueing this video must be refused, else None.
     Chosen rule: a CM teaser is requeued by Channels only (blocked otherwise)."""
-    if is_cm_teaser(v, topic_name) and not is_channels_actor(actor):
+    if is_cm_teaser(v, topic_name) and not can_record_vm_pass(actor):
         return (403, f"CM teaser: only Channels requeues it (actor={actor!r}; send "
                      "X-Actor: channels). The growth agent never requeues a CM teaser.")
     return None
