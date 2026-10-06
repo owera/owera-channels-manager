@@ -629,5 +629,77 @@ ok(video_gen._strip_idea_cot(
    "clean patterned title is unchanged")
 
 
+# --- P0 2026-10-03 ---------------------------------------------------------
+print("#1406: a CoT-stripped remainder that starts mid-sentence is not a title")
+ok(video_gen._strip_idea_cot("Conferindo a contagem… o 14B fez 62 tok/s. Sem, 28. · Local 69") is None,
+   "'Conferindo a contagem… o 14B fez…' → dropped (was saved as #1406 'o 14B fez 62 tok/s…')")
+ok(video_gen._strip_idea_cot("Conferindo a contagem. O 14B fez 62 tok/s. Sem, 28. · Local 69")
+   == "O 14B fez 62 tok/s. Sem, 28. · Local 69", "a capitalised title after CoT is kept")
+for frag in ["o 14B fez 62 tok/s. Sem, 28. · Local 69", "camadas na GPU, o resto no CPU · IA 4",
+             "Com Flash Attention, · Local 66", ", o 14B fez 62 · Local 69"]:
+    ok(video_gen.is_title_fragment(frag), f"fragment rejected: {frag!r}")
+for good in ["14B no PCIe x4 fez 9. No x16, 41. · Local 68", "npm install travou · IA 3",
+             "vLLM segurou 40 tok/s · IA 2", "Think do 14B encheu a 8GB. Sem ele, rodou. · Local 70"]:
+    ok(not video_gen.is_title_fragment(good), f"title kept: {good!r}")
+_orig_complete = video_gen.complete
+video_gen.complete = lambda *a, **k: ("Conferindo a contagem… o 14B fez 62 tok/s. Sem, 28. · Local 69\n"
+                                      "Com Flash Attention o 16k rodou. · Local 66\n"
+                                      "e o resto ficou no CPU. · Local 67")
+try:
+    _gi = video_gen.generate_ideas("Rodar IA local", None, [], 5)
+finally:
+    video_gen.complete = _orig_complete
+ok(_gi == ["Com Flash Attention o 16k rodou. · Local 66"],
+   f"generate_ideas drops sentence fragments, got {_gi}")
+
+print("series numbering continues from the max used number (all statuses)")
+_used = ["Thumb do seu PNG · Shipping 8", "x · Shipping 1", "y · Shipping 3", "z · Shipping 3",
+         "IA trap · IA 227", "no suffix at all", None]
+ok(video_gen.series_numbers_used(_used) == {"shipping": 8, "ia": 227}, "max per series")
+ok(video_gen.renumber_series(["A · Shipping 3", "B · Shipping 4", "C · Shipping 5"], _used)
+   == ["A · Shipping 9", "B · Shipping 10", "C · Shipping 11"],
+   "#1400–#1402 shape: Shipping 3/4/5 → 9/10/11 (max used 8)")
+ok(video_gen.renumber_series(["Q · IA 12", "R"], _used) == ["Q · IA 228", "R"],
+   "IA continues at 228; unsuffixed ideas untouched")
+ok(video_gen.renumber_series(["New · Local 01"], []) == ["New · Local 01"], "first in a series keeps width")
+
+print("RR draft-time hook pace: ideas are born ≤8 words and spoken ≤2.8s")
+_fake = {"Modelo em swap não pensa.": 1.9, "O 14B com KV q8 rodou. Sem, não.": 3.6}
+ok(video_gen.rr_hook_reason("Modelo em swap não pensa. · IA 9", "pt-BR-AntonioNeural",
+                            lambda h, v: _fake[h]) is None, "short claim passes")
+ok("spoken by 3.60s" in video_gen.rr_hook_reason("O 14B com KV q8 rodou. Sem, não. · Local 60",
+                                                  "pt-BR-AntonioNeural", lambda h, v: _fake[h]),
+   "two-sentence head spoken by 3.6s → rejected (real TTS measurement)")
+ok("9 words" in video_gen.rr_hook_reason("um dois três quatro cinco seis sete oito nove · IA 1", None),
+   "9-word head → rejected without TTS")
+ok(video_gen.rr_hook_reason("Curto e bom. · IA 1", "v", lambda h, v: (_ for _ in ()).throw(RuntimeError("tts down")))
+   is None, "TTS outage → word count only (refill never blocked)")
+_calls = []
+
+
+def _regen(extra):
+    _calls.append(extra)
+    return ["Swap mata o 14B. · Local 61", "O 14B com KV q8 rodou. Sem, não. · Local 62"]
+
+
+_fake.update({"Swap mata o 14B.": 1.5})
+_gh = video_gen.enforce_hook_pace(
+    ["O 14B com KV q8 rodou. Sem, não. · Local 60", "Modelo em swap não pensa. · IA 9"], 2,
+    hook_voice="pt-BR-AntonioNeural", regen=_regen, measure=lambda h, v: _fake[h])
+ok(_gh == ["Modelo em swap não pensa. · IA 9", "Swap mata o 14B. · Local 61"],
+   f"failing idea regenerated once with feedback; only passing ideas kept, got {_gh}")
+ok(len(_calls) == 1 and "HOOK PACE (hard)" in _calls[0] and "spoken by 3.60s" in _calls[0],
+   "the regeneration prompt carries the measured miss")
+_calls.clear()
+ok(video_gen.enforce_hook_pace(["Modelo em swap não pensa. · IA 9"], 1, hook_voice="v",
+                               regen=_regen, measure=lambda h, v: _fake[h])
+   == ["Modelo em swap não pensa. · IA 9"] and _calls == [], "all pass → no regeneration call")
+video_gen.complete = lambda *a, **k: "O 14B com KV q8 rodou. Sem, não. · Local 60"
+try:
+    _gn = video_gen.generate_ideas("Rodar IA local", None, [], 2)
+finally:
+    video_gen.complete = _orig_complete
+ok(_gn == ["O 14B com KV q8 rodou. Sem, não. · Local 60"], "no hook_check (OS / longs) → unchanged")
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

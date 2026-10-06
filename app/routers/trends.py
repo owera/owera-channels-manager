@@ -191,6 +191,15 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
                                          language=video_gen.channel_language(session, ch.id))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
+    hp = video_gen.idea_hook_kwargs(session, ch.id, fmt)
+    if hp and ideas:
+        # RR #47: drafts are born passing hook pace (one regeneration)
+        ideas = video_gen.enforce_hook_pace(
+            ideas, idea_count, hook_voice=hp["hook_voice"],
+            regen=lambda extra: video_gen.generate_ideas(
+                topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
+                language=video_gen.channel_language(session, ch.id)))
+    ideas = video_gen.renumber_series(ideas, video_gen.channel_series_subjects(session, ch.id))
     mx_v = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == ch.id)).one() or 0
     produced = 0

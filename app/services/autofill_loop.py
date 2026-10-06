@@ -74,12 +74,24 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
         ideas = video_gen.generate_ideas(
             topic.name, topic.theme_prompt, list(existing), batch, topic.content_format,
             language=video_gen.channel_language(session, topic.channel_id))
+        hp = video_gen.idea_hook_kwargs(session, topic.channel_id, topic.content_format)
+        if hp and ideas:
+            # RR #47: drafts are born passing hook pace (one regeneration)
+            ideas = video_gen.enforce_hook_pace(
+                ideas, batch, hook_voice=hp["hook_voice"],
+                regen=lambda extra: video_gen.generate_ideas(
+                    topic.name, (topic.theme_prompt or "") + extra,
+                    list(existing) + list(ideas), batch, topic.content_format,
+                    language=video_gen.channel_language(session, topic.channel_id)))
     except Exception as e:
         logger.info("autofill skipped for topic '%s': %s", topic.name, e)
         return 0
     if not ideas:
         return 0
     ideas = ideas[:batch]  # board-space math assumes len <= batch; the LLM can return more
+    # "· <Series> NN" continues from the channel's max used number (P0 2026-10-03)
+    ideas = video_gen.renumber_series(
+        ideas, video_gen.channel_series_subjects(session, topic.channel_id))
     mx = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)
     ).one() or 0

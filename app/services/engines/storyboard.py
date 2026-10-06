@@ -1069,9 +1069,10 @@ _TYPE_DOCS = {
     "term_define": 'term_define: {"cue","term","definition"(≤14w)} — define a key term as it is introduced.',
     "quote": 'quote: {"cue","text"(≤16w),"attribution"?} — a memorable line; good for the payoff.',
     "cta": 'cta: {"cue","text","sub"?} — series endcard, exactly one, last, AFTER the claim. '
-           'On-screen chip text is "Subscribe · {series}" (one line). Optional micro sub '
-           '"same series" only if it fits — no extra CTA. Spoken VO: '
-           '"Subscribe — next {series} {noun}." ≤8 words; noun ∈ trap|receipt|bill|drop. '
+           'On-screen chip: EN "Subscribe · {series}"; PT (IA series) "Se inscreve · {series}". '
+           'Optional micro "same series" only if it fits — no extra CTA. Spoken VO: EN '
+           '"Subscribe — next {series} {noun}." (noun ∈ trap|receipt|bill|drop) OR PT (IA) '
+           '"Se inscreve. Próxima armadilha de {series}." ≤8 words. '
            'FORBIDDEN on the card: Follow, Follow tomorrow, amanhã, waitlist, owera.com, '
            'Cloud, "part 2 coming", SMY, 💸, neon. Subscribe text is FORBIDDEN on every '
            'beat before this last card (no mid-short Subscribe VO/chip). '
@@ -1089,7 +1090,23 @@ _TEASER_NO_CLI_RULE = (
     "term_define / quote. No API or path names on screen.\n\n")
 
 
-def _system_prompt(allowed: list[str], product_teaser: bool = False) -> str:
+_CARD_TEXT_RULE = (
+    "8. CARD TEXT: at most ONE card per spoken sentence — never a second card that "
+    "re-says the same sentence. Quote marks only around words the narration says "
+    "VERBATIM. Never two back-to-back cards with the same words. Take card copy from "
+    "the beat's own spoken sentence.\n\n")
+_RR_CARD_RULE = (
+    "9. TERMINAL OUTPUT: a `command` shows a real tool; its output lines (and any "
+    "receipt/log dump) must be words the narration says — never invent output, "
+    "never placeholder lines like [missing] / [gráfico ausente].\n\n")
+_PT_CARD_RULE = (
+    "10. PT-BR CARDS: every visible word in Brazilian Portuguese, in the narration's own "
+    "words: quarters are T1–T4 (never Q1–Q4); no English words the narration does not "
+    "use; no coined jargon (e.g. 'Valor-sentinela', 'Split de página').\n\n")
+
+
+def _system_prompt(allowed: list[str], product_teaser: bool = False, rr: bool = False,
+                   pt: bool = False) -> str:
     types = "\n".join("- " + _TYPE_DOCS[t] for t in allowed if t in _TYPE_DOCS)
     has_bc = any(t in allowed for t in ("code", "command", "diagram"))
     # Product teasers (OS Shipping): no required snippet, no invented CLI.
@@ -1143,6 +1160,7 @@ def _system_prompt(allowed: list[str], product_teaser: bool = False) -> str:
          "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
          "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
          "boxes). Prefer code/command over diagram on vertical shorts.\n\n") +
+        _CARD_TEXT_RULE + (_RR_CARD_RULE if rr else "") + (_PT_CARD_RULE if rr and pt else "") +
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues"
         + (" — and the required code beat" if need_snippet else "") + "):\n"
@@ -1442,7 +1460,7 @@ def annotate_sentences(words, script) -> list[dict]:
         need = _tok(sent)
         if not need:
             continue
-        cta = craft.is_endcard_vo(sent) or craft.contains_subscribe_cta(sent)
+        cta = (craft.is_endcard_vo_sentence(sent) or craft.contains_subscribe_cta(sent))
         # resync: find the first word whose tokens start this sentence
         j = wi
         while j < len(out) and (not wtoks[j] or wtoks[j][0] != need[0]):
@@ -1541,7 +1559,8 @@ _REL_SPLIT = frozenset({
 # A display segment never ENDS on one of these (#1381 "…chamou isso de").
 _DANGLING = frozenset({
     "de", "do", "da", "dos", "das", "a", "o", "as", "os", "um", "uma", "em", "no",
-    "na", "por", "pra", "para", "com", "sem", "e", "ou", "que", "se", "isso", "seu",
+    "na", "por", "pra", "para", "pro", "pros", "pras", "com", "sem", "e", "ou", "que", "se",
+    "isso", "seu",
     "sua", "mais", "pelo", "pela", "pelos", "pelas", "num", "numa", "ao", "aos",
     "nem", "mas", "porque", "quando", "como", "ate", "sobre", "entre", "cada",
     "muito", "pouco", "nao", "the", "an", "of", "to", "in", "on", "for", "with", "and",
@@ -2373,6 +2392,241 @@ def _soft_product_card(beats, script) -> None:
     beats[:] = keep
 
 
+# Guaranteed card ↔ speech sync (P0 2026-10-03). _sync_board's local
+# repair (insert one unit on a gap, drop one generated card on a crowd) gave
+# up on most production boards: generated sentence cards duplicated the
+# speech anchor of an LLM card (#1381: "Você rodou o modelo" as a quote AND
+# as the command's cue), unmatched cards were left free, and the endcard's
+# cap left a hole the repair could not fill. All-or-nothing then shipped the
+# UN-synced board (Gate B FAIL on every RR render since #52). The DP below
+# picks, among the LLM cards and the unused sentence units, the best
+# subsequence whose cards can ALL start in [speech − 1.1s, speech] with
+# holds in [card min, cap] and the endcard in its window, then re-times it.
+_DP_RICH_W = 10.0      # an LLM explanatory card kept
+_DP_TEXT_W = 6.0       # an LLM quote/statement kept
+_DP_GEN_W = 0.5        # a generated card already on the board
+_DP_UNIT_W = -1.0      # a NEW sentence unit (only where needed)
+_DP_PARETO = 10
+# last resort: a hook long enough to cover a claim that runs late (the
+# hook is Gate B exempt; RR hook pace still reports the real defect)
+_SYNC_HOOK_LAST = 8.0
+
+
+def _dp_anchor(toks: list[str], stream: list[str], start: int) -> int:
+    from app.services import craft
+    return craft._find_run(stream, toks, start) if toks else -1
+
+
+def _sync_dp_once(beats, words, duration: float, hook_max: float,
+                  content_end: float | None, banned: set, script: str | None = None):
+    """One DP pass. Returns the new board (list of beat dicts, re-timed) or None."""
+    from app.services import craft
+    lead = craft.SYNC_LEAD_MAX_S
+    D = float(duration)
+    toks, tstart, tsent = [], [], []
+    for w in words or []:
+        if not isinstance(w, dict):
+            continue
+        for t in craft._sync_toks(w.get("text") or w.get("word")):
+            toks.append(t)
+            tstart.append(float(w.get("start") or 0.0))
+            tsent.append(w.get("_s"))
+    if not toks or len(beats) < 2 or (beats[0].get("type") or "") != "hook" \
+            or (beats[-1].get("type") or "") != "cta":
+        return None
+    hook, cta = beats[0], beats[-1]
+    ht = craft._sync_toks(hook.get("text") or hook.get("cue"))
+    h_end = len(ht) if ht and toks[:len(ht)] == ht else 0
+    keys_llm = set()
+    nodes = []  # dict(key=sort time, v=anchor|None, beat=..., w=weight, uid=...)
+    for j, b in enumerate(beats[1:-1], start=1):
+        if ("b", j) in banned:
+            continue
+        typ = b.get("type") or ""
+        cands = [craft._sync_toks(b.get("text"))] if typ in ("quote", "statement") else []
+        cands.append(craft._sync_toks(b.get("cue")))
+        pos = -1
+        for c in cands:
+            pos = _dp_anchor(c, toks, h_end)
+            if pos >= 0:
+                break
+        gen = any(b.get(f) for f in _GEN_FLAGS)
+        w = _DP_GEN_W if gen else (_DP_TEXT_W if typ in ("quote", "statement") else _DP_RICH_W)
+        k = craft.screen_text_key(b)
+        if k and not gen:
+            keys_llm.add(k)
+        if pos < 0:
+            continue  # unmatched: cannot be proven in sync → not kept
+        nodes.append({"t": tstart[pos], "v": tstart[pos], "pos": pos, "beat": b, "w": w,
+                      "uid": ("b", j), "key": k})
+    hook_toks = set(craft.screen_text_key(hook).split())
+    seen_units = set()
+    if _is_annotated(words):
+        levels = [_speech_units(words, over) for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP)]
+        levels.append(_speech_units(words, 2 * _QUOTE_MIN + _GAP, min_side=2))
+        # finest: clause halves of ~2s sentences — lets the last content card
+        # anchor late enough to reach the capped endcard (#1394 tail hole)
+        levels.append(_speech_units(words, 1.5, min_side=2))
+        h_t = tstart[h_end] if h_end < len(tstart) else 0.0
+        for units in levels:
+            for u in units:
+                k = craft.screen_text_key({"type": "quote", "text": u["text"]})
+                st = round(float(u["start"]), 3)
+                if (not k or (k, st) in seen_units or k in keys_llm or set(k.split()) <= hook_toks
+                        or st < h_t - 1e-6 or ("u", k, st) in banned):
+                    continue
+                seen_units.add((k, st))
+                pos = _dp_anchor(craft._sync_toks(u["text"]), toks, h_end)
+                if pos < 0 or abs(tstart[pos] - st) > 1e-3:
+                    continue  # the gate would anchor it elsewhere
+                nodes.append({"t": st, "v": st, "pos": pos, "w": _DP_UNIT_W, "uid": ("u", k, st),
+                              "key": k, "beat": {"type": "quote", "cue": u["text"], "text": u["text"],
+                                                 "attribution": "", "_split": True}})
+    nodes.sort(key=lambda n: (n["t"], -n["w"]))
+    # endcard window
+    vc = None
+    ct = craft._sync_toks(cta.get("cue"))
+    pc = _dp_anchor(ct, toks, h_end)
+    if pc >= 0:
+        vc = tstart[pc]
+    c_lo = max(0.0, D - _ENDCARD_MAX)
+    if vc is not None:
+        c_lo = max(c_lo, vc - lead)
+    if content_end is not None:
+        c_lo = max(c_lo, min(float(content_end), D - _MIN_DUR))
+    c_hi = max(c_lo, vc if vc is not None else D - _MIN_DUR)
+
+    def dmin(b):
+        return _card_min(b) + _GAP
+
+    def dmax(b):
+        return (hook_max if (b.get("type") or "") == "hook" else _MID_MAX) + _GAP
+
+    # DP: states per node = list of (score, lo, hi, prev_state)
+    start_state = (0.0, 0.0, 0.0, None, None)  # score, lo, hi, node idx, prev
+    states = [[] for _ in nodes]
+
+    def push(lst, st):
+        for o in lst:
+            if o[0] >= st[0] - 1e-9 and o[1] <= st[1] + 1e-9 and o[2] >= st[2] - 1e-9:
+                return
+        lst[:] = [o for o in lst if not (st[0] >= o[0] - 1e-9 and st[1] <= o[1] + 1e-9
+                                          and st[2] >= o[2] - 1e-9)]
+        lst.append(st)
+        lst.sort(key=lambda o: -o[0])
+        del lst[_DP_PARETO:]
+
+    def step(prev, prev_beat, prev_key, prev_pos, n):
+        if n["pos"] <= prev_pos:
+            return None
+        if prev_key and n["key"] and _clashes(n["key"], prev_key):
+            return None
+        if (prev_beat.get("type") or "") != "hook":
+            # card text rules 1 + 5 (VM #1423): no near-duplicate neighbour;
+            # a second card on one sentence only as a verbatim continuation
+            # (its later words, nothing repeated). The DP adds those only
+            # where a hold cap / the first cut leaves no other way (a unit
+            # costs weight) — ~1s TTS pauses make one card per sentence
+            # infeasible on some sentences (#1423: S1 after the first cut,
+            # S3 4.85s and S6 4.15s apart > 2.92s hold + 1.1s lead).
+            if craft.cards_near_duplicate(prev_beat, n["beat"]):
+                return None
+            s = tsent[n["pos"]]
+            if s is not None and prev_pos >= 0 and tsent[prev_pos] == s:
+                pl = (len(craft._sync_toks(prev_beat.get("text")))
+                      if (prev_beat.get("type") or "") in ("quote", "statement") else 0)
+                if not craft.is_continuation_card(n["beat"], prev_beat, script, pos=n["pos"],
+                                                  prev_pos=prev_pos, prev_len=pl):
+                    return None
+        lo = max(n["v"] - lead, prev[1] + dmin(prev_beat), 0.0)
+        hi = min(n["v"], prev[2] + dmax(prev_beat), D - _MIN_DUR)
+        return (lo, hi) if lo <= hi + 1e-9 else None
+
+    hk = craft.screen_text_key(hook)
+    for j, n in enumerate(nodes):
+        r = step(start_state, hook, hk, h_end - 1, n)
+        if r:
+            push(states[j], (start_state[0] + n["w"], r[0], r[1], j, start_state))
+        for i in range(j):
+            ni = nodes[i]
+            for st in states[i]:
+                r = step(st, ni["beat"], ni["key"], ni["pos"], n)
+                if r:
+                    push(states[j], (st[0] + n["w"], r[0], r[1], j, st))
+    best = None
+
+    def close(st, beat):
+        lo = max(c_lo, st[1] + dmin(beat))
+        hi = min(c_hi, st[2] + dmax(beat))
+        return lo <= hi + 1e-9
+
+    if close(start_state, hook):
+        best = start_state
+    for j, n in enumerate(nodes):
+        for st in states[j]:
+            if close(st, n["beat"]) and (best is None or st[0] > best[0] + 1e-9):
+                best = st
+    if best is None:
+        return None
+    chain = []
+    st = best
+    while st is not None and st[3] is not None:
+        chain.append(nodes[st[3]])
+        st = st[4]
+    chain.reverse()
+    board = [hook] + [dict(n["beat"]) for n in chain] + [cta]
+    v = craft.card_speech_starts(board, words)
+    state, res = _sync_solve_once(board, v, D, hook_max, content_end)
+    if state != "ok":
+        return None
+    for i, b in enumerate(board):
+        b["start"] = round(res[i], 3)
+    for i in range(len(board) - 1):
+        board[i]["dur"] = round(res[i + 1] - _GAP - res[i], 3)
+    board[-1]["dur"] = round(D - res[-1], 3)
+    board[0]["_uid"] = None
+    for b, n in zip(board[1:-1], chain):
+        b["_uid"] = n["uid"]
+    return board
+
+
+def _sync_dp(beats, words, duration: float, hook_max: float, script: str | None = None) -> bool:
+    """Guaranteed sync: choose + re-time the board so every card passes
+    Gate B's card-sync check (and holds/first cut). False leaves the board
+    unchanged (Gate B then reports it — a real failure, e.g. a hook claim
+    too long to leave room for the first cut)."""
+    from app.services import craft
+    c_end = craft.endcard_vo_content_end(words, script) if script else None
+    for ce in ([c_end, None] if c_end is not None else [None]):
+        banned: set = set()
+        for _ in range(8):
+            board = _sync_dp_once(beats, words, duration, hook_max, ce, banned, script)
+            if board is None:
+                break
+            uids = [b.pop("_uid", None) for b in board]
+            hits = craft.card_sync_hits(craft.card_sync_marker(board, words, "short", script=script))
+            rep = craft.repeated_card_reason
+            bad = set()
+            for i in range(1, len(board) - 1):
+                if rep(board, i):
+                    bad.add(uids[i])
+            if script:
+                for h in craft.card_text_hits(board, script, words):
+                    if 0 < h["i"] < len(board) - 1:
+                        bad.add(uids[h["i"]])
+            if not bad and hits:
+                for n in craft.card_sync_notes(board, words, script):
+                    if n["status"] in ("late", "early", "straddle") and 0 < n["i"] < len(board) - 1:
+                        bad.add(uids[n["i"]])
+            if not bad and not hits and validate_storyboard(board, duration):
+                beats[:] = board
+                return True
+            if not bad:
+                break
+            banned |= {u for u in bad if u}
+    return False
+
+
 def _cap_statements(beats, content_format=None) -> None:
     """Gate C backstop: Shorts keep ≤1 statement. Extra cards become quotes.
 
@@ -2410,18 +2664,233 @@ def _diagram_is_nonsense(b: dict) -> bool:
     return not labeled and len(nodes) <= 3
 
 
-def _demote_nonsense_diagrams(beats, content_format) -> None:
-    shorts = (content_format or "short") != "long"
-    for b in beats:
-        if b.get("type") != "diagram":
+def _narration_sentence_for(cue, script, max_words: int = _SENT_CARD_MAX_WORDS,
+                            labels=None) -> str | None:
+    """A real sentence (or clause) of ``script`` that carries ``cue``'s words,
+    ≤ ``max_words`` and passing craft.text_card_reason; None when there is
+    none. Used when a diagram is demoted to a text card (#1385: never join
+    node labels into loose nouns)."""
+    from app.services import craft
+    need = _tok(cue or "")
+    sents = [x.strip() for x in _SENT_SPLIT_RE.split((script or "").strip()) if x.strip()]
+    if not need or not sents:
+        return None
+
+    def _has(text):
+        t = _tok(text)
+        return any(t[p:p + len(need)] == need for p in range(len(t) - len(need) + 1))
+
+    def _ok(text):
+        n = len(text.split())
+        return (0 < n <= max_words and not craft.is_endcard_vo(text)
+                and not craft.contains_subscribe_cta(text)
+                and craft.text_card_reason(text, labels) is None)
+
+    for sent in sents:
+        if not _has(sent):
             continue
-        if not (shorts or _diagram_is_nonsense(b)):
+        if _ok(sent):
+            return sent
+        for clause in (c.strip(" ,;:—–") for c in _CLAUSE_RE.split(sent)):
+            clause = _LEAD_CONJ_RE.sub("", clause)
+            clause = clause[:1].upper() + clause[1:]
+            if clause and _has(clause) and _ok(clause):
+                return clause
+    return None
+
+
+_LEAD_CONJ_RE = re.compile(r"^(?:and|but|or|so|then|e|mas|ou|então)\s+", re.I)
+
+
+def _demote_nonsense_diagrams(beats, content_format, script=None) -> None:
+    """Shorts never render a diagram (and Longs drop nonsense ones). The beat
+    becomes a quote card carrying a real sentence from its own narration
+    (Channels 2026-10-03, #1385 "Your PNG Channels Manager YouTube"); with no
+    usable sentence the beat gets no card. Node labels are never joined."""
+    shorts = (content_format or "short") != "long"
+    keep = []
+    for b in beats:
+        if b.get("type") != "diagram" or not (shorts or _diagram_is_nonsense(b)):
+            keep.append(b)
             continue
         labels = [n.get("label") for n in (b.get("nodes") or []) if n.get("label")]
-        text = _words_clip(" ".join(labels) or b.get("cue") or "", 8) or "·"
         cue = b.get("cue", "")
+        text = _narration_sentence_for(cue, script, labels=labels)
+        if not text:
+            continue
         b.clear()
-        b.update({"type": "statement", "cue": cue, "text": text, "w": 2, "emoji": ""})
+        b.update({"type": "quote", "cue": cue, "text": text, "attribution": ""})
+        keep.append(b)
+    beats[:] = keep
+
+
+def _fix_verbless_cards(beats, script) -> None:
+    """Last guard (Channels 2026-10-03): a statement/quote card with no verb,
+    or made only of labels/capitalized nouns, is replaced by the narration
+    sentence its cue belongs to, or dropped when there is no usable one."""
+    from app.services import craft
+    keep = []
+    for i, b in enumerate(beats):
+        if (b.get("type") or "") not in craft.TEXT_CARD_TYPES or i == 0:
+            keep.append(b)
+            continue
+        if craft.text_card_reason(b.get("text")) is None:
+            keep.append(b)
+            continue
+        text = _narration_sentence_for(b.get("cue") or b.get("text"), script)
+        if text:
+            b.update({"type": "quote", "text": text})
+            b.pop("w", None)
+            b.pop("emoji", None)
+            b.setdefault("attribution", "")
+            keep.append(b)
+    beats[:] = keep
+
+
+_RICH_CARD_TYPES = frozenset({"stat", "compare", "list", "term_define", "code", "command",
+                              "diagram"})
+
+
+def _narration_card(b: dict, script) -> dict | None:
+    """The beat's own spoken sentence (or clause) as a quote card; None when
+    its cue is not in the narration."""
+    cue = b.get("cue") or ""
+    text = _narration_sentence_for(cue, script)
+    if not text and (b.get("type") or "") in ("quote", "statement"):
+        text = _narration_sentence_for(b.get("text") or "", script)
+    if not text:
+        return None
+    return {"type": "quote", "cue": cue or text, "text": text, "attribution": ""}
+
+
+def _localize_quarters(b: dict) -> None:
+    """PT-BR: Q1–Q4 → T1–T4 in every visible string of the beat."""
+    from app.services import craft
+
+    def fx(v):
+        return craft._QUARTER_RE.sub(r"T\1", v) if isinstance(v, str) else v
+    for k in ("text", "title", "label", "sub", "term", "definition", "value", "unit"):
+        if isinstance(b.get(k), str):
+            b[k] = fx(b[k])
+    for k in ("output", "lines"):
+        if isinstance(b.get(k), list):
+            b[k] = [fx(x) for x in b[k]]
+    if isinstance(b.get("items"), list):
+        b["items"] = [dict(it, text=fx(it.get("text"))) if isinstance(it, dict) else fx(it)
+                      for it in b["items"]]
+    for side in ("left", "right"):
+        col = b.get(side)
+        if isinstance(col, dict):
+            col["title"] = fx(col.get("title"))
+            col["items"] = [fx(x) for x in col.get("items") or []]
+
+
+def _fix_card_output(b: dict, script) -> dict | None:
+    """Rule 3 (RR): keep a terminal card only with real text. Invented output
+    lines are dropped; an invented command/output dump (or nothing left)
+    demotes the beat to its narration sentence."""
+    from app.services import craft
+    bad = craft.invented_output(b, script)
+    if not bad:
+        return b
+    typ = b.get("type") or ""
+    if typ == "command":
+        if (b.get("command") or "").strip() in bad:
+            return _narration_card(b, script)
+        b["output"] = [o for o in b.get("output") or [] if str(o).strip() not in bad]
+        return b
+    lines = [ln for ln in b.get("lines") or [] if str(ln).strip() not in bad]
+    if not lines or str(b.get("lang") or "").strip().lower() in craft.OUTPUT_CODE_LANGS:
+        return _narration_card(b, script)
+    b["lines"] = lines
+    return b
+
+
+def _enforce_card_text_rules(beats, script, words=None, brand=None) -> None:
+    """VM Gate B content review of RR #1423 (2026-10-03), as generator rules:
+    3. RR terminal/tool-output cards never invent output (#1 "[gráfico
+       ausente]") — invented lines go; an invented command becomes the
+       beat's narration sentence.
+    4. RR PT-BR: T1–T4 not Q1–Q4; a statement/term_define headline with
+       words the narration never says ("Valor-sentinela", "Split de
+       página") or an English word the VO does not use becomes the beat's
+       own spoken sentence.
+    2. A quote card (or any “quoted” copy) must be verbatim narration (#10
+       “Se erra o valor, não leu”) — else the spoken clause at its cue.
+    1. One card per spoken sentence (#3 echoed #2): the richest card of the
+       sentence stays; a second one only as a verbatim continuation of a
+       sentence too long for one card.
+    5. No two consecutive near-duplicate cards (#8 repeated #7): the richer
+       of the pair stays.
+    Hook and endcard are never touched."""
+    from app.services import craft
+    if not beats or not script:
+        return
+    rr = (brand or "") in craft.HOOK_PACE_BRANDS
+    pt = craft.is_pt_text(script)
+    out = []
+    for i, b in enumerate(beats):
+        typ = b.get("type") or ""
+        if i == 0 or typ in craft._CARD_RULE_SKIP:
+            out.append(b)
+            continue
+        cur = b
+        if rr and pt and craft.quarter_labels_apply(script):
+            _localize_quarters(cur)
+        if rr and typ in craft.CLI_BEAT_TYPES:
+            cur = _fix_card_output(cur, script)
+        if cur is not None and rr and pt and (
+                craft.unspoken_headline_terms(cur, script) or craft.foreign_terms(cur, script)):
+            cur = _narration_card(cur, script)
+        if cur is not None and craft.unspoken_quotes(cur, script):
+            if (cur.get("type") or "") == "quote" and not cur.get("plain"):
+                cur = _narration_card(cur, script)
+            else:
+                for k in ("text", "title", "label", "sub", "definition"):
+                    if isinstance(cur.get(k), str):
+                        cur[k] = craft._QUOTE_CHARS_RE.sub("", cur[k]).strip()
+        if cur is not None:
+            out.append(cur)
+    # 1. one card per sentence (+ continuations of a long sentence). In
+    # order: a card that is not a continuation of the sentence's last kept
+    # card is an echo — dropped, or it replaces a plain text card when it is
+    # the richer one (#1423: term_define #2 stays, quote #3 goes).
+    anchors = craft.card_anchors(out, script)
+    spans = craft.sentence_spans(script, words) if words else {}
+    kept_by: dict[int, list[int]] = {}
+    drop = set()
+    for i, (s, pos, shown) in enumerate(anchors):
+        if s is None:
+            continue
+        group = kept_by.setdefault(s, [])
+        if not group:
+            group.append(i)
+            continue
+        k = group[-1]
+        cont = craft.is_continuation_card(out[i], out[k], script, pos=pos,
+                                          prev_pos=anchors[k][1], prev_len=anchors[k][2])
+        if cont and len(group) < craft.sentence_card_cap(spans.get(s)):
+            group.append(i)
+        elif ((out[i].get("type") or "") in _RICH_CARD_TYPES
+              and (out[k].get("type") or "") not in _RICH_CARD_TYPES):
+            drop.add(k)
+            group[-1] = i
+        else:
+            drop.add(i)
+    out = [b for j, b in enumerate(out) if j not in drop]
+    # 5. no consecutive near-duplicates
+    res = []
+    for b in out:
+        typ = b.get("type") or ""
+        prev = res[-1] if res else None
+        if (prev is not None and len(res) > 1 and typ not in craft._CARD_RULE_SKIP
+                and (prev.get("type") or "") not in craft._CARD_RULE_SKIP
+                and craft.cards_near_duplicate(prev, b)):
+            if typ in _RICH_CARD_TYPES and (prev.get("type") or "") not in _RICH_CARD_TYPES:
+                res[-1] = b
+            continue
+        res.append(b)
+    beats[:] = res
 
 
 def _cap_list_holds(beats) -> None:
@@ -2455,7 +2924,9 @@ def compose(*, subject, script, words, duration, resolution, width, height,
                        channel_id=channel_id, channel_slug=channel_slug)
     from app.services import craft as _craft
     teaser = _craft.is_product_teaser(subject, topic_name)
-    system = _system_prompt(allowed, product_teaser=teaser)
+    rr_brand = (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS
+    system = _system_prompt(allowed, product_teaser=teaser, rr=rr_brand,
+                            pt=_craft.is_pt_text(script))
     user = _user_prompt(subject, script, content_format, product_teaser=teaser)
 
     raw = llm(user, system=system, max_tokens=1500).strip()
@@ -2492,7 +2963,9 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             ("one" if content_format != "long" else "two") +
             " statement beat(s)), and include EXACTLY one "
             "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
-            "that shows the thing the narration only describes (terminal, receipt, API bill).",
+            "that shows the thing the narration only describes (terminal, receipt, API bill)." +
+            (" Output lines only when the narration says them — never invented output."
+             if rr_brand else ""),
             system=system, max_tokens=1500).strip()
         rb = parse_storyboard(retry, allowed)
         if rb and _code_ok(rb, allowed):
@@ -2503,7 +2976,7 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _lock_opening_hook(beats, script, subject)
     _show_whole_claim(beats, script, subject)
     _apply_split_card(beats, subject, provided_thumb=provided_thumb)
-    _demote_nonsense_diagrams(beats, content_format)
+    _demote_nonsense_diagrams(beats, content_format, script)
     _sanitize_cta(beats, script, subject=subject, brand=brand or th.get("brand"),
                   content_format=content_format, topic_name=topic_name)
     _strip_mid_subscribe_beats(beats)
@@ -2511,6 +2984,8 @@ def compose(*, subject, script, words, duration, resolution, width, height,
         _replace_fabricated_cli(beats, script)
         _soft_product_card(beats, script)
     _cap_statements(beats, content_format)
+    _fix_verbless_cards(beats, script)
+    _enforce_card_text_rules(beats, script, words, brand or th.get("brand"))
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
@@ -2530,8 +3005,23 @@ def compose(*, subject, script, words, duration, resolution, width, height,
         _pull_first_cut(beats, duration, words)
     if (content_format or "short") != "long" and _is_annotated(words):
         # Card ↔ speech sync (CoS 2026-09-30): never after its words, lead ≤ 1.1s.
-        _sync_board(beats, words, duration,
-                    (_craft.HOOK_FIRST_CUT_BY_S - _GAP) if rr_pace else _HOOK_MAX,
-                    script=script)
+        hook_max = (_craft.HOOK_FIRST_CUT_BY_S - _GAP) if rr_pace else _HOOK_MAX
+        synced = _sync_board(beats, words, duration, hook_max, script=script)
+        if synced:
+            synced = not _craft.card_sync_hits(
+                _craft.card_sync_marker(beats, words, content_format, script=script))
+        if synced:
+            # card text rules hold on the repaired board too (no echo /
+            # near-duplicate filler from the local repair)
+            synced = not _craft.card_text_hits(beats, script, words)
+        if not synced:
+            # P0 2026-10-03: the local repair gave up → choose + re-time the
+            # board from the speech anchors (never ship an unsynced board).
+            # RR first: with the first-cut bound; if the claim leaves no room
+            # for it, still guarantee card sync (Gate B then reports only
+            # the real hook-pace defect).
+            for hm in dict.fromkeys((hook_max, _HOOK_MAX, _SYNC_HOOK_LAST)):
+                if _sync_dp(beats, words, duration, hm, script=script):
+                    break
     return build_index_html(beats, th, resolution, width, height, duration,
                             content_format=content_format)

@@ -321,9 +321,21 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
         narration = job_dir / "narration.mp3"
         words = _tts(script, _voice(params), narration)
+        # RR hook join (craft.HOOK_JOIN_*): the claim's full stop is spoken as
+        # ";" when the next sentence would start too late for the first cut.
+        from app.services import craft as _craft
+        brand_hint = params.get("brand") or theme.infer_brand(
+            params.get("channel_id"), params.get("channel_slug"))
+        hook_join = False
+        if _craft.needs_hook_join(script, words, brand_hint,
+                                  params.get("content_format") or "short"):
+            joined = _tts(_craft.hook_join_text(script), _voice(params), narration)
+            if joined:
+                words, hook_join = joined, True
         (job_dir / "narration_words.json").write_text(json.dumps(words))
         narr_secs = _probe_duration(narration) or 12.0
-        duration = max(4.0, round(narr_secs + 0.6, 2))   # small tail so visuals don't cut early
+        # ends END_TAIL_S after the last word (edge-tts trailing silence dropped)
+        duration = _craft.video_duration(narr_secs, words)
         _status(handle, progress=25)
 
         # 3. Composition (typed storyboard, with a deterministic fallback) -> index.html (+ gsap)
@@ -381,6 +393,8 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,
                               words=words, brand=brand)
         cc["script_source"] = "provided" if provided else "generated"
+        if hook_join:
+            cc["hook_join"] = True
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
@@ -409,10 +423,20 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         cli = craft.cli_check_marker(beats, script, title=subject,
                                      topic_name=params.get("topic_name"),
                                      content_format=fmt)
+        # Card text rules (VM Gate B #1423): echo / unspoken quote / invented
+        # output / PT-BR terms / near-duplicates (CARD_TEXT_V1).
+        # RR sentence pace (soft, logged — never a gate check).
+        space = craft.sentence_pace_marker(script, words, brand or params.get("brand"), fmt)
+        if space and space["over"]:
+            logger.info("render: %d RR sentence(s) spoken over %.1fs (%s)", len(space["over"]),
+                        space["max_s"], ", ".join(f"{h['secs']:.2f}s" for h in space["over"]))
+        ctext = (craft.card_text_marker(beats, script, words,
+                                        brand=brand or params.get("brand"), content_format=fmt)
+                 if not used_fallback else None)
         gate = craft.video_maker_gate(beats, content_format=fmt,
                                       used_fallback=used_fallback, hook_pace=pace,
                                       beat_timing=craft.BEAT_TIMING_CURRENT,
-                                      card_sync=sync, cli_check=cli)
+                                      card_sync=sync, cli_check=cli, card_text=ctext)
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -429,6 +453,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             **({"hook_pace": pace} if pace else {}),
             **({"card_sync": sync} if sync else {}),
             **({"cli_check": cli} if cli else {}),
+            **({"card_text": ctext} if ctext else {}),
+            **({"sentence_pace": space} if space else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
             **({"frame0_split": True} if 'data-split="1"' in html else {}),
@@ -613,10 +639,20 @@ def _lock_patterned_opener(script: str, subject: str) -> str:
             for p in re.split(r"(?<=[.!?…])(?=\s|[A-Z])", rest)
             if p.strip()
         ]
-        rest = " ".join(
-            _drop_preamble_sentences(rest_parts, keep_all_if_empty=False)
-        ).strip()
+        rest_parts = _drop_preamble_sentences(rest_parts, keep_all_if_empty=False)
+        # P0 2026-10-03 (#1388/#1397): grok often re-states the claim right
+        # after the locked opener ("Chat set locale pt-BR. Prod answered in
+        # English." ×2). The echo pushed every card 2–4s late (hook-echo words
+        # can't carry a card) — drop leading sentences that repeat the opener.
+        head_keys = {_sentence_key(x) for x in re.split(r"(?<=[.!?…])\s+", opener)}
+        while rest_parts and _sentence_key(rest_parts[0]) in head_keys:
+            rest_parts = rest_parts[1:]
+        rest = " ".join(rest_parts).strip()
     return f"{opener} {rest}".strip() if rest else opener
+
+
+def _sentence_key(text: str) -> str:
+    return "".join(ch for ch in theme.fold(text or "") if ch.isalnum())
 
 
 def _generate_script(subject: str, params: dict, *, llm=None) -> str:
@@ -668,6 +704,19 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
     # Pin the script language to the channel's voice: without this the LLM follows
     # the title's language, so a stray English idea gets an English script narrated
     # by the Portuguese voice (shipped to ch2 on 2026-07-07).
+    from app.services import craft
+    rr_short = ((params.get("content_format") or "short") != "long"
+                and (params.get("brand") or "") in craft.HOOK_PACE_BRANDS)
+    if rr_short:
+        # RR sentence pace (soft): one card per sentence fits when a sentence
+        # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
+        prompt += (f" Keep EVERY spoken sentence short: at most about {craft.SENTENCE_MAX_WORDS} "
+                   f"words (~{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken) — split a long sentence "
+                   "into two instead of chaining clauses.")
+        prompt += (" Endcard as the LAST spoken lines, exactly: "
+                   "'Se inscreve. Próxima armadilha de IA.' "
+                   "On-screen chip: 'Se inscreve · IA'. Do NOT use the English "
+                   "Subscribe — next closer on this series.")
     from app.services.video_gen import language_from_voice
     lang = language_from_voice(params.get("voice_name"))
     if lang:
@@ -693,7 +742,24 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         if retry:
             text = retry
 
-    from app.services import craft
+    if rr_short:
+        long_ = craft.long_spoken_sentences(text)
+        if long_:
+            # one soft rewrite ask; kept only when it has fewer long sentences
+            logger.info("script: %d sentence(s) over ~%.1fs for %r — asking once for a rewrite",
+                        len(long_), craft.SENTENCE_SPOKEN_MAX_S, subject)
+            redo = ask(
+                prompt + "\n\nThese sentences run longer than ~" +
+                f"{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken (> {craft.SENTENCE_MAX_WORDS} words); "
+                "split each into shorter sentences, keep everything else:\n" +
+                "\n".join(f"- {h['text']}" for h in long_) +
+                "\nReturn ONLY the spoken voiceover.",
+                max_tokens=max_tokens,
+            ).strip()
+            redo = _strip_script_preamble(re.sub(r"^[\"'`]+|[\"'`]+$", "", redo).strip())
+            if redo and lo <= len(redo.split()) <= hi and len(
+                    craft.long_spoken_sentences(redo)) < len(long_):
+                text = redo
     text = craft.strip_banned(text) or text
     text = _lock_patterned_opener(text, subject)
     # Shorts: pin the series endcard VO after the claim. No TTS overhaul — one
