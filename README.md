@@ -58,7 +58,7 @@ Manager*, or a video with `cm_pr`) need the Video Maker's Gate B PASS on the fin
 `POST /api/videos/{id}/vm-pass` (header `X-Actor: channels` or `vm`, optional body
 `{"note": "..."}`) records it with actor + timestamp in `creation_config.vm_pass`, bound to
 that render's `video_path` (a re-render clears it). Approve then requires `X-Actor:
-channels` (403 otherwise) and that `vm_pass` (409 otherwise); requeue of a CM teaser
+channels` (403 otherwise — the Video Maker records `vm-pass` but never approves) and that `vm_pass` (409 otherwise); requeue of a CM teaser
 requires `X-Actor: channels` (403 otherwise).
 
 **Actor audit:** approve, requeue, reject and vm-pass record `actor=<name>` in the

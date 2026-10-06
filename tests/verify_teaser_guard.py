@@ -5,8 +5,9 @@ Run: PYTHONPATH=. .venv/bin/python tests/verify_teaser_guard.py
 #1385 (Shipping 8, a Channels Manager teaser) was published with a Video
 Maker Gate B FAIL after a non-Channels approve. Pins:
   * teaser detection (Shipping series / "Channels Manager" / cm_pr);
-  * approve of a CM teaser: 403 for a non-Channels actor, 409 without the
-    VM's vm_pass on THIS render, 200 for Channels with vm_pass;
+  * approve of a CM teaser: 403 for a non-Channels actor (including the
+    Video Maker — CoS 2026-10-06: the VM records vm_pass, never approves),
+    409 without the VM's vm_pass on THIS render, 200 for Channels with vm_pass;
   * vm_pass: Channels/VM only, review + current artifact only, recorded
     with actor + timestamp, cleared by a new render artifact;
   * requeue of a CM teaser by a non-Channels actor → 403 (blocked);
@@ -144,6 +145,22 @@ try:
 
         r = client.post("/api/videos/1/approve", auth=GROWTH)
         ok(r.status_code == 403, "even with vm_pass, the growth agent cannot approve a CM teaser")
+        # CoS 2026-10-06: approve is Channels-only — the VM records PASS, never approves.
+        for vm_actor in ("vm", "video-maker", "videomaker", "VM"):
+            r = client.post("/api/videos/1/approve", auth=GROWTH, headers={"X-Actor": vm_actor})
+            ok(r.status_code == 403 and "only Channels approves" in r.json()["detail"],
+               f"Video Maker ({vm_actor}) approving a CM teaser with vm_pass → 403 ({r.status_code})")
+        ok(runs("approve", 1) == [], "refused VM approves write no JobRun")
+        with Session(engine) as s:
+            ok(s.get(Video, 1).status == VideoStatus.REVIEW, "teaser still in review after VM approve attempts")
+        ok(review_guard.can_record_vm_pass("vm") and review_guard.can_record_vm_pass("channels")
+           and not review_guard.can_record_vm_pass("growth"), "vm_pass allowlist: Channels + VM, not growth")
+        ok(review_guard.is_channels_actor("channels") and not review_guard.is_channels_actor("vm")
+           and not review_guard.is_channels_actor("video-maker"), "approve allowlist: Channels only")
+        r = client.post("/api/videos/1/vm-pass", auth=GROWTH, headers={"X-Actor": "video-maker"},
+                        json={"note": "re-check"})
+        ok(r.status_code == 200 and r.json()["vm_pass"]["actor"] == "video-maker",
+           "VM (video-maker) can still record the PASS")
         r = client.post("/api/videos/1/approve", auth=GROWTH, headers=CH)
         ok(r.status_code == 200 and r.json()["status"] == VideoStatus.APPROVED,
            "Channels + vm_pass on this render → approved")

@@ -735,7 +735,7 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
     if not v:
         raise HTTPException(404, "video not found")
     actor = review_guard.actor_of(request)
-    if not review_guard.is_channels_actor(actor):
+    if not review_guard.can_record_vm_pass(actor):
         raise HTTPException(403, f"vm_pass is set by Channels/VM only (actor={actor!r}; "
                                  "send X-Actor: channels or vm)")
     if v.status != VideoStatus.REVIEW:
