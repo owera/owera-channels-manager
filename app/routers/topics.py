@@ -176,6 +176,16 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
                                          language=video_gen.channel_language(session, t.channel_id))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
+    hp = video_gen.idea_hook_kwargs(session, t.channel_id, t.content_format)
+    if hp and ideas:
+        # RR #47: drafts are born passing hook pace (one regeneration)
+        ideas = video_gen.enforce_hook_pace(
+            ideas, count, hook_voice=hp["hook_voice"],
+            regen=lambda extra: video_gen.generate_ideas(
+                t.name, (t.theme_prompt or "") + extra, list(existing) + list(ideas), count,
+                t.content_format, language=video_gen.channel_language(session, t.channel_id)))
+    ideas = video_gen.renumber_series(
+        ideas, video_gen.channel_series_subjects(session, t.channel_id))
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0
     for i, subj in enumerate(ideas):
         session.add(Video(channel_id=t.channel_id, topic_id=t.id, subject=subj,

@@ -730,5 +730,38 @@ run_tick(s, _Cfg(target=3, horizon=1), raise_on_first)
 ok(drafts_for(s, first.id) == 0, "raising topic produced nothing")
 ok(drafts_for(s, second.id) == 3, "later topic still refilled after the skip")
 
+print("case: P0 2026-10-03 — series numbers continue from the channel max (all statuses)")
+s = fresh_session()
+ch = make_channel(s, slug="owera-ship", daily_render_budget=5)
+t_ship = make_topic(s, ch, name="Shipping", content_format="short")
+add_video(s, ch, t_ship, "Thumbs land · Shipping 8", status=VideoStatus.PUBLISHED)
+add_video(s, ch, t_ship, "Old one · Shipping 3", status=VideoStatus.REJECTED, position=2)
+run_tick(s, _Cfg(target=3, horizon=1),
+         lambda *_a, **_k: ["New A · Shipping 3", "New B · Shipping 4"])
+subs = sorted(v.subject for v in s.exec(select(Video).where(
+    Video.topic_id == t_ship.id, Video.status == VideoStatus.DRAFT)).all())
+ok(subs == ["New A · Shipping 9", "New B · Shipping 10"],
+   f"LLM-picked Shipping 3/4 renumbered to 9/10 (max used 8, rejected 3 burnt): {subs}")
+
+print("case: P0 2026-10-03 — RR (ch2) ideas are born passing hook pace")
+s = fresh_session()
+ch_rr = make_channel(s, slug="rodrigo-recio", name="Rodrigo Recio", daily_render_budget=5)
+t_rr = make_topic(s, ch_rr, name="IA", content_format="short")
+_regen_calls = []
+
+
+def _rr_ideas(name, theme, existing, n, fmt, language=None):
+    if "HOOK PACE" in (theme or ""):
+        _regen_calls.append(theme)
+        return ["Swap mata o 14B · IA 3"]
+    return ["um dois três quatro cinco seis sete oito nove · IA 1", "Modelo em swap não pensa · IA 2"]
+
+
+run_tick(s, _Cfg(target=2, horizon=1), _rr_ideas)
+subs = sorted(v.subject for v in s.exec(select(Video).where(Video.topic_id == t_rr.id)).all())
+ok(subs == ["Modelo em swap não pensa · IA 1", "Swap mata o 14B · IA 2"],
+   f"9-word head dropped, one regeneration with feedback, numbering continues: {subs}")
+ok(len(_regen_calls) == 1 and "9 words" in _regen_calls[0], "regeneration carries the measured miss")
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

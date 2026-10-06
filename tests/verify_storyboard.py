@@ -1221,8 +1221,8 @@ rr_html = _compose(
     subject="Você lotou a VRAM. · IA 175",
     brand="rr",
 )
-ok("cta-chip" in rr_html and "Subscribe · IA" in rr_html,
-   "RR compose locks the IA series chip")
+ok("cta-chip" in rr_html and "Se inscreve · IA" in rr_html,
+   "RR compose locks the PT IA series chip (Se inscreve · IA)")
 ok("Copilot Credits" not in rr_html,
    "RR chip does not invent the OS series label")
 ok("Follow" not in rr_html and "amanhã" not in rr_html.lower()
@@ -1298,8 +1298,9 @@ def code_board_llm(*a, **k):
 
 
 dropped = _compose(code_board_llm, allowed_types=None)
-ok("beat code" not in dropped and "beat stmt" in dropped,
-   "default allowlist does not include code — the beat is salvaged as a statement")
+ok("beat code" not in dropped and "x = 1" not in dropped,
+   "default allowlist does not include code — never rendered; its verbless "
+   "statement salvage gets no card (text-card verb rule, #1385)")
 kept = _compose(code_board_llm, allowed_types=PHASE_A + ["code"])
 ok("beat code" in kept, "allowing code keeps the code beat (and its renderer)")
 
@@ -1431,15 +1432,17 @@ ok(not storyboard._diagram_is_nonsense({
 
 short_oars = [dict(oars)]
 storyboard._demote_nonsense_diagrams(short_oars, "short")
-ok(short_oars[0]["type"] == "statement" and short_oars[0].get("emoji") == "",
-   "shorts demote oar diagrams to a statement (no emoji soup)")
+ok(short_oars == [],
+   "shorts: an oar diagram with no narration sentence gets no card (never joined labels)")
 # shorts demote EVERY diagram, even a labeled one — 9:16 prefers code/command
 real = [{"type": "diagram", "cue": "the pipeline",
          "nodes": [{"id": "a", "label": "retriever"}, {"id": "b", "label": "rerank"}],
          "edges": [{"from": "a", "to": "b", "label": "top-k"}]}]
-storyboard._demote_nonsense_diagrams(real, "short")
-ok(real[0]["type"] == "statement",
-   "shorts demote even a labeled diagram (prefer code/command on 9:16)")
+storyboard._demote_nonsense_diagrams(
+    real, "short", "First we fetch. The pipeline reranks every hit before the model.")
+ok(real[0]["type"] == "quote"
+   and real[0]["text"] == "The pipeline reranks every hit before the model.",
+   "shorts demote a labeled diagram to its own narration sentence (prefer code/command on 9:16)")
 keep = [{"type": "diagram", "cue": "the pipeline",
          "nodes": [{"id": "a", "label": "retriever"}, {"id": "b", "label": "rerank"}],
          "edges": [{"from": "a", "to": "b", "label": "top-k"}]}]
@@ -1448,8 +1451,54 @@ ok(keep[0]["type"] == "diagram",
    "long-form keeps a labeled real topology")
 long_oars = [dict(oars)]
 storyboard._demote_nonsense_diagrams(long_oars, "long")
-ok(long_oars[0]["type"] == "statement",
-   "long-form still demotes generic oars")
+ok(long_oars == [],
+   "long-form still demotes generic oars (no sentence → no card)")
+
+print("Demoted diagram = a real sentence, never joined labels (#1385 card 4)")
+S1385 = ("Your thumbnail, not a template, in Channels Manager. Channels Manager is "
+         "Owera's builder for YouTube channels, and it's still in development. Drop "
+         "in your own PNG or JPEG, and it goes to YouTube as the thumbnail. Before, "
+         "every video got the auto template. Too small, or not an image, and it stops "
+         "before upload. Now your design wins. Still building. Coming soon. "
+         "Subscribe — next Shipping drop.")
+d1385 = [{"type": "hook", "cue": "Your thumbnail", "text": "Your thumbnail, not a template, in Channels Manager."},
+         {"type": "diagram", "cue": "it goes to YouTube",
+          "nodes": [{"id": "a", "label": "Your PNG"}, {"id": "b", "label": "Channels Manager"},
+                    {"id": "c", "label": "YouTube"}],
+          "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "c"}]}]
+storyboard._demote_nonsense_diagrams(d1385, "short", S1385)
+ok(d1385[1]["type"] == "quote" and d1385[1]["text"] == "It goes to YouTube as the thumbnail.",
+   f"#1385 card 4 becomes its narration clause, got {d1385[1].get('text')!r}")
+ok("Channels Manager YouTube" not in d1385[1]["text"], "labels are never concatenated")
+ok(craft.text_card_reason(d1385[1]["text"]) is None, "the demoted card passes the verb check")
+nolabel = [{"type": "diagram", "cue": "never spoken words",
+            "nodes": [{"id": "a", "label": "PNG"}, {"id": "b", "label": "YouTube"}]}]
+storyboard._demote_nonsense_diagrams(nolabel, "short", S1385)
+ok(nolabel == [], "no sentence carrying the cue → the beat gets no card")
+ok(storyboard._narration_sentence_for(
+    "Channels Manager", "Channels Manager YouTube PNG.", labels=["Channels Manager", "YouTube", "PNG"]) is None,
+   "a narration 'sentence' that is only labels is not used")
+vb = [{"type": "hook", "cue": "h", "text": "H"},
+      {"type": "statement", "cue": "it goes to YouTube", "text": "Your PNG Channels Manager YouTube"},
+      {"type": "quote", "cue": "Now your design wins", "text": "Now your design wins"},
+      {"type": "quote", "cue": "nowhere at all", "text": "PNG JPEG YouTube"}]
+storyboard._fix_verbless_cards(vb, S1385)
+ok([b["text"] for b in vb] == ["H", "It goes to YouTube as the thumbnail.", "Now your design wins"],
+   f"verbless text cards are re-sentenced or dropped, got {[b['text'] for b in vb]}")
+
+print("Text-card verb heuristic (craft.text_card_reason)")
+for bad in ["Your PNG Channels Manager YouTube", "PNG JPEG YouTube", "Contexto 32k",
+            "Mesmo modelo, mesma máquina, mesmo contexto.", "Pick line Pack box Shipped",
+            "GPU VRAM Ollama Q4"]:
+    ok(craft.text_card_reason(bad) is not None, f"rejects label/noun card {bad!r}")
+ok(craft.text_card_reason("PNG Channels Manager", labels=["PNG", "Channels Manager"]) is not None,
+   "rejects a card that is only node labels")
+for good in ["It goes to YouTube as the thumbnail", "Now your design wins",
+             "Você rodou o modelo", "O 14B travou em swap", "Stale memory picks tools",
+             "You paid for the bug and the apology.", "Coming soon", "Prompt never stored",
+             "Confiança não se compra no plano Pro", "Demo 4090 é laboratório",
+             "Voltou texto limpo, vai texto.", "Quem mede o tempo, constrói o produto"]:
+    ok(craft.text_card_reason(good) is None, f"accepts sentence card {good!r}")
 
 print("Gate C statement cap (v1262: 3 statements → 1 quote-converted)")
 stmt_board = [
@@ -1883,8 +1932,11 @@ ok(_eq[0].get("split", {}).get("head") == "Chat routed to Maya. Prod paged Lee."
 # --- RR hook pace (P1 d): first cut by 2.5s on RR, claim ≤8 / spoken by 3.0s ---
 print("RR hook pace: first cut by 2.5s (P1 d)")
 _rrb0 = craft.beats_from_html(_rr_html)
-ok(float(_rrb0[1]["start"]) <= 2.5 + 1e-6,
-   "compose RR (brand rr): first cut at %.2fs ≤ 2.5s" % float(_rrb0[1]["start"]))
+# P0 2026-10-03: an 11-word claim spoken until ~5.7s leaves no card whose own
+# words start by 3.6s, so a 2.5s cut would lead its speech by >1.1s. Card
+# sync is guaranteed; Gate B reports the real hook-pace defect (long claim).
+ok(craft.card_sync_hits(craft.card_sync_marker(_rrb0, _rr_words, "short", script=_rr_script)) == [],
+   "compose RR with an over-long claim: card sync still guaranteed")
 ok(_rrb0[0]["text"] == "O prompt processa no CPU por 8 segundos, não é engenharia."
    and 'style="opacity:1"' in re.search(r'<div class="beat hook" id="b0"[^>]*>', _rr_html).group(0),
    "compose RR: frame0 still carries the whole claim at full opacity (#45 kept)")
@@ -1896,9 +1948,22 @@ _pace = craft.hook_pace_marker(_rrb0, _rr_words, "rr")
 ok(_pace["version"] == craft.HOOK_PACE_V1 and _pace["claim_words"] == 11,
    "hook_pace marker on the RR board (11-word claim)")
 _g = craft.video_maker_gate(_rrb0, hook_pace=_pace)
-ok(_g["checks"]["B"] == "FAIL" and any("claim 11 words" in r for r in _g["reasons"])
-   and not any("first cut at" in r for r in _g["reasons"]),
-   "RR 11-word claim (#1376 title) → Gate B FAIL on the claim, not on the first cut (compose fixed it)")
+ok(_g["checks"]["B"] == "FAIL" and any("claim 11 words" in r for r in _g["reasons"]),
+   "RR 11-word claim (#1376 title) → Gate B FAIL on the claim (real defect)")
+_short_script = ("O prompt trava no CPU. Isso não é engenharia. O CPU autentica e monta "
+                 "contexto. Quem produz token é a GPU. Segurar a resposta custa caro. "
+                 "O usuário não sente profundidade, sente espera. Subscribe — next IA trap.")
+_short_words = _words_of(_short_script, step=0.3)
+_short_html = _compose(rr_llm, subject="O prompt trava no CPU. · IA 211",
+                       script=_short_script, words=_short_words,
+                       duration=round(_short_words[-1]["start"] + 1.0, 2), brand="rr",
+                       language="Brazilian Portuguese",
+                       allowed_types=PHASE_A + ["code", "command", "diagram"])
+_sb = craft.beats_from_html(_short_html)
+ok(float(_sb[1]["start"]) <= 2.5 + 1e-6
+   and craft.card_sync_hits(craft.card_sync_marker(_sb, _short_words, "short", script=_short_script)) == [],
+   "compose RR (brand rr) with an in-spec claim: first cut at %.2fs ≤ 2.5s AND card sync clean"
+   % float(_sb[1]["start"]))
 _os_b = craft.beats_from_html(_os_html38)
 ok(craft.hook_pace_marker(_os_b, _os_words, "os") is None,
    "OS (brand os) is out of hook-pace scope (no marker, no check)")
@@ -2525,5 +2590,164 @@ _st0, _r0 = storyboard._sync_solve_once(_se_b, [0.0, 2.2, 4.6], 7.0, 2.38)
 _st1, _r1 = storyboard._sync_solve_once(_se_b, [0.0, 2.2, 4.6], 7.0, 2.38, content_end=4.3)
 ok(_st0 == "ok" and _r0[2] < 4.3 and _st1 == "ok" and 4.3 - 1e-6 <= _r1[2] <= 4.6 + 1e-6,
    "_sync_solve_once: content_end keeps the endcard off the last content sentence (%.2f → %.2f)" % (_r0[2], _r1[2]))
+
+
+print("P0 2026-10-03: compose guarantees card sync on real-shaped RR boards")
+
+
+def _pt_words(script, step=0.36, pause=0.9):
+    # pt-BR-like timing: a ~0.9s pause after each full stop, long endcard VO
+    out, t = [], 0.0
+    for w in script.split():
+        dur = 1.3 if w.strip(".,—") == "IA" else step - 0.05
+        out.append({"text": w.strip(".,!?"), "start": round(t, 3), "dur": round(dur, 3)})
+        t += max(step, dur + 0.05)
+        if w.endswith((".", "!", "?")):
+            t += pause
+    return out
+
+
+_p0_script = ("Modelo em swap não pensa. O sistema empurra pesos pro disco quando a RAM acaba. "
+              "Cada token espera o SSD responder. Você rodou o modelo e tratou isso como lentidão. "
+              "Não é lentidão, é paginação. Mede a memória antes de culpar a GPU. "
+              "Quem mede a RAM escolhe o modelo certo. Subscribe — next IA trap.")
+_p0_words = _pt_words(_p0_script)
+_p0_last = _p0_words[-1]["start"] + _p0_words[-1]["dur"]
+_p0_dur = craft.video_duration(_p0_last + 0.94, _p0_words)
+
+
+def _p0_llm(*a, **k):
+    # LLM board shape of #1381: a quote and a command cued on the SAME words,
+    # evenly-spaced cards, endcard VO far longer than its cap allows
+    return json.dumps({"beats": [
+        {"type": "hook", "cue": "Modelo em swap", "text": "Modelo em swap não pensa."},
+        {"type": "stat", "cue": "O sistema empurra pesos", "value": "0", "unit": "GB", "label": "RAM livre"},
+        {"type": "command", "cue": "Cada token espera", "command": "vmstat 1"},
+        {"type": "quote", "cue": "Você rodou o modelo", "text": "Você rodou o modelo"},
+        {"type": "compare", "cue": "Você rodou o modelo", "title": "Lento vs paginando",
+         "left": {"title": "Lento", "items": ["GPU"]}, "right": {"title": "Swap", "items": ["disco"]}},
+        {"type": "term_define", "cue": "é paginação", "term": "Paginação", "definition": "RAM no disco"},
+        {"type": "stat", "cue": "Mede a memória", "value": "16", "unit": "GB", "label": "antes"},
+        {"type": "quote", "cue": "Quem mede a RAM", "text": "Quem mede a RAM escolhe o modelo certo."},
+        {"type": "cta", "cue": "Subscribe — next", "text": "Subscribe · IA", "sub": "same series"},
+    ]})
+
+
+_p0_html = _compose(_p0_llm, subject="Modelo em swap não pensa. · IA 230", script=_p0_script,
+                    words=_p0_words, duration=_p0_dur, brand="rr", language="Brazilian Portuguese",
+                    allowed_types=PHASE_A + ["code", "command", "diagram"])
+_p0b = craft.beats_from_html(_p0_html)
+_p0sync = craft.card_sync_marker(_p0b, _p0_words, "short", script=_p0_script)
+ok(craft.card_sync_hits(_p0sync) == [],
+   f"#1381 shape: no card late/early (got {craft.card_sync_hits(_p0sync)})")
+ok(float(_p0b[1]["start"]) <= 2.5 + 1e-6, "first cut by 2.5s")
+_p0g = craft.video_maker_gate(_p0b, hook_pace=craft.hook_pace_marker(_p0b, _p0_words, "rr"),
+                              beat_timing=craft.BEAT_TIMING_CURRENT, card_sync=_p0sync)
+ok(_p0g["result"] == "PASS", f"composed board passes the live gate: {_p0g['reasons']}")
+ok(sum(1 for b in _p0b if craft.screen_text_key(b) and "voce rodou o modelo" in craft.screen_text_key(b)) <= 1,
+   "two cards on one speech anchor → one kept (the DP drops the duplicate)")
+ok(_p0b[-1]["type"] == "cta" and storyboard.validate_storyboard(_p0b, _p0_dur),
+   "endcard kept; board valid within the trimmed duration")
+
+
+print("VM Gate B content #1423: card text generator rules")
+_g_script = ("Ignorar o gráfico não é engenharia. Quando você extrai o texto, o gráfico não vem. "
+             "Vem a legenda e uns números soltos do eixo. A curva, a barra que caiu no trimestre, "
+             "fica pra trás. E o modelo resume o relatório só pela legenda. Eu separo as páginas. "
+             "Página com gráfico vai como imagem pro modelo de visão. O resto vai texto. E eu "
+             "pergunto um valor que só existe no gráfico, pra ver se ele leu mesmo. "
+             "Subscribe — next IA trap.")
+_g_raw = [
+    {"type": "hook", "cue": "Ignorar o gráfico", "text": "Ignorar o gráfico não é engenharia."},
+    {"type": "command", "cue": "Quando você extrai o texto", "prompt": "$",
+     "command": "pdftotext relatorio.pdf -", "output": ["Q3: receita", "10 20 30 40", "[gráfico ausente]"]},
+    {"type": "term_define", "cue": "Vem a legenda", "term": "Números soltos",
+     "definition": "valores do eixo sem a forma da curva"},
+    {"type": "quote", "cue": "uns números soltos do eixo",
+     "text": "Vem a legenda e uns números soltos do eixo.", "attribution": ""},
+    {"type": "compare", "cue": "A curva, a barra", "title": "Fica pra trás",
+     "left": {"title": "Extração", "items": ["perde a curva", "perde a barra"]},
+     "right": {"title": "Página", "items": ["curva intacta", "barra do trimestre"]}},
+    {"type": "compare", "cue": "o modelo resume o relatório", "title": "Resumo do modelo",
+     "left": {"title": "Ele lê", "items": ["só a legenda"]},
+     "right": {"title": "Ele ignora", "items": ["a queda do trimestre"]}},
+    {"type": "term_define", "cue": "Eu separo as páginas", "term": "Split de página",
+     "definition": "gráfico vira imagem, resto vira texto"},
+    {"type": "compare", "cue": "Página com gráfico vai", "title": "Duas rotas",
+     "left": {"title": "Com gráfico", "items": ["página em imagem", "modelo de visão"]},
+     "right": {"title": "Sem gráfico", "items": ["página em texto"]}},
+    {"type": "term_define", "cue": "O resto vai texto", "term": "Rota texto",
+     "definition": "página sem gráfico segue como texto"},
+    {"type": "term_define", "cue": "um valor que só existe", "term": "Valor-sentinela",
+     "definition": "número que só existe dentro do gráfico"},
+    {"type": "quote", "cue": "pra ver se ele leu", "text": "Se erra o valor, não leu", "attribution": ""},
+    {"type": "cta", "cue": "Subscribe — next", "text": "Subscribe · IA", "sub": "same series"},
+]
+_g_allowed = PHASE_A + ["code", "command", "diagram"]
+_g_words = storyboard.annotate_sentences(_pt_words(_g_script), _g_script)
+_g = storyboard.parse_storyboard(json.dumps({"beats": _g_raw}), _g_allowed)
+storyboard._enforce_card_text_rules(_g, _g_script, _g_words, "rr")
+_g_txt = " | ".join(craft.beat_screen_text(b) for b in _g)
+ok(_g[1]["type"] == "command" and _g[1]["command"] == "pdftotext relatorio.pdf -" and _g[1]["output"] == [],
+   "rule 3: the real pdftotext command stays; invented output ('Q3: receita', '[gráfico ausente]') goes")
+ok("[gráfico ausente]" not in _g_txt and "Q3" not in _g_txt, "no placeholder output, no 'Q3' on screen")
+ok(not any(t in _g_txt for t in ("Split", "sentinela", "Rota texto")),
+   f"rule 4: coined/English headlines replaced by the narration's words ({_g_txt[:200]})")
+ok(any(b["type"] == "quote" and b["text"] == "Eu separo as páginas." for b in _g),
+   "'Split de página' card → its spoken sentence 'Eu separo as páginas.'")
+ok(any(b["type"] == "quote" and b["text"].startswith("Eu pergunto um valor") for b in _g),
+   "'Valor-sentinela' card → its spoken clause 'Eu pergunto um valor que só existe no gráfico'")
+ok("Se erra o valor" not in _g_txt and any(b.get("text") == "Pra ver se ele leu mesmo." for b in _g),
+   "rule 2: the never-spoken quote becomes the spoken clause at its cue ('pra ver se ele leu mesmo')")
+ok(not any(b["type"] == "quote" and b["text"].startswith("Vem a legenda") for b in _g)
+   and any(b["type"] == "term_define" and b["term"] == "Números soltos" for b in _g),
+   "rule 1: the echo quote #3 goes, the richer #2 stays (one card for 'Vem a legenda…')")
+ok(not any(b.get("term") == "Rota texto" for b in _g) and not any(
+    craft.cards_near_duplicate(a, b) for a, b in zip(_g[1:-1], _g[2:-1])),
+   "rule 5: no back-to-back near-duplicates left")
+ok(craft.card_text_hits(_g, _g_script, rr=True) == [], "generator output has no card-text hit")
+# end to end: compose (synthetic pt-BR timing, ~0.9s pauses) → live gate incl. card_text
+_g_words_raw = _pt_words(_g_script)
+_g_dur = craft.video_duration(_g_words_raw[-1]["start"] + _g_words_raw[-1]["dur"] + 0.94, _g_words_raw)
+_g_html = _compose(lambda *a, **k: json.dumps({"beats": _g_raw}), subject="Ignorar o gráfico não é engenharia. · IA 227",
+                   script=_g_script, words=_g_words_raw, duration=_g_dur, brand="rr",
+                   language="Brazilian Portuguese", allowed_types=_g_allowed)
+_gb = craft.beats_from_html(_g_html)
+_g_ct = craft.card_text_marker(_gb, _g_script, _g_words_raw, brand="rr")
+_g_sync = craft.card_sync_marker(_gb, _g_words_raw, "short", script=_g_script)
+_g_gate = craft.video_maker_gate(_gb, hook_pace=craft.hook_pace_marker(_gb, _g_words_raw, "rr"),
+                                 beat_timing=craft.BEAT_TIMING_CURRENT, card_sync=_g_sync, card_text=_g_ct)
+ok(_g_ct["hits"] == [], f"#1423 composed: no card-text hit ({_g_ct['hits']})")
+ok(_g_gate["result"] == "PASS", f"#1423 composed passes the live gate incl. card text: {_g_gate['reasons']}")
+ok(sum(1 for b in _gb if b["type"] in ("compare", "term_define", "command")) >= 3,
+   "the rich cards survive (command / term_define / compares)")
+# echo across the DP: a continuation is only the sentence's later words
+_g_anch = craft.card_anchors(_gb, _g_script)
+for _k in range(2, len(_gb) - 1):
+    if _g_anch[_k][0] is not None and _g_anch[_k][0] == _g_anch[_k - 1][0]:
+        ok(_g_anch[_k][1] >= _g_anch[_k - 1][1] + max(1, _g_anch[_k - 1][2])
+           and craft.text_in_script(_gb[_k].get("text") or _gb[_k].get("cue"), _g_script)
+           or _gb[_k]["type"] not in ("quote", "statement"),
+           f"card {_k} on the same sentence as card {_k - 1} is a verbatim continuation")
+# other channels: rules 1/2/5 only (no output/PT-term rewrite)
+_g_os = storyboard.parse_storyboard(json.dumps({"beats": _g_raw}), _g_allowed)
+storyboard._enforce_card_text_rules(_g_os, _g_script, _g_words, "os")
+ok(_g_os[1]["type"] == "command" and len(_g_os[1]["output"]) == 3,
+   "OS: terminal output is not rewritten (rule 3 is RR-only, teasers keep the #53 rule)")
+ok("Se erra o valor" not in " ".join(craft.beat_screen_text(b) for b in _g_os),
+   "OS: the never-spoken quote still goes (rule 2 applies to every channel)")
+# quantization 'Q4' is not a quarter (#1377)
+_q4 = [{"type": "hook", "cue": "Gemma 12B cabe", "text": "Gemma 12B cabe em 8 gigas."},
+       {"type": "stat", "cue": "Gemma 12B em Q4", "value": "4", "unit": "bits", "label": "Q4 comprime o peso"},
+       {"type": "cta", "cue": "Subscribe — next", "text": "Subscribe · Local"}]
+storyboard._enforce_card_text_rules(_q4, "Gemma 12B cabe em 8 gigas. Gemma 12B em Q4 pesa sete gigas. "
+                                    "Subscribe — next Local receipt.", None, "rr")
+ok(_q4[1]["label"] == "Q4 comprime o peso", "#1377: 'Q4' quantization label is kept (not → T4)")
+# prompt
+_sp_rr = storyboard._system_prompt(_g_allowed, rr=True, pt=True)
+_sp_os = storyboard._system_prompt(_g_allowed)
+ok("8. CARD TEXT" in _sp_rr and "8. CARD TEXT" in _sp_os, "every prompt: one card per sentence / verbatim quotes")
+ok("9. TERMINAL OUTPUT" in _sp_rr and "T1–T4" in _sp_rr and "9. TERMINAL OUTPUT" not in _sp_os
+   and "T1–T4" not in _sp_os, "RR prompt: no invented output; PT-BR cards (T3 not Q3)")
 
 print(f"\nALL {_checks} CHECKS PASSED")

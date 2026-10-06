@@ -56,6 +56,9 @@ NEXT_CLAIM_NOUNS = ("trap", "receipt", "bill", "drop")
 # OS = Agent memory (Credits wedge killed 2026-09-22); RR = IA.
 # Unknown brand keeps the English public fallback. Patterned titles still win.
 DEFAULT_SERIES = {"os": "Agent memory", "rr": "IA"}
+# CMO option b (2026-10-05): RR IA series uses the PT closer / chip.
+# Other series (Agent memory, Shipping, Local, Copilot Credits) stay EN.
+PT_ENDCARD_SERIES = frozenset({"IA"})
 DEFAULT_SERIES_FALLBACK = "Copilot Credits"
 DEFAULT_NOUN = "trap"
 
@@ -69,15 +72,23 @@ ENDCARD_MAX_S = round(ENDCARD_CARD_MAX_S - 0.12, 2)  # 3.78 — the 0.12 is BEAT
 #   Subscribe — next {series} {noun}.
 # ALLOWED only as the last spoken line / last visual slot. Mid-short (miolo)
 # Subscribe CTAs are stripped — this is not a global invert of Follow/waitlist.
+# EN: Subscribe — next {series} {noun}.
+# PT (RR IA, CMO option b 2026-10-05): Se inscreve. Próxima armadilha de {series}.
+# The PT closer is TWO sentences; endcard_vo_tail_n / strip_mid_subscribe
+# treat them as one trailing unit so a mid "Se inscreve" still strips.
 _ENDCARD_VO_RE = re.compile(
-    r"subscribe\s*[—–-]\s*next\s+.+\s+(?:trap|receipt|bill|drop)\.?\s*$",
+    r"(?:subscribe\s*[—–-]\s*next\s+.+\s+(?:trap|receipt|bill|drop)"
+    r"|se\s+inscreve\.?\s+pr[oó]xima\s+armadilha\s+de\s+.+)\.?\s*$",
     re.IGNORECASE,
 )
+_ENDCARD_VO_PT_HEAD_RE = re.compile(r"^se\s+inscreve\.?$", re.IGNORECASE)
+_ENDCARD_VO_PT_TAIL_RE = re.compile(r"^pr[oó]xima\s+armadilha\s+de\s+.+\.?$", re.IGNORECASE)
 
 # Mute on-screen chip. YPP#5 visual exception — not a Follow button.
-#   Subscribe · {series}
+#   EN: Subscribe · {series}
+#   PT (RR IA): Se inscreve · {series}
 _ENDCARD_CHIP_RE = re.compile(
-    r"^subscribe\s*·\s+\S.*$",
+    r"^(?:subscribe|se\s+inscreve)\s*·\s+\S.*$",
     re.IGNORECASE,
 )
 
@@ -812,12 +823,39 @@ def contains_banned(text: str | None) -> bool:
 
 
 def is_endcard_vo(text: str | None) -> bool:
-    """True when text is the series endcard spoken closer (trailing match)."""
+    """True when text is the series endcard spoken closer (EN one-liner or
+    the full PT two-sentence closer)."""
     return bool(_ENDCARD_VO_RE.search((text or "").strip()))
 
 
+def is_endcard_vo_sentence(text: str | None) -> bool:
+    """True when a single sentence is (part of) the series endcard VO —
+    the EN closer, the PT head 'Se inscreve.', or the PT tail
+    'Próxima armadilha de …'."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if is_endcard_vo(t):
+        return True
+    return bool(_ENDCARD_VO_PT_HEAD_RE.fullmatch(t) or _ENDCARD_VO_PT_TAIL_RE.fullmatch(t))
+
+
+def endcard_vo_tail_n(parts) -> int:
+    """How many trailing script sentences are the series endcard VO (0/1/2).
+    EN = 1; PT = 2 ('Se inscreve.' + 'Próxima armadilha de …')."""
+    ps = [p.strip() for p in (parts or []) if str(p or "").strip()]
+    if not ps:
+        return 0
+    if is_endcard_vo(ps[-1]):
+        return 1
+    if (len(ps) >= 2 and _ENDCARD_VO_PT_HEAD_RE.fullmatch(ps[-2])
+            and _ENDCARD_VO_PT_TAIL_RE.fullmatch(ps[-1])):
+        return 2
+    return 0
+
+
 def is_endcard_chip(text: str | None) -> bool:
-    """True when text is the series endcard chip (`Subscribe · {series}`)."""
+    """True when text is the series endcard chip (EN or PT)."""
     return bool(_ENDCARD_CHIP_RE.fullmatch((text or "").strip()))
 
 
@@ -840,17 +878,18 @@ def strip_subscribe_cta(text: str | None) -> str:
 
 
 def strip_mid_subscribe(script: str | None) -> str:
-    """Ban Subscribe in the miolo. Keep only a trailing endcard VO, if present."""
+    """Ban Subscribe/Inscreve in the miolo. Keep only a trailing endcard VO
+    (EN one-liner or the PT two-sentence closer), if present."""
     raw = (script or "").strip()
     if not raw:
         return ""
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
     if not parts:
         return ""
+    keep_from = len(parts) - endcard_vo_tail_n(parts)
     out: list[str] = []
-    last = len(parts) - 1
     for i, p in enumerate(parts):
-        if i == last and is_endcard_vo(p):
+        if i >= keep_from:
             out.append(p)
             continue
         if contains_subscribe_cta(p):
@@ -860,13 +899,14 @@ def strip_mid_subscribe(script: str | None) -> str:
 
 
 def mid_body_has_subscribe(script: str | None) -> bool:
-    """True if Subscribe appears before a trailing endcard VO (or anywhere if none)."""
+    """True if Subscribe/Inscreve appears before a trailing endcard VO (or anywhere if none)."""
     raw = (script or "").strip()
     if not raw or not contains_subscribe_cta(raw):
         return False
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
-    if parts and is_endcard_vo(parts[-1]):
-        return any(contains_subscribe_cta(p) for p in parts[:-1])
+    n = endcard_vo_tail_n(parts)
+    if n:
+        return any(contains_subscribe_cta(p) for p in parts[:-n])
     return True
 
 
@@ -1293,41 +1333,64 @@ def _ident_parts(ident: str) -> list[str]:
 # returns it as ONE WordBoundary token. URLs/handles (owera.com, @owera) are
 # left untouched. Portuguese voices read "Owera" phonetically, so the lexicon
 # is English-only (voice None → applied; "pt-*" → skipped).
-TTS_LEXICON = {"owera": "Oh-weh-ruh"}
+# EN (#53): Owera → Oh-weh-ruh (English voices only; pt reads Owera fine).
+# PT (CMO option b 2026-10-05): IA → I-A so pt-BR TTS does not expand to
+# "Inteligência Artificial" / "trepe". Cards and titles keep the letters "IA".
+# Match is case-sensitive on "IA" so the Portuguese verb "ia" is untouched.
+TTS_LEXICON = {"owera": "Oh-weh-ruh"}  # EN alias kept for older imports/tests
+TTS_LEXICON_EN = TTS_LEXICON
+TTS_LEXICON_PT = {"IA": "I-A"}
 _TTS_LEX_RE = re.compile(
-    r"(?<![\w./@\-])(" + "|".join(TTS_LEXICON) + r")(?=(?:['\u2019]s)?(?![\w/@\-]|\.\w))",
+    r"(?<![\w./@\-])(" + "|".join(TTS_LEXICON_EN) + r")(?=(?:['\u2019]s)?(?![\w/@\-]|\.\w))",
     re.IGNORECASE)
+_TTS_LEX_PT_RE = re.compile(r"(?<![\w./@\-])(IA)(?![\w/@\-])")
 
 
 def _lexicon_applies(voice: str | None) -> bool:
+    """True for English voices (Owera respelling). Kept for older callers."""
     return not (voice or "").lower().startswith("pt")
+
+
+def _lexicon_for(voice: str | None) -> dict:
+    """Active lexicon for this voice: EN Owera, or PT IA acronym."""
+    if (voice or "").lower().startswith("pt"):
+        return TTS_LEXICON_PT
+    return TTS_LEXICON_EN
 
 
 def tts_spoken_text(text: str | None, voice: str | None = None) -> str:
     """Text for edge-tts: identifiers with underscores are spoken as words
-    (n_batch → "n batch", num_gpu → "num gpu", NUM_PARALLEL → "num parallel"),
-    and brand words are respelled for English voices (Owera → "Oh-weh-ruh")."""
+    (n_batch → "n batch"), EN brand Owera → "Oh-weh-ruh", PT acronym IA →
+    "I-A" (cards stay written "IA")."""
     def _say(m):
         ident = m.group(1)
         spoken = " ".join(_ident_parts(ident))
         return spoken.lower() if ident.isupper() else spoken
     out = _TTS_IDENT_RE.sub(_say, text or "")
-    if _lexicon_applies(voice):
-        out = _TTS_LEX_RE.sub(lambda m: TTS_LEXICON[m.group(1).lower()], out)
+    lex = _lexicon_for(voice)
+    if lex is TTS_LEXICON_PT:
+        out = _TTS_LEX_PT_RE.sub(lambda m: lex[m.group(1)], out)
+    elif lex:
+        out = _TTS_LEX_RE.sub(lambda m: lex[m.group(1).lower()], out)
     return out
 
 
-def _remerge_lexicon(out: list[dict], text: str | None) -> list[dict]:
-    """Map respelled brand words back to the displayed word. edge-tts may
-    return the respelling as one token ("Oh-weh-ruh's") or several ("Oh",
-    "weh", "ruh's"); consecutive tokens whose letters add up to the respelling
-    (+ optional possessive) collapse into one word with the display text."""
+def _remerge_lexicon(out: list[dict], text: str | None,
+                    lex: dict | None = None, case_sensitive: bool = False) -> list[dict]:
+    """Map respelled brand/acronym words back to the displayed word. edge-tts
+    may return the respelling as one token ("Oh-weh-ruh's" / "I-A") or
+    several ("Oh", "weh", "ruh's" / "I", "A"); consecutive tokens whose
+    letters add up to the respelling (+ optional possessive) collapse into
+    one word with the display text."""
+    lex = TTS_LEXICON_EN if lex is None else lex
+    rx = _TTS_LEX_PT_RE if case_sensitive else _TTS_LEX_RE
     k = 0
-    for m in _TTS_LEX_RE.finditer(text or ""):
+    for m in rx.finditer(text or ""):
         disp = m.group(1)
+        spoken = lex[disp] if case_sensitive else lex[disp.lower()]
         tail = (text or "")[m.end():m.end() + 2]
         poss = tail if tail[:1] in ("'", "\u2019") and tail[1:2].lower() == "s" else ""
-        target = _alnum_fold(TTS_LEXICON[disp.lower()] + poss)
+        target = _alnum_fold(spoken + poss)
         for j in range(k, len(out)):
             acc, n = "", 0
             while j + n < len(out) and len(acc) < len(target):
@@ -1371,8 +1434,11 @@ def remerge_tts_words(words, text: str | None, voice: str | None = None) -> list
                                  "dur": round(max(0.0, end - start), 4)}]
                 k = j + 1
                 break
-    if _lexicon_applies(voice):
-        out = _remerge_lexicon(out, text)
+    lex = _lexicon_for(voice)
+    if lex is TTS_LEXICON_PT:
+        out = _remerge_lexicon(out, text, lex=lex, case_sensitive=True)
+    elif lex:
+        out = _remerge_lexicon(out, text, lex=lex)
     return out
 
 
@@ -1390,6 +1456,105 @@ def _word_end(w) -> float | None:
         return round(float(w.get("start") or 0.0) + float(w.get("dur") or 0.0), 3)
     except (TypeError, ValueError, AttributeError):
         return None
+
+
+def claim_match(claim: str | None, words) -> str | None:
+    """How ``claim_spoken_end`` measured the claim: "exact" (claim letters
+    matched the TTS word boundaries), "fallback" (tokens differ: the n-th
+    spoken word was used — a measurement estimate, not a craft fact) or None
+    (no word timings: unmeasurable)."""
+    target = _alnum_fold(claim)
+    words = [w for w in (words or []) if isinstance(w, dict)]
+    if not target or not words:
+        return None
+    acc = ""
+    for w in words:
+        acc += _alnum_fold(w.get("text") or w.get("word") or "")
+        if not target.startswith(acc[: len(target)]):
+            return "fallback"
+        if len(acc) >= len(target):
+            return "exact"
+    return "fallback"
+
+
+def next_speech_start(claim: str | None, words) -> float | None:
+    """Start (s) of the first TTS word after the spoken ``claim`` (None when
+    the claim is not matched exactly or nothing follows it)."""
+    target = _alnum_fold(claim)
+    words = [w for w in (words or []) if isinstance(w, dict)]
+    if not target or not words:
+        return None
+    acc = ""
+    for k, w in enumerate(words):
+        acc += _alnum_fold(w.get("text") or w.get("word") or "")
+        if not target.startswith(acc[: len(target)]):
+            return None
+        if len(acc) >= len(target):
+            if k + 1 >= len(words):
+                return None
+            try:
+                return round(float(words[k + 1].get("start") or 0.0), 3)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+# Video length (P0 2026-10-03): duration was narration + 0.6s, but edge-tts
+# mp3s end with ~0.9s of silence after the last word, so the endcard had to
+# hold over ~1.5s of dead air and the card before it could not reach it
+# (cards hold ≤2.8s) — the sync composer had no feasible tail on most real
+# boards. The video now ends END_TAIL_S after the last spoken word (never
+# longer than before; _mux cuts the audio to the video, so only trailing
+# silence is dropped).
+END_TAIL_S = 0.5
+VIDEO_MIN_S = 4.0
+
+
+def video_duration(narr_secs: float, words=None) -> float:
+    """Composition/video length for a narration of ``narr_secs`` seconds."""
+    dur = float(narr_secs) + 0.6
+    ends = [e for e in (_word_end(w) for w in (words or []) if isinstance(w, dict))
+            if isinstance(e, (int, float))]
+    if ends:
+        dur = min(dur, max(ends) + END_TAIL_S)
+    return max(VIDEO_MIN_S, round(dur, 2))
+
+
+# RR hook join (P0 2026-10-03, CoS decision): the pt-BR voice pauses ~0.94s
+# after a full stop, so with a claim ending at ~2.7s the next sentence starts
+# at ~3.65s — the first card (≤1.1s lead) cannot cut by 2.5s. When that
+# happens, the claim's terminal "."/"!" is spoken as ";" (TTS input only —
+# script, cards and title keep the period), which shortens the pause to
+# ~0.28s. Recorded as creation_config["hook_join"]; HOOK_JOIN_ENABLED is the
+# kill switch.
+HOOK_JOIN_ENABLED = True
+HOOK_JOIN_NEXT_BY_S = 3.6   # HOOK_FIRST_CUT_BY_S + SYNC_LEAD_MAX_S
+_FIRST_SENT_RE = re.compile(r"^(\s*.+?)([.!])(\s+)(?=\S)", re.S)
+
+
+def first_sentence(script: str | None) -> str:
+    m = re.match(r"^\s*(.+?[.!?…])(?=\s|$)", script or "", re.S)
+    return (m.group(1) if m else (script or "")).strip()
+
+
+def hook_join_text(script: str | None) -> str | None:
+    """TTS input with the first sentence's terminal "."/"!" spoken as ";"
+    (None when the first sentence doesn't end in one or nothing follows)."""
+    m = _FIRST_SENT_RE.match(script or "")
+    if not m or "?" in m.group(1) or "…" in m.group(1):
+        return None
+    return m.group(1) + ";" + m.group(3) + (script or "")[m.end():]
+
+
+def needs_hook_join(script: str | None, words, brand: str | None,
+                    content_format: str | None = "short") -> bool:
+    """True when an RR short's next sentence starts too late for the first cut."""
+    if not HOOK_JOIN_ENABLED or (content_format or "short") == "long":
+        return False
+    if (brand or "") not in HOOK_PACE_BRANDS or hook_join_text(script) is None:
+        return False
+    nxt = next_speech_start(first_sentence(script), words)
+    return nxt is not None and nxt > HOOK_JOIN_NEXT_BY_S + 1e-6
 
 
 def claim_spoken_end(claim: str | None, words) -> float | None:
@@ -1422,7 +1587,9 @@ def hook_pace_marker(beats, words, brand: str | None,
         return None
     claim = board[0].get("text") or ""
     return {"version": HOOK_PACE_V1, "claim_words": claim_word_count(claim),
-            "claim_spoken_end": claim_spoken_end(claim, words)}
+            "claim_spoken_end": claim_spoken_end(claim, words),
+            # measurement provenance (CoS 2026-10-03): exact | fallback | None
+            "claim_match": claim_match(claim, words)}
 
 
 def hook_pace_hits(board, hook_pace: dict | None) -> list[str]:
@@ -1470,11 +1637,7 @@ def _find_run(stream: list[str], needle: list[str], start: int) -> int:
     return -1
 
 
-def card_speech_starts(beats, words) -> list[float | None]:
-    """Start (s) of each card's own speech: the first spoken word of its text
-    (quote/statement) or cue, matched in order in the TTS words. The hook is
-    the claim (0.0). None = not found in the narration (unverifiable)."""
-    board = [b for b in (beats or []) if isinstance(b, dict)]
+def _speech_stream(words) -> tuple[list[str], list[float]]:
     toks, starts = [], []
     for w in words or []:
         if not isinstance(w, dict):
@@ -1486,33 +1649,56 @@ def card_speech_starts(beats, words) -> list[float | None]:
         for t in _sync_toks(w.get("text") or w.get("word")):
             toks.append(t)
             starts.append(t0)
-    out: list[float | None] = []
-    cursor = 0
+    return toks, starts
+
+
+def _card_speech_matches(board, words) -> list[tuple[float | None, list[float]]]:
+    """Per card: (primary speech start, every occurrence of its words at or
+    after the previous card's anchor). The primary match is the historical
+    sync_v1 one (first occurrence after the cursor); the alternatives let the
+    notes tell a repeated phrase apart from a mistimed card."""
+    toks, starts = _speech_stream(words)
+    out: list[tuple[float | None, list[float]]] = []
+    cursor, floor = 0, 0
     for i, b in enumerate(board):
         typ = b.get("type") or ""
         if i == 0 and typ == "hook":
             ht = _sync_toks(b.get("text") or b.get("cue"))
             if ht and toks[:len(ht)] == ht:
                 cursor = len(ht)
-            out.append(0.0)
+            out.append((0.0, [0.0]))
             continue
         cands = []
         if typ in ("quote", "statement"):
             cands.append(_sync_toks(b.get("text")))
         cands.append(_sync_toks(b.get("cue")))
-        pos = -1
+        pos, alts = -1, []
+        for c in cands:
+            p = _find_run(toks, c, floor)
+            while p >= 0:
+                alts.append(starts[p])
+                p = _find_run(toks, c, p + 1)
         for c in cands:
             pos = _find_run(toks, c, cursor)
             if pos >= 0:
                 break
         if pos < 0:
-            out.append(None)
+            out.append((None, sorted(set(alts))))
             continue
-        out.append(round(starts[pos], 3))
+        out.append((starts[pos], sorted(set(alts))))
         # the next card may not claim speech that began before this one's
         # (a card continuing the same sentence is "late", never unmatched)
-        cursor = pos
+        cursor = floor = pos
     return out
+
+
+def card_speech_starts(beats, words) -> list[float | None]:
+    """Start (s) of each card's own speech: the first spoken word of its text
+    (quote/statement) or cue, matched in order in the TTS words. The hook is
+    the claim (0.0). None = not found in the narration (unverifiable)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    return [None if v is None else round(v, 3)
+            for v, _ in _card_speech_matches(board, words)]
 
 
 def _hold(b) -> float:
@@ -1523,13 +1709,18 @@ def _hold(b) -> float:
 
 
 def endcard_vo_content_end(words, script: str | None) -> float | None:
-    """End (s) of the last spoken word BEFORE the series endcard VO (the last
-    Subscribe sentence of ``script``). None when there is no endcard VO or
-    the words don't carry it."""
+    """End (s) of the last spoken word BEFORE the series endcard VO. The PT
+    closer is two sentences — content ends before 'Se inscreve.', not before
+    'Próxima armadilha…'. None when there is no endcard VO or the words
+    don't carry it."""
     sents = [x.strip() for x in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if x.strip()]
-    cta = next((x for x in reversed(sents)
-                if is_endcard_vo(x) or contains_subscribe_cta(x)), None)
-    need = _sync_toks(cta)
+    n = endcard_vo_tail_n(sents)
+    if n:
+        head = sents[-n]
+    else:
+        head = next((x for x in reversed(sents)
+                     if is_endcard_vo(x) or contains_subscribe_cta(x)), None)
+    need = _sync_toks(head)
     if not need:
         return None
     toks, owner = [], []
@@ -1551,32 +1742,55 @@ def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
     while that content sentence is still being spoken (#1385: "Coming soon"
     22.84–23.50 under an endcard at 23.20)."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
-    v = card_speech_starts(board, words)
+    matches = _card_speech_matches(board, words)
     c_end = endcard_vo_content_end(words, script) if script else None
+    no_words = not any(isinstance(w, dict) for w in (words or []))
     notes = []
     for i, b in enumerate(board):
         if i == 0 and (b.get("type") or "") == "hook":
             continue
         st = _cue_start(b)
+        sp, alts = matches[i]
         note = {"i": i, "type": b.get("type") or "?", "start": round(st, 3),
-                "speech_start": v[i]}
+                "speech_start": None if sp is None else round(sp, 3)}
         last_cta = i == len(board) - 1 and (b.get("type") or "") in CTA_TYPES
-        if v[i] is None:
-            note.update(lead=None, status="unmatched")
+        if sp is None:
+            # measurement (CoS 2026-10-03): the card's words aren't in the
+            # TTS boundaries (or there are none) — unverifiable, not a defect
+            note.update(lead=None, status="unmatched", kind="measurement",
+                        why="no_word_boundaries" if no_words else "words_not_in_tts")
         else:
-            lead = round(float(v[i]) - st, 3)
-            status = ("late" if lead < -SYNC_TOL_S else
-                      "early" if lead > SYNC_LEAD_MAX_S + SYNC_TOL_S else "ok")
+            # lead from unrounded times (no rounding flips at the 0.05 edge)
+            lead = float(sp) - st
+            status = _sync_status(lead)
             if status == "late" and last_cta and _hold(b) >= CTA_BEAT_MAX_S - SYNC_TOL_S:
                 # the endcard already starts as early as its cap allows
                 status = "late_capped"
-            note.update(lead=lead, status=status)
+            if status in ("late", "early") and len(alts) > 1:
+                # repeated phrase: the in-order matcher took one occurrence,
+                # but the card sits on another one of its own words
+                ok = [a for a in alts if _sync_status(float(a) - st) == "ok"]
+                if ok:
+                    note.update(measured=round(sp, 3), measured_status=status,
+                                kind="measurement", why="repeated_phrase")
+                    sp = min(ok, key=lambda a: abs(float(a) - st))
+                    note["speech_start"] = round(sp, 3)
+                    lead, status = float(sp) - st, "ok"
+            note.update(lead=round(lead, 3), status=status)
+            if status in ("late", "early"):
+                note["kind"] = "real"
         if last_cta and c_end is not None:
             note["content_end"] = c_end
             if note["status"] in ("ok", "early", "unmatched") and st < c_end - SYNC_TOL_S:
                 note["status"] = "straddle"
+                note["kind"] = "real"
         notes.append(note)
     return notes
+
+
+def _sync_status(lead: float) -> str:
+    return ("late" if lead < -SYNC_TOL_S - 1e-9 else
+            "early" if lead > SYNC_LEAD_MAX_S + SYNC_TOL_S + 1e-9 else "ok")
 
 
 def card_sync_marker(beats, words, content_format: str | None = "short",
@@ -1699,7 +1913,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      hook_pace: dict | None = None,
                      beat_timing: str | None = None,
                      card_sync: dict | None = None,
-                     cli_check: dict | None = None) -> dict:
+                     cli_check: dict | None = None,
+                     card_text: dict | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -1819,6 +2034,16 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Product teasers never show a command, CLI, file path or API "
             "output that the script does not literally contain."
         )
+    # Card text rules (marked new short renders; CARD_TEXT_V1).
+    text_hits = card_text_check_hits(card_text)
+    if text_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card text: FAIL — " + "; ".join(text_hits) +
+            ". One card per spoken sentence, quotes only of words the VO says, no "
+            "invented tool output, PT-BR copy on PT cards, no back-to-back "
+            "near-duplicate cards."
+        )
 
     # --- C: kill spoken list/slide spam ------------------------------------
     types = [b.get("type") or "" for b in board]
@@ -1887,7 +2112,79 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         reasons.append("[C] Spoken list/slide spam: FAIL — " + "; ".join(c_hits))
 
     result = "FAIL" if reasons else "PASS"
-    return {"result": result, "checks": checks, "reasons": reasons}
+    kinds = gate_check_kinds(
+        board, hook_pace=hook_pace, card_sync=card_sync,
+        board_hits={"beat_hold": b_hits, "repeated_card": rep_hits,
+                    "fabricated_cli": cli_hits, "card_text": text_hits,
+                    "slide_spam": c_hits})
+    out = {"result": result, "checks": checks, "reasons": reasons}
+    if kinds:
+        out["kinds"] = kinds
+    return out
+
+
+# Real fail vs measurement artifact (CoS 2026-10-03). Every Gate B/C check
+# that failed — or that could not be measured — gets an entry:
+#   kind="real"         a craft defect on the board/timing (still fails);
+#   kind="measurement"  the measuring step, not the video: the card's words
+#                       are not in the TTS word boundaries / no boundaries /
+#                       a repeated phrase matched to the wrong occurrence
+#                       (sync, now resolved) / claim letters not matched
+#                       (hook pace estimated from the n-th word).
+# ``edge`` marks a real fail within EDGE_S of its threshold (VM eyeball).
+EDGE_S = 0.02
+
+
+def gate_check_kinds(board, *, hook_pace: dict | None = None,
+                     card_sync: dict | None = None,
+                     board_hits: dict | None = None) -> list[dict]:
+    out: list[dict] = []
+    for check, hits in (board_hits or {}).items():
+        for h in hits or []:
+            out.append({"check": check, "kind": "real", "detail": h})
+    if (isinstance(hook_pace, dict) and hook_pace.get("version") == HOOK_PACE_V1
+            and board and (board[0].get("type") or "") == "hook"):
+        n = claim_word_count(board[0].get("text") or "")
+        if n > HOOK_CLAIM_MAX_WORDS:
+            out.append({"check": "hook_claim_words", "kind": "real",
+                        "detail": f"{n} words"})
+        end, how = hook_pace.get("claim_spoken_end"), hook_pace.get("claim_match")
+        if isinstance(end, (int, float)) and float(end) > HOOK_CLAIM_SPOKEN_BY_S + 1e-6:
+            e = {"check": "hook_spoken_by", "detail": f"{float(end):.2f}s"}
+            if how == "fallback":
+                e.update(kind="measurement", why="claim_not_matched_in_tts")
+            else:
+                e["kind"] = "real"
+                if float(end) - HOOK_CLAIM_SPOKEN_BY_S <= EDGE_S:
+                    e["edge"] = True
+            out.append(e)
+        elif "claim_match" in hook_pace and how != "exact":
+            out.append({"check": "hook_spoken_by", "kind": "measurement",
+                        "why": "claim_not_matched_in_tts" if how else "no_word_boundaries",
+                        "detail": "not verifiable (not failed)"})
+        if len(board) > 1:
+            cut = _cue_start(board[1])
+            if cut > HOOK_FIRST_CUT_BY_S + 1e-6:
+                e = {"check": "hook_first_cut", "kind": "real", "detail": f"{cut:.2f}s"}
+                if cut - HOOK_FIRST_CUT_BY_S <= EDGE_S:
+                    e["edge"] = True
+                out.append(e)
+    if isinstance(card_sync, dict) and card_sync.get("version") == SYNC_V1:
+        for n in card_sync.get("notes") or []:
+            if not isinstance(n, dict) or not n.get("kind"):
+                continue
+            e = {"check": "card_sync", "kind": n["kind"], "card": n.get("i"),
+                 "status": n.get("status")}
+            if n.get("why"):
+                e["why"] = n["why"]
+            lead = n.get("lead")
+            if n["kind"] == "real" and isinstance(lead, (int, float)):
+                over = (-SYNC_TOL_S - lead) if n.get("status") == "late" else (
+                    lead - SYNC_LEAD_MAX_S - SYNC_TOL_S)
+                if n.get("status") in ("late", "early") and over <= EDGE_S:
+                    e["edge"] = True
+            out.append(e)
+    return out
 
 
 def format_craft_gate_reason(gate: dict | None) -> str | None:
@@ -1919,10 +2216,11 @@ def video_maker_gate_reason(creation_config=None,
     pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
     sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
     cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
+    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
                             used_fallback=used_fallback, legacy_timing=legacy,
                             hook_pace=pace, beat_timing=bt, card_sync=sync,
-                            cli_check=cli)
+                            cli_check=cli, card_text=ctext)
     return format_craft_gate_reason(gate)
 
 
@@ -1995,7 +2293,10 @@ def next_claim_noun(*blobs: str | None) -> str:
 
 
 def series_endcard_vo(series: str, noun: str = DEFAULT_NOUN) -> str:
-    """Spoken closer: Subscribe — next {series} {noun}.  ≤8 words by construction."""
+    """Spoken closer. EN: Subscribe — next {series} {noun}. PT (IA): Se
+    inscreve. Próxima armadilha de {series}."""
+    if series in PT_ENDCARD_SERIES:
+        return f"Se inscreve. Próxima armadilha de {series}."
     n = noun if noun in NEXT_CLAIM_NOUNS else DEFAULT_NOUN
     line = f"Subscribe — next {series} {n}."
     # Safety clip — live series labels are 1–2 words; never invent extra CTA.
@@ -2006,7 +2307,10 @@ def series_endcard_vo(series: str, noun: str = DEFAULT_NOUN) -> str:
 
 
 def series_endcard_chip(series: str) -> str:
-    """On-screen chip, one line. YPP#5: Subscribe · {series}."""
+    """On-screen chip, one line. EN: Subscribe · {series}. PT (IA): Se
+    inscreve · {series}."""
+    if series in PT_ENDCARD_SERIES:
+        return f"Se inscreve · {series}"
     return f"Subscribe · {series}"
 
 
@@ -2053,7 +2357,8 @@ def endcard_clean(card: dict) -> bool:
     micro = (card.get("micro") or "").strip()
     if endcard_scan_banned(vo) or endcard_scan_banned(chip) or endcard_scan_banned(micro):
         return False
-    if "subscribe" in theme.fold(micro):
+    folded_micro = theme.fold(micro)
+    if "subscribe" in folded_micro or "inscreve" in folded_micro:
         return False
     if not is_endcard_chip(chip):
         return False
@@ -2061,25 +2366,26 @@ def endcard_clean(card: dict) -> bool:
         return False
     if len(vo.split()) > 8:
         return False
-    return bool(_ENDCARD_VO_RE.search(vo))
+    return is_endcard_vo(vo)
 
 
 def ensure_series_endcard_vo(script: str | None, subject: str | None,
                              brand: str | None = None,
                              noun: str | None = None,
                              topic_name: str | None = None) -> str:
-    """Pin the last spoken sentence to the series endcard VO. No TTS overhaul —
-    one appended (or replaced) English line. Long-form callers should skip this."""
+    """Pin the trailing spoken closer to the series endcard VO (EN one-liner
+    or the PT two-sentence closer). Mid Subscribe/Inscreve is stripped first.
+    Long-form callers should skip this."""
     card = series_endcard(subject, script, brand, noun, topic_name=topic_name)
     vo = card["vo"]
     raw = strip_mid_subscribe(script)
     if not raw:
         return vo
-    if is_endcard_vo(raw):
-        parts = [p for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
-        if parts:
-            parts[-1] = vo
-            return " ".join(parts).strip()
+    parts = [p for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    n = endcard_vo_tail_n(parts)
+    if n:
+        head = parts[:-n]
+        return (" ".join(head) + " " + vo).strip() if head else vo
     return (raw.rstrip() + " " + vo).strip()
 
 
@@ -2149,10 +2455,11 @@ def prepare_provided_script(script: str | None, subject: str | None, *,
     Verbatim except the generated path's deterministic craft rules:
     banned CTA sentences dropped (``strip_banned``), miolo Subscribe dropped
     (``strip_mid_subscribe``), and for shorts the standard series endcard
-    ``Subscribe — next {series} {noun}.`` appended when the last sentence
-    isn't already an endcard VO (an existing closer is kept as written —
-    never duplicated or rewritten). Long-form skips the endcard, like
-    ``worker._generate_script``.
+    EN ``Subscribe — next {series} {noun}.`` or PT IA
+    ``Se inscreve. Próxima armadilha de IA.`` appended when the trailing
+    closer isn't already an endcard VO (an existing closer is kept as
+    written — never duplicated or rewritten). Long-form skips the endcard,
+    like ``worker._generate_script``.
     """
     text = (script or "").strip()
     edits: list[str] = []
@@ -2169,7 +2476,8 @@ def prepare_provided_script(script: str | None, subject: str | None, *,
         edits.append("mid_subscribe_stripped")
         text = body
     parts = [p for p in re.split(r"(?<=[.!?…])\s+", text) if p.strip()]
-    if parts and is_endcard_vo(parts[-1]):
+    # EN one-liner OR the PT two-sentence closer already present → keep as written.
+    if endcard_vo_tail_n(parts):
         return text, edits
     edits.append("endcard_appended")
     return ensure_series_endcard_vo(text, subject, brand=brand), edits
@@ -2415,3 +2723,592 @@ def apply_craft_review_to_video(video, *, content_format: str | None = "short",
     )
     video.craft_review = status
     return status, reason
+
+
+# Text cards must say something (Channels 2026-10-03, #1385 VM FAIL): card 4
+# rendered "Your PNG Channels Manager YouTube" — a Shorts diagram demoted to
+# a text card by joining its node labels (loose nouns, no verb). A
+# statement/quote card needs a verb and must not be only labels/capitalized
+# nouns. POS-free heuristic: a small EN/PT verb lexicon + inflection endings.
+TEXT_CARD_TYPES = frozenset({"statement", "quote"})
+_VERB_WORDS = frozenset("""
+is are was were be been being am isn't aren't wasn't weren't it's that's
+there's here's what's who's he's she's they're we're you're i'm let's
+has have had having hasn't haven't hadn't do does did doing don't doesn't
+didn't can can't cannot could couldn't will won't would wouldn't shall should
+shouldn't must may might need needs go goes went gone get gets got make makes
+made run runs ran ship ships show shows take takes took say says said use
+uses work works break breaks broke fail fails cost costs pay pays save saves
+read reads write writes wrote see sees saw know knows knew think thinks
+thought land lands hit hits stop stops start starts keep keeps kept turn
+turns become becomes became give gives gave come comes came leave leaves
+left put puts set sets return returns call calls answer answers find finds
+found fit fits lose loses lost win wins won cut cuts drop drops eat eats ate
+burn burns hold holds held send sends sent spend spends spent build builds
+built feel feels felt try tries mean means meant want wants look looks seem
+seems tell tells told ask asks let lets help helps move moves pick picks
+open opens close closes push pushes pull pulls ask asks skip skips wait
+waits beat beats hang hangs crash crashes swap swaps load loads fill fills
+stay stays sit sits grow grows rise rises fall falls fell paid threw thrown
+bought brought caught taught sold told spent lent meant built burnt drove
+wrote broke spoke chose froze ate began ran swam sang rang drank shrank
+é são era eram foi foram ser sendo sido está estão estava estavam esteve
+tem têm tinha tinham teve há havia vai vão ia foi fez faz fazem fazia pode
+podem podia pôde deve devem devia precisa precisam roda rodam rodou cabe
+cabem coube dá dão deu vê viu sabe sei quer querem custa custam custou
+gasta gastou paga pagou para param parou trava travou cai caiu sobe subiu
+volta voltou fica ficou ficam usa usou usam mostra mostrou leva levou
+chega chegou passa passou entra entrou sai saiu põe pôs diz disse dizem
+pensa pensam espera esperam responde respondem aguenta aguentam enche enchem
+erra erram mente acerta acertam ganha ganhou perde perdeu muda mudou
+vem vêm veio vieram vou extrai extraio extraem lê leem leio
+""".split())
+_VERB_ENDINGS_EN = ("ed", "ing")
+_VERB_ENDINGS_PT = ("ou", "aram", "eram", "iram", "ava", "avam", "ando", "endo",
+                    "indo", "ado", "ido", "ará", "erá", "irá", "aria", "eria", "eu", "iu")
+# EN base verbs: base, +s/+es, +ed, +ing are all accepted.
+_EN_VERB_BASES = frozenset("""
+pay treat check trust reach repeat sign earn walk join ship show run cost save
+read write see know think land hit stop start keep turn become give come leave
+put set return call answer find fit lose win cut drop eat burn hold send spend
+build feel try mean want look seem tell ask let help move pick open close push
+pull skip wait beat hang crash swap load fill stay sit grow rise fall go get
+make take say use work break fail need throw ignore miss fix test measure
+count print log retry lock leak own owe charge bill bump blow eat pass ping
+post block catch kill wake sleep page route rot scale swallow bite cache cap
+compare decide deploy drift explain hide fire guess hire learn list match
+lie die pin plan prove quit rank refuse remember render replace reply rewrite
+roll serve sell share slow speed split steal store switch teach thank track
+trade train trigger trip type update watch wipe wonder wrap
+""".split())
+# PT infinitives: 3sg/3pl present, preterite, imperfect, gerund, participle.
+_PT_VERBS = """
+comprar segurar nascer sobrar revisar esconder desmentir medir construir
+escolher mandar contar encolher quantizar cortar caber obedecer reservar falar
+cobrar criar desenhar morar deixar acender pesar continuar confiar sobreviver
+assinar rodar travar pagar gastar custar usar mostrar levar chegar passar
+entrar sair voltar ficar pensar esperar responder aguentar encher errar mentir
+acertar ganhar perder mudar testar trocar subir cair estourar vazar quebrar
+ler escrever ver saber querer poder dever precisar fazer dizer dar ter ser
+estar ir vir pôr achar cumprir abrir fechar ligar desligar carregar baixar
+subir rodar responder pedir parar começar terminar acabar salvar guardar
+lembrar esquecer aprender ensinar explicar decidir provar cair valer render
+dobrar caber engolir queimar comer vender servir ajudar matar morrer ganhar
+separar perguntar existir extrair resumir ignorar rodar conferir resolver
+mandar jogar converter enviar receber chamar trocar somar contar checar
+""".split()
+
+
+_PT_1SG_NOT_VERB = frozenset("""
+custo gasto troco conto salvo baixo passo acerto ganho começo servo resumo dobro
+desenho seguro continuo
+""".split())
+
+
+def _pt_forms(inf: str) -> set:
+    if len(inf) < 3 or inf[-2:] not in ("ar", "er", "ir", "or"):
+        return {inf}
+    st, k = inf[:-2], inf[-2]
+    if k == "a":
+        f = ("a", "am", "ou", "aram", "ava", "avam", "ando", "ado", "e", "em", "ei")
+    elif k == "e":
+        f = ("e", "em", "eu", "eram", "ia", "iam", "endo", "ido", "a", "am")
+    else:
+        f = ("e", "em", "iu", "iram", "ia", "iam", "indo", "ido", "a", "am")
+    out = {inf} | {st + x for x in f}
+    # 1sg present for first-person narration ("Eu separo / pergunto"); short
+    # stems ("do" ← dar, "lo" ← ler) and 1sg forms that are common nouns or
+    # adjectives ("custo", "passo", "resumo", "seguro") are not verbs here.
+    if len(inf) >= 6 and st + "o" not in _PT_1SG_NOT_VERB:
+        out.add(st + "o")
+    return out
+
+
+_PT_VERB_FORMS = frozenset(w for inf in _PT_VERBS for w in _pt_forms(inf))
+# Function words: a card with none of these and ≥3 tokens reads as a label list.
+_FUNCTION_WORDS = frozenset("""
+a an the of to in on at for with by from and or but not no your my our their
+its this that these those every each any all only just than then as if when
+o os as um uma uns umas de do da dos das no na nos nas em ao aos à às por
+pelo pela com sem e ou mas não nem seu sua seus suas meu minha cada todo
+toda só já que se quem mais menos muito
+""".split())
+
+
+_CARD_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ0-9][\w'’À-ÿ\-]*")
+
+
+def _looks_like_verb(tok: str) -> bool:
+    t = tok.lower().replace("’", "'")
+    if t in _VERB_WORDS or t in _PT_VERB_FORMS:
+        return True
+    for suf in ("", "s", "es", "ed", "d", "ing"):
+        if suf and not t.endswith(suf):
+            continue
+        stem = t[: len(t) - len(suf)] if suf else t
+        if stem in _EN_VERB_BASES or (suf == "ing" and stem + "e" in _EN_VERB_BASES):
+            return True
+        if suf in ("ed", "ing") and len(stem) > 2 and stem[-1] == stem[-2] and stem[:-1] in _EN_VERB_BASES:
+            return True
+        if suf == "es" and stem.endswith("i") and stem[:-1] + "y" in _EN_VERB_BASES:
+            return True
+    if t.endswith("ied") and t[:-3] + "y" in _EN_VERB_BASES:
+        return True
+    if len(t) >= 6 and t.endswith(_VERB_ENDINGS_EN):
+        return True
+    return len(t) >= 5 and t.endswith(_VERB_ENDINGS_PT)
+
+
+def text_card_reason(text: str | None, labels=None) -> str | None:
+    """Why a statement/quote card text is not a sentence, or None when fine:
+    no verb, or nothing but node labels / capitalized nouns."""
+    toks = _CARD_WORD_RE.findall(str(text or ""))
+    if not toks:
+        return "empty card"
+    if not any(_looks_like_verb(t) for t in toks):
+        return f"no verb in card text {text!r}"
+    lab = {theme.fold(x).strip() for x in (labels or []) if str(x or "").strip()}
+    if lab:
+        rest = theme.fold(str(text or ""))
+        for x in sorted(lab, key=len, reverse=True):
+            rest = rest.replace(x, " ")
+        if not re.search(r"[a-z0-9]", rest):
+            return f"card text {text!r} is only node labels"
+    if len(toks) >= 3 and not any(t.lower() in _FUNCTION_WORDS for t in toks):
+        lower_verb = any(_looks_like_verb(t) and not t[:1].isupper() for t in toks)
+        capsish = sum(1 for t in toks if t[:1].isupper() or any(c.isdigit() for c in t))
+        if not lower_verb and capsish * 2 >= len(toks):
+            return f"card text {text!r} is a list of nouns/labels"
+    if len(toks) > 1 and all(t[:1].isupper() or t[:1].isdigit() for t in toks):
+        if not any(t.lower() in _VERB_WORDS for t in toks):
+            return f"card text {text!r} is only capitalized nouns"
+    return None
+
+
+def text_card_hits(beats) -> list[str]:
+    """Every statement/quote card that fails text_card_reason."""
+    out = []
+    for i, b in enumerate(beats or []):
+        if isinstance(b, dict) and (b.get("type") or "") in TEXT_CARD_TYPES:
+            r = text_card_reason(b.get("text"))
+            if r:
+                out.append(f"beat[{i}] {b.get('type')}: {r}")
+    return out
+
+
+# Card text rules (VM Gate B content review of RR #1423, 2026-10-03). The
+# card copy failed although every card was readable:
+#   1. echo_card       — two cards for one spoken sentence (#3 re-quoted the
+#                        sentence card #2 already carried). One card per
+#                        sentence; a second one only as a verbatim
+#                        continuation (the sentence's later words, sharing
+#                        < CARD_CONT_OVERLAP_MAX of its content). The
+#                        composer keeps one LLM card per sentence (a second
+#                        only on a sentence longer than one card hold) and
+#                        the sync DP adds continuation clauses only where
+#                        the hold cap / first cut needs them.
+#   2. unspoken_quote  — text in quote marks that the VO never says (#10
+#                        “Se erra o valor, não leu”).
+#   3. invented_output — RR terminal/tool-output cards may only show output
+#                        the script says (#1 "[gráfico ausente]": pdftotext
+#                        never prints that). Extends the #53 teaser rule.
+#   4. foreign_term    — RR PT-BR cards: "T3" not "Q3", no English word the
+#                        narration does not say ("Split de página").
+#   5. near_duplicate  — consecutive cards with near-identical copy (#8
+#                        repeated #7), by content-word overlap.
+# The composer enforces all five (storyboard._enforce_card_text_rules and
+# the sync DP); new short renders carry creation_config["card_text"] and
+# Gate B fails any hit.
+CARD_TEXT_V1 = "card_text_v1"
+CARD_NEAR_DUP = 0.6          # content-stem containment that reads as "the same card"
+CARD_CONT_OVERLAP_MAX = 0.3  # a continuation card shares < this with its sentence's card
+CARD_CONT_MIN_SPAN_S = round(MID_BEAT_MAX_S + BEAT_GAP_S, 2)  # 2.92: one card can't hold it
+_CARD_RULE_SKIP = frozenset({"hook"}) | CTA_TYPES
+_FUNC_FOLD = frozenset(theme.fold(w) for w in _FUNCTION_WORDS) | frozenset(STOPWORDS)
+_QUOTED_RE = re.compile(r"[“\"«„]([^”\"»“„]{2,}?)[”\"»“]")
+_QUOTE_CHARS_RE = re.compile(r"[“”\"«»„]")
+_PLACEHOLDER_RE = re.compile(r"^\s*[\[<(][A-Za-zÀ-ÿ][A-Za-zÀ-ÿ \-]+[\]>)]\s*$")
+_QUARTER_RE = re.compile(r"\bQ([1-4])\b")
+# Output dumps shown as `code` (receipt / log / console) are simulated output.
+OUTPUT_CODE_LANGS = frozenset({"text", "txt", "log", "output", "console", "terminal",
+                               "plain", "receipt", "bill", "stdout"})
+# Real CLI binaries an RR terminal card may invoke (the OUTPUT still has to
+# be in the script). Any other binary must itself be said in the narration.
+REAL_CLI_TOOLS = frozenset("""
+pdftotext pdftoppm pdfimages pdfinfo python python3 pip pip3 uv uvx ollama nvidia-smi
+nvtop nvcc git curl wget docker podman llama-cli llama-server llama-bench llama-run
+vllm huggingface-cli hf ls cat grep rg head tail jq ps top htop free df du kill make
+npm npx node pnpm yarn bun cargo go gcc ffmpeg ffprobe tesseract kubectl ssh scp
+rsync tar unzip echo export sed awk sqlite3 psql redis-cli time watch lms mlx_lm
+sudo env which wc sort uniq tee xargs
+""".split())
+# English words that must not appear on a PT-BR RR card unless the narration
+# says them (technical loanwords the VO uses — prompt, token, cache — pass
+# because they are in the script).
+_EN_CARD_WORDS = (frozenset(_EN_VERB_BASES) | frozenset("""
+page pages chart charts value values sentinel output input fallback quarter revenue
+missing route routes text texts image images vision model models summary legend
+axis curve bar bars split splits only just with without from into after before
+""".split())) - frozenset("""
+render cache log post set ping pin come list track test type plan
+""".split())
+
+
+def _card_stem(tok: str) -> str:
+    t = tok
+    if len(t) > 4 and t.endswith("s"):
+        t = t[:-1]
+    return t[:5]
+
+
+def card_stems(text: str | None) -> set:
+    """Content-word stems of a card's copy (folded, function words dropped)."""
+    toks = re.findall(r"[a-z0-9]+", theme.fold(str(text or "")))
+    return {_card_stem(t) for t in toks
+            if (len(t) >= 3 or t.isdigit()) and t not in _FUNC_FOLD}
+
+
+def card_overlap(a: dict | None, b: dict | None) -> float:
+    """Share of the smaller card's content stems that the other card repeats."""
+    sa, sb = card_stems(beat_screen_text(a)), card_stems(beat_screen_text(b))
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / min(len(sa), len(sb))
+
+
+def cards_near_duplicate(a: dict | None, b: dict | None) -> bool:
+    return card_overlap(a, b) >= CARD_NEAR_DUP - 1e-9
+
+
+def is_pt_text(text: str | None) -> bool:
+    """Rough language test: more PT than EN function words."""
+    toks = re.findall(r"[a-zà-ÿ]+", str(text or "").lower())
+    pt = sum(1 for t in toks if t in {"o", "os", "um", "uma", "de", "do", "da", "dos",
+                                      "das", "não", "que", "é", "com", "pra", "pro",
+                                      "você", "eu", "ele", "se", "no", "na", "em", "vai"})
+    en = sum(1 for t in toks if t in {"the", "of", "to", "and", "is", "you", "it",
+                                      "your", "with", "that", "this", "on", "for"})
+    return pt > en
+
+
+def _script_stems(script: str | None) -> set:
+    return {_card_stem(t) for t in _sync_toks(script)}
+
+
+def unspoken_quotes(beat: dict | None, script: str | None) -> list[str]:
+    """Rule 2: quoted copy the narration never says verbatim. A quote card
+    renders a quote mark (unless ``plain``), so its whole text counts."""
+    if not isinstance(beat, dict) or not script:
+        return []
+    out = []
+    if (beat.get("type") or "") == "quote" and not beat.get("plain"):
+        t = str(beat.get("text") or "")
+        if t.strip() and not text_in_script(_QUOTE_CHARS_RE.sub(" ", t), script):
+            out.append(t)
+    for m in _QUOTED_RE.finditer(beat_screen_text(beat)):
+        q = m.group(1)
+        if not text_in_script(q, script) and q not in out:
+            out.append(q)
+    return out
+
+
+def _cli_binary(cmd: str | None) -> str:
+    toks = str(cmd or "").strip().split()
+    while toks and (toks[0] in ("sudo", "env", "time") or re.match(r"^[A-Z_][A-Z0-9_]*=", toks[0])):
+        toks = toks[1:]
+    return toks[0].rsplit("/", 1)[-1] if toks else ""
+
+
+def is_placeholder_line(line: str | None) -> bool:
+    """"[gráfico ausente]", "<missing>", "(sem saída)": a narrator's note
+    dressed up as tool output — no real tool prints it."""
+    return bool(_PLACEHOLDER_RE.match(str(line or "")))
+
+
+def invented_output(beat: dict | None, script: str | None) -> list[str]:
+    """Rule 3 (RR): terminal/tool-output lines the script does not say.
+    command: the command line must be a real tool (or said in the script);
+    every output line must be said in the script. code: an output dump
+    (lang text/log/console/receipt…) follows the output rule; a code snippet
+    keeps its illustrative lines but never a placeholder line."""
+    if not isinstance(beat, dict):
+        return []
+    typ = beat.get("type") or ""
+    bad: list[str] = []
+    if typ == "command":
+        cmd = str(beat.get("command") or "").strip()
+        if cmd and not text_in_script(cmd, script):
+            binary = _cli_binary(cmd)
+            if binary.lower() not in REAL_CLI_TOOLS and not text_in_script(binary, script):
+                bad.append(cmd)
+        for o in beat.get("output") or []:
+            o = str(o or "").strip()
+            if o and (is_placeholder_line(o) or not text_in_script(o, script)):
+                bad.append(o)
+    elif typ == "code":
+        dump = str(beat.get("lang") or "").strip().lower() in OUTPUT_CODE_LANGS
+        for ln in beat.get("lines") or []:
+            ln = str(ln or "").strip()
+            if ln and (is_placeholder_line(ln) or (dump and not text_in_script(ln, script))):
+                bad.append(ln)
+    return bad
+
+
+_QUARTER_CTX_RE = re.compile(r"\b(?:trimestr\w*|receita|faturamento|lucro|balanco|"
+                             r"relatorio|vendas|fiscal)\b")
+_QUANT_CTX_RE = re.compile(r"\b(?:quantiz\w*|\d+\s*-?\s*bits?|bits?|gguf|gptq|awq|exl2|"
+                           r"q\d_k\w*)\b")
+
+
+def quarter_labels_apply(script: str | None) -> bool:
+    """Q1–Q4 on a PT card reads as a business quarter (→ T1–T4) only when the
+    narration is about quarters/revenue, is not about quantization ("Q4" =
+    4-bit) and does not itself say "Q1–Q4"."""
+    f = theme.fold(str(script or ""))
+    return (bool(_QUARTER_CTX_RE.search(f)) and not _QUANT_CTX_RE.search(f)
+            and not _QUARTER_RE.search(str(script or "")))
+
+
+def foreign_terms(beat: dict | None, script: str | None) -> list[str]:
+    """Rule 4 (RR, PT-BR narration): "Q1–Q4" (PT is T1–T4) and English words
+    on screen that the narration never says. Code/command text is exempt
+    (identifiers keep their language) except the quarter label in output."""
+    if not isinstance(beat, dict):
+        return []
+    typ = beat.get("type") or ""
+    quarters = quarter_labels_apply(script)
+    if typ == "command":
+        copy = " ".join(str(o) for o in beat.get("output") or [])
+        return [f"Q{m.group(1)}" for m in _QUARTER_RE.finditer(copy)] if quarters else []
+    if typ == "code":
+        return []
+    copy = beat_screen_text(beat)
+    out = [f"Q{m.group(1)}" for m in _QUARTER_RE.finditer(copy)] if quarters else []
+    spoken = set(_sync_toks(script))
+    for tok in re.findall(r"[A-Za-z]+", copy):
+        t = tok.lower()
+        if t in _EN_CARD_WORDS and t not in spoken and tok not in out:
+            out.append(tok)
+    return out
+
+
+def unspoken_headline_terms(beat: dict | None, script: str | None) -> list[str]:
+    """Generator rule 4 (RR PT-BR): the headline of a statement / term_define
+    card uses the narration's own words. Content words (≥4 letters, no
+    digits, not an acronym) whose stem the script never says — coined jargon
+    like "Valor-sentinela" or "Split de página"."""
+    if not isinstance(beat, dict):
+        return []
+    typ = beat.get("type") or ""
+    head = beat.get("text") if typ == "statement" else beat.get("term") if typ == "term_define" else None
+    if not head:
+        return []
+    stems = _script_stems(script)
+    out = []
+    for tok in re.findall(r"[A-Za-zÀ-ÿ0-9]+", str(head)):
+        f = theme.fold(tok)
+        if (len(f) < 4 or any(c.isdigit() for c in f) or (tok.isupper() and len(tok) <= 6)
+                or f in _FUNC_FOLD):
+            continue
+        if _card_stem(f) not in stems:
+            out.append(tok)
+    return out
+
+
+def _sentence_token_index(script: str | None) -> tuple[list[str], list[int], list[str]]:
+    sents = [x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip()) if x.strip()]
+    toks, sid = [], []
+    for k, s in enumerate(sents):
+        for t in _sync_toks(s):
+            toks.append(t)
+            sid.append(k)
+    return toks, sid, sents
+
+
+def card_anchors(board, script: str | None) -> list[tuple[int | None, int, int]]:
+    """Per card: (script sentence, token position, shown-token length). The
+    text of a quote/statement (else its cue) is matched in order in the
+    script; shown length is the matched text length (0 for a cue match).
+    (None, -1, 0) = hook / cta / unmatched."""
+    toks, sid, _ = _sentence_token_index(script)
+    out: list[tuple[int | None, int, int]] = []
+    cursor = 0
+    for i, b in enumerate(board or []):
+        typ = (b.get("type") or "") if isinstance(b, dict) else ""
+        if i == 0 and typ == "hook":
+            ht = _sync_toks(b.get("text") or b.get("cue"))
+            if ht and toks[:len(ht)] == ht:
+                cursor = len(ht)
+            out.append((None, -1, 0))
+            continue
+        if typ in CTA_TYPES or not isinstance(b, dict):
+            out.append((None, -1, 0))
+            continue
+        cands = [(_sync_toks(b.get("text")), True)] if typ in ("quote", "statement") else []
+        cands.append((_sync_toks(b.get("cue")), False))
+        pos, shown = -1, 0
+        for c, is_text in cands:
+            pos = _find_run(toks, c, cursor)
+            if pos >= 0:
+                shown = len(c) if is_text else 0
+                break
+        if pos < 0:
+            out.append((None, -1, 0))
+            continue
+        out.append((sid[pos], pos, shown))
+        cursor = pos
+    return out
+
+
+def card_sentence_ids(board, script: str | None) -> list[int | None]:
+    """Script sentence each card belongs to (None = hook/cta/unmatched)."""
+    return [a[0] for a in card_anchors(board, script)]
+
+
+def sentence_spans(script: str | None, words) -> dict[int, float]:
+    """Spoken span (s) per script sentence from TTS word timings (empty when
+    the words cannot be aligned)."""
+    from app.services.engines import storyboard
+    spans: dict[int, list[float]] = {}
+    for w in storyboard.annotate_sentences(words, script):
+        if "_s" not in w:
+            continue
+        try:
+            t0 = float(w.get("start") or 0.0)
+            t1 = t0 + float(w.get("dur") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        lo_hi = spans.setdefault(w["_s"], [t0, t1])
+        lo_hi[0], lo_hi[1] = min(lo_hi[0], t0), max(lo_hi[1], t1)
+    return {k: round(v[1] - v[0], 3) for k, v in spans.items()}
+
+
+def sentence_card_cap(span: float | None) -> int:
+    """Cards one sentence may carry: 1, plus one verbatim continuation per
+    further card-length of speech."""
+    if span is None or span <= CARD_CONT_MIN_SPAN_S + 1e-9:
+        return 1
+    return 1 + int(span // CARD_CONT_MIN_SPAN_S)
+
+
+def is_continuation_card(beat: dict | None, prev: dict | None, script: str | None, *,
+                         pos: int | None = None, prev_pos: int | None = None,
+                         prev_len: int = 0) -> bool:
+    """A further card on the sentence ``prev`` (the sentence's previous card)
+    already carries. A text card must be verbatim narration that starts
+    after ``prev``'s own words (its later words, nothing re-said — #1423 #3
+    re-quoted the sentence from its first word); a rich card must anchor
+    later and not repeat ``prev`` (overlap < CARD_NEAR_DUP)."""
+    if not isinstance(beat, dict):
+        return False
+    if pos is not None and prev_pos is not None and pos < prev_pos + max(1, prev_len):
+        return False
+    typ = beat.get("type") or ""
+    if typ in ("quote", "statement"):
+        return text_in_script(_QUOTE_CHARS_RE.sub(" ", str(beat.get("text") or "")), script)
+    return card_overlap(beat, prev) < CARD_NEAR_DUP - 1e-9
+
+
+def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
+                   pt: bool | None = None) -> list[dict]:
+    """Every card-text rule violation on a board: [{"i","check","detail"}]."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not script:
+        return out
+    if pt is None:
+        pt = is_pt_text(script)
+    anchors = card_anchors(board, script)
+    by_sent: dict[int, list[int]] = {}
+    prev_mid = None
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if i == 0 or typ in _CARD_RULE_SKIP:
+            prev_mid = None if typ in CTA_TYPES else prev_mid
+            continue
+        shown = beat_screen_text(b)[:60]
+        s, pos, _ = anchors[i]
+        if s is not None:
+            group = by_sent.setdefault(s, [])
+            if group:
+                k = group[-1]
+                if not is_continuation_card(b, board[k], script, pos=pos,
+                                            prev_pos=anchors[k][1], prev_len=anchors[k][2]):
+                    out.append({"i": i, "check": "echo_card",
+                                "detail": f"card {i} {shown!r} is a second card for the sentence "
+                                          f"card {group[0]} already carries"})
+            group.append(i)
+        for q in unspoken_quotes(b, script):
+            out.append({"i": i, "check": "unspoken_quote",
+                        "detail": f"card {i} quotes {q!r}, which the narration never says"})
+        if rr:
+            for ln in invented_output(b, script):
+                out.append({"i": i, "check": "invented_output",
+                            "detail": f"card {i} ({typ}) shows {ln!r}, output the script never says"})
+            if pt:
+                for t in foreign_terms(b, script):
+                    out.append({"i": i, "check": "foreign_term",
+                                "detail": f"card {i} shows {t!r} on a PT-BR card"
+                                          + (" (use T1–T4)" if _QUARTER_RE.match(t) else "")})
+        if prev_mid is not None and cards_near_duplicate(board[prev_mid], b):
+            out.append({"i": i, "check": "near_duplicate",
+                        "detail": f"card {i} {shown!r} repeats card {prev_mid} "
+                                  f"({card_overlap(board[prev_mid], b):.0%} shared words)"})
+        prev_mid = i
+    return out
+
+
+def card_text_marker(beats, script: str | None, words=None, *, brand: str | None = None,
+                     content_format: str | None = "short") -> dict | None:
+    """creation_config["card_text"] for a new short render (else None)."""
+    if (content_format or "short") == "long":
+        return None
+    rr = (brand or "") in HOOK_PACE_BRANDS
+    return {"version": CARD_TEXT_V1, "rr": rr,
+            "hits": card_text_hits(beats, script, words, rr=rr)}
+
+
+def card_text_check_hits(card_text: dict | None) -> list[str]:
+    if not isinstance(card_text, dict) or card_text.get("version") != CARD_TEXT_V1:
+        return []
+    return [f"{h.get('check')}: {h.get('detail')}" for h in card_text.get("hits") or []
+            if isinstance(h, dict)]
+
+
+# RR sentence pace (CoS 2026-10-03): one card per spoken sentence holds when a
+# sentence is spoken within one card hold + its lead (2.8s + 1.1s ≈ 3.9s);
+# continuation cards stay the exception. Soft target only — the script
+# generator asks once for a rewrite and the render logs/records the measure;
+# it is never a gate check.
+SENTENCE_SPOKEN_MAX_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
+SPOKEN_WORDS_PER_S = 3.2  # edge-tts pt-BR/en ~3.1–3.5 w/s (#1423); low = conservative
+SENTENCE_MAX_WORDS = int(SENTENCE_SPOKEN_MAX_S * SPOKEN_WORDS_PER_S)  # 12
+
+
+def long_spoken_sentences(script: str | None, words=None,
+                          max_s: float = SENTENCE_SPOKEN_MAX_S) -> list[dict]:
+    """Script sentences spoken longer than ``max_s``: [{"i","text","secs","how"}].
+    ``secs`` is measured from TTS word timings when given (how="tts"), else
+    estimated at SPOKEN_WORDS_PER_S (how="estimate"). The endcard VO is skipped."""
+    sents = [x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip()) if x.strip()]
+    spans = sentence_spans(script, words) if words else {}
+    out = []
+    for i, sent in enumerate(sents):
+        if is_endcard_vo(sent) or contains_subscribe_cta(sent):
+            continue
+        if i in spans:
+            secs, how = spans[i], "tts"
+        else:
+            secs, how = round(len(_sync_toks(sent)) / SPOKEN_WORDS_PER_S, 2), "estimate"
+        if secs > max_s + 1e-9:
+            out.append({"i": i, "text": sent, "secs": secs, "how": how})
+    return out
+
+
+def sentence_pace_marker(script: str | None, words, brand: str | None,
+                         content_format: str | None = "short") -> dict | None:
+    """creation_config["sentence_pace"] for RR shorts (informational, no gate)."""
+    if (content_format or "short") == "long" or (brand or "") not in HOOK_PACE_BRANDS:
+        return None
+    over = long_spoken_sentences(script, words)
+    return {"max_s": SENTENCE_SPOKEN_MAX_S, "over": [{k: h[k] for k in ("i", "secs", "how")} for h in over]}

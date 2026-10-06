@@ -16,8 +16,8 @@ Pins:
   409 on review/approved/rendering/published; /craft + wide PATCH rules unchanged
 - _submit_new passes the provided text to the engine; worker.run_job speaks it
   and never calls _generate_script (generated videos still do)
-- series endcard ``Subscribe — next {series} {noun}.`` appended when missing,
-  never duplicated / rewritten when present
+- series endcard appended when missing (EN ``Subscribe — next {series} {noun}.``;
+  PT IA ``Se inscreve. Próxima armadilha de IA.``), never duplicated / rewritten when present
 - misaligned first spoken line fails the craft gate with a clear reason
   (pre-render FAILED, no slot / playlist / engine; publish gate too)
 - _finalize never clobbers the provided script with an empty/None task script
@@ -66,11 +66,11 @@ A1_SCRIPT = (
     "trocado. E o modelo responde em cima disso com a mesma confiança. Eu testo antes, "
     "com pdftotext na página. Voltou vazio, a página vai como imagem pro modelo de "
     "visão. Voltou texto limpo, vai texto. Primeiro você descobre o que o arquivo é. "
-    "Subscribe — next IA trap."
+    "Se inscreve. Próxima armadilha de IA."
 )
-A1_NO_ENDCARD = A1_SCRIPT.rsplit(" Subscribe", 1)[0]
+A1_NO_ENDCARD = A1_SCRIPT.rsplit("Se inscreve.", 1)[0].rstrip()
 MISALIGNED = ("Hoje vamos falar de produtividade. Não é. Página escaneada é foto. "
-              "Subscribe — next IA trap.")
+              "Se inscreve. Próxima armadilha de IA.")
 
 # ---------------------------------------------------------------------------
 print("schema surface")
@@ -87,21 +87,25 @@ print("craft helpers: endcard pin + hook alignment")
 txt, edits = craft.prepare_provided_script(A1_SCRIPT, A1_SUBJECT, brand="rr")
 ok(txt == A1_SCRIPT and edits == [],
    "script already ending on the series endcard is kept verbatim (no edits)")
-ok(txt.count("Subscribe") == 1, "existing endcard not duplicated")
+ok(txt.count("Se inscreve") == 1, "existing PT endcard not duplicated")
 txt2, edits2 = craft.prepare_provided_script(A1_NO_ENDCARD, A1_SUBJECT, brand="rr")
-ok(txt2 == A1_NO_ENDCARD + " Subscribe — next IA trap.",
-   "missing endcard appended as 'Subscribe — next IA trap.' (series from · IA nn)")
+ok(txt2 == A1_NO_ENDCARD + " Se inscreve. Próxima armadilha de IA.",
+   "missing endcard appended as 'Se inscreve. Próxima armadilha de IA.' (series from · IA nn)")
 ok(edits2 == ["endcard_appended"], "edit recorded as endcard_appended")
 txt3, edits3 = craft.prepare_provided_script(txt2, A1_SUBJECT, brand="rr")
 ok(txt3 == txt2 and edits3 == [], "prepare is idempotent (no second endcard)")
 ok(txt2.startswith(A1_NO_ENDCARD), "body before the endcard is untouched")
-custom = A1_NO_ENDCARD + " Subscribe — next IA receipt."
+custom = A1_NO_ENDCARD + " Se inscreve. Próxima armadilha de IA."
 ok(craft.prepare_provided_script(custom, A1_SUBJECT, brand="rr")[0] == custom,
-   "a present endcard with another allowed noun is kept as written (not rewritten)")
+   "a present PT IA endcard is kept as written (not rewritten)")
+en_custom = "Gemma 12B cabe em 8 gigas. Subscribe — next Local receipt."
+ok(craft.prepare_provided_script(en_custom, "Gemma 12B cabe em 8 gigas. · Local 12", brand="rr")[0]
+   == en_custom,
+   "a present EN Local endcard with another allowed noun is kept as written")
 mid = ("PDF escaneado colado no chat não é engenharia. Subscribe to the channel now. "
        "Voltou vazio, a página vai como imagem.")
 mtxt, medits = craft.prepare_provided_script(mid, A1_SUBJECT, brand="rr")
-ok("Subscribe to the channel" not in mtxt and mtxt.endswith("Subscribe — next IA trap.")
+ok("Subscribe to the channel" not in mtxt and mtxt.endswith("Se inscreve. Próxima armadilha de IA.")
    and "mid_subscribe_stripped" in medits,
    "miolo Subscribe dropped (same rule as the generated path), closer appended")
 long_txt, long_edits = craft.prepare_provided_script(A1_NO_ENDCARD, A1_SUBJECT,
@@ -380,7 +384,7 @@ ch, t, v = seed(s, script=A1_NO_ENDCARD, cc={"script_source": "provided"})
 eng = SyncHFEngine()
 gen = run_submit(s, eng)
 v = s.get(Video, v.id)
-EXPECTED = A1_NO_ENDCARD + " Subscribe — next IA trap."
+EXPECTED = A1_NO_ENDCARD + " Se inscreve. Próxima armadilha de IA."
 ok(gen.call_count == 0, "_generate_script NOT called for a provided script")
 ok(v.status == VideoStatus.RENDERING and v.mpt_task_id == f"h{v.id}",
    "provided video submitted normally (rendering, handle stored)")
@@ -396,8 +400,8 @@ ok(st["state"] == STATE_COMPLETE and st["script"] == EXPECTED,
    "worker status script == provided (+ endcard)")
 ok(st["creation_config"].get("script_source") == "provided",
    "worker creation_config.script_source = provided")
-ok(v.script == EXPECTED and v.script.count("Subscribe") == 1,
-   "row script = spoken text (endcard appended once)")
+ok(v.script == EXPECTED and v.script.count("Se inscreve") == 1,
+   "row script = spoken text (PT endcard appended once)")
 cc = json.loads(v.creation_config)
 ok(cc["script_source"] == "provided" and cc["script_edits"] == ["endcard_appended"],
    "row provenance: provided + script_edits=[endcard_appended]")

@@ -216,8 +216,47 @@ with patch.object(worker, "_llm", side_effect=_in_band_short):
         "Você lotou a VRAM. · IA 175",
         {"content_format": "short", "brand": "rr"},
     )
-ok(rr_script.endswith("Subscribe — next IA trap."),
-   "RR short pins the IA default VO (English public YT)")
+ok(rr_script.endswith("Se inscreve. Próxima armadilha de IA."),
+   "RR short pins the PT IA closer (CMO option b)")
+ok("Se inscreve. Próxima armadilha de IA." in _llm_calls[0]["prompt"]
+   and "Do NOT use the English" in _llm_calls[0]["prompt"],
+   "RR short prompt names the PT endcard VO+chip")
+
+# RR sentence pace (CoS 2026-10-03): ≤ ~3.9s per spoken sentence, soft.
+_sp_long = ("Você lotou a VRAM. " + "E o modelo que você baixou ontem à noite pra rodar local no "
+            "notebook novo da empresa travou tudo de novo. " + " ".join(["Isso pesa."] * 20))
+_sp_short = ("Você lotou a VRAM. O modelo travou tudo de novo. Foi o notebook novo. "
+             + " ".join(["Isso pesa."] * 20))
+
+
+def _sp_llm(seq):
+    def f(_prompt, system=None, max_tokens=2000):
+        _llm_calls.append({"prompt": _prompt})
+        return seq[min(len(_llm_calls), len(seq)) - 1]
+    return f
+
+
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_sp_llm([_sp_long, _sp_short])):
+    sp_fixed = worker._generate_script("Você lotou a VRAM. · IA 175", {"content_format": "short", "brand": "rr"})
+ok("at most about 12 words (~3.9s spoken)" in _llm_calls[0]["prompt"],
+   "RR short prompt targets sentences ≤ ~12 words / ~3.9s (card hold 2.8s + lead 1.1s)")
+ok(len(_llm_calls) == 2 and "E o modelo que você baixou" in _llm_calls[1]["prompt"]
+   and "split each into shorter sentences" in _llm_calls[1]["prompt"],
+   "a sentence over ~3.9s → one rewrite ask naming it")
+ok(sp_fixed.startswith("Você lotou a VRAM. O modelo travou")
+   and sp_fixed.endswith("Se inscreve. Próxima armadilha de IA."),
+   "the rewrite with fewer long sentences is kept (PT endcard pinned)")
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_sp_llm([_sp_long, _sp_long])):
+    sp_kept = worker._generate_script("Você lotou a VRAM. · IA 175", {"content_format": "short", "brand": "rr"})
+ok(len(_llm_calls) == 2 and "E o modelo que você baixou" in sp_kept,
+   "no better rewrite → the original script ships (soft: never blocks)")
+_llm_calls.clear()
+with patch.object(worker, "_llm", side_effect=_sp_llm([_sp_long])):
+    sp_os = worker._generate_script("Memory died · Agent memory 2", {"content_format": "short", "brand": "os"})
+ok(len(_llm_calls) == 1 and "~3.9s spoken" not in _llm_calls[0]["prompt"],
+   "OS / non-RR scripts: no sentence-pace rule, no extra ask")
 
 _llm_calls.clear()
 with patch.object(worker, "_llm", side_effect=_in_band_short):
@@ -928,7 +967,7 @@ with patch.object(_craft_hp, "beats_from_html", return_value=_hp_board):
     cc_fb = worker._creation_config("s", {"content_format": "short"}, "<html>", "x", 9.0,
                                     "portrait", None, True, words=_hp_words, brand="rr")
 ok(cc_rr.get("hook_pace") == {"version": _craft_hp.HOOK_PACE_V1, "claim_words": 9,
-                              "claim_spoken_end": 3.55},
+                              "claim_spoken_end": 3.55, "claim_match": "exact"},
    "RR render records hook_pace (claim words + TTS spoken end)")
 ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
    and any("RR hook pace" in r for r in cc_rr["craft_gate"]["reasons"]),
@@ -974,6 +1013,41 @@ ok(cc_split.get("frame0_split") is True,
 ok("frame0_split" not in cc_os, "no split card on frame0 → no frame0_split marker")
 ok("words=words, brand=brand" in inspect.getsource(worker.run_job),
    "run_job passes TTS words + resolved brand into _creation_config")
+
+# Card text rules (VM Gate B content #1423): marker on every new short render.
+_ctw_script = ("Ignorar o gráfico não é engenharia. Quando você extrai o texto, o gráfico não vem. "
+               "Subscribe — next IA trap.")
+_ctw_board = [
+    {"type": "hook", "start": 0.0, "dur": 2.38, "text": "Ignorar o gráfico não é engenharia."},
+    {"type": "command", "start": 2.5, "dur": 2.6, "cue": "Quando você extrai o texto", "prompt": "$",
+     "command": "pdftotext relatorio.pdf -", "output": ["[gráfico ausente]"]},
+    {"type": "cta", "start": 5.2, "dur": 3.5, "text": "Subscribe · IA", "cue": "Subscribe"},
+]
+_ctw_words = [{"text": t, "start": 0.4 * k, "dur": 0.35} for k, t in enumerate(
+    "Ignorar o gráfico não é engenharia Quando você extrai o texto o gráfico não vem Subscribe next IA trap".split())]
+with patch.object(_craft_hp, "beats_from_html", return_value=_ctw_board):
+    cc_ct = worker._creation_config("Ignorar o gráfico não é engenharia. · IA 227", {"content_format": "short"},
+                                    "<html>", _ctw_script, 9.0, "portrait", None, False,
+                                    words=_ctw_words, brand="rr")
+    cc_ct_fb = worker._creation_config("s", {"content_format": "short"}, "<html>", _ctw_script, 9.0,
+                                       "portrait", None, True, words=_ctw_words, brand="rr")
+ok(cc_ct.get("card_text", {}).get("version") == _craft_hp.CARD_TEXT_V1
+   and [h["check"] for h in cc_ct["card_text"]["hits"]] == ["invented_output"]
+   and any(r.startswith("[B] Card text: FAIL") for r in cc_ct["craft_gate"]["reasons"]),
+   "RR render records card_text and its craft_gate fails invented terminal output")
+ok("card_text" not in cc_ct_fb, "fallback render: no card_text marker")
+ok(cc_ct.get("sentence_pace") == {"max_s": 3.9, "over": []} and "sentence_pace" not in cc_os,
+   "RR render records sentence_pace (informational); OS renders do not")
+with patch.object(_craft_hp, "beats_from_html", return_value=_hp_board):
+    cc_sp = worker._creation_config("s", {"content_format": "short"}, "<html>",
+                                    "Um dois três quatro cinco seis sete oito nove Isso.", 9.0,
+                                    "portrait", None, False, words=_hp_words, brand="rr")
+ok([h["how"] for h in cc_sp["sentence_pace"]["over"]] == ["tts"]
+   and cc_sp["sentence_pace"]["over"][0]["secs"] > 3.9
+   and not any("sentence" in r.lower() for r in cc_sp["craft_gate"]["reasons"]),
+   "a sentence spoken over 3.9s is measured from TTS and logged — never a gate reason")
+ok(cc_os.get("card_text", {}).get("hits") == [] and cc_os.get("card_text", {}).get("rr") is False,
+   "OS render: card_text marker recorded (rules 1/2/5), no hit on a clean board")
 
 
 # ---------------------------------------------------------------------------
@@ -1404,8 +1478,9 @@ try:
         ok(compose_args["resolution"] == "landscape"
            and compose_args["width"] == 1920 and compose_args["height"] == 1080,
            "16:9 aspect selects landscape 1920x1080")
-        ok(compose_args["duration"] == 10.6,
-           "duration is max(4, round(narr_secs+0.6, 2)) — 10.0 → 10.6")
+        ok(compose_args["duration"] == 4.0,
+           "duration is max(4, min(narr+0.6, last word end+0.5)) — 10.0s mp3, last word "
+           "ends 0.4s → 4.0 (trailing TTS silence dropped, P0 2026-10-03)")
         ok(compose_args["language"] == "Brazilian Portuguese",
            "pt-BR voice → language_from_voice Brazilian Portuguese")
         ok(compose_args["content_format"] == "long" and compose_args["topic_id"] == 2,
@@ -1483,7 +1558,7 @@ try:
             return VALID
 
         with patch.object(worker, "_generate_script", return_value="s"), \
-                patch.object(worker, "_tts", side_effect=_tts_write), \
+                patch.object(worker, "_tts", side_effect=lambda t, v, p: (p.write_bytes(b"mp3"), [])[1]), \
                 patch.object(worker, "_probe_duration", return_value=0.0), \
                 patch.object(worker, "_generate_composition", side_effect=_gen_comp2), \
                 patch.object(worker, "_render", side_effect=_render_write), \
@@ -1495,7 +1570,7 @@ try:
            and seen["width"] == 1080 and seen["height"] == 1920,
            "unknown aspect falls back to 9:16 portrait")
         ok(seen["duration"] == 12.6,
-           "probe 0.0 is falsy → narr_secs 12.0 → duration 12.6")
+           "probe 0.0 is falsy → narr_secs 12.0 → duration 12.6 (no word timings to trim by)")
 
     # short probe hits the max(4.0, …) floor
     with tempfile.TemporaryDirectory() as td:
@@ -1651,6 +1726,93 @@ try:
 finally:
     settings.hyperframes_storage_dir = _orig_storage
 
+
+# --- P0 2026-10-03: opener echo, video length, RR hook join -----------------
+print("_lock_patterned_opener drops a re-stated claim (#1388/#1397)")
+ok(worker._lock_patterned_opener(
+    "Chat set locale pt-BR. Prod answered in English. Chat set locale pt-BR. "
+    "Prod answered in English. The header won.",
+    "Chat set locale pt-BR. Prod answered in English. · Agent traps 4")
+   == "Chat set locale pt-BR. Prod answered in English. The header won.",
+   "two-sentence claim said twice → once")
+ok(worker._lock_patterned_opener("Modelo em swap não pensa. Modelo em swap não pensa! Ele espera.",
+                                 "Modelo em swap não pensa · IA 7")
+   == "Modelo em swap não pensa. Ele espera.", "echo with different punctuation → dropped")
+ok(worker._lock_patterned_opener("Modelo em swap não pensa. Ele espera. Modelo em swap não pensa.",
+                                 "Modelo em swap não pensa · IA 7")
+   == "Modelo em swap não pensa. Ele espera. Modelo em swap não pensa.",
+   "a later callback to the claim is kept (only the leading echo goes)")
+
+print("run_job: video ends 0.5s after the last word; RR hook join re-speaks the claim")
+_tts_inputs = []
+
+
+def _fake_tts(text, voice, out_path):
+    _tts_inputs.append(text)
+    Path(out_path).write_bytes(b"x")
+    late = ";" not in text.split(" ")[4]
+    gap = 0.95 if late else 0.28
+    ws, t = [], 0.0
+    for k, w in enumerate(text.split()):
+        ws.append({"text": w.strip(".;,"), "start": round(t, 3), "dur": 0.45})
+        t += 0.55 + (gap if k == 4 else 0.0)
+    return ws
+
+
+_cfg = {}
+
+
+def _fake_status(handle, **f):
+    if "creation_config" in f:
+        _cfg.update(f["creation_config"])
+    if f.get("state") == STATE_FAILED:
+        _cfg["_err"] = f.get("error")
+
+
+_hj_dirs = []
+with tempfile.TemporaryDirectory() as _d:
+    _jd = Path(_d)
+    _script = "Modelo em swap não pensa. Ele espera o disco girar. Subscribe — next IA trap."
+    _durs = []
+
+    def _fake_compose(subject, script, words, resolution, width, height, duration, **kw):
+        _durs.append(duration)
+        return "<html>ok</html>"
+
+    with patch.object(worker, "_tts", side_effect=_fake_tts), \
+         patch.object(worker, "_probe_duration", return_value=9.4), \
+         patch.object(worker, "_status", side_effect=_fake_status), \
+         patch.object(worker, "_generate_composition", side_effect=_fake_compose), \
+         patch.object(worker, "_looks_valid", return_value=True), \
+         patch.object(worker, "_render", return_value=None), \
+         patch.object(worker, "_has_visible_frames", return_value=True), \
+         patch.object(worker, "_pick_bgm", return_value=None), \
+         patch.object(worker, "_mux", return_value=None), \
+         patch.object(worker.theme, "stage_brand_assets", return_value=None):
+        worker.run_job("h1", _jd, "Modelo em swap não pensa · IA 7",
+                       {"provided_script": _script, "brand": "rr", "voice_name": "pt-BR-AntonioNeural"})
+    ok(len(_tts_inputs) == 2 and _tts_inputs[1].startswith("Modelo em swap não pensa; Ele espera"),
+       f"RR claim with the next sentence at 3.70s → re-spoken with ';' (inputs {len(_tts_inputs)})")
+    ok(_cfg.get("hook_join") is True, "creation_config records hook_join")
+    _jw = _fake_tts(_tts_inputs[1], "v", _jd / "probe.mp3")
+    _tts_inputs.pop()
+    _last_end = _jw[-1]["start"] + _jw[-1]["dur"]
+    ok(_durs and abs(_durs[0] - round(min(9.4 + 0.6, _last_end + 0.5), 2)) < 1e-6,
+       f"composition length = last word end + 0.5s (got {_durs})")
+    _tts_inputs.clear(); _cfg.clear(); _durs.clear()
+    with patch.object(worker, "_tts", side_effect=_fake_tts), \
+         patch.object(worker, "_probe_duration", return_value=9.4), \
+         patch.object(worker, "_status", side_effect=_fake_status), \
+         patch.object(worker, "_generate_composition", side_effect=_fake_compose), \
+         patch.object(worker, "_looks_valid", return_value=True), \
+         patch.object(worker, "_render", return_value=None), \
+         patch.object(worker, "_has_visible_frames", return_value=True), \
+         patch.object(worker, "_pick_bgm", return_value=None), \
+         patch.object(worker, "_mux", return_value=None), \
+         patch.object(worker.theme, "stage_brand_assets", return_value=None):
+        worker.run_job("h2", _jd, "Modelo em swap não pensa · Shipping 9",
+                       {"provided_script": _script, "brand": "os", "voice_name": "en-US-AndrewNeural"})
+    ok(len(_tts_inputs) == 1 and "hook_join" not in _cfg, "OS never joins (one TTS pass)")
 
 print()
 print(f"ALL {_checks} CHECKS PASSED")

@@ -216,10 +216,49 @@ ok(len(os_card["vo"].rstrip(".").split()) <= 8,
 ok(craft.endcard_clean(os_card), "OS endcard passes the hard-ban gate")
 
 rr_card = craft.series_endcard("Você lotou a VRAM. · IA 175", brand="rr")
-ok(rr_card["vo"] == "Subscribe — next IA trap."
-   and rr_card["chip"] == "Subscribe · IA",
-   "RR default VO/chip = next IA trap / Subscribe · IA")
-ok(craft.endcard_clean(rr_card), "RR endcard passes the hard-ban gate")
+ok(rr_card["vo"] == "Se inscreve. Próxima armadilha de IA."
+   and rr_card["chip"] == "Se inscreve · IA",
+   "RR IA VO/chip = Se inscreve. Próxima armadilha de IA. / Se inscreve · IA (CMO option b)")
+ok(craft.endcard_clean(rr_card), "RR PT endcard passes the hard-ban gate")
+ok(craft.is_endcard_vo(rr_card["vo"]) and craft.is_endcard_chip(rr_card["chip"]),
+   "PT closer matches is_endcard_vo / is_endcard_chip")
+ok(craft.endcard_vo_tail_n(["Lição.", "Se inscreve.", "Próxima armadilha de IA."]) == 2
+   and craft.endcard_vo_tail_n(["Lição.", "Subscribe — next IA trap."]) == 1,
+   "PT closer is two trailing sentences; EN is one")
+# Mid "Se inscreve" must still strip; trailing PT closer stays.
+_pt_mid = craft.strip_mid_subscribe(
+    "Lição. Se inscreve agora. Continua. Se inscreve. Próxima armadilha de IA.")
+ok(_pt_mid == "Lição. Continua. Se inscreve. Próxima armadilha de IA.",
+   "mid 'Se inscreve' strips; trailing PT endcard kept")
+ok(craft.mid_body_has_subscribe(
+    "Lição. Se inscreve agora. Continua. Se inscreve. Próxima armadilha de IA."),
+   "mid Se inscreve is still a mid-body Subscribe hit")
+ok(not craft.mid_body_has_subscribe(
+    "Lição. Continua. Se inscreve. Próxima armadilha de IA."),
+   "script with only the trailing PT closer is clean")
+# Local (RR brand, non-IA series) stays English.
+_loc = craft.series_endcard("Gemma 12B cabe. · Local 12", brand="rr")
+ok(_loc["vo"] == "Subscribe — next Local trap." and _loc["chip"] == "Subscribe · Local",
+   "Local series keeps the English Subscribe closer")
+ok(craft.endcard_clean(_loc), "EN Local endcard still clean")
+# EN series still PASS
+ok(craft.is_endcard_vo("Subscribe — next Copilot Credits trap.")
+   and craft.is_endcard_chip("Subscribe · Copilot Credits"),
+   "EN endcard VO+chip still match")
+# Lexicon: IA → I-A on pt-BR; verb 'ia' untouched; Owera on EN only.
+ok(craft.tts_spoken_text("Próxima armadilha de IA.", "pt-BR-AntonioNeural")
+   == "Próxima armadilha de I-A.",
+   "pt-BR lexicon: IA → I-A (cards stay written IA)")
+ok(craft.tts_spoken_text("ele ia embora com IA", "pt-BR-FranciscaNeural")
+   == "ele ia embora com I-A",
+   "pt-BR lexicon matches acronym IA only — verb 'ia' untouched")
+ok(craft.tts_spoken_text("Owera and IA", "en-US-GuyNeural") == "Oh-weh-ruh and IA"
+   and craft.tts_spoken_text("Owera and IA", "pt-BR-AntonioNeural") == "Owera and I-A",
+   "Owera respelling is EN-only; IA respelling is PT-only")
+_pinned_pt = craft.ensure_series_endcard_vo(
+    "Lição. Se inscreve no meio.", "Claim. · IA 1", brand="rr")
+ok(_pinned_pt == "Lição. Se inscreve. Próxima armadilha de IA.",
+   "ensure_series_endcard_vo strips mid Inscreve and pins the PT closer")
 
 am = craft.series_endcard("Memory died between chats · Agent memory 2")
 ok(am["vo"] == "Subscribe — next Agent memory trap."
@@ -1089,7 +1128,7 @@ _hb = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Jogar o node_modules
        {"type": "stat", "start": 2.5, "dur": 2.88, "value": "0", "unit": "passos", "label": "x"},
        {"type": "cta", "start": 5.5, "dur": 3.5, "text": "Subscribe · IA"}]
 _m = craft.hook_pace_marker(_hb, _w, "rr")
-ok(_m == {"version": craft.HOOK_PACE_V1, "claim_words": 8, "claim_spoken_end": 2.75},
+ok(_m == {"version": craft.HOOK_PACE_V1, "claim_words": 8, "claim_spoken_end": 2.75, "claim_match": "exact"},
    "hook_pace_marker (rr short): version + claim words + spoken end")
 ok(craft.hook_pace_marker(_hb, _w, "os") is None and craft.hook_pace_marker(_hb, _w, None) is None
    and craft.hook_pace_marker(_hb, _w, "rr", "long") is None,
@@ -1393,5 +1432,264 @@ ok(_st_ok["notes"][-1]["status"] == "ok"
    "endcard after the content sentence ends, before the Subscribe word → ok")
 ok("content_end" not in craft.card_sync_marker(_sb(1.5, 4.0, 6.6, 7.9), _sw)["notes"][-1],
    "no script → no straddle note (Part 1 marker shape unchanged)")
+
+# --- P0 2026-10-03: video length, hook join, measurement vs real --------------
+def _wl(text, t0=0.0, step=0.4, gaps=None):
+    out, t = [], t0
+    for k, w in enumerate(text.split()):
+        t += (gaps or {}).get(k, 0.0)
+        out.append({"text": w.strip(".,;:"), "start": round(t, 3), "dur": round(step - 0.05, 3)})
+        t += step
+    return out
+
+
+print("video length: ends END_TAIL_S after the last word (trailing TTS silence dropped)")
+_vw = _wl("Um dois tres quatro", step=0.5)  # last word ends 1.95
+ok(craft.video_duration(10.0, _vw) == craft.VIDEO_MIN_S, "short narration floors at 4.0s")
+_vw2 = _wl(" ".join(f"w{k}" for k in range(30)), step=0.5)  # last end 14.95
+ok(craft.video_duration(16.3, _vw2) == round(14.95 + craft.END_TAIL_S, 2),
+   "narr 16.3s with last word at 14.95 → 15.45s (was 16.9s: 1.45s of dead air)")
+ok(craft.video_duration(14.0, _vw2) == 14.6, "never longer than narration + 0.6 (old rule)")
+ok(craft.video_duration(12.0, []) == 12.6, "no word timings → old narration + 0.6")
+
+print("RR hook join: claim full stop spoken as ';' only when the next sentence is late")
+_js = "Modelo em swap não pensa. Ele espera o disco. Subscribe — next IA trap."
+ok(craft.hook_join_text(_js) == "Modelo em swap não pensa; Ele espera o disco. Subscribe — next IA trap.",
+   "hook_join_text replaces only the first sentence's terminal period")
+ok(craft.hook_join_text("Por que trava? Porque swap.") is None, "a question claim is never joined")
+ok(craft.hook_join_text("Só uma frase.") is None, "nothing after the claim → no join")
+_late = _wl(_js, step=0.5, gaps={5: 0.94})   # claim ends ~2.45, next starts 3.44+...
+_late = _wl(_js, step=0.55, gaps={5: 0.95})  # next word at 5*0.55+0.95 = 3.70
+ok(craft.next_speech_start("Modelo em swap não pensa.", _late) == 3.7,
+   "next_speech_start: first word after the claim")
+ok(craft.needs_hook_join(_js, _late, "rr"), "RR, next sentence at 3.70s > 3.6s → join")
+ok(not craft.needs_hook_join(_js, _late, "os"), "OS is out of scope (no join)")
+ok(not craft.needs_hook_join(_js, _late, "rr", "long"), "longs never join")
+_ontime = _wl(_js, step=0.55, gaps={5: 0.30})
+ok(not craft.needs_hook_join(_js, _ontime, "rr"), "next sentence by 3.6s → no join")
+_orig_kill = craft.HOOK_JOIN_ENABLED
+craft.HOOK_JOIN_ENABLED = False
+ok(not craft.needs_hook_join(_js, _late, "rr"), "kill switch HOOK_JOIN_ENABLED=False disables the join")
+craft.HOOK_JOIN_ENABLED = _orig_kill
+
+print("hook pace measurement provenance: exact vs fallback (claim letters not in TTS)")
+_cw = _wl("Contexto 32k custa VRAM. Depois vem o resto.")
+ok(craft.claim_match("Contexto 32k custa VRAM.", _cw) == "exact", "claim letters matched → exact")
+_cw2 = _wl("Contexto trinta e dois k custa VRAM. Depois vem o resto.")
+ok(craft.claim_match("Contexto 32k custa VRAM.", _cw2) == "fallback",
+   "number read out by the TTS → fallback (estimate)")
+ok(craft.claim_match("Contexto 32k.", []) is None, "no word boundaries → None")
+_hp = craft.hook_pace_marker([{"type": "hook", "start": 0, "dur": 2.4, "text": "Contexto 32k custa VRAM."}],
+                             _cw, "rr")
+ok(_hp["claim_match"] == "exact", "hook_pace marker records claim_match")
+_hb = [{"type": "hook", "start": 0, "dur": 2.4, "text": "Contexto 32k custa VRAM agora mesmo sim."},
+       {"type": "stat", "start": 2.5, "dur": 2.0, "value": "1", "cue": "x"}]
+_g1 = craft.video_maker_gate(_hb, hook_pace={"version": craft.HOOK_PACE_V1, "claim_words": 7,
+                                              "claim_spoken_end": 3.4, "claim_match": "fallback"})
+ok(_g1["checks"]["B"] == "FAIL" and any(k["check"] == "hook_spoken_by" and k["kind"] == "measurement"
+                                        and k["why"] == "claim_not_matched_in_tts" for k in _g1["kinds"]),
+   "fallback spoken-by fail is still a FAIL but classified measurement")
+_g2 = craft.video_maker_gate(_hb, hook_pace={"version": craft.HOOK_PACE_V1, "claim_words": 7,
+                                              "claim_spoken_end": 3.01, "claim_match": "exact"})
+ok(any(k["check"] == "hook_spoken_by" and k["kind"] == "real" and k.get("edge") for k in _g2["kinds"]),
+   "exact spoken-by 3.01s → real, flagged at the tolerance edge")
+
+print("card sync: a repeated phrase is not a mistimed card (measurement fix)")
+_rs = "Prod answered in English. The header said pt-BR. Prod answered in English again. Subscribe now."
+_rw = _wl(_rs, step=0.5)
+# 'Prod answered in English' at 0.0 (claim) and 4.5 (repeat); card sits on the claim words
+_rb = [{"type": "hook", "start": 0.0, "dur": 1.9, "text": "Prod answered in English.", "cue": "Prod"},
+       {"type": "quote", "start": 2.0, "dur": 2.3, "cue": "The header said", "text": "The header said pt-BR."},
+       {"type": "command", "start": 4.4, "dur": 2.0, "cue": "Prod answered in English"},
+       {"type": "cta", "start": 6.5, "dur": 1.5, "cue": "Subscribe", "text": "Subscribe"}]
+_rn = craft.card_sync_notes(_rb, _rw)
+ok(_rn[0]["status"] == "ok" and "kind" not in _rn[0], "on-time card: ok, no classification noise")
+_rb4 = [_rb[0], {"type": "command", "start": 2.4, "dur": 2.0, "cue": "Prod answered in English"}, _rb[3]]
+_rw4 = _wl("Prod answered in English. Then Prod answered in English. Then a long pause here before "
+           "the end of it. Prod answered in English again. Subscribe now.", step=0.5)
+_n4 = craft.card_sync_notes(_rb4, _rw4)
+ok(_n4[0]["status"] == "ok" and _n4[0]["speech_start"] == 2.5 and "kind" not in _n4[0],
+   "in-order first match on its own words → ok (primary match unchanged)")
+# the in-order matcher skips to a LATER repeat → measured early by >1.1s; the
+# card actually sits on an earlier occurrence of its own words → measurement
+_rw5 = _wl("Chat set locale pt-BR. Prod answered in English. Chat set locale pt-BR. Prod answered in English. The header won. Subscribe now.",
+           step=0.5)
+_rb5 = [{"type": "hook", "start": 0.0, "dur": 2.0, "text": "Chat set locale pt-BR. Prod answered in English.", "cue": "Chat"},
+        {"type": "command", "start": 1.9, "dur": 2.8, "cue": "Prod answered in English"},
+        {"type": "quote", "start": 7.0, "dur": 1.4, "cue": "The header won", "text": "The header won."},
+        {"type": "cta", "start": 8.5, "dur": 1.5, "cue": "Subscribe", "text": "Subscribe"}]
+_n5 = craft.card_sync_notes(_rb5, _rw5)
+ok(_n5[0]["status"] == "ok" and _n5[0]["kind"] == "measurement" and _n5[0]["why"] == "repeated_phrase"
+   and _n5[0]["measured_status"] == "early" and _n5[0]["measured"] == 6.0 and _n5[0]["speech_start"] == 2.0,
+   "#1388 shape: matched the repeat at 6.0s (early 4.1s) but the card leads its words at 2.0s → measurement, ok")
+_rb6 = [dict(b) for b in _rb5]
+_rb6[1] = {"type": "command", "start": 4.0, "dur": 2.8, "cue": "Prod answered in English"}
+_n6 = craft.card_sync_notes(_rb6, _rw5)
+ok(_n6[0]["status"] == "early" and _n6[0]["kind"] == "real",
+   "a card on none of its occurrences (4.0s: 2.0s passed, 6.0s too far) stays a REAL fail")
+_g6 = craft.video_maker_gate(_rb6, card_sync={"version": craft.SYNC_V1, "notes": _n6})
+ok(_g6["checks"]["B"] == "FAIL" and any(k["check"] == "card_sync" and k["kind"] == "real" for k in _g6["kinds"]),
+   "Gate B still FAILs a real sync defect, classified real")
+_n7 = craft.card_sync_notes(_rb5, [])
+ok(all(n["status"] == "unmatched" and n["kind"] == "measurement" and n["why"] == "no_word_boundaries"
+       for n in _n7), "no WordBoundary data → unmatched, classified measurement (not failed)")
+_rb8 = [dict(b) for b in _rb5]
+_rb8[2] = {"type": "quote", "start": 7.0, "dur": 1.4, "cue": "never said words", "text": "Never said."}
+_n8 = craft.card_sync_notes(_rb8, _rw5)
+ok(_n8[1]["status"] == "unmatched" and _n8[1]["why"] == "words_not_in_tts", "card words not in TTS → measurement")
+# rounding: lead computed from unrounded times
+_n9 = craft.card_sync_notes([_rb5[0], {"type": "quote", "start": 8.0504, "dur": 1.0, "cue": "The header won",
+                                       "text": "The header won."}], _rw5)
+ok(_n9[0]["status"] == "late" and _n9[0]["kind"] == "real", "0.0504s late (> 0.05 tol) stays late — no rounding pass")
+_n10 = craft.card_sync_notes([_rb5[0], {"type": "quote", "start": 8.0496, "dur": 1.0, "cue": "The header won",
+                                        "text": "The header won."}], _rw5)
+ok(_n10[0]["status"] == "ok", "0.0496s late (within 0.05 tol) → ok")
+
+
+# ---------------------------------------------------------------------------
+# Card text rules (VM Gate B content review of RR #1423, 2026-10-03)
+# ---------------------------------------------------------------------------
+print("card text rules: echo / unspoken quote / invented output / PT-BR terms / near-duplicates")
+_ct_script = ("Ignorar o gráfico não é engenharia. Quando você extrai o texto, o gráfico não vem. "
+              "Vem a legenda e uns números soltos do eixo. A curva, a barra que caiu no trimestre, "
+              "fica pra trás. E o modelo resume o relatório só pela legenda. Eu separo as páginas. "
+              "Página com gráfico vai como imagem pro modelo de visão. O resto vai texto. E eu "
+              "pergunto um valor que só existe no gráfico, pra ver se ele leu mesmo. "
+              "Subscribe — next IA trap.")
+_ct_cmd = {"type": "command", "cue": "Quando você extrai o texto", "prompt": "$",
+           "command": "pdftotext relatorio.pdf -", "output": ["Q3: receita", "10 20 30 40", "[gráfico ausente]"]}
+_ct_td2 = {"type": "term_define", "cue": "Vem a legenda", "term": "Números soltos",
+           "definition": "valores do eixo sem a forma da curva"}
+_ct_q3 = {"type": "quote", "cue": "uns números soltos do eixo",
+          "text": "Vem a legenda e uns números soltos do eixo.", "attribution": ""}
+_ct_cmp7 = {"type": "compare", "cue": "Página com gráfico vai", "title": "Duas rotas",
+            "left": {"title": "Com gráfico", "items": ["página em imagem", "modelo de visão"]},
+            "right": {"title": "Sem gráfico", "items": ["página em texto"]}}
+_ct_td8 = {"type": "term_define", "cue": "O resto vai texto", "term": "Rota texto",
+           "definition": "página sem gráfico segue como texto"}
+_ct_td9 = {"type": "term_define", "cue": "um valor que só existe", "term": "Valor-sentinela",
+           "definition": "número que só existe dentro do gráfico"}
+_ct_q10 = {"type": "quote", "cue": "pra ver se ele leu", "text": "Se erra o valor, não leu", "attribution": ""}
+# rule 5 / near-duplicate measure
+ok(craft.cards_near_duplicate(_ct_td2, _ct_q3), "#1423 #3 repeats #2's words (≥60% shared) → near-duplicate")
+ok(craft.cards_near_duplicate(_ct_cmp7, _ct_td8), "#1423 #8 'Rota texto' repeats #7 'Duas rotas' → near-duplicate")
+ok(not craft.cards_near_duplicate(_ct_td2, _ct_cmp7), "unrelated cards are not near-duplicates")
+ok(craft.cards_near_duplicate({"type": "quote", "text": "e uns números"}, _ct_td2),
+   "a one-word card repeating its neighbour's key word is a near-duplicate")
+# rule 2 / quotes
+ok(craft.unspoken_quotes(_ct_q10, _ct_script) == ["Se erra o valor, não leu"],
+   "#1423 #10 quote never spoken → unspoken_quote")
+ok(craft.unspoken_quotes({"type": "quote", "text": "Pra ver se ele leu mesmo."}, _ct_script) == [],
+   "a verbatim narration clause may be quoted")
+ok(craft.unspoken_quotes({"type": "quote", "text": "Still building · Coming soon", "plain": True},
+                         _ct_script) == [], "plain status line (no quote mark) is not a quotation")
+ok(craft.unspoken_quotes({"type": "statement", "text": "Ele disse “nunca leu”"}, _ct_script) == ["nunca leu"],
+   "“quoted” copy on any card must be verbatim narration")
+# rule 3 / invented output
+ok(craft.invented_output(_ct_cmd, _ct_script) == ["Q3: receita", "10 20 30 40", "[gráfico ausente]"],
+   "#1423 #1: every output line the script never says is invented; the real pdftotext command is fine")
+ok(craft.invented_output({"type": "command", "command": "chartscan relatorio.pdf"}, _ct_script)
+   == ["chartscan relatorio.pdf"], "a command whose tool is neither real nor said is invented")
+ok(craft.invented_output({"type": "command", "command": "ollama run gemma",
+                          "output": ["o gráfico não vem"]}, _ct_script) == [],
+   "output the narration says is allowed")
+ok(craft.invented_output({"type": "code", "lang": "python", "lines": ["x = [1, 2]", "print(x[0])"]},
+                         _ct_script) == [], "code snippets stay illustrative (no output rule)")
+ok(craft.invented_output({"type": "code", "lang": "python", "lines": ["x = 1", "[sem saída]"]},
+                         _ct_script) == ["[sem saída]"], "a placeholder line in code is invented")
+ok(craft.invented_output({"type": "code", "lang": "log", "lines": ["ERROR chart missing"]}, _ct_script)
+   == ["ERROR chart missing"], "a log/console dump follows the output rule")
+ok(craft.is_placeholder_line("[gráfico ausente]") and craft.is_placeholder_line("<missing>")
+   and not craft.is_placeholder_line("arr[0]") and not craft.is_placeholder_line("10 20 30 40"),
+   "placeholder lines: bracketed narrator notes only")
+# rule 4 / PT-BR terms
+ok(craft.is_pt_text(_ct_script) and not craft.is_pt_text("The model reads the legend only."),
+   "language test: PT narration vs EN narration")
+ok(craft.quarter_labels_apply(_ct_script), "#1423 narration is about a quarter (trimestre) → Q→T applies")
+_q4_script = "Gemma 12B em Q4 pesa cerca de sete gigas. Quantizar o peso pra 4-bit muda o arquivo."
+ok(not craft.quarter_labels_apply(_q4_script)
+   and craft.foreign_terms({"type": "stat", "value": "4", "unit": "bits", "label": "Q4 comprime o peso"},
+                           _q4_script) == [],
+   "#1377: Q4 = 4-bit quantization (said in the VO) is not a quarter")
+ok(craft.foreign_terms(_ct_cmd, _ct_script) == ["Q3"], "#1423 #1: 'Q3' on a PT card → foreign term (T3)")
+ok(craft.foreign_terms({"type": "term_define", "term": "Split de página",
+                        "definition": "gráfico vira imagem"}, _ct_script) == ["Split"],
+   "#1423 #6: English 'Split' the narration never says → foreign term")
+ok(craft.foreign_terms({"type": "term_define", "term": "Split de página", "definition": "x"},
+                       "Eu faço o split das páginas.") == [],
+   "a loanword the narration itself uses is fine")
+ok(craft.unspoken_headline_terms(_ct_td9, _ct_script) == ["sentinela"],
+   "#1423 #9 'Valor-sentinela': coined jargon the narration never says")
+ok(craft.unspoken_headline_terms(_ct_td2, _ct_script) == []
+   and craft.unspoken_headline_terms({"type": "term_define", "term": "Separar páginas"}, _ct_script) == [],
+   "headline in the narration's own words (números soltos / separar ~ separo) passes")
+# rule 1 / echo vs continuation
+ok(not craft.is_continuation_card(_ct_q3, _ct_td2, _ct_script, pos=22, prev_pos=22, prev_len=0),
+   "#1423 #3 re-quotes its sentence from the first word → not a continuation (echo)")
+ok(craft.is_continuation_card({"type": "quote", "text": "pra ver se ele leu mesmo"},
+                              {"type": "quote", "text": "Eu pergunto um valor que só existe no gráfico"},
+                              _ct_script, pos=80, prev_pos=70, prev_len=9),
+   "a verbatim later clause of a long sentence is a continuation")
+ok(not craft.is_continuation_card(_ct_q10, _ct_td9, _ct_script, pos=80, prev_pos=70),
+   "#1423 #10 paraphrase (not verbatim) is never a continuation")
+ok(craft.sentence_card_cap(2.5) == 1 and craft.sentence_card_cap(4.6) == 2 and craft.sentence_card_cap(None) == 1,
+   "composer cap for LLM cards: one per sentence, +1 per further card hold of speech")
+ok(craft._looks_like_verb("separo") and craft._looks_like_verb("pergunto")
+   and not craft._looks_like_verb("custo") and not craft._looks_like_verb("resumo"),
+   "PT 1st-person verbs count (Eu separo / pergunto); noun-like 1sg forms do not")
+# the rendered #1423 board → every VM finding
+_ct_board = [{"type": "hook", "cue": "Ignorar o gráfico", "text": "Ignorar o gráfico não é engenharia."},
+             _ct_cmd, _ct_td2, _ct_q3,
+             {"type": "compare", "cue": "A curva, a barra", "title": "Fica pra trás",
+              "left": {"title": "Extração", "items": ["perde a curva"]},
+              "right": {"title": "Página", "items": ["curva intacta"]}},
+             {"type": "compare", "cue": "o modelo resume o relatório", "title": "Resumo do modelo",
+              "left": {"title": "Ele lê", "items": ["só a legenda"]},
+              "right": {"title": "Ele ignora", "items": ["a queda do trimestre"]}},
+             {"type": "term_define", "cue": "Eu separo as páginas", "term": "Split de página",
+              "definition": "gráfico vira imagem, resto vira texto"},
+             _ct_cmp7, _ct_td8, _ct_td9, _ct_q10,
+             {"type": "cta", "cue": "Subscribe — next", "text": "Subscribe · IA", "sub": "same series"}]
+_ct_hits = craft.card_text_hits(_ct_board, _ct_script, rr=True)
+_ct_by = {(h["check"], h["i"]) for h in _ct_hits}
+ok({("echo_card", 3), ("near_duplicate", 3), ("unspoken_quote", 10), ("echo_card", 10),
+    ("invented_output", 1), ("foreign_term", 1), ("foreign_term", 6), ("near_duplicate", 8)} <= _ct_by,
+   f"rendered #1423 board: every VM card finding is caught (got {sorted(_ct_by)})")
+ok(not any(h["i"] in (2, 4, 5, 7, 9) and h["check"] != "foreign_term" for h in _ct_hits),
+   "cards the VM passed (#2 #4 #5 #7) raise no echo/quote/duplicate hit")
+ok(not any(h["check"] in ("invented_output", "foreign_term")
+           for h in craft.card_text_hits(_ct_board, _ct_script, rr=False)),
+   "RR-only rules (output / PT terms) do not apply to other channels")
+_ct_m = craft.card_text_marker(_ct_board, _ct_script, brand="rr")
+_ct_g = craft.video_maker_gate(_ct_board, card_text=_ct_m)
+ok(_ct_m["version"] == craft.CARD_TEXT_V1 and _ct_m["rr"] is True and _ct_g["checks"]["B"] == "FAIL"
+   and any(r.startswith("[B] Card text: FAIL") for r in _ct_g["reasons"])
+   and any(k["check"] == "card_text" and k["kind"] == "real" for k in _ct_g["kinds"]),
+   "Gate B fails a marked render with card-text hits, classified real")
+ok(craft.card_text_marker(_ct_board, _ct_script, content_format="long") is None,
+   "long-form renders carry no card_text marker")
+ok(craft.card_text_check_hits({"version": "other", "hits": [{"check": "x"}]}) == []
+   and craft.card_text_check_hits(None) == [], "unmarked / older renders: no card-text check")
+_ct_cc = {"beats": _ct_board, "beat_timing": craft.BEAT_TIMING_CURRENT, "card_text": _ct_m}
+ok("Card text" in (craft.video_maker_gate_reason(_ct_cc) or ""),
+   "review gate re-reads creation_config.card_text")
+
+print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft)")
+ok(craft.SENTENCE_SPOKEN_MAX_S == 3.9 and craft.SENTENCE_MAX_WORDS == 12,
+   "target = 2.8s card hold + 1.1s lead = 3.9s ≈ 12 words at 3.2 w/s")
+_sp_over = craft.long_spoken_sentences(_ct_script)
+ok([h["text"][:22] for h in _sp_over] == ["E eu pergunto um valor"] and _sp_over[0]["how"] == "estimate",
+   "#1423: the 16-word 'E eu pergunto…' sentence is over (estimate); the endcard VO is skipped")
+_sp_w = [{"text": t, "start": 0.5 * k, "dur": 0.45} for k, t in enumerate(
+    "Um dois três quatro cinco seis sete oito nove dez Isso".split())]
+_sp_tts = craft.long_spoken_sentences("Um dois três quatro cinco seis sete oito nove dez. Isso.", _sp_w)
+ok(len(_sp_tts) == 1 and _sp_tts[0]["how"] == "tts" and _sp_tts[0]["secs"] == 4.95,
+   "with TTS words the span is measured (10 words over 4.95s > 3.9s)")
+ok(craft.sentence_pace_marker(_ct_script, None, "os") is None
+   and craft.sentence_pace_marker(_ct_script, None, "rr", "long") is None
+   and craft.sentence_pace_marker(_ct_script, None, "rr")["over"][0]["how"] == "estimate",
+   "marker: RR shorts only")
+ok("sentence_pace" not in craft.video_maker_gate.__code__.co_varnames,
+   "sentence pace is not a gate input (never a hard fail)")
 
 print(f"\nALL {_checks} CHECKS PASSED")

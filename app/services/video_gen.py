@@ -1,9 +1,12 @@
 """Generate video subject ideas from a topic theme (via grok -p)."""
 
+import logging
 import re
 
 from app.config import settings
 from app.services.llm import complete
+
+logger = logging.getLogger(__name__)
 
 # The channel's spoken language lives implicitly in its render-profile voice id
 # (e.g. "pt-BR-AntonioNeural"). Idea/script prompts must state it explicitly:
@@ -84,7 +87,28 @@ def _strip_idea_cot(title: str) -> str | None:
     if i >= len(parts):
         return None
     kept = " ".join(parts[i:]).strip()
+    # #1406 (2026-10-02): "Conferindo a contagem… o 14B fez 62 tok/s. Sem,
+    # 28. · Local 69" kept the lowercase tail of a sentence whose head was in
+    # the planning text. A remainder that starts mid-sentence is no title.
+    if kept and is_title_fragment(kept):
+        return None
     return kept or None
+
+
+def is_title_fragment(title: str | None) -> bool:
+    """True for a title that starts mid-sentence (first letter lowercase,
+    e.g. "o 14B fez 62 tok/s…") or whose head ends on a dangling , : ; —."""
+    from app.services.subject_guard import subject_guard_reason
+
+    head = (title or "").split("·", 1)[0].strip()
+    if not head:
+        return True
+    # same start-of-subject shape rules as the pre-produce guard (lowercase
+    # first word unless an allowlisted/code-ish literal, bare unit, leading
+    # punctuation), applied when the idea is born instead of at produce time
+    if subject_guard_reason(head) and not re.search(r"(R\$|US\$|\$|€|£)\s*\d", head):
+        return True
+    return head[-1:] in (",", ":", ";", "—", "–", "-")
 
 
 def language_from_voice(voice_name: str | None) -> str | None:
@@ -118,6 +142,128 @@ def channel_language(session, channel_id: int | None) -> str | None:
     except ValueError:
         return None
     return language_from_voice(voice)
+
+
+def channel_voice(session, channel_id: int | None) -> str | None:
+    """A channel's default render-profile voice name (None if unknown)."""
+    import json
+
+    from app.models import Channel, RenderProfile
+
+    ch = session.get(Channel, channel_id) if channel_id else None
+    if not ch or not ch.default_render_profile_id:
+        return None
+    profile = session.get(RenderProfile, ch.default_render_profile_id)
+    if not profile:
+        return None
+    try:
+        return json.loads(profile.params_json or "{}").get("voice_name") or None
+    except ValueError:
+        return None
+
+
+# Series numbering (P0 2026-10-03): the LLM picks "· <Series> NN" itself and
+# re-used numbers (#1400–#1402 "Shipping 3/4/5" while 1–8 were already used).
+# New ideas continue from the highest number used in that series on the
+# channel, across every status (rejected/failed numbers stay burnt).
+_SERIES_SUFFIX_RE = re.compile(r"·\s*([^·\d][^·]*?)\s+(\d{1,4})\s*$")
+
+
+def series_numbers_used(subjects) -> dict[str, int]:
+    """{series (casefolded): max number} over subjects/titles."""
+    used: dict[str, int] = {}
+    for s in subjects or []:
+        m = _SERIES_SUFFIX_RE.search(str(s or "").strip())
+        if m:
+            key = m.group(1).strip().casefold()
+            used[key] = max(used.get(key, 0), int(m.group(2)))
+    return used
+
+
+def renumber_series(ideas: list[str], used_subjects) -> list[str]:
+    """Rewrite each idea's "· <Series> NN" to max-used + 1, in order."""
+    used = series_numbers_used(used_subjects)
+    out = []
+    for idea in ideas or []:
+        m = _SERIES_SUFFIX_RE.search(idea or "")
+        if not m:
+            out.append(idea)
+            continue
+        key = m.group(1).strip().casefold()
+        nxt = used.get(key, 0) + 1
+        used[key] = nxt
+        out.append(f"{idea[:m.start(2)]}{nxt:0{len(m.group(2))}d}{idea[m.end(2):]}")
+    return out
+
+
+def channel_series_subjects(session, channel_id: int | None) -> list[str]:
+    """Every subject and title on the channel (all statuses)."""
+    from sqlmodel import select
+
+    from app.models import Video
+
+    if not channel_id:
+        return []
+    rows = session.exec(select(Video.subject, Video.title)
+                        .where(Video.channel_id == channel_id)).all()
+    return [x for r in rows for x in r if x]
+
+
+# RR draft-time hook pace (P0 2026-10-03, #47): the title head IS the spoken
+# claim (worker._lock_patterned_opener), so an RR short idea is born passing
+# only if the head is ≤8 words and spoken by HOOK_GEN_SPOKEN_BY_S with the
+# real voice (edge-tts, pt-BR rate -8% / pitch -2Hz, normalized). Ideas that
+# miss are regenerated once with the measurements as feedback, then dropped.
+HOOK_GEN_SPOKEN_BY_S = 2.8
+
+
+def measure_claim(head: str, voice: str) -> float | None:
+    """Real edge-tts spoken end (s) of ``head`` for ``voice`` (None: no TTS)."""
+    import tempfile
+    from pathlib import Path
+
+    from app.services import craft
+    from app.services.engines import worker
+
+    with tempfile.TemporaryDirectory() as d:
+        words = worker._tts(head, voice, Path(d) / "claim.mp3")
+    return craft.claim_spoken_end(head, words)
+
+
+def rr_hook_reason(title: str, voice: str | None, measure=None) -> str | None:
+    """Why an RR short title would fail hook pace, or None when it passes."""
+    from app.services import craft
+
+    head = (title or "").split("·", 1)[0].strip()
+    n = craft.claim_word_count(head)
+    if n > craft.HOOK_CLAIM_MAX_WORDS:
+        return f"{n} words (max {craft.HOOK_CLAIM_MAX_WORDS})"
+    if not voice:
+        return None
+    try:
+        end = (measure or measure_claim)(head, voice)
+    except Exception as e:  # TTS outage: word count only, never block the refill
+        logger.info("hook pace TTS check skipped for %r: %s", head, e)
+        return None
+    if end is not None and end > HOOK_GEN_SPOKEN_BY_S + 1e-6:
+        return f"spoken by {end:.2f}s (max {HOOK_GEN_SPOKEN_BY_S:.1f}s)"
+    return None
+
+
+def idea_hook_kwargs(session, channel_id: int | None, content_format: str | None) -> dict:
+    """{"hook_voice": voice} when the channel's new ideas need the RR
+    draft-time hook check (RR shorts only), else {}."""
+    from app.models import Channel
+    from app.services import craft
+    from app.services.engines import theme
+
+    if (content_format or "short") == "long" or not channel_id:
+        return {}
+    ch = session.get(Channel, channel_id)
+    brand = theme.infer_brand(channel_id, getattr(ch, "slug", None), getattr(ch, "name", None))
+    if brand not in craft.HOOK_PACE_BRANDS:
+        return {}
+    return {"hook_voice": channel_voice(session, channel_id)}
 
 
 def channel_language_code(session, channel_id: int | None) -> str | None:
@@ -209,6 +355,40 @@ def _cap_billing(ideas: list[str], existing: list[str], window: int = BILLING_WI
     return out
 
 
+def enforce_hook_pace(ideas: list[str], n: int, *, hook_voice: str | None,
+                      regen=None, measure=None) -> list[str]:
+    """RR shorts: keep only ideas whose head passes rr_hook_reason (≤8 words,
+    spoken ≤2.8s with ``hook_voice``). Misses trigger ONE ``regen(feedback)``
+    call (→ list of titles) whose passing ideas top the batch back up."""
+    good, bad = [], []
+    for t in ideas or []:
+        r = rr_hook_reason(t, hook_voice, measure)
+        (bad if r else good).append((t, r))
+    if bad and regen is not None and len(good) < n:
+        fb = "; ".join(f'"{t.split("·", 1)[0].strip()}" = {r}' for t, r in bad[:6])
+        try:
+            retry = regen(
+                "\nHOOK PACE (hard): the title before '·' is the spoken opening claim — "
+                "max 8 words and spoken in under 2.8 seconds (one short sentence, "
+                f"no second sentence). These failed: {fb}. Write shorter ones.") or []
+        except Exception as e:
+            logger.info("hook pace regeneration failed: %s", e)
+            retry = []
+        have = {t.lower() for t, _ in good + bad}
+        for t in retry:
+            if len(good) >= n:
+                break
+            if t.lower() in have:
+                continue
+            if not rr_hook_reason(t, hook_voice, measure):
+                good.append((t, None))
+                have.add(t.lower())
+    if bad:
+        logger.info("hook pace: dropped %d idea(s): %s", len(bad),
+                    "; ".join(f"{t!r} {r}" for t, r in bad))
+    return [t for t, _ in good][:max(0, n)]
+
+
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
                    n: int = 8, content_format: str = "short",
                    language: str | None = None) -> list[str]:
@@ -277,6 +457,8 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
         title = _strip_idea_cot(title) or ""
         if not title or title.lower() in seen:
             continue
+        if is_title_fragment(title):
+            continue  # #1406: a sentence tail is not a title
         if contains_banned(title) or contains_subscribe_cta(title):
             continue
         if currency_in_text(title):
