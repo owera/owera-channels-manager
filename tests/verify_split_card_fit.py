@@ -6,8 +6,10 @@ Run: PYTHONPATH=. .venv/bin/python tests/verify_split_card_fit.py
 each card picked its own font against 26% of the height and the pair was
 stacked with no global fit; on frame0 the top card also started at 5–6%.
 craft.split_card_markup now lays the pair out — for BOTH the thumb and
-frame0 — in one 9%–72% box with 8% lateral padding, and the two cards share
+frame0 — in one 9%–72% box (8% left / 11% right padding), and the two cards share
 ONE font size that shrinks step-wise until the estimated block fits.
+Padding is asymmetric (CoS 06/10, Designer): 8% left, 11% right, so the
+right edge stays ≤ 89% of the width, clear of the action-button column.
 """
 import re
 import sys
@@ -70,9 +72,11 @@ def inner_w(w, h):
 print("box")
 for w, h in SIZES:
     b = craft.split_box(w, h)
-    ok(abs(b["top"] / h - 0.09) < 1e-9 and abs((b["top"] + b["height"]) / h - 0.72) < 1e-9
-       and abs(b["left"] / w - 0.08) < 1e-9 and abs(b["width"] / w - 0.84) < 1e-9,
-       f"{w}x{h}: box is 9%–72% of the height, 8% padding each side")
+    ok(abs(b["top"] / h - 0.09) < 1e-9 and abs((b["top"] + b["height"]) / h - 0.72) < 1e-9,
+       f"{w}x{h}: box is 9%–72% of the height")
+    ok(b["left"] / w >= 0.08 - 1e-9 and (b["left"] + b["width"]) / w <= 0.89 + 1e-9
+       and abs(b["left"] / w - 0.08) < 1e-9 and abs((b["left"] + b["width"]) / w - 0.89) < 1e-9,
+       f"{w}x{h}: box runs from 8% to 89% of the width (8% left, 11% right padding)")
 
 print("fit: every pair, both sizes")
 for name, sp in PAIRS.items():
@@ -128,10 +132,13 @@ for name, t in (("short", SHORT), ("long", LONG), ("#1408", OVERFLOW[0])):
     th_html = thumbnail._thumbnail_html(sp["head"], brand="os", split=sp)
     rw = int(re.search(r'data-width="(\d+)"', th_html).group(1))
     rh = int(re.search(r'data-height="(\d+)"', th_html).group(1))
-    m = re.search(r"#stage\{position:absolute;left:0;right:0;top:(\d+)px;height:(\d+)px;padding:0 (\d+)px", th_html)
-    ok(m and abs(int(m.group(1)) - int(rh * 0.09)) <= 1 and abs(int(m.group(1)) + int(m.group(2)) - int(rh * 0.72)) <= 1
-       and int(m.group(3)) == int(rw * 0.08),
-       f"thumb {name} @{rw}x{rh}: #stage = 9%–72% box, 8% lateral padding")
+    m = re.search(r"#stage\{position:absolute;left:0;right:0;top:(\d+)px;height:(\d+)px;"
+                  r"padding:0 (\d+)px 0 (\d+)px", th_html)
+    ok(m and abs(int(m.group(1)) - int(rh * 0.09)) <= 1 and abs(int(m.group(1)) + int(m.group(2)) - int(rh * 0.72)) <= 1,
+       f"thumb {name} @{rw}x{rh}: #stage = 9%–72% box")
+    ok(m and int(m.group(4)) >= int(rw * 0.08) and rw - int(m.group(3)) <= rw * 0.89 + 1e-6,
+       f"thumb {name}: left padding ≥ 8% ({int(m.group(4))}px), right edge ≤ 89% of the width "
+       f"({100 * (rw - int(m.group(3))) / rw:.1f}%)")
     tf = fonts(th_html)
     ok(len(tf) == 2 and tf[0] == tf[1] == craft.split_fit(sp, rw, rh)["px"],
        f"thumb {name}: the two cards share one font size ({tf})")
@@ -139,10 +146,12 @@ for name, t in (("short", SHORT), ("long", LONG), ("#1408", OVERFLOW[0])):
     f0 = storyboard.build_index_html([beat], theme.resolve(1, sp["head"], brand="os"),
                                      "portrait", 1080, 1920, 3.0)
     mm = re.search(r"\.hook\[data-split\]\{inset:auto;left:0;right:0;top:(\d+)px;height:(\d+)px;"
-                   r"justify-content:flex-start;padding:0 (\d+)px;", f0)
-    ok(mm and int(mm.group(1)) == int(1920 * 0.09) and int(mm.group(1)) + int(mm.group(2)) == int(1920 * 0.72)
-       and int(mm.group(3)) == int(1080 * 0.08),
-       f"frame0 {name}: split hook = same 9%–72% box (was 5–6% top), 8% lateral padding")
+                   r"justify-content:flex-start;padding:0 (\d+)px 0 (\d+)px;", f0)
+    ok(mm and int(mm.group(1)) == int(1920 * 0.09) and int(mm.group(1)) + int(mm.group(2)) == int(1920 * 0.72),
+       f"frame0 {name}: split hook = same 9%–72% box (was 5–6% top)")
+    ok(mm and int(mm.group(4)) >= int(1080 * 0.08) and 1080 - int(mm.group(3)) <= 1080 * 0.89 + 1e-6,
+       f"frame0 {name}: left padding ≥ 8%, right edge ≤ 89% of the width "
+       f"({100 * (1080 - int(mm.group(3))) / 1080:.1f}%)")
     ff = fonts(f0)
     ok(len(ff) == 2 and ff[0] == ff[1] == craft.split_fit(sp, 1080, 1920)["px"],
        f"frame0 {name}: the two cards share one font size ({ff})")

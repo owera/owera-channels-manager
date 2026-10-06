@@ -726,11 +726,14 @@ def _split_text_html(text: str) -> str:
 # past 72% (#1408 text to 88.6%) because each card picked its own size against
 # 26% of the height and the two were stacked with no global fit. Now both
 # outputs (thumb + frame0) lay the pair out in ONE box, 9%–72% of the frame
-# height with 8% lateral padding, and the two cards share one font size that
-# shrinks step-wise until the estimated block height fits the box.
+# height, 8% padding on the left and 11% on the right (CoS 06/10: the right
+# edge stays ≤ 89% of the width, clear of the Shorts action-button column),
+# and the two cards share one font size that shrinks step-wise until the
+# estimated block height fits the box.
 SPLIT_BOX_TOP_FRAC = 0.09
 SPLIT_BOX_BOTTOM_FRAC = 0.72
-SPLIT_PAD_X_FRAC = 0.08          # lateral padding of the box (each side, of width)
+SPLIT_PAD_LEFT_FRAC = 0.08       # left padding of the box (of width)
+SPLIT_PAD_RIGHT_FRAC = 0.11      # right padding (of width): right edge ≤ 89% (action column)
 SPLIT_GAP_FRAC = 0.025           # gap between the cards (of height)
 SPLIT_CARD_PAD_X_FRAC = 0.05     # card inner padding left/right (of width)
 SPLIT_CARD_PAD_T_FRAC = 0.035    # card inner padding top (of width)
@@ -774,7 +777,8 @@ def split_box(width: int, height: int) -> dict:
     """The 9%–72% × 8%-padded box both outputs place the pair in (px)."""
     top = height * SPLIT_BOX_TOP_FRAC
     return {"top": top, "height": height * SPLIT_BOX_BOTTOM_FRAC - top,
-            "left": width * SPLIT_PAD_X_FRAC, "width": width * (1 - 2 * SPLIT_PAD_X_FRAC)}
+            "left": width * SPLIT_PAD_LEFT_FRAC,
+            "width": width * (1 - SPLIT_PAD_LEFT_FRAC - SPLIT_PAD_RIGHT_FRAC)}
 
 
 def split_card_height(label: str | None, text: str | None, px: float,
@@ -824,7 +828,7 @@ def split_fit(spec: dict | None, width: int, height: int) -> dict:
 def split_card_markup(spec: dict, width: int, height: int) -> str:
     """Shared frame0/thumb markup (same HTML → frame0 ≡ thumb). The container
     (thumbnail #stage / storyboard .hook[data-split]) is the 9%–72% box with
-    8% lateral padding; sizes are explicit px so the fit estimate holds."""
+    8% left / 11% right padding; sizes are explicit px so the fit estimate holds."""
     from app.services.engines.theme import esc
 
     fit = split_fit(spec, width, height)
