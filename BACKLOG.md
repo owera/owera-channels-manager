@@ -1944,3 +1944,21 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 71. ✅ DONE (PR autoimprove/2026-10-07-endcard-cue) shorts endcard cue follows the spoken closer — normal
+- **resolution (2026-10-07):** `_sanitize_cta` sets only the last shorts
+  CTA `cue` to the script's trailing endcard, the line align and
+  card-sync match. A pinned `Subscribe — next agent trap.` replaces a
+  model cue of `Subscribe — next Agent traps trap.` An unpinned doubled
+  closer stays the cue, so that audio still matches. A script with no
+  endcard, and long-form, keep the model cue. Suite:
+  `tests/verify_storyboard.py` 593 → 604. Dropping the assignment leaves
+  the doubled cue unmatched (`card_speech_starts` is None).
+- **why (found 2026-10-07, after #76):** the chip was rewritten; the cue
+  was not. The doubled template is not a contiguous token run in the
+  pinned closer, so the endcard stays `words_not_in_tts`.
+- **caution:** normal (`storyboard.py` only). Not a publish/oauth path.
+- **acceptance:** the doubled cue is unmatched; after sanitize the last
+  cue is the spoken closer and matches the Subscribe word. The mid CTA,
+  an unpinned doubled script, a script with no closer, and long-form
+  keep their cues.

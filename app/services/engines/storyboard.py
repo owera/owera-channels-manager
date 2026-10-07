@@ -1372,6 +1372,22 @@ def _last_sentence(script: str) -> str:
     return parts[-1] if parts else (script or "").strip()
 
 
+def _spoken_endcard_cue(script: str | None) -> str | None:
+    """Trailing endcard sentence(s) in ``script``, or None when it has no closer.
+
+    Align and card-sync match ``cue`` to the spoken words. The chip is not
+    spoken. Use the script tail — even a still-doubled closer the pin has
+    not replaced — so the cue stays findable in that audio. A script with
+    no endcard keeps the model cue.
+    """
+    from app.services import craft
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", (script or "").strip()) if p.strip()]
+    n = craft.endcard_vo_tail_n(parts)
+    if not n:
+        return None
+    return " ".join(parts[-n:])
+
+
 def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short",
                   topic_name=None) -> None:
     """Shorts: lock the last card to the series chip. Longs: punch + CTA ban.
@@ -1380,7 +1396,8 @@ def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short
     (``ensure_series_endcard_vo`` + chip ``Subscribe · {series}``). This
     sanitizer does NOT invert the global Follow/waitlist/Cloud ban.
     Mid-video / title / Follow-tomorrow stay sanitized. Long-form cards
-    still reject Follow/Subscribe verbs.
+    still reject Follow/Subscribe verbs. The last shorts CTA cue follows
+    the script's spoken closer when it has one.
     """
     from app.services import craft
     banned_verbs = {theme.fold(v) for v in _FOLLOW_VERBS.values()} | {"subscribe", "inscreva"}
@@ -1407,6 +1424,15 @@ def _sanitize_cta(beats, script, subject=None, brand=None, content_format="short
             if craft.contains_banned(b["sub"]) or theme.fold(b["sub"]) in banned_verbs:
                 b["sub"] = ""
             b["endcard"] = False
+    if shorts:
+        # Last card only. An earlier CTA cue is mid-script speech; pointing
+        # it at the closer would consume those words and unmatch the endcard.
+        spoken = _spoken_endcard_cue(script)
+        if spoken:
+            for b in reversed(beats):
+                if b.get("type") == "cta":
+                    b["cue"] = spoken
+                    break
 
 
 def _strip_mid_subscribe_beats(beats) -> None:

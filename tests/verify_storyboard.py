@@ -2034,6 +2034,81 @@ _sx = [{"type": "cta", "text": "old", "cue": "Subscribe"}]
 storyboard._sanitize_cta(_sx, "A. Subscribe — next Shipping trap.", subject="No suffix here",
                          brand="os", topic_name="Shipping")
 ok(_sx[0]["text"] == "Subscribe · Shipping", "_sanitize_cta: topic beats the OS brand default")
+ok(_sx[0]["cue"] == "Subscribe — next Shipping trap.",
+   "_sanitize_cta: cue is the script's spoken closer, not the leftover chip cue")
+
+# Cue drives align_storyboard / card-sync. The chip is not spoken. After #76
+# the audio is "next agent trap" while the model cue is still the doubled
+# template, which is not a contiguous token run — status words_not_in_tts.
+print("shorts endcard cue follows the spoken closer")
+_pinned = (
+    "Chat paged Lee at 2am. The agent retried the same tool call. "
+    "The bill was the loop, not the model. Subscribe — next agent trap."
+)
+_cue_beats = [
+    {"type": "hook", "text": "Chat paged Lee at 2am.", "cue": "Chat paged Lee at 2am"},
+    {"type": "statement", "text": "The agent retried the same tool call.",
+     "cue": "The agent retried the same tool call"},
+    {"type": "statement", "text": "The bill was the loop, not the model.",
+     "cue": "The bill was the loop, not the model"},
+    {"type": "cta", "text": "old", "cue": "Subscribe — next Agent traps trap."},
+]
+_cue_words = _words_of(_pinned, step=0.4)
+_sub_at = next(w["start"] for w in _cue_words if w["text"].lower() == "subscribe")
+ok(craft.card_speech_starts(_cue_beats, _cue_words)[-1] is None,
+   "doubled 'Agent traps trap' cue is not in the pinned audio")
+storyboard._sanitize_cta(
+    _cue_beats, _pinned, subject="Chat paged Lee · Agent traps 4",
+    brand="os", topic_name="Agent traps",
+)
+ok(_cue_beats[-1]["cue"] == "Subscribe — next agent trap.",
+   "pinned Agent traps script: last CTA cue is the spoken closer, not 'Agent traps trap'")
+ok(_cue_beats[-1]["text"] == "Subscribe · Agent traps" and _cue_beats[-1].get("endcard") is True,
+   "cue rewrite keeps the series chip")
+_mid = [
+    {"type": "cta", "text": "old", "cue": "mid subscribe line"},
+    {"type": "cta", "text": "old", "cue": "Subscribe — next Agent traps trap."},
+]
+storyboard._sanitize_cta(
+    _mid, _pinned, subject="Chat paged Lee · Agent traps 4",
+    brand="os", topic_name="Agent traps",
+)
+ok(_mid[0]["cue"] == "mid subscribe line" and _mid[1]["cue"] == "Subscribe — next agent trap.",
+   "only the last CTA cue becomes the closer")
+storyboard._strip_mid_subscribe_beats(_cue_beats)
+ok(_cue_beats[-1]["cue"] == "Subscribe — next agent trap.",
+   "mid-subscribe scrub leaves the last endcard cue (it is the VO)")
+ok(craft.card_speech_starts(_cue_beats, _cue_words)[-1] == _sub_at,
+   "pinned cue is found at the spoken Subscribe (doubled cue was None)")
+_doubled_script = "Chat paged Lee. Subscribe — next Agent traps trap."
+_doubled = [{"type": "cta", "text": "old", "cue": "Subscribe — next Agent traps trap."}]
+storyboard._sanitize_cta(
+    _doubled, _doubled_script, subject="Chat paged Lee · Agent traps 4",
+    brand="os", topic_name="Agent traps",
+)
+ok(_doubled[0]["cue"] == "Subscribe — next Agent traps trap.",
+   "unpinned doubled closer stays the cue (the clean VO is not in that audio)")
+_bare = [{"type": "cta", "text": "old", "cue": "golf hotel"}]
+storyboard._sanitize_cta(_bare, "alpha bravo charlie delta echo foxtrot golf hotel",
+                         subject="Test video")
+ok(_bare[0]["cue"] == "golf hotel",
+   "a script with no endcard leaves the model cue")
+_long_cue = [
+    {"type": "hook", "text": "H", "cue": "h"},
+    {"type": "cta", "text": "Subscribe", "sub": "Follow tomorrow", "cue": "follow now"},
+]
+storyboard._sanitize_cta(
+    _long_cue, "The lesson is cut by meaning.",
+    subject="Deep dive", brand="os", content_format="long",
+)
+ok(_long_cue[-1]["cue"] == "follow now", "long-form does not rewrite the CTA cue")
+_pt = [{"type": "cta", "text": "old", "cue": "Subscribe — next IA trap"}]
+storyboard._sanitize_cta(
+    _pt, "O cache cresce. Se inscreve. Próxima armadilha de IA.",
+    subject="O cache cresce. · IA 9", brand="rr", topic_name="IA",
+)
+ok(_pt[0]["cue"] == "Se inscreve. Próxima armadilha de IA.",
+   "PT closer: cue is both spoken sentences")
 
 # --- RR batch 29/09 Gate B (P0 2026-09-30): sentence-bounded cards ----------
 print("RR P0 2026-09-30: cards end at sentence boundaries, no CTA leak, holds ≤2.80")
