@@ -354,7 +354,7 @@ ok(not [h for h in mk["hits"] if h["check"] != "repeated_version"],
 first_cut = min((float(x.get("start") or 0) for x in fb[1:]), default=0)
 ok(first_cut <= craft.HOOK_FIRST_CUT_BY_S + 1e-6,
    f"first cut by {craft.HOOK_FIRST_CUT_BY_S}s on a flagged OS topic ({first_cut:.2f}s)")
-src_c = inspect.getsource(storyboard.compose)
+src_c = inspect.getsource(storyboard._compose_board)
 ok("HOOK_PACE_BRANDS or literal" in src_c, "_pull_first_cut gated by brand RR OR the literal_cards flag")
 calls.clear()
 storyboard.compose(subject="Cursor timed out on French Windows. · Agent traps 9",

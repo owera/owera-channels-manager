@@ -1093,6 +1093,48 @@ BEAT_TIMING_INCL_FADE = "card_incl_fade"
 BEAT_TIMING_HOLD_280 = "card_hold_280"
 BEAT_TIMING_CURRENT = BEAT_TIMING_HOLD_280
 LEGACY_MID_BEAT_MAX_S = 3.0
+
+# Tighter mid hold for flagged topics (topic_flags.TIGHT_MID_CARDS, default 47
+# — OS named tool; CMO 08/10 + PREFLIGHT #1451 Q3): the VM measures a card
+# blank-midpoint to blank-midpoint (hold + the 0.12s gap), so a 2.80 hold reads
+# ≈2.92 (#1450: 2.88–2.94). 2.48 hold ≈ 2.60 measured. Applied to the
+# generator (aligner / splitter / sync DP) and to the one-card-per-sentence
+# continuation threshold while that topic's board is composed and its render
+# markers are computed. The Gate B hold check keeps MID_BEAT_MAX_S (2.80) for
+# every board (publish-time recompute has no topic context): stricter
+# generator, same gate.
+LITERAL_MID_BEAT_MAX_S = 2.48
+_MID_CAP_VAR = __import__("contextvars").ContextVar("mid_hold_cap", default=None)
+
+
+def mid_beat_max() -> float:
+    """Mid hold cap in force (MID_BEAT_MAX_S unless mid_hold_cap set one)."""
+    v = _MID_CAP_VAR.get()
+    return MID_BEAT_MAX_S if v is None else float(v)
+
+
+class mid_hold_cap:
+    """Context manager: compose / mark a board under ``cap`` (None = default)."""
+
+    def __init__(self, cap):
+        self.cap = cap
+        self._tok = None
+
+    def __enter__(self):
+        self._tok = _MID_CAP_VAR.set(self.cap)
+        return self
+
+    def __exit__(self, *exc):
+        _MID_CAP_VAR.reset(self._tok)
+        return False
+
+
+def mid_cap_for_topic(topic_id) -> float | None:
+    """LITERAL_MID_BEAT_MAX_S for a topic_flags.TIGHT_MID_CARDS topic, else None."""
+    from app.services import topic_flags
+    if topic_flags.has(topic_flags.TIGHT_MID_CARDS, topic_id):
+        return LITERAL_MID_BEAT_MAX_S
+    return None
 LEGACY_CTA_BEAT_MAX_S = 4.0
 # RR hook pace (P1 d, council 2026-09-29): on the RR channel the claim is
 # ≤8 words, fully spoken by 3.0s, and the first cut lands by 2.5s (PULSE:
@@ -3692,6 +3734,11 @@ CARD_TEXT_V1 = "card_text_v1"
 CARD_NEAR_DUP = 0.6          # content-stem containment that reads as "the same card"
 CARD_CONT_OVERLAP_MAX = 0.3  # a continuation card shares < this with its sentence's card
 CARD_CONT_MIN_SPAN_S = round(MID_BEAT_MAX_S + BEAT_GAP_S, 2)  # 2.92: one card can't hold it
+
+
+def card_cont_min_span() -> float:
+    """CARD_CONT_MIN_SPAN_S under the mid hold cap in force (mid_hold_cap)."""
+    return round(mid_beat_max() + BEAT_GAP_S, 2)
 _CARD_RULE_SKIP = frozenset({"hook"}) | CTA_TYPES
 _FUNC_FOLD = frozenset(theme.fold(w) for w in _FUNCTION_WORDS) | frozenset(STOPWORDS)
 _QUOTED_RE = re.compile(r"[“\"«„]([^”\"»“„]{2,}?)[”\"»“]")
@@ -3961,9 +4008,9 @@ def sentence_spans(script: str | None, words) -> dict[int, float]:
 def sentence_card_cap(span: float | None) -> int:
     """Cards one sentence may carry: 1, plus one verbatim continuation per
     further card-length of speech."""
-    if span is None or span <= CARD_CONT_MIN_SPAN_S + 1e-9:
+    if span is None or span <= card_cont_min_span() + 1e-9:
         return 1
-    return 1 + int(span // CARD_CONT_MIN_SPAN_S)
+    return 1 + int(span // card_cont_min_span())
 
 
 def is_continuation_card(beat: dict | None, prev: dict | None, script: str | None, *,

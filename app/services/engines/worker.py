@@ -406,94 +406,98 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
     """Snapshot the creative choices this video was made with — the 'treatment' signal the
     growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
     raises (a bad snapshot must not fail a render)."""
-    try:
-        from app.services import craft
-        th = theme.resolve(params.get("topic_id"), subject, brand=params.get("brand"))
-        beat_types = re.findall(r'class="beat ([a-z_]+)"', html)
-        fmt = params.get("content_format") or "short"
-        beats = craft.beats_from_html(html)
-        # RR hook pace marker (P1 d): only new RR renders are checked for
-        # claim ≤8 words / spoken by 3.0s / first cut by 2.5s.
-        pace = (craft.hook_pace_marker(beats, words, brand or params.get("brand"), fmt)
-                if not used_fallback else None)
-        # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
-        # after its own words or leading them by more than 1.1s.
-        sync = (craft.card_sync_marker(beats, words, fmt, script=script)
-                if not used_fallback else None)
-        # Product teasers: no invented CLI on screen (CLI_V1).
-        # literal_cards topics (OS named tool, topic 47): terminal/log/quote
-        # / error / command / quote / stat text only from the on-screen allowlist
-        # (overrides "on_screen_allow"), no repeated version (LITERAL_V1).
-        cli = craft.cli_check_marker(beats, script, title=subject,
-                                     topic_name=params.get("topic_name"),
-                                     content_format=fmt,
-                                     topic_id=params.get("topic_id"),
-                                     sources=params.get("on_screen_allow"))
-        # Card text rules (VM Gate B #1423): echo / unspoken quote / invented
-        # output / PT-BR terms / near-duplicates (CARD_TEXT_V1).
-        # RR sentence pace (soft, logged — never a gate check).
-        space = craft.sentence_pace_marker(script, words, brand or params.get("brand"), fmt)
-        if space and space["over"]:
-            logger.info("render: %d RR sentence(s) spoken over %.1fs (%s)", len(space["over"]),
-                        space["max_s"], ", ".join(f"{h['secs']:.2f}s" for h in space["over"]))
-        from app.services import topic_flags as _tf
-        _lit_src = (params.get("on_screen_allow")
-                    if _tf.has(_tf.LITERAL_CARDS, params.get("topic_id")) else None)
-        ctext = (craft.card_text_marker(beats, script, words,
-                                        brand=brand or params.get("brand"), content_format=fmt,
-                                        sources=_lit_src)
-                 if not used_fallback else None)
-        # Card ⊂ VO (VM P0, council 06/10): each text card = one whole spoken
-        # sentence, one card per sentence (CARD_VO_V1; no OCR in-pipeline —
-        # card source text vs the VO script).
-        cvo = (craft.card_vo_marker(beats, script, content_format=fmt)
-               if not used_fallback else None)
-        gate = craft.video_maker_gate(beats, content_format=fmt,
-                                      used_fallback=used_fallback, hook_pace=pace,
-                                      beat_timing=craft.BEAT_TIMING_CURRENT,
-                                      card_sync=sync, cli_check=cli, card_text=ctext,
-                                      card_vo=cvo)
-        # literal_cards topics: generator slips compose repaired (generated
-        # evidence card → plain, attribution / stat removed, repeated version
-        # dropped) — informational in the VM's craft report, never a verdict.
-        slips = craft.generator_slips_from_html(html) if not used_fallback else None
-        craft.attach_generator_slips(gate, slips)
-        if slips:
-            logger.info("render: %d generator slip(s) repaired by compose: %s", len(slips),
-                        "; ".join(f"{x.get('kind')}@{x.get('cue')!r}" for x in slips[:10]))
-        return {
-            "composition_version": settings.composition_version,
-            "content_format": fmt,
-            "resolution": resolution,
-            "voice": _voice(params),
-            "theme": {"accent": th["accent"], "bg_variant": th["bg_variant"]},
-            "beat_types": beat_types,
-            "beat_count": len(beat_types),
-            "beats": beats or None,
-            "craft_gate": gate,
-            # Aligner caps mid holds at 2.80s so hold + fade ≤ 3.0s (RR
-            # 2026-09-30); older renders keep their own marker's cap.
-            "beat_timing": craft.BEAT_TIMING_CURRENT,
-            **({"hook_pace": pace} if pace else {}),
-            **({"card_sync": sync} if sync else {}),
-            **({"cli_check": cli} if cli else {}),
-            **({"card_text": ctext} if ctext else {}),
-            **({"card_vo": cvo} if cvo else {}),
-            **({"generator_slips": {"count": len(slips),
-                                    "slips": slips[:craft.GEN_SLIPS_LIST_MAX]}}
-               if slips is not None else {}),
-            **({"sentence_pace": space} if space else {}),
-            # Designer split card rendered on frame0 → the publish-time thumb
-            # uses the same card (frame0 ≡ thumb); absent on older renders.
-            **({"frame0_split": True} if 'data-split="1"' in html else {}),
-            "bgm": (bgm.name if bgm else None),
-            "bgm_volume": float(params.get("bgm_volume") or 0.2),
-            "script_words": len(script.split()),
-            "duration": duration,
-            "used_fallback": used_fallback,
-        }
-    except Exception as e:
-        return {"error": f"creation_config failed: {type(e).__name__}: {e}"}
+    # tight_mid_cards topics (OS named tool, 47): the card-text / Card ⊂ VO
+    # markers use the same continuation threshold the board was composed with.
+    from app.services import craft as _craft_cap
+    with _craft_cap.mid_hold_cap(_craft_cap.mid_cap_for_topic(params.get("topic_id"))):
+        try:
+            from app.services import craft
+            th = theme.resolve(params.get("topic_id"), subject, brand=params.get("brand"))
+            beat_types = re.findall(r'class="beat ([a-z_]+)"', html)
+            fmt = params.get("content_format") or "short"
+            beats = craft.beats_from_html(html)
+            # RR hook pace marker (P1 d): only new RR renders are checked for
+            # claim ≤8 words / spoken by 3.0s / first cut by 2.5s.
+            pace = (craft.hook_pace_marker(beats, words, brand or params.get("brand"), fmt)
+                    if not used_fallback else None)
+            # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
+            # after its own words or leading them by more than 1.1s.
+            sync = (craft.card_sync_marker(beats, words, fmt, script=script)
+                    if not used_fallback else None)
+            # Product teasers: no invented CLI on screen (CLI_V1).
+            # literal_cards topics (OS named tool, topic 47): terminal/log/quote
+            # / error / command / quote / stat text only from the on-screen allowlist
+            # (overrides "on_screen_allow"), no repeated version (LITERAL_V1).
+            cli = craft.cli_check_marker(beats, script, title=subject,
+                                         topic_name=params.get("topic_name"),
+                                         content_format=fmt,
+                                         topic_id=params.get("topic_id"),
+                                         sources=params.get("on_screen_allow"))
+            # Card text rules (VM Gate B #1423): echo / unspoken quote / invented
+            # output / PT-BR terms / near-duplicates (CARD_TEXT_V1).
+            # RR sentence pace (soft, logged — never a gate check).
+            space = craft.sentence_pace_marker(script, words, brand or params.get("brand"), fmt)
+            if space and space["over"]:
+                logger.info("render: %d RR sentence(s) spoken over %.1fs (%s)", len(space["over"]),
+                            space["max_s"], ", ".join(f"{h['secs']:.2f}s" for h in space["over"]))
+            from app.services import topic_flags as _tf
+            _lit_src = (params.get("on_screen_allow")
+                        if _tf.has(_tf.LITERAL_CARDS, params.get("topic_id")) else None)
+            ctext = (craft.card_text_marker(beats, script, words,
+                                            brand=brand or params.get("brand"), content_format=fmt,
+                                            sources=_lit_src)
+                     if not used_fallback else None)
+            # Card ⊂ VO (VM P0, council 06/10): each text card = one whole spoken
+            # sentence, one card per sentence (CARD_VO_V1; no OCR in-pipeline —
+            # card source text vs the VO script).
+            cvo = (craft.card_vo_marker(beats, script, content_format=fmt)
+                   if not used_fallback else None)
+            gate = craft.video_maker_gate(beats, content_format=fmt,
+                                          used_fallback=used_fallback, hook_pace=pace,
+                                          beat_timing=craft.BEAT_TIMING_CURRENT,
+                                          card_sync=sync, cli_check=cli, card_text=ctext,
+                                          card_vo=cvo)
+            # literal_cards topics: generator slips compose repaired (generated
+            # evidence card → plain, attribution / stat removed, repeated version
+            # dropped) — informational in the VM's craft report, never a verdict.
+            slips = craft.generator_slips_from_html(html) if not used_fallback else None
+            craft.attach_generator_slips(gate, slips)
+            if slips:
+                logger.info("render: %d generator slip(s) repaired by compose: %s", len(slips),
+                            "; ".join(f"{x.get('kind')}@{x.get('cue')!r}" for x in slips[:10]))
+            return {
+                "composition_version": settings.composition_version,
+                "content_format": fmt,
+                "resolution": resolution,
+                "voice": _voice(params),
+                "theme": {"accent": th["accent"], "bg_variant": th["bg_variant"]},
+                "beat_types": beat_types,
+                "beat_count": len(beat_types),
+                "beats": beats or None,
+                "craft_gate": gate,
+                # Aligner caps mid holds at 2.80s so hold + fade ≤ 3.0s (RR
+                # 2026-09-30); older renders keep their own marker's cap.
+                "beat_timing": craft.BEAT_TIMING_CURRENT,
+                **({"hook_pace": pace} if pace else {}),
+                **({"card_sync": sync} if sync else {}),
+                **({"cli_check": cli} if cli else {}),
+                **({"card_text": ctext} if ctext else {}),
+                **({"card_vo": cvo} if cvo else {}),
+                **({"generator_slips": {"count": len(slips),
+                                        "slips": slips[:craft.GEN_SLIPS_LIST_MAX]}}
+                   if slips is not None else {}),
+                **({"sentence_pace": space} if space else {}),
+                # Designer split card rendered on frame0 → the publish-time thumb
+                # uses the same card (frame0 ≡ thumb); absent on older renders.
+                **({"frame0_split": True} if 'data-split="1"' in html else {}),
+                "bgm": (bgm.name if bgm else None),
+                "bgm_volume": float(params.get("bgm_volume") or 0.2),
+                "script_words": len(script.split()),
+                "duration": duration,
+                "used_fallback": used_fallback,
+            }
+        except Exception as e:
+            return {"error": f"creation_config failed: {type(e).__name__}: {e}"}
 
 
 # --------------------------------------------------------------------------- LLM steps
