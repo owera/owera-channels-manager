@@ -722,33 +722,145 @@ def _split_text_html(text: str) -> str:
     return re.sub(r"([_/])", r"\1<wbr>", esc(text))
 
 
+# Fit (Designer council 06/10, FINDINGS #1): 9 of 22 split cards on air ran
+# past 72% (#1408 text to 88.6%) because each card picked its own size against
+# 26% of the height and the two were stacked with no global fit. Now both
+# outputs (thumb + frame0) lay the pair out in ONE box, 9%–72% of the frame
+# height, 8% padding on the left and 11% on the right (CoS 06/10: the right
+# edge stays ≤ 89% of the width, clear of the Shorts action-button column),
+# and the two cards share one font size that shrinks step-wise until the
+# estimated block height fits the box.
+SPLIT_BOX_TOP_FRAC = 0.09
+SPLIT_BOX_BOTTOM_FRAC = 0.72
+SPLIT_PAD_LEFT_FRAC = 0.08       # left padding of the box (of width)
+SPLIT_PAD_RIGHT_FRAC = 0.11      # right padding (of width): right edge ≤ 89% (action column)
+SPLIT_GAP_FRAC = 0.025           # gap between the cards (of height)
+SPLIT_CARD_PAD_X_FRAC = 0.05     # card inner padding left/right (of width)
+SPLIT_CARD_PAD_T_FRAC = 0.035    # card inner padding top (of width)
+SPLIT_CARD_PAD_B_FRAC = 0.04     # card inner padding bottom (of width)
+SPLIT_CARD_MIN_H_FRAC = 0.24     # visual weight for short cards (of height)
+SPLIT_BORDER_PX = 4
+SPLIT_LABEL_FRAC = 44 / 1080     # label type size (of width; 44px at 1080w)
+SPLIT_LABEL_LH = 1.2
+SPLIT_LABEL_GAP_EM = 0.25
+SPLIT_LINE_H = 1.04
+SPLIT_SPACE_EM = 0.30
+SPLIT_FONT_STEP = 0.94           # shrink factor per step
+SPLIT_FONT_MIN_FRAC = 0.035      # floor (of width)
+
+
+def _split_word_em(word: str) -> float:
+    return sum(SPLIT_CAP_EM if (c.isupper() or c.isdigit()) else SPLIT_CHAR_EM for c in word)
+
+
+def split_text_lines(text: str | None, px: float, inner_w: float) -> int:
+    """Greedy word-wrap line count at ``px`` in ``inner_w`` (identifiers may
+    break after "_" / "/", like the <wbr> in the markup)."""
+    words = [w for w in re.split(r"\s+", text or "") if w]
+    if not words:
+        return 0
+    lines, cur = 1, 0.0
+    for w in words:
+        parts = [p for p in re.split(r"(?<=[_/])", w) if p]
+        for k, part in enumerate(parts):
+            wpx = _split_word_em(part) * px
+            sep = 0.0 if (cur == 0 or k > 0) else SPLIT_SPACE_EM * px
+            if cur and cur + sep + wpx > inner_w + 1e-6:
+                lines += 1
+                cur = wpx
+            else:
+                cur += sep + wpx
+    return lines
+
+
+def split_box(width: int, height: int) -> dict:
+    """The 9%–72% × 8%-padded box both outputs place the pair in (px)."""
+    top = height * SPLIT_BOX_TOP_FRAC
+    return {"top": top, "height": height * SPLIT_BOX_BOTTOM_FRAC - top,
+            "left": width * SPLIT_PAD_LEFT_FRAC,
+            "width": width * (1 - SPLIT_PAD_LEFT_FRAC - SPLIT_PAD_RIGHT_FRAC)}
+
+
+def split_card_height(label: str | None, text: str | None, px: float,
+                      width: int, height: int) -> float:
+    """Estimated rendered card height (px) at type size ``px``."""
+    box = split_box(width, height)
+    inner_w = box["width"] - 2 * width * SPLIT_CARD_PAD_X_FRAC - 2 * SPLIT_BORDER_PX
+    body = split_text_lines(text, px, inner_w) * px * SPLIT_LINE_H
+    if label:
+        lab = width * SPLIT_LABEL_FRAC
+        body += lab * SPLIT_LABEL_LH + lab * SPLIT_LABEL_GAP_EM
+    h = body + width * (SPLIT_CARD_PAD_T_FRAC + SPLIT_CARD_PAD_B_FRAC) + 2 * SPLIT_BORDER_PX
+    return max(h, height * SPLIT_CARD_MIN_H_FRAC)
+
+
+def split_fit(spec: dict | None, width: int, height: int) -> dict:
+    """One shared type size for both cards, shrunk step-wise until the pair
+    (top card + gap + bottom card) fits the 9%–72% box.
+
+    {"px", "top_h", "bottom_h", "block_h", "box", "fits", "steps"}"""
+    spec = spec or {}
+    top_l, top_t = spec.get("top_label") or "", spec.get("top") or ""
+    bot_l, bot_t = spec.get("bottom_label") or "", spec.get("bottom") or ""
+    box = split_box(width, height)
+    inner_w = box["width"] - 2 * width * SPLIT_CARD_PAD_X_FRAC - 2 * SPLIT_BORDER_PX
+    # Start at the smaller of the two per-card sizes, capped so the longest
+    # word of either card fits one line (shrink, never break inside a word).
+    ems = [_split_word_em(p) for t in (top_t, bot_t)
+           for w in re.split(r"[\s]+", t) if w for p in re.split(r"(?<=[_/])", w) if p]
+    px = float(min(split_font_px(top_t, width, height), split_font_px(bot_t, width, height),
+                   inner_w / max(ems or [SPLIT_CHAR_EM])))
+    floor = width * SPLIT_FONT_MIN_FRAC
+    gap = height * SPLIT_GAP_FRAC
+    steps = 0
+    while True:
+        th = split_card_height(top_l, top_t, px, width, height)
+        bh = split_card_height(bot_l, bot_t, px, width, height)
+        block = th + gap + bh
+        if block <= box["height"] + 1e-6 or px * SPLIT_FONT_STEP < floor:
+            break
+        px *= SPLIT_FONT_STEP
+        steps += 1
+    return {"px": int(px), "top_h": th, "bottom_h": bh, "block_h": block, "box": box,
+            "fits": block <= box["height"] + 1e-6, "steps": steps}
+
+
 def split_card_markup(spec: dict, width: int, height: int) -> str:
-    """Shared frame0/thumb markup (same HTML → frame0 ≡ thumb)."""
+    """Shared frame0/thumb markup (same HTML → frame0 ≡ thumb). The container
+    (thumbnail #stage / storyboard .hook[data-split]) is the 9%–72% box with
+    8% left / 11% right padding; sizes are explicit px so the fit estimate holds."""
     from app.services.engines.theme import esc
 
+    fit = split_fit(spec, width, height)
+    px = fit["px"]
+    lab_px = int(round(width * SPLIT_LABEL_FRAC))
+    pad = (f"{int(round(width * SPLIT_CARD_PAD_T_FRAC))}px {int(round(width * SPLIT_CARD_PAD_X_FRAC))}px "
+           f"{int(round(width * SPLIT_CARD_PAD_B_FRAC))}px")
+    min_h = int(height * SPLIT_CARD_MIN_H_FRAC)
+
     def card(cls, label, text, stamp):
-        px = split_font_px(text, width, height)
-        lab = ('<div class="sc-label">' + esc(label) + "</div>") if label else ""
+        lab = (f'<div class="sc-label" style="font-size:{lab_px}px">' + esc(label) + "</div>") if label else ""
         x = '<div class="sc-x">✕</div>' if stamp else ""
-        return ('<div class="sc ' + cls + '">' + x + lab +
+        return (f'<div style="min-height:{min_h}px;padding:{pad}" class="sc {cls}">' + x + lab +
                 '<div class="sc-text" style="font-size:' + str(px) + 'px">' +
                 _split_text_html(text) + "</div></div>")
 
-    return ('<div class="split">' +
+    return (f'<div class="split" data-font="{px}" style="gap:{int(height * SPLIT_GAP_FRAC)}px">' +
             card("sc-top", spec.get("top_label") or "", spec.get("top") or "", False) +
             card("sc-bot", spec.get("bottom_label") or "", spec.get("bottom") or "", True) +
             "</div>")
 
 
 SPLIT_CSS = (
-    ".split{display:flex;flex-direction:column;gap:3.2%;width:100%;height:100%;"
+    ".split{display:flex;flex-direction:column;width:100%;height:100%;"
     "box-sizing:border-box;justify-content:flex-start}"
-    ".sc{position:relative;flex:0 0 auto;min-height:28%;box-sizing:border-box;border-radius:26px;"
-    "padding:4.5% 6% 5%;text-align:left;display:flex;flex-direction:column;justify-content:center;"
+    ".sc{position:relative;flex:0 0 auto;box-sizing:border-box;border-radius:26px;"
+    "text-align:left;display:flex;flex-direction:column;justify-content:center;"
     "background:rgba(255,255,255,.06);border:4px solid var(--split-top,#9aa4b2)}"
     ".sc-bot{border-color:var(--split-bot,#e5484d);background:rgba(229,72,77,.10)}"
     ".sc-label{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:800;"
-    "letter-spacing:.14em;text-transform:uppercase;font-size:44px;opacity:.78;margin-bottom:.25em}"
+    "letter-spacing:.14em;text-transform:uppercase;font-size:44px;line-height:1.2;opacity:.78;"
+    "margin-bottom:.25em}"
     ".sc-text{font-weight:900;line-height:1.04;letter-spacing:-.02em;"
     "overflow-wrap:normal;word-break:normal;hyphens:manual}"
     ".sc-x{position:absolute;right:5%;top:6%;font-size:96px;font-weight:900;line-height:1;"
