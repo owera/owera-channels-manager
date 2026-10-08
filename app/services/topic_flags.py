@@ -26,6 +26,10 @@ Flags:
     when the script says them (else Gate B FAIL); no version number on two
     consecutive cards; RR hook pace first cut (≤2.5s). See craft.literal_*
     and storyboard._apply_literal_cards.
+  * TIGHT_MID_CARDS ("tight_mid_cards", default [47]) — mid cards hold ≤ 2.48s
+    (≈2.60s as the VM measures it, with the 0.12s gap) instead of 2.80
+    (≈2.92): generator and continuation threshold only; Gate B keeps 2.80
+    (craft.mid_hold_cap).
 """
 from __future__ import annotations
 
@@ -33,11 +37,13 @@ ALL = "*"
 VM_PASS_REQUIRED = "vm_pass_required"
 VM_PASS_EXEMPT = "vm_pass_exempt"
 LITERAL_CARDS = "literal_cards"
+TIGHT_MID_CARDS = "tight_mid_cards"
 
 DEFAULTS: dict[str, tuple] = {
     VM_PASS_REQUIRED: (ALL,),
     VM_PASS_EXEMPT: (),
     LITERAL_CARDS: (47,),
+    TIGHT_MID_CARDS: (47,),
 }
 
 

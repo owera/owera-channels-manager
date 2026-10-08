@@ -148,8 +148,10 @@ class Settings(BaseSettings):
     #     "on_screen" cards verbatim; attribution / stat values only when the
     #     script says them (else Gate B FAIL = render blocked); no version on 2
     #     consecutive cards; the ≤2.5s first cut (VM FAIL P0 #1449, CMO 08/10).
+    #   tight_mid_cards (default [47]): mid cards hold ≤2.48s (≈2.60s measured
+    #     with the fade) instead of 2.80 (≈2.92) — generator only; Gate B keeps 2.80.
     topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": [],
-                                               "literal_cards": [47]}
+                                               "literal_cards": [47], "tight_mid_cards": [47]}
 
 
 settings = Settings()

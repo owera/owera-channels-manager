@@ -41,6 +41,13 @@ _MID_MIN = 1.8   # soft floor for every other beat after the hook — see align_
 # VM 2026-09-29: a mid card is ≤3.0s INCLUDING its fade. RR check 2026-09-30:
 # a 2.88s hold still measured 3.05–3.08s with the real fade → hold ≤2.80s.
 _MID_MAX = 2.80
+
+
+def _mid_max() -> float:
+    """The mid hold cap in force: _MID_MAX, or the tighter per-topic cap set by
+    craft.mid_hold_cap (topic_flags.TIGHT_MID_CARDS, OS named tool: 2.48s)."""
+    from app.services import craft
+    return craft.mid_beat_max()
 # Series endcard (last cta) ceiling. Craft gate: chip holds ≤4.0s after the
 # claim. Surplus stays on the payoff / earlier mids — never back on frame0
 # and never a long neon Follow card. Mid-body still dumps into the CTA first
@@ -417,14 +424,14 @@ def align_storyboard(beats: list[dict], words: list[dict], duration: float) -> l
     # absorbs the penultimate dump (so an 8s+ list can shrink); _cap_endcard
     # then enforces the 4.0s chip ceiling and re-caps the penultimate.
     for i in range(n - 1):
-        wanted = starts[i] + _MID_MAX + _GAP
+        wanted = starts[i] + _mid_max() + _GAP
         if starts[i + 1] <= wanted + 1e-9:
             continue
         if i + 1 == n - 1:
             new_next = wanted  # dump into CTA; chip ceiling is applied after
         else:
             succ_end = starts[i + 2] - _GAP
-            new_next = max(wanted, succ_end - _MID_MAX)
+            new_next = max(wanted, succ_end - _mid_max())
         if new_next < starts[i + 1] - 1e-9:
             starts[i + 1] = new_next
     for i in range(1, n):
@@ -1716,7 +1723,7 @@ def _speech_units(words, split_over: float | None = None, min_side: int = 3) -> 
     unit, and a unit never carries a word of the next sentence.
     ``split_over`` lowers the spoken-span threshold (finer clause units when
     a window needs more cards)."""
-    over = (_MID_MAX + _QUOTE_MIN) if split_over is None else float(split_over)
+    over = (_mid_max() + _QUOTE_MIN) if split_over is None else float(split_over)
     sents: dict[int, list[dict]] = {}
     for w in words or []:
         if isinstance(w, dict) and "_s" in w and not w.get("_scta"):
@@ -1770,7 +1777,7 @@ def _sentence_cards(words, a: float, b: float, *, taken=(), left_key: str = "",
     With ``lead_max`` the cards may stop up to that much before ``b`` (the
     caller starts the next card early — visual leads the VO).
     """
-    for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP):
+    for over in (None, _mid_max(), 2 * _QUOTE_MIN + _GAP):
         cards = _sentence_cards_at(words, a, b, _speech_units(words, over), taken=taken,
                                    left_key=left_key, right_key=right_key,
                                    hook_toks=hook_toks, flag=flag, lead_max=lead_max)
@@ -1822,14 +1829,14 @@ def _sentence_cards_at(words, a, b, allu, *, taken, left_key, right_key, hook_to
     n = len(merged)
     if not n:
         return None
-    short = (b - a) - n * (_MID_MAX + _GAP)
+    short = (b - a) - n * (_mid_max() + _GAP)
     if short > 1e-9:
         if short > lead_max + 1e-9:
             return None
-        b = a + n * (_MID_MAX + _GAP)
+        b = a + n * (_mid_max() + _GAP)
     # starts: s0 = a, sn = b; each slot in [_QUOTE_MIN+_GAP, _MID_MAX+_GAP]
     st = [a] + [max(a, u["start"]) for u in merged[1:]] + [b]
-    slot_hi, slot_lo = _MID_MAX + _GAP, _QUOTE_MIN + _GAP
+    slot_hi, slot_lo = _mid_max() + _GAP, _QUOTE_MIN + _GAP
     for _ in range(3):
         for i in range(1, n):  # forward: not too long / not too short
             st[i] = min(max(st[i], st[i - 1] + slot_lo), st[i - 1] + slot_hi)
@@ -1838,7 +1845,7 @@ def _sentence_cards_at(words, a, b, allu, *, taken, left_key, right_key, hook_to
     cards, keys = [], []
     for i, u in enumerate(merged):
         d = st[i + 1] - _GAP - st[i]
-        if d > _MID_MAX + 1e-6 or d < _QUOTE_MIN - 1e-6:
+        if d > _mid_max() + 1e-6 or d < _QUOTE_MIN - 1e-6:
             return None
         if u["key"] in keys or (keys and _clashes(u["key"], keys[-1])):
             return None
@@ -1880,7 +1887,7 @@ def _fill_hook_surplus(beats, duration: float, words=None) -> None:
     hook_dur = float(hook.get("dur") or 0.0)
     if hook_dur <= _HOOK_MAX + 1e-9:
         return
-    slot = _MID_MAX + _GAP
+    slot = _mid_max() + _GAP
     n = int((hook_dur - _HOOK_MAX) / slot)
     # Parity with the old second pass: one more slot when the remainder on
     # the hook would still leave >= _MID_MIN over _HOOK_MAX.
@@ -1908,12 +1915,12 @@ def _fill_hook_surplus(beats, duration: float, words=None) -> None:
     end = nxt_start
     right_key = craft.screen_text_key(nxt)
     for _ in range(n):
-        start = end - _GAP - _MID_MAX
+        start = end - _GAP - _mid_max()
         if start < _GAP + _MIN_DUR:
             break
         text = _window_text(words, start, end)
         nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
-              "_fill": True, "start": round(start, 3), "dur": round(_MID_MAX, 3)}
+              "_fill": True, "start": round(start, 3), "dur": round(_mid_max(), 3)}
         key = craft.screen_text_key(nb)
         if (not key or key in taken or _clashes(key, right_key)
                 or set(key.split()) <= hook_toks):
@@ -1982,7 +1989,7 @@ def _split_long_mids(beats, words=None) -> None:
     if not words or len(beats) < 3:
         return
     from app.services import craft
-    slot = _MID_MAX + _GAP
+    slot = _mid_max() + _GAP
     i = 1
     while i < len(beats) - 1:
         b = beats[i]
@@ -1990,23 +1997,23 @@ def _split_long_mids(beats, words=None) -> None:
             i += 1
             continue
         s0 = float(b.get("start") or 0.0)
-        rem = float(b.get("dur") or 0.0) - _MID_MAX - _GAP
-        if _is_annotated(words) and float(b.get("dur") or 0.0) > _MID_MAX + 1e-9 \
+        rem = float(b.get("dur") or 0.0) - _mid_max() - _GAP
+        if _is_annotated(words) and float(b.get("dur") or 0.0) > _mid_max() + 1e-9 \
                 and rem < _QUOTE_MIN - 1e-9:
             # Overflow too short for its own card: the next card starts early
             # (visual leads the VO by < 1s) instead of stretching this one.
             nxt = beats[i + 1]
             n_end = float(nxt.get("start") or 0.0) + float(nxt.get("dur") or 0.0)
-            n_start = s0 + _MID_MAX + _GAP
+            n_start = s0 + _mid_max() + _GAP
             cap = _ENDCARD_MAX if i + 1 == len(beats) - 1 else None
             if cap is None or n_end - n_start <= cap + 1e-9:
-                b["dur"] = round(_MID_MAX, 3)
+                b["dur"] = round(_mid_max(), 3)
                 nxt["start"] = round(n_start, 3)
                 nxt["dur"] = round(n_end - n_start, 3)
             i += 1
             continue
         if (rem < _MID_MIN - 1e-9 and not _is_annotated(words)) \
-                or float(b.get("dur") or 0.0) <= _MID_MAX + 1e-9:
+                or float(b.get("dur") or 0.0) <= _mid_max() + 1e-9:
             i += 1
             continue
         taken = {craft.screen_text_key(x) for x in beats}
@@ -2014,7 +2021,7 @@ def _split_long_mids(beats, words=None) -> None:
         if _is_annotated(words):
             w_end = s0 + float(b.get("dur") or 0.0) + _GAP
             nxt = beats[i + 1]
-            cards = _sentence_cards(words, s0 + _MID_MAX + _GAP, w_end,
+            cards = _sentence_cards(words, s0 + _mid_max() + _GAP, w_end,
                                     taken=taken, left_key=craft.screen_text_key(b),
                                     right_key=craft.screen_text_key(nxt),
                                     flag="_split", lead_max=_LEAD_MAX)
@@ -2031,7 +2038,7 @@ def _split_long_mids(beats, words=None) -> None:
             if not cards:
                 i += 1
                 continue
-            b["dur"] = round(_MID_MAX, 3)
+            b["dur"] = round(_mid_max(), 3)
             beats[i + 1:i + 1] = cards
             i += 1 + len(cards)
             continue
@@ -2040,7 +2047,7 @@ def _split_long_mids(beats, words=None) -> None:
         prev_key = craft.screen_text_key(b)
         next_key = craft.screen_text_key(beats[i + 1])
         inserts = []
-        t = s0 + _MID_MAX + _GAP
+        t = s0 + _mid_max() + _GAP
         for j in range(k):
             text = _window_text(words, t, t + piece + _GAP)
             nb = {"type": "quote", "cue": text, "text": text, "attribution": "",
@@ -2056,7 +2063,7 @@ def _split_long_mids(beats, words=None) -> None:
         if len(inserts) != k:
             i += 1
             continue
-        b["dur"] = round(_MID_MAX, 3)
+        b["dur"] = round(_mid_max(), 3)
         beats[i + 1:i + 1] = inserts
         i += 1 + k
 
@@ -2114,7 +2121,7 @@ def _pull_first_cut(beats, duration: float, words=None, cut_by: float | None = N
             end = float(snap[-1].get("start") or 0.0) + float(snap[-1].get("dur") or 0.0)
         else:
             end = float(beats[i + 1].get("start") or 0.0) - _GAP
-        cap = _ENDCARD_MAX if (cur.get("type") or "") == "cta" else _MID_MAX
+        cap = _ENDCARD_MAX if (cur.get("type") or "") == "cta" else _mid_max()
         if end - cur_start <= cap + 1e-9:
             cur["dur"] = round(end - cur_start, 3)
             break
@@ -2194,9 +2201,9 @@ def _walk_back(beats) -> None:
         cur_start = float(cur.get("start") or 0.0)
         nxt_start = float(nxt.get("start") or 0.0)
         cur["dur"] = round(max(_MIN_DUR, nxt_start - _GAP - cur_start), 3)
-        if float(cur["dur"]) <= _MID_MAX + 1e-9:
+        if float(cur["dur"]) <= _mid_max() + 1e-9:
             continue
-        extra = float(cur["dur"]) - _MID_MAX
+        extra = float(cur["dur"]) - _mid_max()
         new_start = min(cur_start + extra, nxt_start - _MIN_DUR)
         if new_start <= cur_start + 1e-9:
             continue
@@ -2230,7 +2237,7 @@ def _insert_slack_card(beats, words, surplus: float) -> bool:
             st = float(u["start"])
             if st - _GAP - s_i < keep - 1e-9 or st >= e_i - 1e-9:
                 continue
-            if (e_i - st) + surplus > _MID_MAX + 1e-9 or (e_i - st) + surplus < _QUOTE_MIN:
+            if (e_i - st) + surplus > _mid_max() + 1e-9 or (e_i - st) + surplus < _QUOTE_MIN:
                 continue
             k = craft.screen_text_key({"type": "quote", "text": u["text"]})
             if (not k or k in taken or set(k.split()) <= hook_toks
@@ -2287,7 +2294,7 @@ def _sync_solve_once(beats, v, duration: float, hook_max: float,
         A.append((lo, hi))
 
     def dmax(i):
-        return (hook_max if (beats[i].get("type") or "") == "hook" else _MID_MAX) + _GAP
+        return (hook_max if (beats[i].get("type") or "") == "hook" else _mid_max()) + _GAP
 
     def dmin(i):
         return _card_min(beats[i]) + _GAP
@@ -2339,7 +2346,7 @@ def _sync_board_once(beats, words, duration: float, hook_max: float,
                      content_end: float | None) -> bool:
     from app.services import craft
     snap = copy.deepcopy(beats)
-    levels = [_speech_units(words, over) for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP)]
+    levels = [_speech_units(words, over) for over in (None, _mid_max(), 2 * _QUOTE_MIN + _GAP)]
     levels.append(_speech_units(words, 2 * _QUOTE_MIN + _GAP, min_side=2))
     for _ in range(24):
         v = craft.card_speech_starts(beats, words)
@@ -2570,7 +2577,7 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
     hook_toks = set(craft.screen_text_key(hook).split())
     seen_units = set()
     if _is_annotated(words):
-        levels = [_speech_units(words, over) for over in (None, _MID_MAX, 2 * _QUOTE_MIN + _GAP)]
+        levels = [_speech_units(words, over) for over in (None, _mid_max(), 2 * _QUOTE_MIN + _GAP)]
         levels.append(_speech_units(words, 2 * _QUOTE_MIN + _GAP, min_side=2))
         # finest: clause halves of ~2s sentences — lets the last content card
         # anchor late enough to reach the capped endcard (#1394 tail hole)
@@ -2608,7 +2615,7 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
         return _card_min(b) + _GAP
 
     def dmax(b):
-        return (hook_max if (b.get("type") or "") == "hook" else _MID_MAX) + _GAP
+        return (hook_max if (b.get("type") or "") == "hook" else _mid_max()) + _GAP
 
     # DP: states per node = list of (score, lo, hi, prev_state)
     start_state = (0.0, 0.0, 0.0, None, None)  # score, lo, hi, node idx, prev
@@ -3193,8 +3200,17 @@ def _plain_unsourced_quotes(beats, script, sources, slips=None) -> None:
             b["attribution"] = ""
 
 
-def compose(*, subject, script, words, duration, resolution, width, height,
-            topic_id=None, content_format="short", allowed_types=None, language=None,
+def compose(*, topic_id=None, **kw) -> str | None:
+    """Generate a composition index.html via the typed-storyboard path (see
+    _compose_board). A topic flagged topic_flags.TIGHT_MID_CARDS (default 47)
+    is composed under the tighter mid hold cap (craft.mid_hold_cap)."""
+    from app.services import craft as _craft
+    with _craft.mid_hold_cap(_craft.mid_cap_for_topic(topic_id)):
+        return _compose_board(topic_id=topic_id, **kw)
+
+
+def _compose_board(*, subject, script, words, duration, resolution, width, height,
+                   topic_id=None, content_format="short", allowed_types=None, language=None,
             llm, brand=None, channel_id=None, channel_slug=None,
             provided_thumb=False, topic_name=None, on_screen_allow=None,
             on_screen=None) -> str | None:
