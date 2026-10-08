@@ -129,6 +129,12 @@ def _effective_skip_gate(video: Video, channel: Channel) -> bool:
     return channel.default_skip_gate if video.skip_gate is None else video.skip_gate
 
 
+def _vm_pass_missing(video: Video) -> str | None:
+    """review_guard.vm_pass_required_reason (topic_flags vm_pass_required)."""
+    from app.services import review_guard
+    return review_guard.vm_pass_required_reason(video)
+
+
 def _cc_dict(raw) -> dict:
     """creation_config column (JSON str / dict / None) → dict (never raises)."""
     if isinstance(raw, dict):
@@ -232,6 +238,12 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
             cc = {**cc, "script_source": _craft.SCRIPT_SOURCE_PROVIDED,
                   "script_edits": prior_cc.get("script_edits") or []}
         video.creation_config = json.dumps(cc)
+    # A new render never inherits the VM's Gate B PASS of the previous artifact
+    # (engines without a task creation_config keep the old blob, vm_pass included).
+    _cc_now = _cc_dict(video.creation_config)
+    if "vm_pass" in _cc_now:
+        _cc_now.pop("vm_pass")
+        video.creation_config = json.dumps(_cc_now)
 
     # A completed re-render is the only thing that clears a PATCH /craft
     # stale-render marker (2026-10-06): this mp4 was rendered from the saved text.
@@ -290,6 +302,13 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_FAIL
         video.error = blocked
+        video.approved_at = None
+    elif _effective_skip_gate(video, channel) and _vm_pass_missing(video):
+        # vm_pass_required topic (default 47): skip-gate never auto-approves it;
+        # it waits in review for the VM's Gate B PASS (#1449/#1450).
+        video.status = VideoStatus.REVIEW
+        video.craft_review = craft.CRAFT_REVIEW_PENDING
+        video.error = _vm_pass_missing(video)
         video.approved_at = None
     elif _effective_skip_gate(video, channel):
         video.status = VideoStatus.APPROVED

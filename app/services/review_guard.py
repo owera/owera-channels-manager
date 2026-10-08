@@ -16,9 +16,17 @@ Teaser detection (``is_cm_teaser``) — any of:
 
 vm_pass: POST /api/videos/{id}/vm-pass (Channels/VM only) on a rendered
 review item stores creation_config["vm_pass"] = {"result": "PASS", "actor",
-"at" (UTC ISO), "video_path", "note"}. It is bound to the render artifact:
-a re-render writes a new creation_config (and a new video_path), so a stale
-vm_pass never carries over to a new render.
+"at" (UTC ISO), "video_path", "artifact" (size:mtime_ns of the file), "note"}.
+It is bound to the render artifact: a re-render overwrites the same
+storage/videos/{id}/video.mp4 (new size/mtime → the old record no longer
+matches) and _finalize drops any vm_pass carried in creation_config, so a stale
+vm_pass never carries over to a new render. Records written before the
+"artifact" field existed keep the path-only check.
+
+vm_pass_required topics (topic_flags.VM_PASS_REQUIRED, default topic 47 — OS
+"named tool", #1449/#1450 published without Gate B 08/10): approve, skip-gate
+auto-approve, retry-republish and the publish loop all need vm_pass on the
+current render (vm_pass_required_reason); any actor may approve once it is there.
 
 Actor (every approve / requeue / reject / vm_pass): the ``X-Actor`` request
 header (lower-cased, ≤40 chars), else the HTTP Basic auth username, else
@@ -100,6 +108,21 @@ def is_cm_teaser(v, topic_name: str | None = None) -> bool:
     return "cm_pr" in _overrides(v) or "cm_pr" in _cc(v)
 
 
+def artifact_fingerprint(video_path: str | None) -> str | None:
+    """"<size>:<mtime_ns>" of the render file, else None. _finalize always copies
+    the new render to the SAME storage/videos/{id}/video.mp4, so the path alone
+    cannot tell two renders apart; the copy's size/mtime can."""
+    import os
+
+    if not video_path:
+        return None
+    try:
+        st = os.stat(video_path)
+    except OSError:
+        return None
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
 def vm_pass_of(v) -> dict | None:
     """The vm_pass record for the CURRENT render artifact, else None."""
     rec = _cc(v).get("vm_pass")
@@ -107,6 +130,8 @@ def vm_pass_of(v) -> dict | None:
         return None
     if not v.video_path or rec.get("video_path") != v.video_path:
         return None  # recorded for another (older) render
+    if "artifact" in rec and rec.get("artifact") != artifact_fingerprint(v.video_path):
+        return None  # same path, but a newer render overwrote the file
     return rec
 
 
@@ -115,7 +140,8 @@ def set_vm_pass(v, actor: str, note: str | None = None) -> dict:
     cc = _cc(v)
     rec = {"result": "PASS", "actor": actor,
            "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-           "video_path": v.video_path, "note": (note or "")[:300]}
+           "video_path": v.video_path,
+           "artifact": artifact_fingerprint(v.video_path), "note": (note or "")[:300]}
     cc["vm_pass"] = rec
     v.creation_config = json.dumps(cc)
     return rec
@@ -134,6 +160,25 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
                      "(POST /api/videos/{id}/vm-pass by Channels/VM first; a re-render "
                      "clears it).")
     return None
+
+
+def vm_pass_required_reason(v) -> str | None:
+    """Why this video may not be approved / auto-approved / published, else None.
+
+    Topics flagged topic_flags.VM_PASS_REQUIRED (default: 47, OS "named tool")
+    need the VM's Gate B PASS on the CURRENT render (vm_pass_of: a PASS recorded
+    for an older render never counts). Same lock as the CM teaser (#71/#73),
+    without its Channels-only actor rule. #1449/#1450 (VM FAIL P0 08/10) were
+    auto-approved and published without Gate B."""
+    from app.services import topic_flags
+
+    if not topic_flags.has(topic_flags.VM_PASS_REQUIRED, getattr(v, "topic_id", None)):
+        return None
+    if vm_pass_of(v) is not None:
+        return None
+    return (f"topic {v.topic_id} requires the VM's Gate B PASS on this render before "
+            "approve/publish (POST /api/videos/{id}/vm-pass by Channels/VM first; a "
+            "re-render clears it)")
 
 
 def teaser_requeue_block(v, actor: str, topic_name: str | None = None):

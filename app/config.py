@@ -127,6 +127,18 @@ class Settings(BaseSettings):
     # "storyboard" = new typed-beat path; "legacy" = old clip-array path (kill switch).
     composition_version: str = "storyboard"
 
+    # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
+    # flag name -> list of Topic ids it applies to. env: MANAGER_TOPIC_FLAGS as a
+    # JSON object, e.g. MANAGER_TOPIC_FLAGS='{"vm_pass_required": [47, 52]}'.
+    # A flag missing from the env object keeps its code default
+    # (topic_flags.DEFAULTS), so overriding one flag never silently drops another.
+    #   vm_pass_required: approve / skip-gate auto-approve / retry-republish /
+    #     publish need the VM's Gate B PASS (POST /api/videos/{id}/vm-pass) on
+    #     the CURRENT render — same lock as the CM teaser (#71/#73). Topic 47 =
+    #     OS "named tool" (Agent traps / Real agent bugs, fixed): #1449/#1450
+    #     were auto-approved and published without Gate B (VM FAIL P0 08/10).
+    topic_flags: dict[str, list[int]] = {"vm_pass_required": [47]}
+
 
 settings = Settings()
 
