@@ -31,6 +31,10 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.db as app_db
+# Duplicate-episode check is pinned in tests/verify_episode_dup.py; this suite's
+# fixtures share one passing "· <Series> N" title across rows, so it is off here.
+from app.services import episode_guard as _episode_guard  # noqa: E402
+_episode_guard.duplicate_episode_reason = lambda session, video: None
 import app.main as main
 from app.config import settings
 from app.db import get_session
