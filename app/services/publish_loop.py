@@ -378,6 +378,21 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   channel_id=channel.id, detail=f"publish episode gate: {dup}")
         session.commit()
         return
+    # vm_pass required (default: every topic — #1449/#1450 shipped without
+    # Gate B): never upload without the VM's PASS on THIS render; park it in
+    # review (the VM records vm-pass there, then approve again).
+    from app.services import review_guard
+    need_vm = review_guard.vm_pass_required_reason(video)
+    if need_vm:
+        video.craft_review = craft.CRAFT_REVIEW_PENDING
+        video.status = VideoStatus.REVIEW
+        video.approved_at = None
+        video.error = need_vm
+        session.add(video)
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=f"publish vm_pass gate: {need_vm}")
+        session.commit()
+        return
     if video.craft_review != craft.CRAFT_REVIEW_PASS:
         video.craft_review = craft.CRAFT_REVIEW_PASS
 

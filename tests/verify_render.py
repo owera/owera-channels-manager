@@ -34,6 +34,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 # Importing app.models defines every table=True model, registering them all on
 # SQLModel.metadata so create_all() below builds the full schema.
+import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 # Duplicate-episode check is pinned in tests/verify_episode_dup.py; this suite's
 # fixtures share one passing "· <Series> N" title across rows, so it is off here.
