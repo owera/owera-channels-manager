@@ -697,10 +697,11 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     block = review_guard.teaser_approve_block(v, actor, _topic.name if _topic else None)
     if block:
         raise HTTPException(block[0], block[1])
-    # vm_pass_required topics (default 47, OS named tool): VM Gate B PASS on this render
+    # vm_pass required (default: every topic, minus vm_pass_exempt): VM Gate B
+    # PASS on this render — 409 "held: needs vm_pass" (growth agent included)
     need_vm = review_guard.vm_pass_required_reason(v)
     if need_vm:
-        raise HTTPException(409, f"cannot approve: {need_vm}")
+        raise HTTPException(409, need_vm)
     if body:
         data = body.model_dump(exclude_unset=True)
         if "tags" in data:
@@ -771,8 +772,8 @@ def requeue(video_id: int, request: Request, session: Session = Depends(get_sess
 def vm_pass(video_id: int, request: Request, body: dict | None = None,
             session: Session = Depends(get_session)):
     """Record the Video Maker's Gate B PASS on the CURRENT render (Channels/VM
-    only; X-Actor: channels|vm). Required before a CM teaser — or any video on a
-    vm_pass_required topic (topic_flags, default 47) — can be approved.
+    only; X-Actor: channels|vm). Required before any video can be approved
+    (every topic by default; topic_flags vm_pass_required / vm_pass_exempt).
     Body (optional): {"note": "..."}. Bound to video_path: a re-render clears it."""
     v = session.get(Video, video_id)
     if not v:
@@ -807,7 +808,7 @@ def retry(video_id: int, session: Session = Depends(get_session)):
     if v.video_path and _P(v.video_path).is_file() and _publish_side_failure(session, v):
         need_vm = review_guard.vm_pass_required_reason(v)
         if need_vm:
-            raise HTTPException(409, f"cannot re-publish: {need_vm}")
+            raise HTTPException(409, need_vm)
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft

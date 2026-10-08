@@ -378,9 +378,9 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
                   channel_id=channel.id, detail=f"publish episode gate: {dup}")
         session.commit()
         return
-    # vm_pass_required topic (default 47, OS named tool — #1449/#1450 shipped
-    # without Gate B): never upload without the VM's PASS on THIS render; park it
-    # in review (the VM records vm-pass there, then approve again).
+    # vm_pass required (default: every topic — #1449/#1450 shipped without
+    # Gate B): never upload without the VM's PASS on THIS render; park it in
+    # review (the VM records vm-pass there, then approve again).
     from app.services import review_guard
     need_vm = review_guard.vm_pass_required_reason(video)
     if need_vm:

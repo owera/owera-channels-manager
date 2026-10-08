@@ -23,10 +23,12 @@ matches) and _finalize drops any vm_pass carried in creation_config, so a stale
 vm_pass never carries over to a new render. Records written before the
 "artifact" field existed keep the path-only check.
 
-vm_pass_required topics (topic_flags.VM_PASS_REQUIRED, default topic 47 — OS
-"named tool", #1449/#1450 published without Gate B 08/10): approve, skip-gate
+vm_pass required on EVERY topic by default (topic_flags.VM_PASS_REQUIRED =
+["*"], exemptions in VM_PASS_EXEMPT; Rodrigo 08/10 after OS #1449/#1450 were
+published without Gate B): approve (API / growth agent / manual), skip-gate
 auto-approve, retry-republish and the publish loop all need vm_pass on the
-current render (vm_pass_required_reason); any actor may approve once it is there.
+current render (vm_pass_required_reason, 409 "held: needs vm_pass"); any actor
+may approve once it is there (CM teasers keep their Channels-only rule).
 
 Actor (every approve / requeue / reject / vm_pass): the ``X-Actor`` request
 header (lower-cased, ≤40 chars), else the HTTP Basic auth username, else
@@ -156,29 +158,37 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
                      "X-Actor: channels). The growth agent and the Video Maker never "
                      "approve a CM teaser (the VM records vm-pass).")
     if vm_pass_of(v) is None:
-        return (409, "CM teaser: approve requires the VM's Gate B PASS on this final render "
+        return (409, "held: needs vm_pass — CM teaser: approve requires the VM's Gate B "
+                     "PASS on this final render "
                      "(POST /api/videos/{id}/vm-pass by Channels/VM first; a re-render "
                      "clears it).")
     return None
 
 
+VM_PASS_HELD = "held: needs vm_pass"
+
+
 def vm_pass_required_reason(v) -> str | None:
     """Why this video may not be approved / auto-approved / published, else None.
 
-    Topics flagged topic_flags.VM_PASS_REQUIRED (default: 47, OS "named tool")
-    need the VM's Gate B PASS on the CURRENT render (vm_pass_of: a PASS recorded
-    for an older render never counts). Same lock as the CM teaser (#71/#73),
-    without its Channels-only actor rule. #1449/#1450 (VM FAIL P0 08/10) were
-    auto-approved and published without Gate B."""
+    Every topic by default (topic_flags.VM_PASS_REQUIRED = ["*"], minus
+    topic_flags.VM_PASS_EXEMPT) needs the VM's Gate B PASS on the CURRENT render
+    (vm_pass_of: a PASS recorded for an older render never counts). Same lock
+    as the CM teaser (#71/#73), without its Channels-only actor rule.
+    #1449/#1450 (OS topic 47, VM FAIL P0 08/10) were auto-approved and
+    published without Gate B (Rodrigo 08/10 15:11)."""
     from app.services import topic_flags
 
-    if not topic_flags.has(topic_flags.VM_PASS_REQUIRED, getattr(v, "topic_id", None)):
+    tid = getattr(v, "topic_id", None)
+    if not topic_flags.has(topic_flags.VM_PASS_REQUIRED, tid):
+        return None
+    if topic_flags.has(topic_flags.VM_PASS_EXEMPT, tid):
         return None
     if vm_pass_of(v) is not None:
         return None
-    return (f"topic {v.topic_id} requires the VM's Gate B PASS on this render before "
-            "approve/publish (POST /api/videos/{id}/vm-pass by Channels/VM first; a "
-            "re-render clears it)")
+    return (f"{VM_PASS_HELD} — the VM's Gate B PASS on this render is required before "
+            f"approve/publish (topic {tid}; POST /api/videos/{{id}}/vm-pass by Channels/VM "
+            "first; a re-render clears it)")
 
 
 def teaser_requeue_block(v, actor: str, topic_name: str | None = None):

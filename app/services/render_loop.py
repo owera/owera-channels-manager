@@ -304,8 +304,8 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.error = blocked
         video.approved_at = None
     elif _effective_skip_gate(video, channel) and _vm_pass_missing(video):
-        # vm_pass_required topic (default 47): skip-gate never auto-approves it;
-        # it waits in review for the VM's Gate B PASS (#1449/#1450).
+        # vm_pass required (default: every topic): skip-gate never auto-approves
+        # without the VM's Gate B PASS; it waits in review (#1449/#1450).
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_PENDING
         video.error = _vm_pass_missing(video)

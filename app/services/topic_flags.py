@@ -1,33 +1,51 @@
 """Per-topic policy flags (one shared structure for every per-topic switch).
 
 settings.topic_flags (env MANAGER_TOPIC_FLAGS, JSON object) maps a flag name to
-the Topic ids it applies to. A flag absent from the settings object falls back
-to DEFAULTS, so an env override of one flag never drops another one's default.
+the Topic ids it applies to; "*" in the list means every topic. A flag absent
+from the settings object falls back to DEFAULTS, so an env override of one flag
+never drops another one's default.
 
 Flags:
-  * VM_PASS_REQUIRED ("vm_pass_required") — approve, skip-gate auto-approve,
+  * VM_PASS_REQUIRED ("vm_pass_required", default ["*"] = ALL topics) —
+    approve (API / growth agent / manual), skip-gate auto-approve,
     retry-republish and the publish loop need the Video Maker's Gate B PASS
     (creation_config["vm_pass"]) on the CURRENT render artifact
-    (review_guard.vm_pass_required_reason). First entry: topic 47, OS "named
-    tool" — #1449/#1450 were auto-approved and published without Gate B.
+    (review_guard.vm_pass_required_reason; 409 "held: needs vm_pass").
+    Rodrigo 08/10 15:11, after #1449/#1450 (OS topic 47) were auto-approved
+    and published without Gate B. A per-topic list (e.g. [47]) narrows it.
+  * VM_PASS_EXEMPT ("vm_pass_exempt", default [] = none) — topics exempt from
+    VM_PASS_REQUIRED.
 """
 from __future__ import annotations
 
+ALL = "*"
 VM_PASS_REQUIRED = "vm_pass_required"
+VM_PASS_EXEMPT = "vm_pass_exempt"
 
-DEFAULTS: dict[str, tuple[int, ...]] = {
-    VM_PASS_REQUIRED: (47,),
+DEFAULTS: dict[str, tuple] = {
+    VM_PASS_REQUIRED: (ALL,),
+    VM_PASS_EXEMPT: (),
 }
 
 
-def topics_with(flag: str) -> frozenset[int]:
-    """Topic ids carrying ``flag`` (settings override, else DEFAULTS)."""
+def _raw(flag: str) -> tuple:
     from app.config import settings
 
     cfg = getattr(settings, "topic_flags", None) or {}
     raw = cfg.get(flag, DEFAULTS.get(flag, ())) if isinstance(cfg, dict) else DEFAULTS.get(flag, ())
+    return tuple(raw or ())
+
+
+def applies_to_all(flag: str) -> bool:
+    """True when ``flag`` lists "*" (every topic)."""
+    return any(str(x).strip() == ALL for x in _raw(flag))
+
+
+def topics_with(flag: str) -> frozenset[int]:
+    """Explicit Topic ids carrying ``flag`` (settings override, else DEFAULTS);
+    "*" is reported by applies_to_all, not here."""
     out = set()
-    for x in raw or ():
+    for x in _raw(flag):
         try:
             out.add(int(x))
         except (TypeError, ValueError):
@@ -36,7 +54,9 @@ def topics_with(flag: str) -> frozenset[int]:
 
 
 def has(flag: str, topic_id) -> bool:
-    """True when ``topic_id`` carries ``flag``."""
+    """True when ``topic_id`` carries ``flag`` (listed, or the flag is "*")."""
+    if applies_to_all(flag):
+        return True
     if topic_id is None:
         return False
     try:
