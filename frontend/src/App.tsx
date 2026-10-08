@@ -6,6 +6,7 @@ import Review from "./pages/Review";
 import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
 import Trends from "./pages/Trends";
+import { HeldToasts } from "./ui";
 
 const NAV = [
   { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
+      <HeldToasts />
       <BottomNav />
     </div>
   );

@@ -6,7 +6,7 @@ import {
   type QueueReason, type Video,
 } from "../api";
 import { BOARD_COLUMNS, STATUS_META, TERMINAL_COLUMNS } from "../status";
-import { Empty, Field, Modal, StatusChip } from "../ui";
+import { Empty, Field, HeldBadge, Modal, StatusChip, useHeld } from "../ui";
 
 function relTime(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now();
@@ -22,6 +22,8 @@ function relTime(iso: string): string {
 function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero, oauthHold }: { v: Video; onOpen: (v: Video) => void; eta?: string; qinfo?: QueueReason; format?: "short" | "long"; paused?: boolean; budgetZero?: boolean; oauthHold?: boolean }) {
   const m = useMut();
   const progressing = v.status === "rendering" || v.status === "publishing";
+  // 409 "held…" on this card's approve / produce → neutral "Segurado" badge
+  const hold = useHeld().find((n) => n.videoId === v.id && (v.status === "review" || v.status === "draft"));
   return (
     <motion.div layout initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
       className="panel p-3 cursor-pointer card-hover" onClick={() => onOpen(v)}>
@@ -55,7 +57,9 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero, oauthHol
         </div>
       )}
 
-      {v.error && <div className="mt-2 text-[11px] font-mono text-[#f7768e] line-clamp-2">{v.error}</div>}
+      {hold ? <HeldBadge reason={hold.reason} />
+        : v.error && /^held\b/i.test(v.error.trim()) ? <HeldBadge reason={v.error.trim().replace(/^held\s*[:\-—–]?\s*/i, "")} />
+        : v.error && <div className="mt-2 text-[11px] font-mono text-[#f7768e] line-clamp-2">{v.error}</div>}
 
       <div className="flex items-center gap-2 mt-3">
         {format && (

@@ -1,8 +1,9 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { STATUS_META } from "./status";
 import type { Status } from "./api";
+import { dismissHeld, heldSnapshot, subscribeHeld, type HeldNotice } from "./held";
 
 export function StatusChip({ status, sm }: { status: Status; sm?: boolean }) {
   const m = STATUS_META[status];
@@ -120,5 +121,52 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
         style={{ transform: on ? "translateX(22px)" : "translateX(2px)" }}
       />
     </button>
+  );
+}
+
+// ---- "Segurado" (held) state: 409 "held…" from approve / produce ----
+export function useHeld(): HeldNotice[] {
+  return useSyncExternalStore(subscribeHeld, heldSnapshot, heldSnapshot);
+}
+
+const HELD_HEX = "#f5a524";
+
+/** Neutral amber badge — a hold is not an error. */
+export function HeldBadge({ reason }: { reason: string }) {
+  return (
+    <div className="mt-2 flex items-start gap-1.5 font-mono text-[10px] tracking-wider rounded-sm border px-1.5 py-1"
+      style={{ color: HELD_HEX, borderColor: `${HELD_HEX}40`, background: `${HELD_HEX}14` }}
+      title={reason} data-held="1">
+      <span>⏸</span>
+      <span className="line-clamp-3"><span className="uppercase">Segurado:</span> {reason}</span>
+    </div>
+  );
+}
+
+/** Global toasts for holds (bulk produce / review approve have no card). */
+export function HeldToasts() {
+  const notices = useHeld();
+  useEffect(() => {
+    if (!notices.length) return;
+    const t = setTimeout(() => dismissHeld(notices[notices.length - 1].id), 8000);
+    return () => clearTimeout(t);
+  }, [notices]);
+  const recent = notices.filter((n) => Date.now() - n.at < 8000).slice(0, 4);
+  if (!recent.length) return null;
+  return createPortal(
+    <div className="fixed right-4 bottom-20 md:bottom-4 z-[60] flex flex-col gap-2 max-w-sm">
+      {recent.map((n) => (
+        <div key={n.id} role="status" className="panel px-3 py-2 font-mono text-xs flex items-start gap-2"
+          style={{ color: HELD_HEX, borderColor: `${HELD_HEX}55` }}>
+          <span>⏸</span>
+          <span className="flex-1">
+            <span className="uppercase">Segurado</span>
+            {n.videoId != null ? ` · #${n.videoId}` : ""}: {n.reason}
+          </span>
+          <button className="text-fog-300 hover:text-white" onClick={() => dismissHeld(n.id)}>×</button>
+        </div>
+      ))}
+    </div>,
+    document.body,
   );
 }
