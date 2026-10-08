@@ -450,7 +450,10 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             # Card ⊂ VO (VM P0, council 06/10): each text card = one whole spoken
             # sentence, one card per sentence (CARD_VO_V1; no OCR in-pipeline —
             # card source text vs the VO script).
-            cvo = (craft.card_vo_marker(beats, script, content_format=fmt)
+            # RR also: each text card = a whole sentence or an isolated term
+            # (whole_sentence; Gate B #1443 F1).
+            cvo = (craft.card_vo_marker(beats, script, content_format=fmt,
+                                        brand=brand or params.get("brand"))
                    if not used_fallback else None)
             gate = craft.video_maker_gate(beats, content_format=fmt,
                                           used_fallback=used_fallback, hook_pace=pace,

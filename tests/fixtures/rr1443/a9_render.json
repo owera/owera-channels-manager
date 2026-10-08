@@ -1,0 +1,542 @@
+{
+"_note": "RR #1443 re-render on a9addc4 (08/10): VO script, word timings (whisper medium on the master, mapped onto the script words) and the rendered board (creation_config.beats).",
+"script": "Chat sem fim não é engenharia. O modelo não lembra de nada entre uma resposta e outra. O app reenvia a conversa a cada mensagem. Quando não cabe mais, corta ou resume, e você não vê o que saiu. A decisão errada da mensagem 30 continua lá, puxando a resposta. Eu fecho o fio. Peço um resumo de dez linhas com as decisões e confiro. Depois abro um chat novo só com esse resumo. Se inscreve. Próxima armadilha de IA.",
+"duration": 36.06,
+"words": [
+{
+"text": "Chat",
+"start": 0.2,
+"dur": 0.3
+},
+{
+"text": "sem",
+"start": 0.7,
+"dur": 0.32
+},
+{
+"text": "fim",
+"start": 1.02,
+"dur": 0.14
+},
+{
+"text": "não",
+"start": 1.16,
+"dur": 0.24
+},
+{
+"text": "é",
+"start": 1.4,
+"dur": 0.18
+},
+{
+"text": "engenharia.",
+"start": 1.58,
+"dur": 0.98
+},
+{
+"text": "O",
+"start": 2.56,
+"dur": 0.3
+},
+{
+"text": "modelo",
+"start": 2.86,
+"dur": 0.3
+},
+{
+"text": "não",
+"start": 3.28,
+"dur": 0.68
+},
+{
+"text": "lembra",
+"start": 3.96,
+"dur": 0.4
+},
+{
+"text": "de",
+"start": 4.36,
+"dur": 0.22
+},
+{
+"text": "nada",
+"start": 4.58,
+"dur": 0.22
+},
+{
+"text": "entre",
+"start": 4.8,
+"dur": 0.24
+},
+{
+"text": "uma",
+"start": 5.04,
+"dur": 0.24
+},
+{
+"text": "resposta",
+"start": 5.28,
+"dur": 0.48
+},
+{
+"text": "e",
+"start": 5.76,
+"dur": 0.24
+},
+{
+"text": "outra.",
+"start": 6.0,
+"dur": 0.4
+},
+{
+"text": "O",
+"start": 7.36,
+"dur": 0.04
+},
+{
+"text": "app",
+"start": 7.4,
+"dur": 0.3
+},
+{
+"text": "reenvia",
+"start": 7.7,
+"dur": 0.3
+},
+{
+"text": "a",
+"start": 8.26,
+"dur": 0.26
+},
+{
+"text": "conversa",
+"start": 8.52,
+"dur": 0.44
+},
+{
+"text": "a",
+"start": 8.96,
+"dur": 0.08
+},
+{
+"text": "cada",
+"start": 9.04,
+"dur": 0.18
+},
+{
+"text": "mensagem.",
+"start": 9.22,
+"dur": 0.86
+},
+{
+"text": "Quando",
+"start": 10.94,
+"dur": 0.22
+},
+{
+"text": "não",
+"start": 11.16,
+"dur": 0.28
+},
+{
+"text": "cabe",
+"start": 11.44,
+"dur": 0.26
+},
+{
+"text": "mais,",
+"start": 11.7,
+"dur": 0.52
+},
+{
+"text": "corta",
+"start": 12.56,
+"dur": 0.26
+},
+{
+"text": "ou",
+"start": 12.82,
+"dur": 0.3
+},
+{
+"text": "resume,",
+"start": 13.02,
+"dur": 0.38
+},
+{
+"text": "e",
+"start": 13.72,
+"dur": 0.14
+},
+{
+"text": "você",
+"start": 13.86,
+"dur": 0.34
+},
+{
+"text": "não",
+"start": 14.2,
+"dur": 0.28
+},
+{
+"text": "vê",
+"start": 14.48,
+"dur": 0.1
+},
+{
+"text": "o",
+"start": 14.58,
+"dur": 0.14
+},
+{
+"text": "que",
+"start": 14.72,
+"dur": 0.2
+},
+{
+"text": "saiu.",
+"start": 14.92,
+"dur": 0.46
+},
+{
+"text": "A",
+"start": 16.24,
+"dur": 0.24
+},
+{
+"text": "decisão",
+"start": 16.48,
+"dur": 0.48
+},
+{
+"text": "errada",
+"start": 16.96,
+"dur": 0.34
+},
+{
+"text": "da",
+"start": 17.3,
+"dur": 0.12
+},
+{
+"text": "mensagem",
+"start": 17.42,
+"dur": 0.64
+},
+{
+"text": "30",
+"start": 18.06,
+"dur": 0.36
+},
+{
+"text": "continua",
+"start": 18.42,
+"dur": 0.56
+},
+{
+"text": "lá,",
+"start": 18.98,
+"dur": 0.42
+},
+{
+"text": "puxando",
+"start": 19.76,
+"dur": 0.36
+},
+{
+"text": "a",
+"start": 20.12,
+"dur": 0.34
+},
+{
+"text": "resposta.",
+"start": 20.46,
+"dur": 0.4
+},
+{
+"text": "Eu",
+"start": 21.78,
+"dur": 0.42
+},
+{
+"text": "fecho",
+"start": 22.2,
+"dur": 0.4
+},
+{
+"text": "o",
+"start": 22.6,
+"dur": 0.18
+},
+{
+"text": "fio.",
+"start": 22.78,
+"dur": 0.84
+},
+{
+"text": "Peço",
+"start": 24.02,
+"dur": 0.22
+},
+{
+"text": "um",
+"start": 24.24,
+"dur": 0.24
+},
+{
+"text": "resumo",
+"start": 24.48,
+"dur": 0.32
+},
+{
+"text": "de",
+"start": 24.8,
+"dur": 0.24
+},
+{
+"text": "dez",
+"start": 25.04,
+"dur": 0.3
+},
+{
+"text": "linhas",
+"start": 25.3,
+"dur": 0.36
+},
+{
+"text": "com",
+"start": 25.66,
+"dur": 0.22
+},
+{
+"text": "as",
+"start": 25.88,
+"dur": 0.52
+},
+{
+"text": "decisões",
+"start": 26.4,
+"dur": 0.3
+},
+{
+"text": "e",
+"start": 26.4,
+"dur": 0.26
+},
+{
+"text": "confiro.",
+"start": 26.66,
+"dur": 0.64
+},
+{
+"text": "Depois",
+"start": 28.26,
+"dur": 0.44
+},
+{
+"text": "abro",
+"start": 28.7,
+"dur": 0.34
+},
+{
+"text": "um",
+"start": 29.04,
+"dur": 0.18
+},
+{
+"text": "chat",
+"start": 29.22,
+"dur": 0.26
+},
+{
+"text": "novo",
+"start": 29.48,
+"dur": 0.34
+},
+{
+"text": "só",
+"start": 29.82,
+"dur": 0.32
+},
+{
+"text": "com",
+"start": 30.14,
+"dur": 0.3
+},
+{
+"text": "esse",
+"start": 30.44,
+"dur": 0.2
+},
+{
+"text": "resumo.",
+"start": 30.64,
+"dur": 0.74
+},
+{
+"text": "Se",
+"start": 32.2,
+"dur": 0.16
+},
+{
+"text": "inscreve.",
+"start": 32.36,
+"dur": 0.9
+},
+{
+"text": "Próxima",
+"start": 34.02,
+"dur": 0.44
+},
+{
+"text": "armadilha",
+"start": 34.46,
+"dur": 0.62
+},
+{
+"text": "de",
+"start": 35.08,
+"dur": 0.26
+},
+{
+"text": "IA.",
+"start": 35.34,
+"dur": 0.28
+}
+],
+"board_a9": [
+{
+"type": "hook",
+"start": 0.0,
+"dur": 2.38,
+"cue": "Chat sem fim não é engenharia",
+"text": "Chat sem fim não é engenharia.",
+"object": "CHAT",
+"emoji": ""
+},
+{
+"type": "stat",
+"start": 2.5,
+"dur": 2.108,
+"cue": "O modelo não lembra",
+"emoji": "",
+"value": "0",
+"unit": "",
+"label": "não lembra de nada"
+},
+{
+"type": "quote",
+"start": 4.728,
+"dur": 1.906,
+"cue": "entre uma resposta e outra.",
+"text": "entre uma resposta e outra.",
+"attribution": ""
+},
+{
+"type": "code",
+"start": 6.754,
+"dur": 2.8,
+"cue": "O app reenvia",
+"lines": [
+"on_message(texto):",
+"  conversa.append(texto)",
+"  send(conversa)"
+]
+},
+{
+"type": "quote",
+"start": 9.674,
+"dur": 2.314,
+"cue": "Quando não cabe",
+"text": "Quando não cabe",
+"attribution": ""
+},
+{
+"type": "compare",
+"start": 12.108,
+"dur": 2.8,
+"cue": "corta ou resume",
+"title": "Não cabe mais",
+"left": {
+"title": "Corta",
+"items": [
+"o que saiu"
+]
+},
+"right": {
+"title": "Resume",
+"items": [
+"você não vê"
+]
+}
+},
+{
+"type": "stat",
+"start": 15.028,
+"dur": 1.4,
+"cue": "A decisão errada",
+"emoji": "",
+"value": "30",
+"unit": "",
+"label": "puxando a resposta"
+},
+{
+"type": "quote",
+"start": 16.548,
+"dur": 1.797,
+"cue": "errada da mensagem",
+"text": "errada da mensagem",
+"attribution": ""
+},
+{
+"type": "quote",
+"start": 18.465,
+"dur": 2.8,
+"cue": "puxando a resposta.",
+"text": "puxando a resposta.",
+"attribution": ""
+},
+{
+"type": "term_define",
+"start": 21.385,
+"dur": 2.8,
+"cue": "Eu fecho o fio",
+"term": "Fio",
+"definition": "a conversa que eu fecho"
+},
+{
+"type": "stat",
+"start": 24.305,
+"dur": 2.8,
+"cue": "dez linhas",
+"emoji": "",
+"value": "10",
+"unit": "linhas",
+"label": "com as decisões"
+},
+{
+"type": "quote",
+"start": 27.225,
+"dur": 2.438,
+"cue": "Depois abro um chat novo",
+"text": "Depois abro um chat novo",
+"attribution": ""
+},
+{
+"type": "quote",
+"start": 29.783,
+"dur": 2.377,
+"cue": "só com esse resumo.",
+"text": "só com esse resumo.",
+"attribution": ""
+},
+{
+"type": "cta",
+"start": 32.28,
+"dur": 3.78,
+"cue": "Se inscreve. Próxima armadilha de IA.",
+"text": "Se inscreve · IA",
+"sub": ""
+}
+]
+}

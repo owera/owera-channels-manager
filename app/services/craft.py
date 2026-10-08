@@ -1163,6 +1163,8 @@ _BEAT_SNAP_KEYS = (
     # plain quote = no quote mark on screen (renderer); the quote-mark checks
     # (unspoken quote, literal-card source match) must see it.
     "plain",
+    # RR isolated-term card ("mensagem 30" after its sentence card, #1443 F1)
+    "isolated",
     # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
     "unit_first",
 )
@@ -1432,6 +1434,15 @@ def screen_text_fragment(a: str | None, b: str | None) -> bool:
     return any(long_[k:k + m] == short for k in range(len(long_) - m + 1))
 
 
+def is_term_card(b) -> bool:
+    """RR isolated-term card (storyboard whole-sentence cards, Gate B #1443
+    F1): a plain quote flagged ``isolated`` with 1–3 words — a spoken noun
+    phrase / number popped while its sentence is spoken ("mensagem 30"),
+    never a piece of a sentence (card_vo whole checks the term itself)."""
+    return (isinstance(b, dict) and (b.get("type") or "") == "quote" and bool(b.get("isolated"))
+            and 0 < len(_SYNC_TOK_RE.findall(theme.fold(str(b.get("text") or "")))) <= 3)
+
+
 def repeated_card_reason(board: list[dict], i: int,
                          keys: list[str] | None = None) -> str | None:
     """Why beat i repeats a card (None = it does not).
@@ -1456,7 +1467,7 @@ def repeated_card_reason(board: list[dict], i: int,
         return (f"beat[{i - 1}]→beat[{i}] ({t_prev}→{t_cur}) show the same card "
                 f"{shown!r} back-to-back")
     if (t_cur in FRAGMENT_TYPES and t_prev in FRAGMENT_TYPES
-            and screen_text_fragment(keys[i - 1], cur)):
+            and not is_term_card(board[i]) and screen_text_fragment(keys[i - 1], cur)):
         return (f"beat[{i - 1}]→beat[{i}] ({t_prev}→{t_cur}) card {shown!r} is a "
                 "fragment of its neighbour (partial-text echo)")
     if t_cur in _REPEAT_EXEMPT_REPLAY:
@@ -1465,6 +1476,8 @@ def repeated_card_reason(board: list[dict], i: int,
         if (board[j].get("type") or "") in _REPEAT_EXEMPT_REPLAY:
             continue
         if keys[j] and keys[j] == cur:
+            if is_term_card(board[i]) and is_term_card(board[j]):
+                continue  # RR isolated term said again later ("resposta"): a label, not a replayed card
             return (f"beat[{i}] type={t_cur} replays beat[{j}] card {shown!r}")
     return None
 
@@ -3847,12 +3860,15 @@ def is_placeholder_line(line: str | None) -> bool:
     return bool(_PLACEHOLDER_RE.match(str(line or "")))
 
 
-def invented_output(beat: dict | None, script: str | None) -> list[str]:
+def invented_output(beat: dict | None, script: str | None, *,
+                    spoken_code: bool = False) -> list[str]:
     """Rule 3 (RR): terminal/tool-output lines the script does not say.
     command: the command line must be a real tool (or said in the script);
     every output line must be said in the script. code: an output dump
     (lang text/log/console/receipt…) follows the output rule; a code snippet
-    keeps its illustrative lines but never a placeholder line."""
+    keeps its illustrative lines but never a placeholder line — except with
+    ``spoken_code`` (RR PT): then a snippet the VO does not speak
+    (code_card_spoken) is invented as a whole (every line returned)."""
     if not isinstance(beat, dict):
         return []
     typ = beat.get("type") or ""
@@ -3873,7 +3889,40 @@ def invented_output(beat: dict | None, script: str | None) -> list[str]:
             ln = str(ln or "").strip()
             if ln and (is_placeholder_line(ln) or (dump and not text_in_script(ln, script))):
                 bad.append(ln)
+        if not bad and spoken_code and not code_card_spoken(beat, script):
+            bad.extend(str(x).strip() for x in beat.get("lines") or [] if str(x or "").strip())
     return bad
+
+
+_CODE_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_CODE_KEYWORDS = frozenset("""
+def return if else elif for while in not and or is none true false null self this
+function const let var import from class new await async print def end do then
+""".split())
+
+
+def code_card_spoken(beat: dict | None, script: str | None) -> bool:
+    """RR PT (Gate B #1443 WARN): a code snippet card must show code the VO
+    speaks. #1443 #3 drew `on_message(texto): conversa.append(texto);
+    send(conversa)` under "O app reenvia a conversa a cada mensagem." — the
+    snippet passed every check (code lines are "illustrative", Card ⊂ VO maps
+    an object card by its cue only, foreign_term skips code) but none of its
+    identifiers is said. True when every line is said verbatim, or when every
+    identifier (keywords aside, split at _ and camelCase) is a spoken word."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") != "code":
+        return True
+    lines = [str(x).strip() for x in beat.get("lines") or [] if str(x or "").strip()]
+    if not lines or all(text_in_script(ln, script) for ln in lines):
+        return True
+    spoken = set(_sync_toks(script))
+    for ln in lines:
+        for ident in _CODE_IDENT_RE.findall(ln):
+            if ident.lower() in _CODE_KEYWORDS:
+                continue
+            parts = [p for p in re.split(r"_|(?<=[a-z])(?=[A-Z])", ident) if p]
+            if any(theme.fold(p) not in spoken for p in parts):
+                return False
+    return True
 
 
 _QUARTER_CTX_RE = re.compile(r"\b(?:trimestr\w*|receita|faturamento|lucro|balanco|"
@@ -4013,9 +4062,29 @@ def sentence_card_cap(span: float | None) -> int:
     return 1 + int(span // card_cont_min_span())
 
 
+def illustrates_whole_card(beat: dict | None, prev: dict | None, script: str | None, *,
+                           pos: int | None = None, prev_pos: int | None = None) -> bool:
+    """RR whole-sentence cards: a rich (object) card that follows the whole-
+    sentence / clause text card of its sentence and anchors later in it (a
+    compare / stat illustrating what the sentence card already says). The
+    whole-sentence card always leads its sentence (it anchors on the first
+    word), so a sentence spoken longer than one hold (2.8s + 1.1s lead) needs
+    such a second card — a text piece is never allowed there."""
+    if not isinstance(beat, dict) or not isinstance(prev, dict):
+        return False
+    typ = beat.get("type") or ""
+    if typ in TEXT_CARD_TYPES or typ in CTA_TYPES or typ == "hook":
+        return False
+    if (prev.get("type") or "") not in TEXT_CARD_TYPES or not is_whole_unit(prev.get("text"), script):
+        return False
+    if pos is not None and prev_pos is not None and pos <= prev_pos:
+        return False
+    return not screen_text_near(screen_text_key(beat), screen_text_key(prev))
+
+
 def is_continuation_card(beat: dict | None, prev: dict | None, script: str | None, *,
                          pos: int | None = None, prev_pos: int | None = None,
-                         prev_len: int = 0) -> bool:
+                         prev_len: int = 0, whole: bool = False) -> bool:
     """A further card on the sentence ``prev`` (the sentence's previous card)
     already carries. A text card must be verbatim narration that starts
     after ``prev``'s own words (its later words, nothing re-said — #1423 #3
@@ -4023,6 +4092,12 @@ def is_continuation_card(beat: dict | None, prev: dict | None, script: str | Non
     later and not repeat ``prev`` (overlap < CARD_NEAR_DUP)."""
     if not isinstance(beat, dict):
         return False
+    if whole and illustrates_whole_card(beat, prev, script, pos=pos, prev_pos=prev_pos):
+        return True
+    if is_term_card(beat):
+        # an isolated term pops later in the sentence its previous card shows
+        return ((pos is None or prev_pos is None or pos > prev_pos)
+                and text_in_script(str(beat.get("text") or ""), script))
     if pos is not None and prev_pos is not None and pos < prev_pos + max(1, prev_len):
         return False
     typ = beat.get("type") or ""
@@ -4067,6 +4142,33 @@ def stat_unit_first(beat, script: str | None) -> bool:
     return bool(before) and not after
 
 
+def stat_ordinal_unit(beat, script: str | None) -> str:
+    """RR PT (Gate B #1443 WARN): a stat card with a bare number (no unit)
+    that the VO speaks as a label/ordinal right after a noun ("a decisão
+    errada da mensagem 30") → that noun ("mensagem"), else "". Such a card
+    counting up 0→30 reads as a quantity; the composer draws it unit-first and
+    static ("mensagem 30"). A number after a function word ("de 30", "as 30")
+    or followed by a noun ("30 mensagens") is a quantity → ""."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") != "stat":
+        return ""
+    value, unit = stat_value_unit(beat)
+    if unit or not _STAT_VALUE_RE.match(value):
+        return ""
+    words = re.findall(r"[^\W_]+(?:[.,]\d+)?", str(script or ""))
+    for k, w in enumerate(words):
+        if w != value or k == 0:
+            continue
+        prev = words[k - 1]
+        pf = theme.fold(prev)
+        if pf in _FUNC_FOLD or pf.isdigit() or len(pf) < 3 or _looks_like_verb(prev):
+            continue
+        nxt = words[k + 1] if k + 1 < len(words) else ""
+        if nxt and not _looks_like_verb(nxt) and theme.fold(nxt) not in _FUNC_FOLD:
+            continue  # "30 mensagens …": a quantity
+        return prev
+    return ""
+
+
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                    pt: bool | None = None, sources=None) -> list[dict]:
     """Every card-text rule violation on a board: [{"i","check","detail"}]."""
@@ -4091,7 +4193,8 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
             if group:
                 k = group[-1]
                 if not is_continuation_card(b, board[k], script, pos=pos,
-                                            prev_pos=anchors[k][1], prev_len=anchors[k][2]):
+                                            prev_pos=anchors[k][1], prev_len=anchors[k][2],
+                                            whole=rr):
                     out.append({"i": i, "check": "echo_card",
                                 "detail": f"card {i} {shown!r} is a second card for the sentence "
                                           f"card {group[0]} already carries"})
@@ -4100,9 +4203,13 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
             out.append({"i": i, "check": "unspoken_quote",
                         "detail": f"card {i} quotes {q!r}, which the narration never says"})
         if rr:
-            for ln in invented_output(b, script):
+            for ln in invented_output(b, script, spoken_code=pt):
                 out.append({"i": i, "check": "invented_output",
                             "detail": f"card {i} ({typ}) shows {ln!r}, output the script never says"})
+            if pt and not b.get("unit_first") and stat_ordinal_unit(b, script):
+                out.append({"i": i, "check": "stat_word_order",
+                            "detail": f"card {i} counts {b.get('value')!s} as a quantity but the VO "
+                                      f"says {stat_ordinal_unit(b, script)} {b.get('value')!s} (a label)"})
             if pt and not b.get("unit_first") and stat_unit_first(b, script):
                 out.append({"i": i, "check": "stat_word_order",
                             "detail": f"card {i} shows {b.get('value')!s} {b.get('unit')!s} but "
@@ -4112,7 +4219,9 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                     out.append({"i": i, "check": "foreign_term",
                                 "detail": f"card {i} shows {t!r} on a PT-BR card"
                                           + (" (use T1–T4)" if _QUARTER_RE.match(t) else "")})
-        if prev_mid is not None and cards_near_duplicate(board[prev_mid], b):
+        if (prev_mid is not None and not is_term_card(b)
+                and not (rr and illustrates_whole_card(b, board[prev_mid], script))
+                and cards_near_duplicate(board[prev_mid], b)):
             out.append({"i": i, "check": "near_duplicate",
                         "detail": f"card {i} {shown!r} repeats card {prev_mid} "
                                   f"({card_overlap(board[prev_mid], b):.0%} shared words)"})
@@ -4165,13 +4274,128 @@ CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment", "card_spans_senten
                            "sentence_two_cards", "echo_card"})
 
 
+# Whole sentence OR isolated term (VM Gate B RR #1443 F1, re-render on a9addc4
+# 08/10): the #78 continuation allowance let a sentence run over two text
+# cards ("Depois abro um chat novo" + "só com esse resumo.") and the composer
+# kept producing pieces of sentences ("entre uma resposta e outra.", "Quando
+# não cabe", "errada da mensagem"). On RR (PT series) a text card
+# (statement/quote) now shows EITHER
+#   - a whole VO sentence (bounded by . ! ?) or a whole run of strong clauses
+#     of one sentence (bounded by ; : — – or the sentence ends) — so a
+#     sentence split over two cards only passes when each card is itself a
+#     whole clause unit; OR
+#   - an isolated term: 1–3 spoken words, a noun phrase or number, not a piece
+#     of a sentence (no verb, no function word / conjunction at either edge,
+#     and in the VO it does not start right after a content word — "errada da
+#     mensagem" cuts "A decisão errada…" mid noun phrase).
+# Gate B: card_vo_hits(whole=True) (card_vo marker "whole_sentence"); the
+# composer guard is storyboard._guard_whole_cards. EN / OS / Shipping keep the
+# #78 rule: their boards still rely on continuation cards to cover sentences
+# spoken longer than one card hold (2.8s + 1.1s lead).
+CARD_VO_WHOLE_BRANDS = HOOK_PACE_BRANDS
+CARD_TERM_MAX_WORDS = 3
+_STRONG_CLAUSE_RE = re.compile(r"\s*[;:—–]\s*|\s+-\s+")
+_TERM_EDGE_STOP = _FUNC_FOLD | frozenset(theme.fold(w) for w in """
+quando enquanto porque pois entao logo depois antes ate como onde pra para pro
+assim tambem ainda so ja nem e ou mas se que and or but so then when because
+while until if as
+esse essa esses essas isso este esta estes estas isto aquele aquela aquilo outro outra
+outros outras mesmo mesma voce voces eu ele ela eles elas nos nada tudo algo alguem
+ninguem coisa la aqui ali agora sempre nunca it this that these those you they we he
+she thing things something nothing everything
+peco faco digo vejo tenho ponho trago venho sinto sigo prefiro consigo confiro abro
+""".split())
+
+
+# "teto | de VRAM": a term never stops before its "de …" complement.
+_TERM_BINDING = frozenset({"de", "do", "da", "dos", "das", "of"})
+
+
+def card_vo_whole_applies(brand: str | None) -> bool:
+    """The whole-sentence / isolated-term card rule applies to this brand."""
+    return (brand or "") in CARD_VO_WHOLE_BRANDS
+
+
+def _sentence_units(script: str | None) -> list[list[list[str]]]:
+    """Per script sentence: its strong-clause token lists (punctuation-split
+    at ; : — – and " - ")."""
+    out = []
+    for sent in (x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())):
+        if not sent:
+            continue
+        parts = [_sync_toks(c) for c in _STRONG_CLAUSE_RE.split(sent)]
+        out.append([c for c in parts if c])
+    return out
+
+
+def whole_unit_texts(script: str | None) -> list[list[str]]:
+    """Every token run a whole-unit card may show: each sentence, and each
+    contiguous run of its strong clauses."""
+    runs = []
+    for clauses in _sentence_units(script):
+        for a in range(len(clauses)):
+            acc: list[str] = []
+            for b in range(a, len(clauses)):
+                acc = acc + clauses[b]
+                runs.append(list(acc))
+    return runs
+
+
+def is_whole_unit(text: str | None, script: str | None) -> bool:
+    """The card text is a whole VO sentence or a whole run of its strong clauses."""
+    ct = _sync_toks(text)
+    return bool(ct) and any(ct == r for r in whole_unit_texts(script))
+
+
+def isolated_term_reason(text: str | None, script: str | None) -> str | None:
+    """None when the card text is an isolated term the VO speaks (1–3 words,
+    noun phrase or number, not a piece of a sentence); else why not."""
+    raw = [t for t in _CARD_WORD_RE.findall(str(text or ""))]
+    ct = _sync_toks(text)
+    if not ct:
+        return "empty"
+    if len(ct) > CARD_TERM_MAX_WORDS:
+        return f"{len(ct)} words (a term is 1–{CARD_TERM_MAX_WORDS})"
+    if any(_looks_like_verb(t) for t in raw if not any(c.isdigit() for c in t)):
+        return "has a verb (a clause, not a term)"
+    if ct[0] in _TERM_EDGE_STOP or ct[-1] in _TERM_EDGE_STOP:
+        return "starts/ends on a function word or conjunction"
+    toks, sid, _ = _sentence_token_index(script)
+    p = _find_run(toks, ct, 0)
+    if p < 0:
+        return "not spoken by the VO"
+    why = "cuts a noun phrase (starts right after a content word in the VO)"
+    while p >= 0:
+        prev = toks[p - 1] if p > 0 and sid[p - 1] == sid[p] else None
+        q = p + len(ct)
+        nxt = toks[q] if q < len(toks) and sid[q] == sid[p] else None
+        if nxt in _TERM_BINDING:
+            why = f"cuts a noun phrase (the VO goes on '{ct[-1]} {nxt} …')"
+        elif prev is None or prev in _FUNC_FOLD or prev in _TERM_EDGE_STOP or prev.isdigit():
+            return None
+        p = _find_run(toks, ct, p + 1)
+    return why
+
+
+def card_piece_reason(text: str | None, script: str | None) -> str | None:
+    """None when a text card is a whole sentence / clause unit or an isolated
+    term (RR whole-sentence rule); else a short reason."""
+    if is_whole_unit(text, script):
+        return None
+    why = isolated_term_reason(text, script)
+    if why is None:
+        return None
+    return f"not a whole VO sentence nor an isolated term ({why})"
+
+
 def _spoken_sentence_ids(sents: list[str]) -> list[int]:
     return [k for k, s in enumerate(sents)
             if not (is_endcard_vo(s) or contains_subscribe_cta(s))]
 
 
 def card_vo_hits(beats, script: str | None, *,
-                 allow_continuation: bool | None = None) -> list[dict]:
+                 allow_continuation: bool | None = None,
+                 whole: bool = False) -> list[dict]:
     """Card ⊂ VO violations: [{"i","check","detail"}] (i=None for a sentence).
 
     Text cards (statement/quote) are matched in the VO after normalising
@@ -4189,8 +4413,16 @@ def card_vo_hits(beats, script: str | None, *,
       sentence_two_cards    a sentence carries a further card that is not a
                             valid continuation;
       sentence_no_card      a spoken sentence has no card (informational).
-    The endcard/Subscribe sentence and cta/endcard cards are skipped."""
+    The endcard/Subscribe sentence and cta/endcard cards are skipped.
+
+    ``whole`` (RR, CARD_VO_WHOLE_BRANDS): every text card must be a whole
+    sentence / strong-clause unit or an isolated term (card_piece_reason).
+    Such a card is never a card_fragment (a term or a whole clause may stand
+    alone); any other text card is a card_fragment even when it is the
+    literal next words of the previous card (a sentence split over two cards
+    FAILS unless each card is itself whole)."""
     allow = CARD_VO_ALLOW_CONTINUATION if allow_continuation is None else allow_continuation
+    whole_rule = bool(whole)   # (``whole`` is reused below for the sentence text)
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
     if not board or not script:
@@ -4298,7 +4530,7 @@ def card_vo_hits(beats, script: str | None, *,
             if allow and prev is not None:
                 plen = (prev["end"] - prev["pos"]) if prev["text"] else 0
                 if not is_continuation_card(b, board[prev["i"]], script, pos=apos,
-                                            prev_pos=prev["pos"], prev_len=plen):
+                                            prev_pos=prev["pos"], prev_len=plen, whole=whole_rule):
                     hit(i, "sentence_two_cards", f"cards {prev['i']}, {i} both sit on the sentence "
                                                  f"{sents[s][:80]!r} (not a continuation)")
             on.append(e)
@@ -4322,17 +4554,51 @@ def card_vo_hits(beats, script: str | None, *,
                 hit(e["i"], "card_fragment",
                     f"card {e['i']} stops before the sentence {sents[k][:80]!r} ends "
                     "(no card shows its next words)")
+    if whole_rule:
+        out = _whole_card_hits(board, script, out, sents, sid, toks)
     return out
 
 
+def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
+    """card_vo_hits(whole=True) post-pass (see card_piece_reason)."""
+    piece: dict[int, str | None] = {}
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if (i == 0 and typ == "hook") or typ in CTA_TYPES or typ not in TEXT_CARD_TYPES:
+            continue
+        ct = _sync_toks(b.get("text"))
+        if not ct or _find_run(toks, ct, 0) < 0:
+            continue  # card_not_in_vo already
+        piece[i] = card_piece_reason(b.get("text"), script)
+    res = [h for h in out if not (h["check"] in ("card_fragment", "echo_card") and h.get("i") in piece
+                                  and piece[h["i"]] is None
+                                  and (h["check"] == "card_fragment" or is_term_card(board[h["i"]])))]
+    flagged = {h.get("i") for h in res if h["check"] in ("card_fragment", "card_spans_sentences")}
+    for i, why in piece.items():
+        if why is None or i in flagged:
+            continue
+        b = board[i]
+        p = _find_run(toks, _sync_toks(b.get("text")), 0)
+        whole_s = sents[sid[p]][:80] if p >= 0 else ""
+        res.append({"i": i, "check": "card_fragment",
+                    "detail": f"card {i} {str(b.get('text') or '')[:60]!r} is a piece of the sentence "
+                              f"{whole_s!r}: {why} (a card shows the whole sentence or an isolated term)"})
+    return res
+
+
 def card_vo_marker(beats, script: str | None,
-                   content_format: str | None = "short") -> dict | None:
-    """creation_config["card_vo"] for a new short render (else None)."""
+                   content_format: str | None = "short", *,
+                   brand: str | None = None) -> dict | None:
+    """creation_config["card_vo"] for a new short render (else None). RR
+    (CARD_VO_WHOLE_BRANDS) also gets the whole-sentence / isolated-term rule
+    (``whole_sentence``: True)."""
     if (content_format or "short") == "long":
         return None
+    whole = card_vo_whole_applies(brand)
     return {"version": CARD_VO_V1, "source": "card_source_text+vo_script",
             "continuation": CARD_VO_ALLOW_CONTINUATION,
-            "hits": card_vo_hits(beats, script)}
+            **({"whole_sentence": True} if whole else {}),
+            "hits": card_vo_hits(beats, script, whole=whole)}
 
 
 def card_vo_check_hits(card_vo: dict | None) -> list[str]:
