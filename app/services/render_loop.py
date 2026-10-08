@@ -236,6 +236,16 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     # A completed re-render is the only thing that clears a PATCH /craft
     # stale-render marker (2026-10-06): this mp4 was rendered from the saved text.
     video.creation_config = _craft.clear_stale_render(video.creation_config)
+    # Measurement-fail cap (CTO 06/10 2c): count consecutive renders whose
+    # gate had an unverifiable (kind="measurement") check; at the cap the gate
+    # FAILs below (→ review, VM review via vm-pass), never a silent PASS.
+    _t = session.get(Topic, video.topic_id)
+    _fmt = "long" if _t and _t.content_format == "long" else "short"
+    video.measurement_streak = _craft.next_measurement_streak(
+        video.measurement_streak, video.creation_config, _fmt)
+    video.creation_config = _craft.with_measurement_cap(
+        video.creation_config, video.measurement_streak,
+        video_path=video.video_path, content_format=_fmt)
 
     # An operator-provided thumbnail (thumb_provided.*) is never replaced by the
     # 1s still — skip the still entirely and keep the marker on the new blob.
