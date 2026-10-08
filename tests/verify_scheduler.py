@@ -4,7 +4,7 @@ This project has no pytest; run directly:
     PYTHONPATH=. .venv/bin/python tests/verify_scheduler.py
 
 The scheduler is the heartbeat: every loop (render, publish, metrics, analytics,
-autofill, BGM replenish) only runs because start() registered it. A regression
+reach, autofill, BGM replenish) only runs because start() registered it. A regression
 here is invisible until a loop silently never ticks again — the exact failure
 mode `_safe` exists to prevent ("never let a tick kill the scheduler thread").
 It never had a direct test. Covers:
@@ -13,12 +13,12 @@ It never had a direct test. Covers:
   - `_music_replenish_tick`: replenishes strictly below bgm_pool_min, not at or
     above it, counting the pool through the real music_gen.pool_count (only
     `techno_*.wav` counts — mp3s/foreign wavs don't; a missing dir counts 0)
-  - start(): all six jobs registered, each interval wired to ITS settings field
+  - start(): all seven jobs registered, each interval wired to ITS settings field
     (distinct sentinel values so a crossed wire fails), max_instances=1 +
     coalesce=True on every job, the staggered first runs (metrics/analytics/
-    autofill/music within minutes of startup; render/publish wait a full
+    reach/autofill/music within minutes of startup; render/publish wait a full
     interval), UTC timezone, and idempotence (a second start() is a no-op)
-  - the registered job funcs are the _safe-wrapped ticks: ALL SIX are driven
+  - the registered job funcs are the _safe-wrapped ticks: ALL SEVEN are driven
     directly; each stub raises its own exception class, so per-loop routing,
     crash containment (however narrow a refactored except clause gets), and
     the crash log naming the right tick are proven for every loop
@@ -27,7 +27,7 @@ It never had a direct test. Covers:
   - the UTC pin is forced honest: TZ is set to a non-UTC zone before start(),
     so a dropped timezone="UTC" fails even on a UTC-configured host/CI
 
-Real BackgroundScheduler, started and shut down for real; the five loop ticks
+Real BackgroundScheduler, started and shut down for real; the six loop ticks
 are stubbed with recorders BEFORE start() so no real loop can ever run (and the
 sentinel intervals put every first fire minutes-to-hours away regardless).
 Exits non-zero on the first failed assertion.
@@ -48,6 +48,7 @@ from app.services import (
     metrics_loop,
     music_gen,
     publish_loop,
+    reach_loop,
     render_loop,
     scheduler,
 )
@@ -82,12 +83,13 @@ _orig_level = _log.level
 
 # Stub every loop tick with a recorder BEFORE any start(): _safe captures the
 # function at add_job time, so a registered job can only ever reach these.
-_tick_calls = {"render": 0, "publish": 0, "metrics": 0, "analytics": 0, "autofill": 0}
+_tick_calls = {"render": 0, "publish": 0, "metrics": 0, "analytics": 0, "reach": 0,
+               "autofill": 0}
 
 # One exception class per loop: containment and routing get proven per loop,
 # and a narrowed `except SomeError` in _safe can't hide behind a shared type.
 _EXC = {"render": RuntimeError, "publish": ValueError, "metrics": KeyError,
-        "analytics": IndexError, "autofill": TypeError,
+        "analytics": IndexError, "reach": AttributeError, "autofill": TypeError,
         "music_replenish": ArithmeticError}
 
 
@@ -101,11 +103,13 @@ def _bump(name):
 _ORIG = {
     "render": render_loop.tick, "publish": publish_loop.tick,
     "metrics": metrics_loop.tick, "analytics": analytics_loop.tick,
+    "reach": reach_loop.tick,
     "autofill": autofill_loop.tick, "replenish": music_gen.replenish,
 }
 _ORIG_SETTINGS = {k: getattr(settings, k) for k in (
     "bgm_dir", "bgm_pool_min", "bgm_pool_target", "render_tick_seconds",
     "publish_tick_seconds", "metrics_tick_hours", "analytics_tick_hours",
+    "reach_tick_hours",
     "autofill_tick_minutes")}
 
 _replenish_calls = []
@@ -196,6 +200,7 @@ try:
     publish_loop.tick = _bump("publish")
     metrics_loop.tick = _bump("metrics")
     analytics_loop.tick = _bump("analytics")
+    reach_loop.tick = _bump("reach")
     autofill_loop.tick = _bump("autofill")
 
     # Make the UTC pin honest everywhere: on a UTC-configured host a dropped
@@ -208,6 +213,7 @@ try:
     settings.publish_tick_seconds = 2222
     settings.metrics_tick_hours = 33
     settings.analytics_tick_hours = 44
+    settings.reach_tick_hours = 66
     settings.autofill_tick_minutes = 55
 
     ok(scheduler._scheduler is None, "no scheduler exists before start()")
@@ -220,9 +226,9 @@ try:
     ok(str(sch.timezone) == "UTC", "the scheduler runs in UTC, not the host tz")
 
     jobs = {j.id: j for j in sch.get_jobs()}
-    ok(set(jobs) == {"render", "publish", "metrics", "analytics", "autofill",
+    ok(set(jobs) == {"render", "publish", "metrics", "analytics", "reach", "autofill",
                      "music_replenish"},
-       "exactly the six loops are registered, by id")
+       "exactly the seven loops are registered, by id")
 
     ok(jobs["render"].trigger.interval == timedelta(seconds=1111),
        "render interval comes from render_tick_seconds")
@@ -232,6 +238,8 @@ try:
        "metrics interval comes from metrics_tick_hours")
     ok(jobs["analytics"].trigger.interval == timedelta(hours=44),
        "analytics interval comes from analytics_tick_hours")
+    ok(jobs["reach"].trigger.interval == timedelta(hours=66),
+       "reach interval comes from reach_tick_hours")
     ok(jobs["autofill"].trigger.interval == timedelta(minutes=55),
        "autofill interval comes from autofill_tick_minutes")
     ok(jobs["music_replenish"].trigger.interval == timedelta(hours=24),
@@ -243,7 +251,7 @@ try:
 
     # Staggered first runs: the snapshot/refill loops start within minutes of
     # boot (trend data accumulates right away); render/publish wait one interval.
-    for jid, offset in (("metrics", 30), ("analytics", 60), ("autofill", 45),
+    for jid, offset in (("metrics", 30), ("analytics", 60), ("reach", 300), ("autofill", 45),
                         ("music_replenish", 120)):
         lo = t0 + timedelta(seconds=offset - 1)
         hi = t1 + timedelta(seconds=offset + 1)
@@ -257,9 +265,9 @@ try:
        "no tick fired during the test window (sentinel intervals + stagger)")
 
     # --- every registered func is ITS loop's tick, _safe-wrapped -------------
-    print("all six job funcs reach the right tick, crash-contained")
+    print("all seven job funcs reach the right tick, crash-contained")
 
-    for jid in ("render", "publish", "metrics", "analytics", "autofill"):
+    for jid in ("render", "publish", "metrics", "analytics", "reach", "autofill"):
         _recorder.records.clear()
         before = dict(_tick_calls)
         contained = True
@@ -298,7 +306,7 @@ try:
 
     scheduler.start()
     ok(scheduler._scheduler is sch, "a second start() keeps the same scheduler")
-    ok(len(sch.get_jobs()) == 6, "a second start() registers no duplicate jobs")
+    ok(len(sch.get_jobs()) == 7, "a second start() registers no duplicate jobs")
 
     scheduler.shutdown()
     ok(not sch.running, "shutdown() actually stops the scheduler, not just the global")
@@ -313,8 +321,8 @@ try:
     scheduler.start()
     ok(scheduler._scheduler is not None and scheduler._scheduler is not sch,
        "start() after shutdown() builds a fresh scheduler")
-    ok(len(scheduler._scheduler.get_jobs()) == 6,
-       "the fresh scheduler carries all six jobs again")
+    ok(len(scheduler._scheduler.get_jobs()) == 7,
+       "the fresh scheduler carries all seven jobs again")
     scheduler.shutdown()
     ok(scheduler._scheduler is None, "final shutdown leaves no scheduler behind")
 finally:
@@ -324,6 +332,7 @@ finally:
     publish_loop.tick = _ORIG["publish"]
     metrics_loop.tick = _ORIG["metrics"]
     analytics_loop.tick = _ORIG["analytics"]
+    reach_loop.tick = _ORIG["reach"]
     autofill_loop.tick = _ORIG["autofill"]
     music_gen.replenish = _ORIG["replenish"]
     for k, v in _ORIG_SETTINGS.items():
