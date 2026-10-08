@@ -81,6 +81,8 @@ _ENDCARD_VO_RE = re.compile(
     r"|se\s+inscreve\.?\s+pr[oó]xima\s+armadilha\s+de\s+.+)\.?\s*$",
     re.IGNORECASE,
 )
+SUBSCRIBE_EN_CLOSER_RE = re.compile(
+    r"^subscribe\s*[—–-]\s*next\s+(.+?)\s+(?:trap|receipt|bill|drop)\.?$", re.IGNORECASE)
 _ENDCARD_VO_PT_HEAD_RE = re.compile(r"^se\s+inscreve\.?$", re.IGNORECASE)
 _ENDCARD_VO_PT_TAIL_RE = re.compile(r"^pr[oó]xima\s+armadilha\s+de\s+.+\.?$", re.IGNORECASE)
 
@@ -1116,6 +1118,8 @@ _BEAT_SNAP_KEYS = (
     # command output / quote attribution). Older snapshots lack these keys —
     # screen_text_key then sees less copy and never over-matches (fail-open).
     "term", "definition", "left", "right", "output", "attribution",
+    # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
+    "unit_first",
 )
 # Repeated card (VM 2026-09-29: RR #1340/#1349/#1370/#1376 held one card
 # ~6.2s back-to-back; #1354/#1357/#1372 replayed cards 1-3 as 4-6).
@@ -2569,7 +2573,12 @@ def series_endcard_chip(series: str) -> str:
 
 
 def series_endcard_micro(series: str) -> str:
-    """Optional second line. Only if the chip is short enough; no extra CTA."""
+    """Optional second line. Only if the chip is short enough; no extra CTA.
+
+    PT series (RR IA) get none: "same series" is English on a PT-BR card
+    (Gate B #1443 F5). EN series keep it unchanged."""
+    if series in PT_ENDCARD_SERIES:
+        return ""
     chip = series_endcard_chip(series)
     # Chip grew from `· {series}` (~+10). 32 still fits Copilot Credits.
     if len(chip) <= 32:
@@ -2621,6 +2630,21 @@ def endcard_clean(card: dict) -> bool:
     if len(vo.split()) > 8:
         return False
     return is_endcard_vo(vo)
+
+
+def pt_series_needs_pt_closer(closer: str | None, subject: str | None,
+                              script: str | None = None,
+                              brand: str | None = None) -> bool:
+    """True when the series is a PT one (RR IA) but ``closer`` is the EN
+    one-liner ("Subscribe — next IA trap."). Never True for an EN series."""
+    m = SUBSCRIBE_EN_CLOSER_RE.match((closer or "").strip())
+    if not m or not is_endcard_vo(closer):
+        return False
+    # Both the closer's own series and the video's series must be PT, so an
+    # RR "Subscribe — next Local trap." (EN series) is never touched.
+    named = _canonical_series(m.group(1))
+    return (named in PT_ENDCARD_SERIES
+            and series_of(subject, brand) in PT_ENDCARD_SERIES)
 
 
 def ensure_series_endcard_vo(script: str | None, subject: str | None,
@@ -2731,7 +2755,15 @@ def prepare_provided_script(script: str | None, subject: str | None, *,
         text = body
     parts = [p for p in re.split(r"(?<=[.!?…])\s+", text) if p.strip()]
     # EN one-liner OR the PT two-sentence closer already present → keep as written.
-    if endcard_vo_tail_n(parts):
+    n = endcard_vo_tail_n(parts)
+    if n:
+        # PT series (RR IA) only: a stale EN closer ("Subscribe — next IA
+        # trap.", composed before #70) is swapped for the decided PT closer —
+        # the chip is already "Se inscreve · IA" and TTS reads "trap" as
+        # "trép" (Gate B #1443 F6/W5). EN series keep their closer as written.
+        if n == 1 and pt_series_needs_pt_closer(parts[-1], subject, text, brand):
+            edits.append("endcard_pt_swapped")
+            return ensure_series_endcard_vo(text, subject, brand=brand), edits
         return text, edits
     edits.append("endcard_appended")
     return ensure_series_endcard_vo(text, subject, brand=brand), edits
@@ -3505,6 +3537,42 @@ def is_continuation_card(beat: dict | None, prev: dict | None, script: str | Non
     return card_overlap(beat, prev) < CARD_NEAR_DUP - 1e-9
 
 
+_STAT_VALUE_RE = re.compile(r"^\d+(?:[.,]\d+)?$")
+_STAT_VALUE_UNIT_RE = re.compile(r"^(\d+(?:[.,]\d+)?)\s+([^\W\d_][\w-]*)$")
+
+
+def stat_value_unit(beat) -> tuple[str, str]:
+    """(value, unit) of a stat card; a value written as "30 mensagem" with no
+    unit splits into ("30", "mensagem")."""
+    value = str((beat or {}).get("value") or "").strip()
+    unit = str((beat or {}).get("unit") or "").strip()
+    if not unit:
+        m = _STAT_VALUE_UNIT_RE.match(value)
+        if m:
+            value, unit = m.group(1), m.group(2)
+    return value, unit
+
+
+def stat_unit_first(beat, script: str | None) -> bool:
+    """True when a stat card's unit is spoken BEFORE its number.
+
+    "A decisão errada da mensagem 30" = the 30th message (an ordinal / label),
+    so the card must read "mensagem 30", never "30 mensagem", which is
+    ungrammatical and reads as a quantity (Gate B #1443 F4). A VO that also
+    says "<n> <unit>" ("30 mensagens") keeps the normal number-first order.
+    """
+    if not isinstance(beat, dict) or (beat.get("type") or "") != "stat":
+        return False
+    value, unit = stat_value_unit(beat)
+    if not unit or not _STAT_VALUE_RE.match(value):
+        return False
+    folded = " ".join(theme.fold(script or "").split())
+    u, v = re.escape(" ".join(theme.fold(unit).split())), re.escape(value)
+    before = re.search(rf"(?<![\w]){u}\s+(?:n[oº°]\.?\s*)?{v}(?![\w])", folded)
+    after = re.search(rf"(?<![\w.,]){v}\s+{u}", folded)
+    return bool(before) and not after
+
+
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                    pt: bool | None = None) -> list[dict]:
     """Every card-text rule violation on a board: [{"i","check","detail"}]."""
@@ -3541,6 +3609,10 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
             for ln in invented_output(b, script):
                 out.append({"i": i, "check": "invented_output",
                             "detail": f"card {i} ({typ}) shows {ln!r}, output the script never says"})
+            if pt and not b.get("unit_first") and stat_unit_first(b, script):
+                out.append({"i": i, "check": "stat_word_order",
+                            "detail": f"card {i} shows {b.get('value')!s} {b.get('unit')!s} but "
+                                      f"the VO says {b.get('unit')!s} {b.get('value')!s}"})
             if pt:
                 for t in foreign_terms(b, script):
                     out.append({"i": i, "check": "foreign_term",
