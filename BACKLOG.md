@@ -1944,3 +1944,29 @@ flag the operator step in the commit body.
 - **acceptance:** in-window, budget short, a review row with no artifact
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
+
+### 72. ✅ DONE (PR, 2026-10-08) API produce holds the same subjects auto-produce holds — normal
+- **resolution (2026-10-08):** `POST /api/videos/{id}/produce` returns 409
+  and leaves the row DRAFT when `subject_guard_reason` is set, recording
+  `video.error` and one `produce`/`error` JobRun (a repeat click does not
+  append another). Bulk produce queues the legal drafts and counts the
+  rest in `held`. `POST /api/videos` with `queue: true` is 409 and writes
+  no row; `queue: false` still saves the draft. A legal subject still
+  queues, a stale `subject guard:` note is cleared, and any other `error`
+  is left alone. A non-draft is still the status 409 and writes nothing.
+  Suite: `tests/verify_videos.py` 227 → 254. Red before the hold: that
+  check failed at `produce of a lowercase fragment is 409`.
+- **why:** the guard was only inside `render_loop._auto_produce`. The board
+  Produce button, Produce all, and `POST /api/videos/{id}/produce` (growth
+  playbook) queued a stripped or currency subject and spent a render slot
+  on a video the publish gate will not ship.
+- **caution:** normal (`app/routers/videos.py` only; not a money-path file).
+  Isolated commit + regression tests.
+- **acceptance:** a lowercase fragment, a bare unit, and a currency subject
+  stay DRAFT on single and bulk produce; a legal subject, including
+  `node_modules …`, still queues; `queue: true` on a held subject creates
+  nothing; `queue: false` still creates a draft.
+- **not bundled:** `POST /api/trends/{id}/adopt` still marks the first
+  `produce_count` ideas QUEUED in-process. `generate_ideas` already drops
+  currency and title-fragments before that. Requeue / retry-to-queued are
+  re-renders of an existing row, not this draft gate.

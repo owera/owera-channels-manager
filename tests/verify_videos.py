@@ -40,6 +40,13 @@ ignores ``channel_id`` and queues every draft id in the list, so
 ``false`` still queued video 1. Both fields reject bools with
 ``mode="before"``. Integer ids, including integer 0, stay as they are.
 
+Produce (single, bulk, and ``POST /api/videos`` with ``queue: true``) is a
+draft→render transition. Auto-produce already holds a subject the guard
+rejects; these routes used to queue it anyway. A held subject stays a draft
+(409 on single produce and on ``queue: true``, which writes no row). Bulk
+still queues the legal ids and reports ``held``. ``queue: false`` still
+saves the idea as a draft.
+
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real
 manager.db, no network, lifespan/scheduler never started). Exits
 non-zero on the first failed assertion.
@@ -395,11 +402,11 @@ try:
     ok(snapshot(r.json()["id"])["subject"] == "padded create",
        "stripped create subject persisted")
 
-    r = post(topic_id=1, subject="queued idea", queue=True)
+    r = post(topic_id=1, subject="Queued idea", queue=True)
     ok(r.status_code == 201, "POST queue=true is 201")
     ok(r.json().get("status") == VideoStatus.QUEUED,
        "queue=true lands QUEUED (the flag is not dropped by the floor)")
-    ok(r.json().get("subject") == "queued idea", "queue=true kept the subject")
+    ok(r.json().get("subject") == "Queued idea", "queue=true kept the subject")
 
     print("POST /api/videos: blank/whitespace subject is 400, writes no row")
     n_before = n_videos()
@@ -722,7 +729,7 @@ try:
        "channel 1 reorder left channel 2 positions")
 
     r = post_produce(channel_id=2, ordered_ids=[ch2_extra, 2, 999])
-    ok(r.status_code == 200 and r.json() == {"produced": 2},
+    ok(r.status_code == 200 and r.json() == {"produced": 2, "held": 0},
        "integer produce queues the two listed drafts and skips the missing id")
     produced = {row[0]: row for row in board_state()}
     ok(produced[ch2_extra][3] == VideoStatus.QUEUED
@@ -735,7 +742,7 @@ try:
     ok(n_produce_runs() == 2, "integer produce wrote one JobRun per queued draft")
 
     r = post_produce(channel_id=0, ordered_ids=[ch1_extra])
-    ok(r.status_code == 200 and r.json() == {"produced": 1},
+    ok(r.status_code == 200 and r.json() == {"produced": 1, "held": 0},
        "produce channel_id=0 still queues the listed draft (0 is not a bool)")
     ok("boolean" not in r.text, "produce integer 0 is not the bool rejection")
     after0 = {row[0]: row for row in board_state()}
@@ -745,7 +752,7 @@ try:
     ok(n_produce_runs() == 3, "channel_id=0 produce wrote one JobRun")
 
     r = post_produce(channel_id=2, ordered_ids=[2])
-    ok(r.status_code == 200 and r.json() == {"produced": 0},
+    ok(r.status_code == 200 and r.json() == {"produced": 0, "held": 0},
        "produce of a non-draft reports 0")
     ok(n_produce_runs() == 3, "no-op produce writes no JobRun")
     ok(board_state() == tuple(after0[i] for i in sorted(after0)),
@@ -775,6 +782,134 @@ try:
     ok(board_state() == tuple(after0[i] for i in sorted(after0))
        and n_produce_runs() == 3,
        "unauthenticated reorder/produce write nothing")
+
+    print("produce holds a subject auto-produce would not queue")
+    from app.services.subject_guard import HOLD_PREFIX
+    BAD = "camadas na GPU, o resto no CPU. · IA 209"
+    UNIT = "B em Q4 rodou na 24GB. O Q8, não. · Local 56"
+    CUR = "O agente me cobrou $47 no terminal. · Claude Code 10"
+    GOOD = "Chat targeted staging. Prod wrote production. · Agent memory 35"
+    NODE = "node_modules no contexto não é engenharia. · IA 206"
+
+    def add_draft(subject, status=VideoStatus.DRAFT, error=None) -> int:
+        with Session(engine) as s:
+            v = Video(channel_id=1, topic_id=1, subject=subject, status=status,
+                      position=0, error=error)
+            s.add(v)
+            s.commit()
+            s.refresh(v)
+            return v.id
+
+    def vstate(vid: int):
+        with Session(engine) as s:
+            v = s.get(Video, vid)
+            return v.status, v.error
+
+    def hold_runs(vid: int):
+        with Session(engine) as s:
+            return s.exec(select(JobRun).where(
+                JobRun.kind == "produce", JobRun.video_id == vid)).all()
+
+    rev = add_draft(BAD, status=VideoStatus.REVIEW)
+    r = client.post(f"/api/videos/{rev}/produce", auth=auth)
+    ok(r.status_code == 409 and "cannot produce from status" in r.text,
+       "a non-draft is refused for status before the subject guard")
+    ok(vstate(rev) == (VideoStatus.REVIEW, None),
+       "status refusal does not rewrite a review row")
+    ok(hold_runs(rev) == [], "status refusal writes no produce JobRun")
+
+    bad = add_draft(BAD)
+    ids_before = video_ids()
+    r = client.post(f"/api/videos/{bad}/produce", auth=auth)
+    ok(r.status_code == 409, "produce of a lowercase fragment is 409")
+    ok(isinstance(r.json().get("detail"), str) and r.json()["detail"].startswith(HOLD_PREFIX),
+       "409 detail is the subject-guard reason")
+    ok(vstate(bad) == (VideoStatus.DRAFT, r.json()["detail"]),
+       "held produce stays DRAFT and records the reason")
+    rows = hold_runs(bad)
+    ok(len(rows) == 1 and rows[0].status == "error" and rows[0].channel_id == 1,
+       "one produce/error JobRun names the channel")
+    ok("held draft" in rows[0].detail and "via API" not in rows[0].detail,
+       "the hold detail is not the success audit line")
+    r = client.post(f"/api/videos/{bad}/produce", auth=auth)
+    ok(r.status_code == 409 and len(hold_runs(bad)) == 1,
+       "a second produce of the same hold does not append another JobRun")
+
+    unit = add_draft(UNIT)
+    cur = add_draft(CUR)
+    ok(client.post(f"/api/videos/{unit}/produce", auth=auth).status_code == 409
+       and vstate(unit)[0] == VideoStatus.DRAFT,
+       "produce of a bare-unit subject stays DRAFT")
+    ok(client.post(f"/api/videos/{cur}/produce", auth=auth).status_code == 409
+       and (vstate(cur)[1] or "").startswith(HOLD_PREFIX),
+       "produce of a currency subject stays DRAFT with the hold reason")
+
+    good = add_draft(GOOD, error=HOLD_PREFIX + " stale")
+    r = client.post(f"/api/videos/{good}/produce", auth=auth)
+    ok(r.status_code == 200 and r.json().get("status") == VideoStatus.QUEUED,
+       "a legal subject still produces")
+    ok(vstate(good) == (VideoStatus.QUEUED, None),
+       "queuing clears a stale subject-guard note")
+    grows = hold_runs(good)
+    ok(len(grows) == 1 and grows[0].status == "success" and "via API" in grows[0].detail,
+       "a legal produce still writes the API success JobRun")
+
+    noted = add_draft(NODE, error="hook note")
+    r = client.post(f"/api/videos/{noted}/produce", auth=auth)
+    ok(r.status_code == 200 and vstate(noted) == (VideoStatus.QUEUED, "hook note"),
+       "node_modules is allowlisted, and a non-hold error is left alone")
+
+    b1 = add_draft(UNIT)
+    b2 = add_draft(CUR)
+    g2 = add_draft(GOOD)
+    r = client.post("/api/videos/produce", auth=auth,
+                    json={"channel_id": 1, "ordered_ids": [b1, g2, b2, 999, b1]})
+    ok(r.status_code == 200 and r.json() == {"produced": 1, "held": 2},
+       "bulk queues the legal draft, holds the two bad ones, and skips missing")
+    ok(vstate(b1)[0] == VideoStatus.DRAFT and vstate(b2)[0] == VideoStatus.DRAFT
+       and vstate(g2)[0] == VideoStatus.QUEUED,
+       "bulk does not queue a held sibling of a legal draft")
+    ok(len(hold_runs(b1)) == 1 and len(hold_runs(b2)) == 1,
+       "a repeated id in the same bulk body does not double the hold JobRun")
+    r = client.post("/api/videos/produce", auth=auth,
+                    json={"channel_id": 1, "ordered_ids": [b1, b2, g2]})
+    ok(r.status_code == 200 and r.json() == {"produced": 0, "held": 2},
+       "a second bulk hold reports 0 produced and does not re-queue the legal row")
+    ok(len(hold_runs(b1)) == 1 and len(hold_runs(b2)) == 1
+       and vstate(g2)[0] == VideoStatus.QUEUED,
+       "the second bulk does not append hold JobRuns or unqueue the legal draft")
+
+    n_before = n_videos()
+    ids_before = video_ids()
+    r = post(topic_id=1, subject=BAD, queue=True)
+    ok(r.status_code == 409 and r.json().get("detail", "").startswith(HOLD_PREFIX),
+       "POST queue=true on a held subject is 409")
+    ok(n_videos() == n_before and video_ids() == ids_before,
+       "POST queue=true on a held subject writes no row")
+    r = post(topic_id=1, subject=CUR, queue=False)
+    ok(r.status_code == 201 and r.json().get("status") == VideoStatus.DRAFT
+       and not r.json().get("error"),
+       "POST queue=false still saves a held subject as a draft (auto-produce holds later)")
+    r = post(topic_id=1, subject="Chat picked annual. Prod billed monthly.", queue=True)
+    ok(r.status_code == 201 and r.json().get("status") == VideoStatus.QUEUED,
+       "POST queue=true on a legal subject still queues")
+
+    stale_bulk = add_draft(GOOD, error=HOLD_PREFIX + " old")
+    r = client.post("/api/videos/produce", auth=auth,
+                    json={"channel_id": 1, "ordered_ids": [stale_bulk]})
+    ok(r.status_code == 200 and r.json() == {"produced": 1, "held": 0}
+       and vstate(stale_bulk) == (VideoStatus.QUEUED, None),
+       "bulk produce of a legal subject clears a stale subject-guard note")
+
+    quiet = add_draft(UNIT)
+    before_q = vstate(quiet)
+    r = client.post(f"/api/videos/{quiet}/produce")
+    ok(r.status_code == 401 and vstate(quiet) == before_q and hold_runs(quiet) == [],
+       "unauthenticated produce of a held subject writes nothing")
+    r = client.post("/api/videos/produce",
+                    json={"channel_id": 1, "ordered_ids": [quiet]})
+    ok(r.status_code == 401 and vstate(quiet) == before_q and hold_runs(quiet) == [],
+       "unauthenticated bulk produce of a held subject writes nothing")
 
     reorder_src = inspect.getsource(ReorderBody)
     ok('_reject_bool_channel' in reorder_src

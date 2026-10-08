@@ -45,13 +45,15 @@ with Session(engine) as s:
     s.commit()
     s.add(Topic(channel_id=1, name="T"))
     s.commit()
-    s.add(Video(channel_id=1, topic_id=1, subject="draft one",
+    # Subjects must pass the pre-produce guard (lowercase fragments are
+    # held, not queued). The audit trail is what this file pins.
+    s.add(Video(channel_id=1, topic_id=1, subject="Draft one",
                 status=VideoStatus.DRAFT))          # id 1
-    s.add(Video(channel_id=1, topic_id=1, subject="draft two",
+    s.add(Video(channel_id=1, topic_id=1, subject="Draft two",
                 status=VideoStatus.DRAFT))          # id 2
-    s.add(Video(channel_id=1, topic_id=1, subject="already queued",
+    s.add(Video(channel_id=1, topic_id=1, subject="Already queued",
                 status=VideoStatus.QUEUED))         # id 3
-    s.add(Video(channel_id=1, topic_id=1, subject="draft three",
+    s.add(Video(channel_id=1, topic_id=1, subject="Draft three",
                 status=VideoStatus.DRAFT))          # id 4
     s.commit()
 
