@@ -704,12 +704,17 @@ def render_stat(b, ctx):
     bid = "#b" + str(i)
     value, unit = b["value"], b.get("unit", "")
     label = b.get("label", "")
-    num_html = '<span class="stat-num">' + ("0" if _NUM_RE.match(value) else theme.esc(value)) + "</span>"
+    # Unit-first (RR PT ordinal "mensagem 30") is a label, not a quantity:
+    # drawn static, no count-up from 0.
+    count = bool(_NUM_RE.match(value)) and not (unit and b.get("unit_first"))
+    num_html = '<span class="stat-num">' + ("0" if count else theme.esc(value)) + "</span>"
     unit_html = ('<span class="stat-unit">' + theme.esc(unit) + "</span>") if unit else ""
     label_html = ('<div class="stat-label">' + _words_html(label) + "</div>") if label else ""
-    inner = '<div class="stat-row">' + num_html + unit_html + "</div>" + label_html
+    # RR PT: unit spoken before the number ("da mensagem 30") → "mensagem 30".
+    row = (unit_html + num_html) if (unit_html and b.get("unit_first")) else (num_html + unit_html)
+    inner = '<div class="stat-row">' + row + "</div>" + label_html
     tw = [_from(bid + " .stat-num", s, "opacity:0,scale:0.55", "opacity:1,scale:1", dur=0.3, ease="back.out(1.7)")]
-    if _NUM_RE.match(value):
+    if count:
         tw.append(_countup(bid + " .stat-num", float(value), s + 0.1, dur=min(1.1, max(0.5, ctx["dur"] * 0.5))))
     if unit:
         tw.append(_from(bid + " .stat-unit", s + 0.2, "opacity:0", "opacity:1", dur=0.25))
@@ -2870,6 +2875,10 @@ def _enforce_card_text_rules(beats, script, words=None, brand=None) -> None:
         cur = b
         if rr and pt and craft.quarter_labels_apply(script):
             _localize_quarters(cur)
+        if rr and pt and craft.stat_unit_first(cur, script):
+            # "30 mensagem" → value "30", unit "mensagem", drawn "mensagem 30".
+            cur["value"], cur["unit"] = craft.stat_value_unit(cur)
+            cur["unit_first"] = True
         if rr and typ in craft.CLI_BEAT_TYPES:
             cur = _fix_card_output(cur, script)
         if cur is not None and rr and pt and (
