@@ -140,7 +140,16 @@ class Settings(BaseSettings):
     #     OS topic 47, were auto-approved and published without Gate B). A list
     #     of ids (e.g. [47]) narrows it to those topics; [] turns it off.
     #   vm_pass_exempt (default []): topics exempt from vm_pass_required.
-    topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": []}
+    #   literal_cards (default [47], OS "named tool"): the storyboard never
+    #     invents on-screen evidence — rule 2b (required snippet) off; log /
+    #     error / command / quote / stat cards ONLY from the video's explicit
+    #     allowlist (overrides "on_screen_allow", see craft.on_screen_allow);
+    #     anything else becomes a plain text card; provided overrides
+    #     "on_screen" cards verbatim; attribution / stat values only when the
+    #     script says them (else Gate B FAIL = render blocked); no version on 2
+    #     consecutive cards; the ≤2.5s first cut (VM FAIL P0 #1449, CMO 08/10).
+    topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": [],
+                                               "literal_cards": [47]}
 
 
 settings = Settings()

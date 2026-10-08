@@ -15,16 +15,29 @@ Flags:
     and published without Gate B. A per-topic list (e.g. [47]) narrows it.
   * VM_PASS_EXEMPT ("vm_pass_exempt", default [] = none) — topics exempt from
     VM_PASS_REQUIRED.
+  * LITERAL_CARDS ("literal_cards", default [47] — OS "named tool") — the
+    storyboard never invents on-screen evidence (VM FAIL P0 #1449: invented
+    PowerShell `MissingTerminator`, a misquote attributed to the Cursor forum,
+    "3.20.21" on three cards in a row): rule 2b (required snippet) off, the
+    no-invented-output rule on; log / error / command / quote / stat cards
+    ONLY from the video's explicit allowlist (overrides "on_screen_allow",
+    craft.on_screen_allow) — anything else becomes a plain text card;
+    provided "on_screen" cards used verbatim; attribution / stat values only
+    when the script says them (else Gate B FAIL); no version number on two
+    consecutive cards; RR hook pace first cut (≤2.5s). See craft.literal_*
+    and storyboard._apply_literal_cards.
 """
 from __future__ import annotations
 
 ALL = "*"
 VM_PASS_REQUIRED = "vm_pass_required"
 VM_PASS_EXEMPT = "vm_pass_exempt"
+LITERAL_CARDS = "literal_cards"
 
 DEFAULTS: dict[str, tuple] = {
     VM_PASS_REQUIRED: (ALL,),
     VM_PASS_EXEMPT: (),
+    LITERAL_CARDS: (47,),
 }
 
 

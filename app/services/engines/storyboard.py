@@ -18,6 +18,7 @@ Design rules:
     parameter, so it never imports ``worker`` (no import cycle).
 """
 
+import contextvars
 import copy
 import json
 import logging
@@ -145,6 +146,29 @@ def _code_line_clip(text, n: int) -> str:
     return s[:n].rstrip()
 
 
+# literal_cards topics: a terminal / code line cut to fit the card ends in "…"
+# so the cut is explicit (craft.source_literal accepts an "…" cut of an
+# allowlisted line; a silent cut would read as a different, invented line).
+_CUT_MARK = contextvars.ContextVar("storyboard_cut_mark", default=False)
+
+
+def _cli_clip(text, n: int, keep_indent: bool) -> str:
+    raw = str(text).rstrip() if keep_indent else str(text).strip()
+    out = _code_line_clip(text, n) if keep_indent else _chars_clip(text, n)
+    if _CUT_MARK.get() and len(raw) > n:
+        out = (raw[:n - 1].rstrip() if keep_indent else raw[:n - 1].strip()) + "\u2026"
+    return out
+
+
+def _parse_cut(raw: str, allowed, mark: bool):
+    """parse_storyboard with literal-topic cut marks ("…") on clipped lines."""
+    tok = _CUT_MARK.set(bool(mark))
+    try:
+        return parse_storyboard(raw, allowed)
+    finally:
+        _CUT_MARK.reset(tok)
+
+
 def _coerce_beat(raw: dict, allowed: set) -> dict | None:
     """Validate + clamp one raw beat. Unknown/out-of-allowlist types downgrade to
     ``statement``. Returns None only if it can't be salvaged into anything."""
@@ -227,7 +251,7 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
 
     # Phase B/C: accept + clamp here; rendered only once their renderers are registered.
     if btype == "code":
-        lines = [_code_line_clip(x, 60) for x in (raw.get("lines") or []) if str(x).strip()][:8]
+        lines = [_cli_clip(x, 60, True) for x in (raw.get("lines") or []) if str(x).strip()][:8]
         if not lines:
             return None
         hl = [i for i in (raw.get("highlight") or []) if isinstance(i, int)]
@@ -235,11 +259,11 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
                 "lines": lines, "highlight": hl}
 
     if btype == "command":
-        cmd = _chars_clip(raw.get("command", ""), 80)
+        cmd = _cli_clip(raw.get("command", ""), 80, False)
         if not cmd:
             return None
         return {"type": "command", "cue": cue, "prompt": _chars_clip(raw.get("prompt", "$"), 3),
-                "command": cmd, "output": [_chars_clip(x, 60) for x in (raw.get("output") or [])][:4]}
+                "command": cmd, "output": [_cli_clip(x, 60, False) for x in (raw.get("output") or [])][:4]}
 
     if btype == "diagram":
         nodes = [{"id": _chars_clip(n.get("id", ""), 12), "label": _words_clip(n.get("label", ""), 3)}
@@ -1021,7 +1045,7 @@ _RENDERERS = {
 # --------------------------------------------------------------------------- assembly
 
 def build_index_html(beats, th, resolution, width, height, duration,
-                     content_format: str = "short") -> str:
+                     content_format: str = "short", slips=None) -> str:
     from app.services import craft
     body, tweens = [], []
     for i, b in enumerate(beats):
@@ -1050,6 +1074,11 @@ def build_index_html(beats, th, resolution, width, height, duration,
                 '" alt="" />\n')
     snap = json.dumps(craft.snapshot_beats(beats), ensure_ascii=False).replace("</", "<\\/")
     embed = '<script type="application/json" id="storyboard-beats">' + snap + "</script>\n"
+    if slips is not None:
+        # literal_cards topics: what the generator got wrong and compose
+        # repaired (craft.generator_slips_from_html → craft_gate report)
+        sj = json.dumps(list(slips), ensure_ascii=False).replace("</", "<\\/")
+        embed += '  <script type="application/json" id="generator-slips">' + sj + "</script>\n"
     return (
         "<!doctype html>\n<html lang=\"en\" data-resolution=\"" + resolution +
         "\"" + brand_attr + ">\n"
@@ -1102,6 +1131,18 @@ _TEASER_NO_CLI_RULE = (
     "term_define / quote. No API or path names on screen.\n\n")
 
 
+_LITERAL_CARD_RULE = (
+    "7. LITERAL EVIDENCE ONLY (real bug, real sources): NEVER invent commands, terminal "
+    "output, logs, error text, code, file paths, version numbers, quotes or numbers. A "
+    "`command`/`code` beat is allowed ONLY when every line is copied character-for-"
+    "character from a log / error / command entry of the ON-SCREEN ALLOWLIST; a `quote` "
+    "ONLY for an allowlisted quote, and NEVER with an attribution the narration does not "
+    "say; a `stat` ONLY for a value in an allowlisted stat that the narration also says. "
+    "The allowlist is the ONLY source for those cards — when nothing fits, use a plain "
+    "statement card with the spoken words. Never show the same version number on two "
+    "consecutive cards.\n\n")
+
+
 _CARD_TEXT_RULE = (
     "8. CARD TEXT: at most ONE card per spoken sentence — never a second card that "
     "re-says the same sentence. Quote marks only around words the narration says "
@@ -1118,11 +1159,12 @@ _PT_CARD_RULE = (
 
 
 def _system_prompt(allowed: list[str], product_teaser: bool = False, rr: bool = False,
-                   pt: bool = False) -> str:
+                   pt: bool = False, literal: bool = False) -> str:
     types = "\n".join("- " + _TYPE_DOCS[t] for t in allowed if t in _TYPE_DOCS)
     has_bc = any(t in allowed for t in ("code", "command", "diagram"))
-    # Product teasers (OS Shipping): no required snippet, no invented CLI.
-    need_snippet = has_bc and not product_teaser
+    # Product teasers (OS Shipping) and literal_cards topics (OS named tool,
+    # topic 47): no required snippet (rule 2b off), no invented CLI.
+    need_snippet = has_bc and not product_teaser and not literal
     rich = "stat / compare / list / term_define" + (" / code / command / diagram" if has_bc else "")
     return (
         "You design the VISUAL storyboard for a technical-explainer video. The narration "
@@ -1168,11 +1210,12 @@ def _system_prompt(allowed: list[str], product_teaser: bool = False, rr: bool = 
         "NEVER anchor two beats inside the same short sentence. FORBIDDEN on the cta and anywhere "
         "on screen: Follow, Follow tomorrow, Siga, waitlist, owera.com, Cloud-as-product, "
         "'part 2 coming', SMY, Instagram, LinkedIn, 💸, neon. Endcard also forbids amanhã.\n" +
-        (_TEASER_NO_CLI_RULE if product_teaser else
+        (_LITERAL_CARD_RULE if literal else _TEASER_NO_CLI_RULE if product_teaser else
          "7. 9:16 MUST carry the claim with ≥1 real UI still: a `command` (terminal) or `code` "
          "(receipt / API bill / config). Do NOT draw nonsense diagrams (generic A→B oars, unlabeled "
          "boxes). Prefer code/command over diagram on vertical shorts.\n\n") +
-        _CARD_TEXT_RULE + (_RR_CARD_RULE if rr else "") + (_PT_CARD_RULE if rr and pt else "") +
+        _CARD_TEXT_RULE + (_RR_CARD_RULE if rr or literal else "") +
+        (_PT_CARD_RULE if rr and pt else "") +
         "Allowed beat types:\n" + types + "\n\n"
         "Example for narration about RAG chunking (notice the VARIED types and verbatim cues"
         + (" — and the required code beat" if need_snippet else "") + "):\n"
@@ -1188,8 +1231,31 @@ def _system_prompt(allowed: list[str], product_teaser: bool = False, rr: bool = 
     )
 
 
+_SOURCE_PROMPT_MAX = 4000
+
+
+def _sources_block(sources) -> str:
+    """ON-SCREEN ALLOWLIST for a literal_cards topic (≤ _SOURCE_PROMPT_MAX chars)."""
+    from app.services import craft
+    allow = craft.on_screen_allow(sources)
+    if not allow:
+        return ("\n\nON-SCREEN ALLOWLIST: empty — show NO command / code / log / quote / "
+                "stat card; carry every claim with statement / compare / term_define.")
+    room = _SOURCE_PROMPT_MAX
+    parts = []
+    for x in allow:
+        line = f"- [{x['kind']}] {x['text'].strip()}"[:max(0, room)]
+        room -= len(line)
+        parts.append(line)
+        if room <= 0:
+            break
+    return ("\n\nON-SCREEN ALLOWLIST (the ONLY text a command / code / log / quote / stat "
+            "card may show, copied character-for-character):\n" + "\n".join(parts))
+
+
 def _user_prompt(subject: str, script: str, content_format: str,
-                 product_teaser: bool = False) -> str:
+                 product_teaser: bool = False, literal: bool = False,
+                 sources=None) -> str:
     from app.services import craft
     first = craft.first_spoken_sentence(script) or subject
     obj = craft.opening_object(first)["label"]
@@ -1219,6 +1285,7 @@ def _user_prompt(subject: str, script: str, content_format: str,
             "Opening object (frame 0 AND thumb chrome — echo this, do not swap for a "
             "diagram or emoji): " + obj + "\n" +
             pace + "\n\nNarration script:\n" + script +
+            (_sources_block(sources) if literal else "") +
             "\n\nReturn the storyboard JSON now.")
 
 
@@ -2441,6 +2508,7 @@ def _soft_product_card(beats, script) -> None:
 # subsequence whose cards can ALL start in [speech − 1.1s, speech] with
 # holds in [card min, cap] and the endcard in its window, then re-times it.
 _DP_RICH_W = 10.0      # an LLM explanatory card kept
+_DP_LIT_W = 10 * _DP_RICH_W   # literal_cards topics: provided on_screen card
 _DP_TEXT_W = 6.0       # an LLM quote/statement kept
 _DP_GEN_W = 0.5        # a generated card already on the board
 _DP_UNIT_W = -1.0      # a NEW sentence unit (only where needed)
@@ -2490,6 +2558,8 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
                 break
         gen = any(b.get(f) for f in _GEN_FLAGS)
         w = _DP_GEN_W if gen else (_DP_TEXT_W if typ in ("quote", "statement") else _DP_RICH_W)
+        if b.get("_lit"):
+            w = _DP_LIT_W   # provided literal card (on_screen): keep it whenever it fits
         k = craft.screen_text_key(b)
         if k and not gen:
             keys_llm.add(k)
@@ -2628,7 +2698,8 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
     return board
 
 
-def _sync_dp(beats, words, duration: float, hook_max: float, script: str | None = None) -> bool:
+def _sync_dp(beats, words, duration: float, hook_max: float, script: str | None = None,
+             sources=None) -> bool:
     """Guaranteed sync: choose + re-time the board so every card passes
     Gate B's card-sync check (and holds/first cut). False leaves the board
     unchanged (Gate B then reports it — a real failure, e.g. a hook claim
@@ -2649,7 +2720,7 @@ def _sync_dp(beats, words, duration: float, hook_max: float, script: str | None 
                 if rep(board, i):
                     bad.add(uids[i])
             if script:
-                for h in craft.card_text_hits(board, script, words):
+                for h in craft.card_text_hits(board, script, words, sources=sources):
                     if 0 < h["i"] < len(board) - 1:
                         bad.add(uids[h["i"]])
             if not bad and hits:
@@ -2869,7 +2940,8 @@ def _enforce_card_text_rules(beats, script, words=None, brand=None) -> None:
     out = []
     for i, b in enumerate(beats):
         typ = b.get("type") or ""
-        if i == 0 or typ in craft._CARD_RULE_SKIP:
+        if i == 0 or typ in craft._CARD_RULE_SKIP or b.get("_lit"):
+            # provided literal cards (on_screen) are verbatim by contract
             out.append(b)
             continue
         cur = b
@@ -2951,10 +3023,181 @@ def _cap_list_holds(beats) -> None:
             nxt["dur"] = float(nxt.get("dur") or 0) + extra
 
 
+# Literal cards (topic_flags.LITERAL_CARDS — OS named tool, topic 47; VM FAIL
+# P0 #1449 08/10). See craft.LITERAL_V1 for the contract.
+def _cue_token_pos(script_toks: list[str], b: dict) -> int:
+    return _find_subseq(script_toks, _tok(b.get("cue") or ""), 0)
+
+
+def _merge_on_screen(beats, script, on_screen, allowed) -> None:
+    """Provided literal cards (overrides "on_screen") go on the board verbatim,
+    at their cue; a generated mid card anchored in the same script sentence
+    gives way. A provided card whose cue is not in the narration is skipped
+    (it cannot be timed)."""
+    from app.services import craft
+    stoks = _tok(script or "")
+    bounds, pos = [], 0
+    for sent in _script_sentences(script):
+        n = len(_tok(sent))
+        bounds.append((pos, pos + n))
+        pos += n
+
+    def sent_of(p: int) -> int | None:
+        for k, (a, b) in enumerate(bounds):
+            if a <= p < b:
+                return k
+        return None
+
+    lit = []
+    for rb in on_screen if isinstance(on_screen, list) else []:
+        _tok_mark = _CUT_MARK.set(True)
+        try:
+            cb = _coerce_beat(rb, set(allowed or [])) if isinstance(rb, dict) else None
+        finally:
+            _CUT_MARK.reset(_tok_mark)
+        if not cb or (cb.get("type") or "") == "hook" or (cb.get("type") or "") in craft.CTA_TYPES:
+            continue
+        p = _cue_token_pos(stoks, cb)
+        if p < 0:
+            logger.info("storyboard: on_screen card %r skipped (cue not in the narration)",
+                        cb.get("cue"))
+            continue
+        cb["_lit"] = True
+        lit.append((p, cb))
+    if not lit:
+        return
+    taken = {sent_of(p) for p, _ in lit}
+    head = [beats[0]] if beats and (beats[0].get("type") or "") == "hook" else []
+    tail = [b for b in beats[len(head):] if (b.get("type") or "") in craft.CTA_TYPES]
+    mids, last = [], -1
+    for b in beats[len(head):]:
+        if (b.get("type") or "") in craft.CTA_TYPES:
+            continue
+        p = _cue_token_pos(stoks, b)
+        if p >= 0 and sent_of(p) in taken:
+            continue
+        last = p if p >= 0 else last
+        mids.append((last, b))
+    merged = sorted(mids + lit, key=lambda t: t[0])
+    beats[:] = head + [b for _, b in merged] + tail
+
+
+def _slip(slips, kind: str, b: dict, detail) -> None:
+    """Record one generator slip (literal_cards topics) for the gate report."""
+    if slips is None:
+        return
+    slips.append({"kind": kind, "type": b.get("type") or "", "cue": str(b.get("cue") or "")[:80],
+                  "detail": detail if isinstance(detail, list) else [str(detail)[:160]]})
+
+
+def _plain_card(b: dict, script) -> dict | None:
+    """The beat's spoken words as a plain text card (no quote mark, no
+    attribution); None when its cue is not in the narration."""
+    nb = _narration_card(b, script)
+    if nb is None:
+        return None
+    nb["plain"] = True
+    nb["attribution"] = ""
+    return nb
+
+
+def _apply_literal_cards(beats, script, sources, on_screen, allowed, slips=None) -> None:
+    """Literal-card board rules (before timing; ``sources`` = the on-screen
+    allowlist, craft.on_screen_allow): provided cards merged verbatim; a
+    command/code card with any line not an allowlisted log / error / command
+    line, a quote not allowlisted, or a stat whose value is not allowlisted or
+    never said becomes a plain text card with the beat's spoken words (dropped
+    when its cue is not spoken); an attribution the script never says is
+    removed. Provided ("on_screen", _lit) cards are never rewritten — any
+    violation there stays on the board and Gate B (cli_check literal) blocks
+    the render."""
+    from app.services import craft
+    _merge_on_screen(beats, script, on_screen, allowed)
+    out = []
+    for i, b in enumerate(beats):
+        typ = b.get("type") or ""
+        if (i == 0 and typ == "hook") or typ in craft.CTA_TYPES or b.get("_lit"):
+            out.append(b)
+            continue
+        why = kind = None
+        detail: list = []
+        if typ in craft.CLI_BEAT_TYPES:
+            bad = [ln for ln in craft.cli_lines(b)
+                   if not craft.source_literal(ln, sources, craft.CLI_ALLOW_KINDS)]
+            if bad:
+                why, kind, detail = (f"{typ} line(s) not allowlisted: {bad[:2]!r}",
+                                     "cli_not_in_allowlist", [str(x)[:160] for x in bad[:3]])
+        elif typ == "stat":
+            val = str(b.get("value") or "")
+            if not craft.text_in_script(val, script):
+                why, kind, detail = f"stat {val!r} not said", "stat_not_in_script", [val]
+            elif not craft.stat_allowed(val, sources):
+                why, kind, detail = f"stat {val!r} not allowlisted", "stat_not_in_allowlist", [val]
+        elif typ == "quote" and not b.get("plain") and not craft.source_literal(
+                b.get("text"), sources, {"quote"}):
+            if craft.text_in_script(b.get("text"), script):
+                _slip(slips, "quote_not_in_allowlist", b, [str(b.get("text") or "")[:160]])
+                if str(b.get("attribution") or "").strip():
+                    _slip(slips, "attribution_dropped", b, [str(b.get("attribution"))[:160]])
+                b["plain"] = True
+                b["attribution"] = ""
+            else:
+                why, kind, detail = ("quote not allowlisted", "quote_not_in_allowlist",
+                                     [str(b.get("text") or "")[:160]])
+        if why:
+            logger.info("storyboard: literal topic → plain text card (%s)", why)
+            nb = _plain_card(b, script)
+            _slip(slips, kind, b, detail + (["→ plain text card"] if nb else ["→ dropped (cue not spoken)"]))
+            if nb is None:
+                continue
+            b = nb
+        attr = str(b.get("attribution") or "").strip()
+        if attr and not craft.text_in_script(attr, script):
+            _slip(slips, "attribution_dropped", b, [attr[:160]])
+            b["attribution"] = ""
+        out.append(b)
+    beats[:] = out
+
+
+def _drop_repeated_versions(beats, slips=None) -> None:
+    """No dotted version number on two consecutive cards (#1449: "3.20.21" on
+    cards #7, #8 and #9): the later card goes (the hook and the endcard stay)."""
+    from app.services import craft
+    out, prev = [], set()
+    for i, b in enumerate(beats):
+        typ = b.get("type") or ""
+        if typ in craft.CTA_TYPES:
+            out.append(b)
+            prev = set()
+            continue
+        vs = craft.version_tokens(craft.beat_screen_text(b))
+        if i > 0 and vs & prev:
+            logger.info("storyboard: card dropped (version %s repeated)", sorted(vs & prev))
+            _slip(slips, "repeated_version_dropped", b, sorted(vs & prev))
+            continue
+        out.append(b)
+        prev = vs
+    beats[:] = out
+
+
+def _plain_unsourced_quotes(beats, script, sources, slips=None) -> None:
+    """After timing: every quote card not an allowlisted quote (sync/split
+    fillers are narration words) renders plain, without attribution."""
+    from app.services import craft
+    for b in beats:
+        if (b.get("type") or "") == "quote" and not craft.source_literal(
+                b.get("text"), sources, {"quote"}):
+            if str(b.get("attribution") or "").strip():
+                _slip(slips, "attribution_dropped", b, [str(b.get("attribution"))[:160]])
+            b["plain"] = True
+            b["attribution"] = ""
+
+
 def compose(*, subject, script, words, duration, resolution, width, height,
             topic_id=None, content_format="short", allowed_types=None, language=None,
             llm, brand=None, channel_id=None, channel_slug=None,
-            provided_thumb=False, topic_name=None) -> str | None:
+            provided_thumb=False, topic_name=None, on_screen_allow=None,
+            on_screen=None) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -2967,16 +3210,25 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     from app.services import craft as _craft
     teaser = _craft.is_product_teaser(subject, topic_name)
     rr_brand = (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS
+    from app.services import topic_flags
+    literal = topic_flags.has(topic_flags.LITERAL_CARDS, topic_id)
+    # literal topics: the explicit on-screen allowlist (craft.on_screen_allow)
+    # is the ONLY source for log / error / command / quote / stat cards
+    sources = on_screen_allow
+    # generator slips (literal topics): every generated card compose had to
+    # repair → embedded in the HTML → creation_config / craft_gate report
+    slips: list | None = [] if literal else None
     system = _system_prompt(allowed, product_teaser=teaser, rr=rr_brand,
-                            pt=_craft.is_pt_text(script))
-    user = _user_prompt(subject, script, content_format, product_teaser=teaser)
+                            pt=_craft.is_pt_text(script), literal=literal)
+    user = _user_prompt(subject, script, content_format, product_teaser=teaser,
+                        literal=literal, sources=sources)
 
     raw = llm(user, system=system, max_tokens=1500).strip()
-    beats = parse_storyboard(raw, allowed)
+    beats = _parse_cut(raw, allowed, literal)
     if not beats:
         raw = llm(user + "\n\nReturn ONLY valid JSON {\"beats\":[...]} using the allowed types.",
                   system=system, max_tokens=1500).strip()
-        beats = parse_storyboard(raw, allowed)
+        beats = _parse_cut(raw, allowed, literal)
     if not beats:
         logger.info("storyboard: unparseable for %r — falling back", subject)
         return None
@@ -2992,13 +3244,13 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             ("/ code / command / diagram" if any(t in allowed for t in ("code", "command", "diagram")) else "") +
             ". Exactly one hook first and one cta last. Hook text = first spoken sentence.",
             system=system, max_tokens=1500).strip()
-        rb = parse_storyboard(retry, allowed)
+        rb = _parse_cut(retry, allowed, literal)
         if rb and (_variety_ok(rb, content_format) or len(_rich_types(rb)) > len(_rich_types(beats))):
             beats = rb
 
     # R2: if code/command is allowed but the draft has neither, push once for a snippet.
     # Keep the retry only when it actually adds one (otherwise keep the varied original).
-    if not teaser and not _code_ok(beats, allowed):
+    if not teaser and not literal and not _code_ok(beats, allowed):
         retry = llm(
             user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
             "cta-last, keep variety (at most " +
@@ -3022,12 +3274,16 @@ def compose(*, subject, script, words, duration, resolution, width, height,
     _sanitize_cta(beats, script, subject=subject, brand=brand or th.get("brand"),
                   content_format=content_format, topic_name=topic_name)
     _strip_mid_subscribe_beats(beats)
+    if literal:
+        _apply_literal_cards(beats, script, sources, on_screen, allowed, slips)
     if teaser:
         _replace_fabricated_cli(beats, script)
         _soft_product_card(beats, script)
     _cap_statements(beats, content_format)
     _fix_verbless_cards(beats, script)
     _enforce_card_text_rules(beats, script, words, brand or th.get("brand"))
+    if literal:
+        _drop_repeated_versions(beats, slips)
 
     align_storyboard(beats, words, duration)
     _cap_list_holds(beats)
@@ -3041,8 +3297,9 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             logger.info("storyboard: timing invalid for %r — falling back", subject)
             return None
     _break_repeated_cards(beats, words)
+    # RR hook pace; literal_cards topics (OS named tool) get the same ≤2.5s first cut.
     rr_pace = ((content_format or "short") != "long"
-               and (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS)
+               and ((brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS or literal))
     if rr_pace:
         _pull_first_cut(beats, duration, words)
     if (content_format or "short") != "long" and _is_annotated(words):
@@ -3055,7 +3312,8 @@ def compose(*, subject, script, words, duration, resolution, width, height,
         if synced:
             # card text rules hold on the repaired board too (no echo /
             # near-duplicate filler from the local repair)
-            synced = not _craft.card_text_hits(beats, script, words)
+            synced = not _craft.card_text_hits(beats, script, words,
+                                               sources=_craft.literal_sources(sources) if literal else None)
         if not synced:
             # P0 2026-10-03: the local repair gave up → choose + re-time the
             # board from the speech anchors (never ship an unsynced board).
@@ -3063,7 +3321,11 @@ def compose(*, subject, script, words, duration, resolution, width, height,
             # for it, still guarantee card sync (Gate B then reports only
             # the real hook-pace defect).
             for hm in dict.fromkeys((hook_max, _HOOK_MAX, _SYNC_HOOK_LAST)):
-                if _sync_dp(beats, words, duration, hm, script=script):
+                if _sync_dp(beats, words, duration, hm, script=script,
+                            sources=_craft.literal_sources(sources) if literal else None):
                     break
+    if literal:
+        # timing/sync fillers are narration words: never dressed as a quotation
+        _plain_unsourced_quotes(beats, script, sources, slips)
     return build_index_html(beats, th, resolution, width, height, duration,
-                            content_format=content_format)
+                            content_format=content_format, slips=slips)

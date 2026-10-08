@@ -352,6 +352,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             brand=brand,
             provided_thumb=params.get("thumb_source") == "provided",
             topic_name=params.get("topic_name"),
+            on_screen_allow=params.get("on_screen_allow"), on_screen=params.get("on_screen"),
         )
         used_fallback = False
         if not _looks_valid(html):
@@ -420,9 +421,14 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         sync = (craft.card_sync_marker(beats, words, fmt, script=script)
                 if not used_fallback else None)
         # Product teasers: no invented CLI on screen (CLI_V1).
+        # literal_cards topics (OS named tool, topic 47): terminal/log/quote
+        # / error / command / quote / stat text only from the on-screen allowlist
+        # (overrides "on_screen_allow"), no repeated version (LITERAL_V1).
         cli = craft.cli_check_marker(beats, script, title=subject,
                                      topic_name=params.get("topic_name"),
-                                     content_format=fmt)
+                                     content_format=fmt,
+                                     topic_id=params.get("topic_id"),
+                                     sources=params.get("on_screen_allow"))
         # Card text rules (VM Gate B #1423): echo / unspoken quote / invented
         # output / PT-BR terms / near-duplicates (CARD_TEXT_V1).
         # RR sentence pace (soft, logged — never a gate check).
@@ -430,8 +436,12 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
         if space and space["over"]:
             logger.info("render: %d RR sentence(s) spoken over %.1fs (%s)", len(space["over"]),
                         space["max_s"], ", ".join(f"{h['secs']:.2f}s" for h in space["over"]))
+        from app.services import topic_flags as _tf
+        _lit_src = (params.get("on_screen_allow")
+                    if _tf.has(_tf.LITERAL_CARDS, params.get("topic_id")) else None)
         ctext = (craft.card_text_marker(beats, script, words,
-                                        brand=brand or params.get("brand"), content_format=fmt)
+                                        brand=brand or params.get("brand"), content_format=fmt,
+                                        sources=_lit_src)
                  if not used_fallback else None)
         # Card ⊂ VO (VM P0, council 06/10): each text card = one whole spoken
         # sentence, one card per sentence (CARD_VO_V1; no OCR in-pipeline —
@@ -443,6 +453,14 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                                       beat_timing=craft.BEAT_TIMING_CURRENT,
                                       card_sync=sync, cli_check=cli, card_text=ctext,
                                       card_vo=cvo)
+        # literal_cards topics: generator slips compose repaired (generated
+        # evidence card → plain, attribution / stat removed, repeated version
+        # dropped) — informational in the VM's craft report, never a verdict.
+        slips = craft.generator_slips_from_html(html) if not used_fallback else None
+        craft.attach_generator_slips(gate, slips)
+        if slips:
+            logger.info("render: %d generator slip(s) repaired by compose: %s", len(slips),
+                        "; ".join(f"{x.get('kind')}@{x.get('cue')!r}" for x in slips[:10]))
         return {
             "composition_version": settings.composition_version,
             "content_format": fmt,
@@ -461,6 +479,9 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             **({"cli_check": cli} if cli else {}),
             **({"card_text": ctext} if ctext else {}),
             **({"card_vo": cvo} if cvo else {}),
+            **({"generator_slips": {"count": len(slips),
+                                    "slips": slips[:craft.GEN_SLIPS_LIST_MAX]}}
+               if slips is not None else {}),
             **({"sentence_pace": space} if space else {}),
             # Designer split card rendered on frame0 → the publish-time thumb
             # uses the same card (frame0 ≡ thumb); absent on older renders.
@@ -865,7 +886,8 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
                           width: int, height: int, duration: float, *,
                           topic_id=None, content_format: str = "short",
                           language: str | None = None, brand: str | None = None,
-                          provided_thumb: bool = False, topic_name: str | None = None) -> str:
+                          provided_thumb: bool = False, topic_name: str | None = None,
+                          on_screen_allow=None, on_screen=None) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
     the old clip-array path below as a kill switch. Returns "" on generic failure so
@@ -882,6 +904,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             content_format=content_format, allowed_types=settings.composition_beat_types,
             language=language, llm=_llm_compose, brand=brand,
             provided_thumb=provided_thumb, topic_name=topic_name,
+            on_screen_allow=on_screen_allow, on_screen=on_screen,
         )
         return html or ""
     except Exception as e:
