@@ -240,6 +240,29 @@ Channels/VM". The app enforces this: approve → 403 for non-Channels actors and
 reject / vm-pass records the actor (`X-Actor` header, else the Basic auth username) in the
 JobRun history — send `X-Actor: growth` on your calls.
 
+**HTTP 409 "held…" = HELD, not an error (CoS 2026-10-08).** Since #87 every approve needs
+the VM's Gate B PASS on the current render, for **every topic** (no exemptions by default).
+Without it the CM API answers **409** and the JSON `detail` **starts with `held`** — exactly:
+- `approve` / `retry` (re-publish): `held: needs vm_pass — the VM's Gate B PASS on this render
+  is required before approve/publish (topic N; POST /api/videos/{id}/vm-pass by Channels/VM
+  first; a re-render clears it)`
+- CM teaser `approve` (Channels actor, no PASS yet): `held: needs vm_pass — CM teaser: approve
+  requires the VM's Gate B PASS on this final render (POST /api/videos/{id}/vm-pass by
+  Channels/VM first; a re-render clears it).`
+
+Rule: **a 409 whose `detail` starts with `held`** (any call: `approve`, `retry`, `produce`,
+`requeue` — later produce holds use the same prefix) means the video is **HELD waiting for a
+human/VM `vm_pass`** (or the hold named after `held:`). That is the app working as designed:
+do **not** retry the call, do **not** requeue / re-render / reject it to "unstick" it, do
+**not** count it as a failure or escalate it as an incident. Record it as `held` in the report
+(`## Triage` → "Held (waiting vm_pass): #id, #id") and move on to the next item. (Older
+wordings — "approve requires the VM's Gate B PASS…", "cannot approve: topic N requires the
+VM's Gate B PASS…" — are no longer returned; if you still see a 409 mentioning `vm_pass` or
+`Gate B PASS`, treat it the same way.) Other 409s (e.g. "cannot approve: duplicate episode…",
+"cannot hold from status…") are unchanged. The 403s for the growth actor on approve / requeue /
+vm-pass of CM teasers are unchanged — also not errors; leave those videos alone (CM teasers
+keep their existing `⚠ Needs operator` line).
+
 Rules: only touch `failed`/`rejected`/`review`/stuck rows — never `published` or in-flight
 videos. Re-render → `QUEUED`, re-publish → `APPROVED` (see the lifecycle map in step 4;
 an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
@@ -426,6 +449,8 @@ risky, skip it — doing nothing is always safe.
   already stages it.
 - **If triage surfaced anything that needs the operator** (OAuth reconnect, a recurring
   quota wall), lead the report with a `⚠ Needs operator` block so it can't be missed.
+  Videos that got a 409 `held…` are listed once as **Held (waiting vm_pass)** —
+  informational, not a failure and not an operator incident.
   A clean triage day = one line: "No operational issues found."
 - **Report only what you verified.** Every claim of effect must be backed by an
   observation you actually made this run — quote the proof (the DB row / API response /
