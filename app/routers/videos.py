@@ -20,6 +20,7 @@ from app.schemas import (
 from app.services import metadata, quota, review_guard
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
+from app.services.subject_guard import HOLD_PREFIX, subject_guard_reason
 from app.services.youtube import QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -271,6 +272,14 @@ def create_video(body: VideoCreate, session: Session = Depends(get_session)):
         fields["title"] = body.title
         _require_str(fields, "title",
                      "title must be a non-empty string (omit it or send null)")
+    # queue=true is a draft→render transition. Auto-produce holds a subject
+    # the guard rejects; this path used to queue it anyway and spend a slot
+    # on a video the publish gate will not ship. Draft create (queue false)
+    # still saves the idea — the next auto-produce tick records the hold.
+    if body.queue:
+        held = subject_guard_reason(fields["subject"])
+        if held:
+            raise HTTPException(409, held)
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)).one() or 0
     v = Video(channel_id=topic.channel_id, topic_id=topic.id, subject=fields["subject"],
               status=VideoStatus.QUEUED if body.queue else VideoStatus.DRAFT, position=mx + 1)
@@ -530,6 +539,25 @@ def delete_video(video_id: int, session: Session = Depends(get_session)):
         session.commit()
 
 
+def _hold_unqueued_subject(session: Session, video: Video) -> str | None:
+    """Reason the draft must stay a draft, or None when it may be queued.
+
+    Sibling of render_loop._hold_invalid_subject. One produce/error JobRun per
+    distinct reason; a repeat click does not append another row. Does not
+    change status — the caller commits.
+    """
+    reason = subject_guard_reason(video.subject)
+    if not reason:
+        return None
+    if video.error != reason:
+        video.error = reason
+        session.add(video)
+        quota.log(session, kind="produce", status="error", video_id=video.id,
+                  channel_id=video.channel_id,
+                  detail=f"produce held draft (not queued): {reason}")
+    return reason
+
+
 def _set_status(session, video_id, new, **fields):
     v = session.get(Video, video_id)
     if not v:
@@ -551,10 +579,16 @@ def produce(video_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "video not found")
     if v.status != VideoStatus.DRAFT:
         raise HTTPException(409, f"cannot produce from status '{v.status}'")
+    held = _hold_unqueued_subject(session, v)
+    if held:
+        session.commit()
+        raise HTTPException(409, held)
     # Draft->queued from the API was the last unaudited transition (2026-08-01: an
     # operator bulk-produce of 20 drafts was only reconstructable from the uvicorn
     # access log) — log it so /api/runs distinguishes operator queueing from the
     # scheduler's auto-produce rows.
+    if (v.error or "").startswith(HOLD_PREFIX):
+        v.error = None
     quota.log(session, kind="produce", status="success", video_id=v.id,
               channel_id=v.channel_id, detail="produced via API: draft queued")
     return _set_status(session, video_id, VideoStatus.QUEUED)
@@ -562,19 +596,32 @@ def produce(video_id: int, session: Session = Depends(get_session)):
 
 @router.post("/produce")
 def produce_bulk(body: ReorderBody, session: Session = Depends(get_session)):
-    """Promote many drafts at once (reuses {channel_id, ordered_ids:[video ids]})."""
+    """Promote many drafts at once (reuses {channel_id, ordered_ids:[video ids]}).
+
+    A subject the guard rejects stays DRAFT (same hold as single produce) and
+    is counted in ``held``. Other drafts in the list still queue.
+    """
     n = 0
+    held_ids: list[int] = []
     for vid in body.ordered_ids:
         v = session.get(Video, vid)
-        if v and v.status == VideoStatus.DRAFT:
-            v.status = VideoStatus.QUEUED
-            session.add(v)
-            quota.log(session, kind="produce", status="success", video_id=v.id,
-                      channel_id=v.channel_id,
-                      detail="bulk-produced via API: draft queued")
-            n += 1
+        if not v or v.status != VideoStatus.DRAFT:
+            continue
+        held = _hold_unqueued_subject(session, v)
+        if held:
+            if v.id not in held_ids:
+                held_ids.append(v.id)
+            continue
+        v.status = VideoStatus.QUEUED
+        if (v.error or "").startswith(HOLD_PREFIX):
+            v.error = None
+        session.add(v)
+        quota.log(session, kind="produce", status="success", video_id=v.id,
+                  channel_id=v.channel_id,
+                  detail="bulk-produced via API: draft queued")
+        n += 1
     session.commit()
-    return {"produced": n}
+    return {"produced": n, "held": len(held_ids)}
 
 
 # Review-gate state table (P0 2026-09-29). Anything outside these sets is 409
