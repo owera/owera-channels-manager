@@ -1,3 +1,4 @@
+import { HeldError, heldReason, pushHeld, videoIdOf } from "./held";
 import {
   useMutation,
   useQuery,
@@ -174,10 +175,20 @@ async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     let msg = res.statusText;
+    let body: unknown = null;
     try {
-      const j = await res.json();
-      msg = j.detail || JSON.stringify(j);
+      body = await res.json();
+      const d = (body as any)?.detail;
+      msg = typeof d === "string" ? d : d ? JSON.stringify(d) : JSON.stringify(body);
     } catch {}
+    // 409 "held…" (approve without vm_pass, produce holds): a neutral
+    // "Segurado" state, never an error — see held.ts.
+    const reason = heldReason(res.status, body);
+    if (reason !== null) {
+      const e = new HeldError(reason, videoIdOf(path), path);
+      pushHeld(e);
+      throw e;
+    }
     throw new Error(msg);
   }
   if (res.status === 204) return undefined as T;
