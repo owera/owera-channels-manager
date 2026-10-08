@@ -10,7 +10,7 @@ draft turns into render spend.
 Conservative by design: it only flags the *shape* a stripped number leaves
 behind at the very start of the subject. It does not try to prove that a number
 or stake exists anywhere, because plenty of valid subjects have none (OS:
-"Chat targeted staging. Prod wrote production.").
+"The summary lost the deadline.").
 
 Flagged (returns a reason):
   - first word all-lowercase letters, e.g. "regenerações …", "camadas …",

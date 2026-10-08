@@ -491,16 +491,23 @@ ok(out == ["O agente force-pushou a main. · Claude Code 11",
 
 
 # ---------------------------------------------------------------------------
-print("9. Agent memory: domain spread + at most 1 in 5 billing/price")
-AM_THEME = "Format: {chat vs prod}. · Agent memory {nn}. Example: Chat remembered. Prod forgot."
+print("9. Agent memory: one-sentence A/B/C titles, no Chat/Prod, no billing")
+AM_THEME = ("TITLE: one sentence, ≤8 words, = first spoken sentence = full hook card. "
+            "· Agent memory {nn}. Rotate A/B/C. Example: Agents don't forget, they get trimmed.")
 _, prompt = run_ideas("X", topic="Agent memory and state in production", theme=AM_THEME)
 ok(video_gen.AGENT_MEMORY_SPREAD in prompt, "Agent memory prompt carries the spread rule")
-ok("'Chat did X. Prod did Y.'" in prompt, "template 'Chat did X. Prod did Y.' is kept exactly")
+ok("'Chat did X. Prod did Y.'" not in prompt, "the 'Chat did X. Prod did Y.' template is gone")
+ok("ONE sentence, max 8 words" in prompt, "one sentence, ≤8 words")
+for pat in ("Agents don't <human verb>", "<lost|found|wiped>", "Ask your agent"):
+    ok(pat in prompt, f"rotating pattern in the prompt: {pat}")
+ok("never the same pattern twice in a row" in prompt, "no pattern twice in a row")
+for ban in ("Chat X. Prod Y.", "money/prices/bills/Credits", "Subscribe — next memory trap."):
+    ok(ban in prompt, f"banned / closer stated: {ban!r}")
 for dom in ("calendar/scheduling", "shipping address", "permission/access",
             "language/locale", "user preference", "order status", "timezone",
             "notifications"):
     ok(dom in prompt, f"domain listed: {dom}")
-ok("At most 1 in 5" in prompt, "prompt states the 1-in-5 billing/price cap")
+ok("no billing idea at all" in prompt, "prompt bans billing/price hooks entirely")
 _, other = run_ideas("X", topic="CrewAI", theme="· CrewAI {nn}")
 ok(video_gen.AGENT_MEMORY_SPREAD not in other, "other series do not get the Agent memory rule")
 
@@ -509,38 +516,55 @@ for txt, exp in (("Chat priced it in EUR. Prod charged USD.", True),
                  ("Chat picked annual. Prod billed monthly.", True),
                  ("Chat froze card 4412. Prod charged the card.", True),
                  ("Chat declined the warranty. Prod added it anyway.", True),
-                 ("Chat booked 3pm. Prod booked 3am.", False),
-                 ("Chat set pt-BR. Prod replied in English.", False),
-                 ("Chat revoked access. Prod kept the token.", False),
-                 ("Chat muted alerts. Prod paged at 2am.", False)):
+                 ("The summary lost the deadline.", False),
+                 ("Agents don't remember, they reread.", False),
+                 ("Ask your agent what you said first.", False)):
     ok(video_gen.is_billing_themed(txt) is exp, f"billing classifier: {txt!r} -> {exp}")
 
-BATCH = ("Chat booked 3pm. Prod booked 3am. · Agent memory 39\n"
+for txt, exp in (("Chat booked 3pm. Prod booked 3am.", True),
+                 ("chat set pt-BR! Prod replied in English.", True),
+                 ("Chat routed to Maya. Prod paged Lee. · Agent memory 32", True),
+                 ("Agents don't remember, they reread.", False),
+                 ("The summary lost the deadline.", False),
+                 ("Ask your agent what you said first.", False),
+                 ("Prod booked 3am. Chat booked 3pm.", False)):
+    ok(video_gen.is_chat_prod_title(txt) is exp, f"chat/prod shape: {txt!r} -> {exp}")
+
+BATCH = ("Agents don't remember, they reread. · Agent memory 39\n"
          "Chat applied SAVE20. Prod charged full price again. · Agent memory 40\n"
-         "Chat picked weekly. Prod billed yearly. · Agent memory 41\n"
+         "The coupon lost the invoice note. · Agent memory 41\n"
          "Chat set pt-BR. Prod replied in English. · Agent memory 42\n"
-         "Chat revoked access. Prod kept the token. · Agent memory 43\n"
+         "The summary lost the deadline. · Agent memory 43\n"
          "Chat muted alerts. Prod paged at 2am. · Agent memory 44\n"
-         "Chat saved the new address. Prod shipped to the old one. · Agent memory 45\n"
+         "Memory search found the old address. · Agent memory 45\n"
          "Chat marked it refunded. Prod kept the invoice open. · Agent memory 46")
 out, _ = run_ideas(BATCH, topic="Agent memory and state in production", theme=AM_THEME,
                    existing=["Chat routed to Maya. Prod paged Lee. · Agent memory 32"])
-billing = [video_gen.is_billing_themed(x) for x in out]
-ok(sum(billing[:5]) <= 1 and all(sum(billing[i:i + 5]) <= 1 for i in range(len(billing))),
-   "new batch keeps at most 1 billing idea in any 5 consecutive")
-ok("Chat picked weekly. Prod billed yearly. · Agent memory 41" not in out,
-   "a second billing idea inside the window is dropped")
-recent_billing = ["Chat priced it in EUR. Prod charged USD. · Agent memory 30",
-                  "Chat applied SAVE20. Prod charged full price. · Agent memory 33",
-                  "Chat picked annual. Prod billed monthly. · Agent memory 37",
-                  "Chat appended line 3. Prod overwrote the file. · Agent memory 38"]
-out2, _ = run_ideas(BATCH, topic="Agent memory and state in production", theme=AM_THEME,
-                    existing=recent_billing)
-ok(not any(video_gen.is_billing_themed(x) for x in out2[:2]),
-   "with billing in the last 5 existing subjects, the batch opens non-billing "
-   "(existing + new window counted)")
+ok(out == ["Agents don't remember, they reread. · Agent memory 39",
+           "The summary lost the deadline. · Agent memory 43",
+           "Memory search found the old address. · Agent memory 45"],
+   "AM: every 'Chat …. Prod ….' idea and every billing idea is dropped")
 out3, _ = run_ideas(BATCH, topic="CrewAI", theme="· CrewAI {nn}")
-ok(len(out3) == 8, "the billing cap only applies to the Agent memory series")
+ok(len(out3) == 8, "the filter only applies to the Agent memory series")
+
+# A one-sentence A/B/C title passes the guards the two-sentence head used to need.
+from app.services import subject_guard
+from app.services.engines import worker as _wk
+ABC = [("Agents don't forget, they get trimmed. · Agent memory 60",
+        "They get trimmed because the oldest turns leave first."),
+       ("The summary lost the deadline. · Agent memory 61",
+        "A summary compresses exact values first."),
+       ("Ask your agent what you said first. · Agent memory 62",
+        "A long session keeps a summary, not the first turn.")]
+for title, rest in ABC:
+    ok(subject_guard.subject_guard_reason(title) is None, f"subject_guard passes: {title!r}")
+    ok(craft.spoken_title_ok(title), f"spoken series pattern passes: {title!r}")
+    head = title.split("·", 1)[0].strip()
+    locked = _wk._lock_patterned_opener(f"Your agent has a memory problem. {rest}", title)
+    ok(locked == f"{head} {rest}",
+       f"worker swaps sentence 1 for the one-sentence head, keeps the rest: {locked!r}")
+    ok(_wk._lock_patterned_opener(f"{head} {rest}", title) == f"{head} {rest}",
+       "script already opening on the head is kept verbatim (no duplicate)")
 
 
 print()

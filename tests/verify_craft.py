@@ -261,9 +261,9 @@ ok(_pinned_pt == "Lição. Se inscreve. Próxima armadilha de IA.",
    "ensure_series_endcard_vo strips mid Inscreve and pins the PT closer")
 
 am = craft.series_endcard("Memory died between chats · Agent memory 2")
-ok(am["vo"] == "Subscribe — next Agent memory trap."
+ok(am["vo"] == "Subscribe — next memory trap."
    and am["chip"] == "Subscribe · Agent memory",
-   "non-Credits/IA series only swaps {series}/{noun}")
+   "Agent memory closer is 'Subscribe — next memory trap.' (CMO 2026-10-08); chip unchanged")
 ok(craft.endcard_clean(am), "Agent memory endcard invents no extra CTA")
 
 bill = craft.series_endcard(
@@ -1219,9 +1219,11 @@ ok(craft.ensure_series_endcard_vo("Chat paged Lee. Subscribe — next Agent trap
    == "Chat paged Lee. Subscribe — next agent trap.",
    "a doubled-noun closer in the script is re-pinned to the clean one")
 ok(craft.series_cta_phrase("Cloud bills", "trap") == "Cloud bill"
-   and craft.series_cta_phrase("Agent memory", "receipt") == "Agent memory receipt",
+   and craft.series_cta_phrase("Shipping", "receipt") == "Shipping receipt",
    "generic: a series ending in a closer noun is singularised, not doubled; others unchanged")
-ok(craft.series_endcard_vo("Agent memory") == "Subscribe — next Agent memory trap."
+ok(craft.series_endcard_vo("Agent memory") == "Subscribe — next memory trap."
+   and craft.series_endcard_vo("Agent memory", "bill") == "Subscribe — next memory trap."
+   and craft.is_endcard_vo("Subscribe — next memory trap.")
    and craft.series_endcard_vo("Copilot Credits", "receipt") == "Subscribe — next Copilot Credits receipt.",
    "existing series closers unchanged")
 _fixture_topics = ["Shipping", "Agent traps", "IA", "Credits", "Deep dives", "OpenCode",

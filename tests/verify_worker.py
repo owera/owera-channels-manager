@@ -264,8 +264,8 @@ with patch.object(worker, "_llm", side_effect=_in_band_short):
         "Memory died between chats · Agent memory 2",
         {"content_format": "short", "brand": "os"},
     )
-ok(mem.endswith("Subscribe — next Agent memory trap."),
-   "non-Credits/IA series only swaps {series}/{noun}")
+ok(mem.endswith("Subscribe — next memory trap."),
+   "Agent memory pins 'Subscribe — next memory trap.' (CMO 2026-10-08)")
 
 _llm_calls.clear()
 with patch.object(worker, "_llm", side_effect=_in_band_short):
