@@ -300,10 +300,14 @@ NO_BILLING_AMOUNT_HOOK = (
     "Mentioning billing, a coupon, an invoice or a plan is fine without an amount."
 )
 
-# OS "Agent memory" series (item 9, 2026-09-28): five straight billing/price
-# scenarios (EUR/USD, SAVE20 coupon, annual vs monthly, warranty, card) read as
-# clones. Keep the "Chat did X. Prod did Y." template, spread the domains, cap
-# billing/price at 1 in 5. Applies to NEW ideas only — never rewrites drafts.
+# OS "Agent memory" series. 2026-09-28 spread the domains and capped
+# billing/price at 1 in 5. 2026-10-08 (CMO, PATTERNS.md §5): the "Chat did X.
+# Prod did Y." template is BANNED — it kept producing "Chat X. Prod Y." titles
+# the CMO killed for topic 26. New ideas are ONE sentence of ≤8 words (also
+# the first spoken sentence and the full hook card), rotating patterns A/B/C,
+# never the same pattern twice in a row, and the subject is a memory
+# mechanism. Money/price hooks are banned in Agent memory entirely (was 1 in
+# 5). Applies to NEW ideas only — never rewrites drafts.
 AGENT_MEMORY_SERIES_RE = re.compile(r"agent\s+memory", re.IGNORECASE)
 AGENT_MEMORY_DOMAINS = (
     "calendar/scheduling", "shipping address", "permission/access",
@@ -312,19 +316,31 @@ AGENT_MEMORY_DOMAINS = (
     "identity/account", "search filters", "data retention/deletion",
 )
 AGENT_MEMORY_SPREAD = (
-    "SCENARIO SPREAD (Agent memory): keep the title template exactly "
-    "'Chat did X. Prod did Y.' (two short sentences, then the · Agent memory nn "
-    "suffix). Spread the scenarios across different domains — "
-    + ", ".join(AGENT_MEMORY_DOMAINS) + " — one domain per idea, no two in a row "
-    "from the same domain. At most 1 in 5 ideas may be about billing/price "
-    "(currency, coupons, plans, invoices, refunds, cards, warranties); the rest "
-    "must be non-billing."
+    "TITLE (Agent memory, new shorts only): ONE sentence, max 8 words. It is "
+    "the first spoken sentence AND the full hook card text, same words. Then "
+    "' · Agent memory {nn}'. Rotate hook patterns, never the same pattern "
+    "twice in a row: A) \"Agents don't <human verb>, they <machine verb>.\" "
+    "B) \"<memory operation> <lost|found|wiped> <exact fact>.\" "
+    "C) \"Ask your agent <question that exposes memory>.\" "
+    "Subject = a memory mechanism (context, trimming, summary, retrieval, "
+    "process restart, store). Spread the scenarios across different domains — "
+    + ", ".join(AGENT_MEMORY_DOMAINS) + " — one domain per idea, no two in a "
+    "row from the same domain. BANNED: \"Chat X. Prod Y.\" (any chat-vs-prod "
+    "two-sentence title), money/prices/bills/Credits (no billing idea at all), "
+    "dotted version numbers in the VO, Owera/Cloud/Channels Manager. End VO: "
+    "\"Subscribe — next memory trap.\""
 )
-BILLING_WINDOW = 5          # sliding window for the 1-in-5 billing cap
+# Post-filter (cheap): the banned two-sentence "Chat …. Prod …." shape, even
+# when the verbs differ from the old template. One sentence, or a different
+# first word, passes.
+_AM_CHAT_PROD_RE = re.compile(
+    r"^\s*chat\b[^.!?]*[.!?]\s+prod\b", re.IGNORECASE)
+# Money/price words. Agent memory drops any idea that matches (CMO 2026-10-08,
+# billing cap 0; "Credits" added with it).
 _BILLING_THEME_RE = re.compile(
     r"\b(?:bill(?:ed|ing|s)?|charg(?:e|ed|es|ing)|pric(?:e|ed|es|ing)|invoic(?:e|ed|es)|"
     r"coupon|discount|refund(?:ed|s)?|warranty|subscription|checkout|payment|paid|pay|"
-    r"card|annual|monthly|usd|eur|brl|tax|fee|cobr(?:ou|a|ar|an[çc]a)|pre[çc]o|fatura|"
+    r"card|annual|monthly|usd|eur|brl|tax|fee|credits?|cobr(?:ou|a|ar|an[çc]a)|pre[çc]o|fatura|"
     r"cupom|reembolso|assinatura|cart[aã]o|plano|mensal|anual)\b|[$€£]",
     re.IGNORECASE,
 )
@@ -339,20 +355,9 @@ def _is_agent_memory(topic_name: str | None, theme_prompt: str | None) -> bool:
     return bool(AGENT_MEMORY_SERIES_RE.search(f"{topic_name or ''}\n{theme_prompt or ''}"))
 
 
-def _cap_billing(ideas: list[str], existing: list[str], window: int = BILLING_WINDOW) -> list[str]:
-    """Keep at most 1 billing-themed idea in any `window` consecutive subjects,
-    counting the tail of `existing` (the topic's recent subjects) before the new
-    batch. Over-cap billing ideas are dropped (no extra LLM call); the autofill
-    loop's next tick asks again for the shortfall."""
-    tail = [bool(is_billing_themed(x)) for x in existing[-(window - 1):]] if window > 1 else []
-    out: list[str] = []
-    for idea in ideas:
-        billing = is_billing_themed(idea)
-        if billing and any(tail[-(window - 1):]):
-            continue
-        out.append(idea)
-        tail.append(billing)
-    return out
+def is_chat_prod_title(text: str | None) -> bool:
+    """The banned Agent memory shape: two sentences, 'Chat …. Prod ….'."""
+    return bool(_AM_CHAT_PROD_RE.match((text or "").split("·", 1)[0]))
 
 
 def enforce_hook_pace(ideas: list[str], n: int, *, hook_voice: str | None,
@@ -466,5 +471,9 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
         seen.add(title.lower())
         out.append(title)
     if agent_memory:
-        out = _cap_billing(out, list(existing))
+        # CMO 2026-10-08: money/price hooks are banned in Agent memory
+        # entirely (billing cap 0), and the "Chat X. Prod Y." two-sentence
+        # shape is dropped here so a model that ignores the prompt can't
+        # land one in the queue. Other series keep both.
+        out = [t for t in out if not is_billing_themed(t) and not is_chat_prod_title(t)]
     return out[:max(0, n)]  # the model often returns more lines than asked

@@ -3023,7 +3023,9 @@ def next_claim_noun(*blobs: str | None) -> str:
 # EN closer phrase per series when "{series} {noun}" reads wrong. CMO
 # 2026-10-06 (#1328): Agent traps → "Subscribe — next agent trap." (the
 # template gave "next Agent traps trap.").
-SERIES_CTA_PHRASE = {"Agent traps": "agent trap"}
+# CMO 2026-10-08 (topic 26, PATTERNS.md §5): Agent memory closes on
+# "Subscribe — next memory trap." (chip stays "Subscribe · Agent memory").
+SERIES_CTA_PHRASE = {"Agent traps": "agent trap", "Agent memory": "memory trap"}
 
 
 def series_cta_phrase(series: str, noun: str = DEFAULT_NOUN) -> str:
@@ -3032,7 +3034,7 @@ def series_cta_phrase(series: str, noun: str = DEFAULT_NOUN) -> str:
     Explicit SERIES_CTA_PHRASE first. Otherwise, when the series' last word is
     already a closer noun (trap|receipt|bill|drop, singular or plural), that
     word becomes the noun in the singular ("Cloud bills" → "Cloud bill");
-    else "{series} {noun}" as before ("Agent memory trap").
+    else "{series} {noun}" as before ("Shipping trap").
     """
     if series in SERIES_CTA_PHRASE:
         return SERIES_CTA_PHRASE[series]
