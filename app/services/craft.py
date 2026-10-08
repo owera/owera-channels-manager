@@ -1118,6 +1118,9 @@ _BEAT_SNAP_KEYS = (
     # command output / quote attribution). Older snapshots lack these keys —
     # screen_text_key then sees less copy and never over-matches (fail-open).
     "term", "definition", "left", "right", "output", "attribution",
+    # plain quote = no quote mark on screen (renderer); the quote-mark checks
+    # (unspoken quote, literal-card source match) must see it.
+    "plain",
     # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
     "unit_first",
 )
@@ -1182,6 +1185,39 @@ def snapshot_beats(beats) -> list[dict]:
         snap = {k: b[k] for k in _BEAT_SNAP_KEYS if k in b}
         out.append(snap)
     return out
+
+
+_GEN_SLIPS_RE = re.compile(
+    r'<script type="application/json" id="generator-slips">(.*?)</script>', re.S)
+GEN_SLIPS_LIST_MAX = 40
+
+
+def generator_slips_from_html(html: str | None) -> list[dict] | None:
+    """Generator slips embedded by storyboard.compose on a literal_cards topic
+    (a generated evidence card turned plain / dropped, an attribution or stat
+    removed, a repeated version dropped …), or None when the board carries no
+    slip record (other topics, legacy / fallback renders)."""
+    m = _GEN_SLIPS_RE.search(html or "")
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1).replace("<\\/", "</"))
+    except (TypeError, ValueError):
+        return None
+    return [x for x in data if isinstance(x, dict)] if isinstance(data, list) else None
+
+
+def attach_generator_slips(gate: dict | None, slips) -> dict | None:
+    """Surface generator slips in the craft gate report the VM reads
+    (``generator_slips``: N, ``generator_slip_list``: […]). Informational:
+    never changes result / checks / reasons — what still violates the rules
+    after the repair is a cli_check hit (Gate B FAIL)."""
+    if not isinstance(gate, dict) or slips is None:
+        return gate
+    lst = [x for x in slips if isinstance(x, dict)]
+    gate["generator_slips"] = len(lst)
+    gate["generator_slip_list"] = lst[:GEN_SLIPS_LIST_MAX]
+    return gate
 
 
 def beats_from_html(html: str | None) -> list[dict]:
@@ -1474,20 +1510,174 @@ def _lexicon_for(voice: str | None) -> dict:
     return TTS_LEXICON_EN
 
 
+# Dotted version numbers in the VO (VM FAIL P0 #1449 08/10): edge-tts en-US
+# reads "3.20.21" as "March 20th, 21" and "1.15.19" as "January 15th, 2019"
+# (whisper small/base/tiny agree). The audio input gets the spoken form
+# ("three point twenty point twenty-one"); cards, titles and word timings keep
+# the digits (remerge_tts_words maps the spoken words back to "3.20.21").
+# Only 3–4 numeric parts, or a v-prefixed 2-part ("v2.1" → "version two point
+# one"): plain decimals and prices ("2.5x", "$3.20", "Python 3.10") are not
+# touched. Not inside URLs / paths / handles. No SSML: edge-tts gets plain text.
+# PT voices too (CoS 08/10 15:27; RR PT): "3.20.21" → "três ponto vinte ponto
+# vinte e um", and a bare 2-part "3.20" → "três ponto vinte" (PT writes
+# decimals with a comma) — except thousands grouping ("1.500", "2.000.000"),
+# money ("R$ 3.20") and "%"/"x" amounts, which PT keeps as numbers.
+_TTS_VERSION_RE = re.compile(
+    r"(?<![\w./@\-$€£])([vV](?=\d+\.\d))?(\d+(?:\.\d+){2,3}|(?<=[vV])\d+\.\d+)(?![\w/@\-]|\.\d)")
+_NUM_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+             "fourteen fifteen sixteen seventeen eighteen nineteen").split()
+_NUM_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _int_words(n: int) -> str:
+    """English words for 0 ≤ n < 1_000_000 ("283" → "two hundred eighty-three")."""
+    if n < 20:
+        return _NUM_ONES[n]
+    if n < 100:
+        t, o = divmod(n, 10)
+        return _NUM_TENS[t] + ("-" + _NUM_ONES[o] if o else "")
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return _NUM_ONES[h] + " hundred" + (" " + _int_words(r) if r else "")
+    if n < 1_000_000:
+        k, r = divmod(n, 1000)
+        return _int_words(k) + " thousand" + (" " + _int_words(r) if r else "")
+    return " ".join(_NUM_ONES[int(c)] for c in str(n))
+
+
+def _version_part_words(part: str) -> str:
+    if len(part) > 1 and part.startswith("0"):
+        return " ".join(_NUM_ONES[int(c)] for c in part)   # "05" → "zero five"
+    return _int_words(int(part))
+
+
+def version_spoken(token: str) -> str:
+    """"3.20.21" → "three point twenty point twenty-one"; "v2.1" → "version two point one"."""
+    t = str(token or "")
+    pre = ""
+    if t[:1] in ("v", "V"):
+        pre, t = "version ", t[1:]
+    return pre + " point ".join(_version_part_words(p) for p in t.split("."))
+
+
+_TTS_VERSION_PT_RE = re.compile(
+    r"(?<![\w./@\-$€£,])([vV](?=\d+\.\d))?(\d+(?:\.\d+){1,3})(?![\w/@\-%]|[.,]\d)")
+_NUM_ONES_PT = ("zero um dois três quatro cinco seis sete oito nove dez onze doze treze catorze "
+                "quinze dezesseis dezessete dezoito dezenove").split()
+_NUM_TENS_PT = "_ _ vinte trinta quarenta cinquenta sessenta setenta oitenta noventa".split()
+_NUM_HUNDREDS_PT = ("_ cento duzentos trezentos quatrocentos quinhentos seiscentos setecentos "
+                    "oitocentos novecentos").split()
+
+
+def _int_words_pt(n: int) -> str:
+    """Portuguese words for 0 ≤ n < 1000 ("21" → "vinte e um", "283" →
+    "duzentos e oitenta e três"); larger parts are read digit by digit."""
+    if n < 20:
+        return _NUM_ONES_PT[n]
+    if n < 100:
+        t, o = divmod(n, 10)
+        return _NUM_TENS_PT[t] + (" e " + _NUM_ONES_PT[o] if o else "")
+    if n == 100:
+        return "cem"
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return _NUM_HUNDREDS_PT[h] + (" e " + _int_words_pt(r) if r else "")
+    return " ".join(_NUM_ONES_PT[int(c)] for c in str(n))
+
+
+def _pt_version_ok(text: str, m) -> bool:
+    """PT: a dotted number is a version unless it is thousands grouping
+    (every part after the first has exactly 3 digits: "1.500", "2.000.000"),
+    money ("R$ 3.20") or bare 2-part next to "x" ("2.5x" is caught by the regex)."""
+    if m.group(1):
+        return True
+    parts = m.group(2).split(".")
+    if all(len(p) == 3 for p in parts[1:]):
+        return False
+    before = text[max(0, m.start() - 3):m.start()].replace(" ", "").upper()
+    return not before.endswith(("R$", "US$", "U$", "$", "€", "£"))
+
+
+def _version_matches(text: str | None, pt: bool):
+    t = text or ""
+    if not pt:
+        return list(_TTS_VERSION_RE.finditer(t))
+    return [m for m in _TTS_VERSION_PT_RE.finditer(t) if _pt_version_ok(t, m)]
+
+
+def version_spoken_pt(token: str) -> str:
+    """"3.20.21" → "três ponto vinte ponto vinte e um"; "v2.1" → "versão dois ponto um"."""
+    t = str(token or "")
+    pre = ""
+    if t[:1] in ("v", "V"):
+        pre, t = "versão ", t[1:]
+
+    def part(p: str) -> str:
+        if len(p) > 1 and p.startswith("0"):
+            return " ".join(_NUM_ONES_PT[int(c)] for c in p)
+        return _int_words_pt(int(p))
+    return pre + " ponto ".join(part(p) for p in t.split("."))
+
+
+def tts_version_pairs(text: str | None, pt: bool = False) -> list[tuple[str, str]]:
+    """[(displayed version, spoken form)] in ``text`` order (``pt``: PT voice)."""
+    say = version_spoken_pt if pt else version_spoken
+    return [(m.group(0), say(m.group(0))) for m in _version_matches(text, pt)]
+
+
+def _sub_versions(text: str, pt: bool) -> str:
+    say = version_spoken_pt if pt else version_spoken
+    out, last = [], 0
+    for m in _version_matches(text, pt):
+        out.append(text[last:m.start()])
+        out.append(say(m.group(0)))
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
 def tts_spoken_text(text: str | None, voice: str | None = None) -> str:
     """Text for edge-tts: identifiers with underscores are spoken as words
     (n_batch → "n batch"), EN brand Owera → "Oh-weh-ruh", PT acronym IA →
-    "I-A" (cards stay written "IA")."""
+    "I-A" (cards stay written "IA"), dotted versions → words in every voice
+    ("3.20.21" → "three point twenty point twenty-one" / PT "três ponto vinte
+    ponto vinte e um", never a date)."""
     def _say(m):
         ident = m.group(1)
         spoken = " ".join(_ident_parts(ident))
         return spoken.lower() if ident.isupper() else spoken
-    out = _TTS_IDENT_RE.sub(_say, text or "")
     lex = _lexicon_for(voice)
+    out = text or ""
+    out = _sub_versions(out, lex is TTS_LEXICON_PT)
+    out = _TTS_IDENT_RE.sub(_say, out)
     if lex is TTS_LEXICON_PT:
         out = _TTS_LEX_PT_RE.sub(lambda m: lex[m.group(1)], out)
     elif lex:
         out = _TTS_LEX_RE.sub(lambda m: lex[m.group(1).lower()], out)
+    return out
+
+
+def _remerge_versions(out: list[dict], text: str | None, pt: bool = False) -> list[dict]:
+    """Collapse the WordBoundary words of a spoken version ("three", "point",
+    "twenty", "point", "twenty-one") back into one word "3.20.21" (first
+    start, last end) so cue alignment and cards see the displayed token."""
+    k = 0
+    for disp, spoken in tts_version_pairs(text, pt):
+        target = _alnum_fold(spoken)
+        for j in range(k, len(out)):
+            acc, n = "", 0
+            while j + n < len(out) and len(acc) < len(target):
+                acc += _alnum_fold(out[j + n].get("text") or "")
+                n += 1
+                if not target.startswith(acc):
+                    break
+            if acc == target and n:
+                start = float(out[j].get("start") or 0.0)
+                end = _word_end(out[j + n - 1]) or start
+                out[j:j + n] = [{**out[j], "text": disp, "start": start,
+                                 "dur": round(max(0.0, end - start), 4)}]
+                k = j + 1
+                break
     return out
 
 
@@ -1555,6 +1745,7 @@ def remerge_tts_words(words, text: str | None, voice: str | None = None) -> list
         out = _remerge_lexicon(out, text, lex=lex, case_sensitive=True)
     elif lex:
         out = _remerge_lexicon(out, text, lex=lex)
+    out = _remerge_versions(out, text, pt=lex is TTS_LEXICON_PT)
     return out
 
 
@@ -1990,11 +2181,253 @@ def fabricated_cli(beats, script: str | None) -> list[dict]:
     return out
 
 
+# Literal cards (topic_flags.LITERAL_CARDS, default topic 47 — OS "named tool" /
+# "Real agent bugs, fixed"; VM FAIL P0 #1449 08/10, CMO scope + Rodrigo 08/10
+# 15:12). #1449 showed an invented PowerShell error (`MissingTerminator`,
+# "exécution") on a real Cursor bug, a misquote attributed to the Cursor forum
+# and "3.20.21" on three cards in a row. On a flagged topic the video carries an
+# explicit ON-SCREEN ALLOWLIST in overrides "on_screen_allow" — the ONLY text a
+# log / error / command / quote / stat card may show:
+#   [{"kind": "log"|"error"|"command"|"quote"|"stat", "text": "<verbatim>",
+#     "source": "https://…"}, …]
+# (or the "On-screen literal allowlist" section of a SCRIPT_PROPOSED.md, see
+# parse_allowlist_md), and optionally literal cards in overrides "on_screen"
+# (storyboard beats, used verbatim). A terminal / log / code card renders only
+# when every line is an allowlisted log / error / command line; a quote card
+# only for an allowlisted quote; a stat only when its value is in an
+# allowlisted stat AND the script says it; an attribution only when the script
+# says it; anything else becomes a plain text card (the spoken words, no quote
+# mark, no attribution); a dotted version number never on two consecutive
+# cards. Matching is literal per character (case-sensitive) against a whole
+# allowlisted line, ignoring whitespace runs (terminal padding), typographic
+# quotes/dashes and "…" vs "..."; a card line ending in "…"/"..." may cut an
+# allowlisted line short (≥12 chars kept). New renders on a flagged topic carry
+# the violations in creation_config["cli_check"] (literal=True) — Gate B FAILs
+# any hit, so a render with an unsourced attribution / stat / card is blocked.
+LITERAL_V1 = "lit_v1"
+ON_SCREEN_KINDS = ("log", "error", "command", "quote", "stat")
+CLI_ALLOW_KINDS = frozenset({"log", "error", "command"})
+_SRC_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+                           "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u00ab": '"',
+                           "\u00bb": '"', "\u2010": "-", "\u2011": "-", "\u2012": "-",
+                           "\u2013": "-", "\u2014": "-", "\u2212": "-"})
+_SRC_WS_RE = re.compile(r"\s+")
+_SRC_EDGE = " \t\r\n\"'“”‘’«»„.,;:…"
+_SRC_CUT_MIN = 12
+# Dotted version numbers: 3+ numeric parts (3.20.21, 1.2.13, 2.1.283) or a
+# v-prefixed 2-part (v2.1). Plain decimals / prices (2.5, $3.20) are not versions.
+VERSION_RE = re.compile(r"(?<![\w.])(?:[vV](?=\d))?(\d+(?:\.\d+){2,3}|(?<=[vV])\d+\.\d+)(?![\w]|\.\d)")
+_MD_URL_RE = re.compile(r"https?://\S+")
+_MD_TICK_RE = re.compile(r"`([^`]+)`")
+_MD_DQ_RE = re.compile(r"[\"“]([^\"“”]{4,})[\"”]")
+_ERRISH_RE = re.compile(r"(?i)\b(err(or)?|exception|fail(ed|ure)?|traceback|errorid)\b|^ERR\b")
+_CMDISH_RE = re.compile(r"^(\$ |> |❯ |npm |pip |uv |git |python |node |curl |claude |cursor )")
+
+
+def _allow_kind_of(text: str, hint: str = "") -> str:
+    h = hint.lower()
+    if "quote" in h:
+        return "quote"
+    if "stat" in h:
+        return "stat"
+    if "command" in h or "repro" in h or _CMDISH_RE.match(text.strip()):
+        return "command"
+    if "error" in h or _ERRISH_RE.search(text):
+        return "error"
+    return "log"
+
+
+def parse_allowlist_md(md: str) -> list[dict]:
+    """The "On-screen literal allowlist" section of a SCRIPT_PROPOSED.md →
+    on_screen_allow entries (best effort; the JSON list is canonical).
+
+    Grouped by "Source: <url>" lines; a bullet whose content STARTS with a
+    backticked string contributes that string (kind from the bullet's label /
+    the text: command, error, else log); "Reporter quote: "…"" → quote;
+    "Fact for a stat card: "…"" → stat. Prose bullets, "Removed" / "NOT
+    allowed" notes and later sections are ignored."""
+    out: list[dict] = []
+    text = str(md or "")
+    lo = text.lower()
+    k = lo.find("on-screen literal allowlist")
+    if k < 0:
+        return out
+    body = text[k:].split("\n", 1)[1] if "\n" in text[k:] else ""
+    nxt = re.search(r"(?m)^##\s", body)
+    if nxt:
+        body = body[:nxt.start()]
+    url, label = "", ""
+    for raw in body.splitlines():
+        ln = raw.strip()
+        if ln.lower().startswith("source:"):
+            m = _MD_URL_RE.search(ln)
+            url = m.group(0).rstrip(").,") if m else ""
+            label = ""
+            continue
+        if not ln.startswith(("- ", "* ")):
+            continue
+        item = ln[2:].strip()
+        if item.startswith("`"):
+            m = _MD_TICK_RE.match(item)
+            if m:
+                lit = m.group(1)
+                # keep the leading spaces of a terminal row when the raw bullet had them
+                out.append({"kind": _allow_kind_of(lit, label), "text": lit, "source": url})
+            continue
+        head = item.split(":", 1)[0].lower() if ":" in item else ""
+        if head and ("quote" in head or "stat" in head):
+            m = _MD_DQ_RE.search(item.split(":", 1)[1])
+            if m:
+                out.append({"kind": "quote" if "quote" in head else "stat",
+                            "text": m.group(1), "source": url})
+            continue
+        if item.endswith(":") or (head and not _MD_TICK_RE.search(item.split(":", 1)[1] or "")):
+            label = head or item.rstrip(":").lower()
+    return out
+
+
+def on_screen_allow(raw) -> list[dict]:
+    """overrides "on_screen_allow" → [{"kind", "text", "source"}]. Accepts the
+    JSON list (canonical; a bare string item counts as a log line) or a
+    SCRIPT_PROPOSED.md allowlist section (parse_allowlist_md). Entries with an
+    unknown kind or empty text are ignored (they cannot back a card)."""
+    if isinstance(raw, str):
+        raw = parse_allowlist_md(raw)
+    out = []
+    for x in raw if isinstance(raw, list) else []:
+        if isinstance(x, str):
+            x = {"kind": "log", "text": x}
+        if not isinstance(x, dict):
+            continue
+        kind = str(x.get("kind") or "").strip().lower()
+        txt = str(x.get("text") or "")
+        if kind in ON_SCREEN_KINDS and txt.strip():
+            out.append({"kind": kind, "text": txt,
+                        "source": str(x.get("source") or x.get("url") or "").strip()})
+    return out
+
+
+# Back-compat name used across craft / storyboard / worker: the literal
+# sources ARE the allowlist.
+literal_sources = on_screen_allow
+
+
+def _src_fold(text) -> str:
+    import html as _html
+    t = _html.unescape(str(text or "")).translate(_SRC_FOLD).replace("\u2026", "...")
+    return _SRC_WS_RE.sub("", t.replace("\u00a0", " "))
+
+
+def _allow_lines(allow, kinds=None):
+    for e in on_screen_allow(allow):
+        if kinds and e["kind"] not in kinds:
+            continue
+        yield e, [e["text"]] + [x for x in e["text"].splitlines() if x.strip()]
+
+
+def source_literal(text, allow, kinds=None) -> bool:
+    """True when ``text`` (edge quotes/punctuation trimmed) is a whole
+    allowlisted line / entry of one of ``kinds`` (default: any kind); a text
+    ending in "…"/"..." may be a ≥12-char cut of one."""
+    raw = str(text or "").strip()
+    need = _src_fold(raw.strip(_SRC_EDGE))
+    if not need:
+        return True
+    cut = raw.endswith(("...", "\u2026")) and len(need) >= _SRC_CUT_MIN
+    for _e, lines in _allow_lines(allow, kinds):
+        for ln in lines:
+            have = _src_fold(ln.strip(_SRC_EDGE))
+            if need == have or (cut and have.startswith(need)):
+                return True
+    return False
+
+
+def stat_allowed(value, allow) -> bool:
+    """A stat value (e.g. "120s", "100%") that appears as a whole token in an
+    allowlisted stat entry."""
+    v = str(value or "").strip()
+    if not v:
+        return True
+    pat = re.compile(r"(?<![\w.])" + re.escape(v.translate(_SRC_FOLD)) + r"(?![\w])")
+    return any(pat.search(e["text"].translate(_SRC_FOLD)) for e, _ in _allow_lines(allow, {"stat"}))
+
+
+def allowlist_unsourced(allow, source_texts) -> list[dict]:
+    """Allowlist entries whose text is NOT literally in any of the fetched
+    source texts (same folding as source_literal) — a preflight check for the
+    producer / VM that the allowlist itself was copied, not paraphrased."""
+    hay = [_src_fold(t) for t in (source_texts or []) if t]
+    bad = []
+    for e in on_screen_allow(allow):
+        need = _src_fold(e["text"].strip(_SRC_EDGE).rstrip(".…"))
+        if need and not any(need in h for h in hay):
+            bad.append(e)
+    return bad
+
+
+def version_tokens(text) -> set:
+    """Dotted version numbers shown in ``text`` ("v3.20.21" → "3.20.21")."""
+    return {m.group(1) for m in VERSION_RE.finditer(str(text or ""))}
+
+
+def literal_hits(beats, script: str | None, sources) -> list[dict]:
+    """Literal-card violations on a board (see LITERAL_V1; ``sources`` = the
+    on_screen_allow list): [{"i","type","check","text","why"}]."""
+    out: list[dict] = []
+    prev_versions: set = set()
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES:
+            prev_versions = set()
+            continue
+        shown_versions = version_tokens(beat_screen_text(b))
+        rep = sorted(shown_versions & prev_versions)
+        if rep:
+            out.append({"i": i, "type": typ, "check": "repeated_version", "text": rep,
+                        "why": "the same version number is on the previous card"})
+        prev_versions = shown_versions
+        if i == 0 and typ == "hook":
+            continue
+        if typ in CLI_BEAT_TYPES:
+            bad = [ln for ln in cli_lines(b) if not source_literal(ln, sources, CLI_ALLOW_KINDS)]
+            if bad:
+                out.append({"i": i, "type": typ, "check": "not_in_allowlist", "text": bad[:3],
+                            "why": "a log / error / command line not in the on-screen allowlist"})
+        elif typ == "quote" and not b.get("plain"):
+            t = str(b.get("text") or "")
+            if t.strip() and not source_literal(t, sources, {"quote"}):
+                out.append({"i": i, "type": typ, "check": "quote_not_in_allowlist", "text": [t],
+                            "why": "a quotation not in the on-screen allowlist"})
+        attr = str(b.get("attribution") or "").strip()
+        if attr and not text_in_script(attr, script):
+            out.append({"i": i, "type": typ, "check": "attribution_not_in_script", "text": [attr],
+                        "why": "an attribution the script never says"})
+        if typ == "stat":
+            val = str(b.get("value") or "").strip()
+            if val and not text_in_script(val, script):
+                out.append({"i": i, "type": typ, "check": "stat_not_in_script", "text": [val],
+                            "why": "a stat value the script never says"})
+            elif val and not stat_allowed(val, sources):
+                out.append({"i": i, "type": typ, "check": "stat_not_in_allowlist", "text": [val],
+                            "why": "a stat value not in the on-screen allowlist"})
+    return out
+
+
 def cli_check_marker(beats, script: str | None, *, title: str | None = None,
                      topic_name: str | None = None,
-                     content_format: str | None = "short") -> dict | None:
-    """creation_config["cli_check"] for a new product-teaser short (else None)."""
-    if (content_format or "short") == "long" or not is_product_teaser(title, topic_name):
+                     content_format: str | None = "short",
+                     topic_id=None, sources=None) -> dict | None:
+    """creation_config["cli_check"] for a new product-teaser short or a new
+    short on a literal_cards topic (else None)."""
+    if (content_format or "short") == "long":
+        return None
+    from app.services import topic_flags
+    if topic_flags.has(topic_flags.LITERAL_CARDS, topic_id):
+        return {"version": CLI_V1, "literal": True,
+                "allow": len(on_screen_allow(sources)),
+                "hits": literal_hits(beats, script, sources)}
+    if not is_product_teaser(title, topic_name):
         return None
     return {"version": CLI_V1, "hits": fabricated_cli(beats, script)}
 
@@ -2006,8 +2439,9 @@ def cli_check_hits(cli_check: dict | None) -> list[str]:
     for h in cli_check.get("hits") or []:
         if isinstance(h, dict):
             shown = " / ".join(str(x) for x in (h.get("text") or []))
-            hits.append(f"card {h.get('i')} ({h.get('type')}) shows {shown!r}, "
-                        "which the narration never says")
+            why = h.get("why") or "which the narration never says"
+            sep = ": " if h.get("why") else ", "
+            hits.append(f"card {h.get('i')} ({h.get('type')}) shows {shown!r}{sep}{why}")
     return hits
 
 
@@ -2149,7 +2583,11 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         reasons.append(
             "[B] Fabricated CLI: FAIL — " + "; ".join(cli_hits) +
             ". Product teasers never show a command, CLI, file path or API "
-            "output that the script does not literally contain."
+            "output that the script does not literally contain"
+            + ("; literal-card topics show log / error / command / quote / stat text "
+               "only from the video's on-screen allowlist, attribution and stat values "
+               "only when the script says them, never a repeated version number."
+               if (cli_check or {}).get("literal") else ".")
         )
     # Card text rules (marked new short renders; CARD_TEXT_V1).
     text_hits = card_text_check_hits(card_text)
@@ -2368,10 +2806,13 @@ def video_maker_gate_of(creation_config=None,
     sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
     cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
     ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
-    return video_maker_gate(beats, content_format=content_format,
-                            used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace, beat_timing=bt, card_sync=sync,
-                            cli_check=cli, card_text=ctext)
+    gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
+    return attach_generator_slips(
+        video_maker_gate(beats, content_format=content_format,
+                         used_fallback=used_fallback, legacy_timing=legacy,
+                         hook_pace=pace, beat_timing=bt, card_sync=sync,
+                         cli_check=cli, card_text=ctext),
+        gs.get("slips") if gs else None)
 
 
 def next_measurement_streak(prev: int | None, creation_config=None,
@@ -3323,10 +3764,16 @@ def _script_stems(script: str | None) -> set:
     return {_card_stem(t) for t in _sync_toks(script)}
 
 
-def unspoken_quotes(beat: dict | None, script: str | None) -> list[str]:
+def unspoken_quotes(beat: dict | None, script: str | None, sources=None) -> list[str]:
     """Rule 2: quoted copy the narration never says verbatim. A quote card
-    renders a quote mark (unless ``plain``), so its whole text counts."""
+    renders a quote mark (unless ``plain``), so its whole text counts.
+    ``sources`` (literal_cards topics): a terminal/code card whose lines are
+    all literal in the recorded sources keeps its quote characters — they are
+    part of the real output (e.g. «S-1-5-18»), not a quotation."""
     if not isinstance(beat, dict) or not script:
+        return []
+    if sources and (beat.get("type") or "") in CLI_BEAT_TYPES and cli_lines(beat) and all(
+            source_literal(ln, sources, CLI_ALLOW_KINDS) for ln in cli_lines(beat)):
         return []
     out = []
     if (beat.get("type") or "") == "quote" and not beat.get("plain"):
@@ -3574,7 +4021,7 @@ def stat_unit_first(beat, script: str | None) -> bool:
 
 
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
-                   pt: bool | None = None) -> list[dict]:
+                   pt: bool | None = None, sources=None) -> list[dict]:
     """Every card-text rule violation on a board: [{"i","check","detail"}]."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -3602,7 +4049,7 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                                 "detail": f"card {i} {shown!r} is a second card for the sentence "
                                           f"card {group[0]} already carries"})
             group.append(i)
-        for q in unspoken_quotes(b, script):
+        for q in unspoken_quotes(b, script, sources):
             out.append({"i": i, "check": "unspoken_quote",
                         "detail": f"card {i} quotes {q!r}, which the narration never says"})
         if rr:
@@ -3627,13 +4074,14 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
 
 
 def card_text_marker(beats, script: str | None, words=None, *, brand: str | None = None,
-                     content_format: str | None = "short") -> dict | None:
-    """creation_config["card_text"] for a new short render (else None)."""
+                     content_format: str | None = "short", sources=None) -> dict | None:
+    """creation_config["card_text"] for a new short render (else None).
+    ``sources``: literal_cards topics only (see unspoken_quotes)."""
     if (content_format or "short") == "long":
         return None
     rr = (brand or "") in HOOK_PACE_BRANDS
     return {"version": CARD_TEXT_V1, "rr": rr,
-            "hits": card_text_hits(beats, script, words, rr=rr)}
+            "hits": card_text_hits(beats, script, words, rr=rr, sources=sources)}
 
 
 def card_text_check_hits(card_text: dict | None) -> list[str]:

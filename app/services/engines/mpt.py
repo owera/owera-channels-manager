@@ -17,8 +17,9 @@ class MPTEngine:
         # overrides already merged into params); don't pass it to MPT's VideoParams.
         # provided_script is the HyperFrames worker's key — MPT gets the same text
         # on its native ``video_script`` field (render_loop sets both).
+        # on_screen_allow / on_screen (literal_cards overrides) feed the storyboard only.
         params = {k: v for k, v in params.items()
-                  if k not in ("content_format", "provided_script")}
+                  if k not in ("content_format", "provided_script", "on_screen_allow", "on_screen")}
         return mpt.submit(params)
 
     def poll(self, handle: str) -> dict:

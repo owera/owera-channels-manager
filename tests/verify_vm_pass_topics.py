@@ -54,7 +54,8 @@ def ok(cond, msg):
 
 
 print("config")
-ok(Settings().topic_flags == {"vm_pass_required": ["*"], "vm_pass_exempt": []}
+_dflt = Settings().topic_flags
+ok(_dflt.get("vm_pass_required") == ["*"] and _dflt.get("vm_pass_exempt") == []
    and topic_flags.DEFAULTS[topic_flags.VM_PASS_REQUIRED] == ("*",)
    and topic_flags.DEFAULTS[topic_flags.VM_PASS_EXEMPT] == (),
    "default: vm_pass required on ALL topics, no exemptions")
