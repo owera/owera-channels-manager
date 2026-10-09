@@ -460,7 +460,9 @@ _OBJECT_HINTS = (
     (r"\b(billed|billing|bill|cobr(?:ou|ar|anca)|credits?|creditos?|copilot)\b",
      "BILL", "bill"),
     (r"\b(recibo|receipt|invoice|fatura)\b", "RECEIPT", "receipt"),
-    (r"\b(api|paid|pago|produto|product)\b", "RECEIPT", "receipt"),
+    # `api` is not a billing noun — it stole RECEIPT on the ch2-code golden
+    # ("Cada API nova vira mais uma integração?") before integração→MCP.
+    (r"\b(paid|pago|produto|product)\b", "RECEIPT", "receipt"),
     (r"\b(mcp|integra(?:cao|coes)|connector|conector)\b", "MCP", "object"),
     (r"\b(rag|retriev|chunk|embed|rerank)\b", "RAG", "object"),
     (r"\b(memor(?:y|ia)|forget|amnesia|session|sessao)\b", "MEMORY", "object"),

@@ -334,6 +334,9 @@ ok('data-kind="terminal"' in html_term and "ollama run" in html_term,
 html_rag = thumbnail._thumbnail_html("Sua RAG busca lixo e você culpa o modelo")
 ok('data-object="RAG"' in html_rag,
    "PT RAG spoken phrase → RAG object on the thumb")
+html_api_mcp = thumbnail._thumbnail_html("Cada API nova vira mais uma integração?")
+ok('data-object="MCP"' in html_api_mcp and 'data-kind="receipt"' not in html_api_mcp,
+   "API + integração thumb is MCP, not a billing RECEIPT")
 html_forced = thumbnail._thumbnail_html("ignored slogan", obj={"label": "TERMINAL"})
 ok('data-object="TERMINAL"' in html_forced and 'data-kind="terminal"' in html_forced,
    "explicit obj overrides hook-text mining (frame0/thumb share one object)")
