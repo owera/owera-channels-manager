@@ -1380,4 +1380,108 @@ render_loop.tick()
 ok(s.get(Video, q.id).status == VideoStatus.RENDERING,
    "unpaused: the same tick submits it")
 
+# --- submit: a queued subject the produce guard would hold must not render ----
+# _auto_produce already keeps these DRAFT. POST /videos queue=true, trend adopt's
+# produce_count, and any QUEUED row from before the guard still reach _submit_new.
+# Idea generation keeps an "R$N" subject on purpose (it is not a title fragment),
+# and that title can never publish. Park it back to DRAFT before playlist create
+# or engine.submit, and keep going so a later valid sibling still renders.
+print("submit_new: subject guard returns a queued bad subject to draft")
+from app.services.subject_guard import subject_guard_reason
+
+s = fresh_session()
+set_concurrency(s, 4)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_currency = make_video(
+    s, ch, t, status=VideoStatus.QUEUED, position=1,
+    subject="O plano cobra R$50 por mês")
+v_fragment = make_video(
+    s, ch, t, status=VideoStatus.QUEUED, position=2,
+    subject="camadas na GPU, o resto no CPU")
+v_good = make_video(
+    s, ch, t, status=VideoStatus.QUEUED, position=3,
+    subject="The summary lost the deadline.")
+ok(subject_guard_reason(v_currency.subject) is not None,
+   "currency subject is held by the guard")
+ok(subject_guard_reason(v_fragment.subject) is not None,
+   "lowercase fragment is held by the guard")
+ok(subject_guard_reason(v_good.subject) is None,
+   "a normal subject is not held")
+
+submitted = []
+playlist_ids = []
+
+
+class _CountEngine:
+    def submit(self, video, params):
+        submitted.append(video.id)
+        return f"task-{video.id}"
+
+
+render_loop.get_engine = lambda name: _CountEngine()
+_prev_ensure = render_loop.ensure_topic_playlist
+render_loop.ensure_topic_playlist = lambda session, topic, channel: playlist_ids.append(
+    getattr(topic, "id", None))
+
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_currency.id).status == VideoStatus.DRAFT,
+   "currency subject leaves the queue (no render slot)")
+ok(s.get(Video, v_fragment.id).status == VideoStatus.DRAFT,
+   "lowercase fragment leaves the queue")
+ok((s.get(Video, v_currency.id).error or "").startswith("subject guard:"),
+   "currency row records the subject-guard reason")
+ok("currency" in (s.get(Video, v_currency.id).error or ""),
+   "currency reason names currency")
+ok((s.get(Video, v_fragment.id).error or "").startswith("subject guard:"),
+   "fragment row records the subject-guard reason")
+ok(s.get(Video, v_good.id).status == VideoStatus.RENDERING,
+   "a later valid subject still renders in the same tick")
+ok(submitted == [v_good.id],
+   "engine.submit runs only for the valid subject")
+ok(playlist_ids == [t.id],
+   "playlist ensure runs only for the video that actually starts")
+held_runs = s.exec(
+    select(JobRun).where(JobRun.kind == "produce", JobRun.status == "error")).all()
+ok(len(held_runs) == 2
+   and {r.video_id for r in held_runs} == {v_currency.id, v_fragment.id},
+   "one produce error JobRun per newly held queued video")
+ok(all("no render slot" in (r.detail or "") for r in held_runs),
+   "the JobRun says the render slot was not spent")
+n_before = len(held_runs)
+render_loop._submit_new(s)
+s.commit()
+n_after = s.exec(
+    select(JobRun).where(JobRun.kind == "produce", JobRun.status == "error")).all()
+ok(len(n_after) == n_before, "a second submit does not log the hold again")
+ok(submitted == [v_good.id], "the valid render is not submitted twice")
+
+s2 = fresh_session()
+set_concurrency(s2, 2)
+ch2 = make_channel(s2, slug="ch-hold", daily_render_budget=5)
+t2 = make_topic(s2, ch2, content_format="short")
+preset = subject_guard_reason("camadas na GPU, o resto no CPU")
+v_preset = make_video(
+    s2, ch2, t2, status=VideoStatus.QUEUED, position=1,
+    subject="camadas na GPU, o resto no CPU", error=preset)
+v_ok2 = make_video(
+    s2, ch2, t2, status=VideoStatus.QUEUED, position=2,
+    subject="Cache misses cost the whole request.")
+submitted.clear()
+playlist_ids.clear()
+render_loop._submit_new(s2)
+s2.commit()
+ok(s2.get(Video, v_preset.id).status == VideoStatus.DRAFT,
+   "a queued row that already carries the reason still leaves the queue")
+ok(s2.get(Video, v_preset.id).error == preset, "the existing reason is kept")
+ok(s2.exec(select(JobRun).where(JobRun.kind == "produce")).all() == [],
+   "an unchanged reason does not write another produce JobRun")
+ok(submitted == [v_ok2.id],
+   "the sibling still renders when the held reason was already stored")
+ok(playlist_ids == [t2.id],
+   "playlist ensure still skips the already-held subject")
+
+render_loop.ensure_topic_playlist = _prev_ensure
+
 print(f"\nALL {_checks} CHECKS PASSED")
