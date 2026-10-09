@@ -1962,3 +1962,24 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 73. ✅ DONE (PR autoimprove/2026-10-09-submit-subject-guard) submit parks a queued subject the produce guard would hold — normal
+- **resolution (2026-10-09):** `_submit_new` runs `subject_guard_reason`
+  after the budget gate and before playlist creation or `engine.submit`.
+  A hit goes back to DRAFT with that reason and one `produce` error
+  JobRun (no second log when the reason is already stored). The loop
+  keeps walking, so a later valid sibling still renders in the same tick.
+  Suite: `tests/verify_render.py` → 174. Mutants killed: drop the guard,
+  fall through into submit, leave the row QUEUED, `break` instead of
+  `continue`, log even when the reason is unchanged.
+- **why (found 2026-10-09, backlog otherwise clear):** `_auto_produce`
+  already holds a bad DRAFT, and API produce is PR #85. `POST /videos`
+  with `queue=true`, trend adopt's `produce_count`, and any QUEUED row
+  from before the guard still reach `_submit_new`. Idea generation keeps
+  an `R$N` subject on purpose (it is not a title fragment). That title
+  can never publish, and the render slot is already spent.
+- **caution:** normal (`render_loop.py` only). Not a publish/oauth path.
+- **acceptance:** a queued currency subject and a queued lowercase
+  fragment return to DRAFT with no `engine.submit` and no playlist
+  ensure; a later valid subject in the same tick still renders; a second
+  pass does not log again.

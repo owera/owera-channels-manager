@@ -573,6 +573,27 @@ def _submit_new(session: Session) -> None:
                 + quota.in_flight_renders(session, channel.id)
                 >= channel.daily_render_budget):
             continue
+        # Subject guard at the spend point. _auto_produce already keeps a bad
+        # DRAFT from being queued, but POST /videos queue=true, trend adopt's
+        # produce_count, and a QUEUED row from before the guard still get here.
+        # Idea generation keeps an "R$N" subject (not a title fragment), and
+        # that title can never publish. Park it back to DRAFT before playlist
+        # creation or engine.submit, and keep walking so a later valid sibling
+        # still takes the slot. The reason text matches _hold_invalid_subject,
+        # so the next auto-produce tick does not log a second JobRun.
+        reason = subject_guard_reason(video.subject)
+        if reason:
+            video.status = VideoStatus.DRAFT
+            if video.error != reason:
+                video.error = reason
+                quota.log(session, kind="produce", status="error", video_id=video.id,
+                          channel_id=channel.id,
+                          detail=("submit held queued video (back to draft, "
+                                  f"no render slot): {reason}"))
+                logger.info("submit held queued %s on channel %s: %s",
+                            video.id, channel.slug, reason)
+            session.add(video)
+            continue
         topic = session.get(Topic, video.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services.craft import brand_of
