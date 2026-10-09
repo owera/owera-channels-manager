@@ -1,0 +1,1799 @@
+{
+ "_note": "OS EN fixtures for the whole-sentence card rule (CoS 09/10). Boards = the LLM board of the 06/10 renders (creation_config.beats, timing stripped). words: #1319/#1328 = whisper-medium word timings of the 06/10 masters mapped onto the script words (ypp-review-craft/os-gate-b-2026-10-06); #1318 = synthetic 0.38 s/word (the pace at which #1318 had no whole board before the term-anchor fix). gate_b_0610 = Gate B fragment quotes of that day.",
+ "1319": {
+  "subject": "Your eval passed because the agent saw the answer key. · Agent traps 2",
+  "script": "Your eval passed because the agent saw the answer key. That score is leakage. If the expected output, the rubric, or a solved trace sat in the prompt, the repo, or a tool result, the agent graded its own homework. A green bar means the test was contaminated. Strip the key and run it again. If the score collapses, you measured recall. A real eval only counts once the answer is gone. Subscribe — next Agent traps drop.",
+  "topic_id": 46,
+  "duration": 27.36,
+  "words": [
+   {
+    "text": "Your",
+    "start": 0.0,
+    "dur": 0.52
+   },
+   {
+    "text": "eval",
+    "start": 0.52,
+    "dur": 0.76
+   },
+   {
+    "text": "passed",
+    "start": 1.29,
+    "dur": 0.11
+   },
+   {
+    "text": "because",
+    "start": 1.28,
+    "dur": 0.26
+   },
+   {
+    "text": "the",
+    "start": 1.54,
+    "dur": 0.38
+   },
+   {
+    "text": "agent",
+    "start": 1.92,
+    "dur": 0.26
+   },
+   {
+    "text": "saw",
+    "start": 2.18,
+    "dur": 0.24
+   },
+   {
+    "text": "the",
+    "start": 2.42,
+    "dur": 0.58
+   },
+   {
+    "text": "answer",
+    "start": 3.0,
+    "dur": 0.05
+   },
+   {
+    "text": "key.",
+    "start": 3.01,
+    "dur": 0.11
+   },
+   {
+    "text": "That",
+    "start": 3.5,
+    "dur": 0.22
+   },
+   {
+    "text": "score",
+    "start": 3.72,
+    "dur": 0.26
+   },
+   {
+    "text": "is",
+    "start": 3.98,
+    "dur": 0.2
+   },
+   {
+    "text": "leakage.",
+    "start": 4.18,
+    "dur": 0.28
+   },
+   {
+    "text": "If",
+    "start": 4.98,
+    "dur": 0.12
+   },
+   {
+    "text": "the",
+    "start": 5.1,
+    "dur": 0.26
+   },
+   {
+    "text": "expected",
+    "start": 5.36,
+    "dur": 0.38
+   },
+   {
+    "text": "output,",
+    "start": 5.74,
+    "dur": 0.46
+   },
+   {
+    "text": "the",
+    "start": 6.21,
+    "dur": 0.11
+   },
+   {
+    "text": "rubric,",
+    "start": 6.33,
+    "dur": 0.11
+   },
+   {
+    "text": "or",
+    "start": 6.2,
+    "dur": 1.24
+   },
+   {
+    "text": "a",
+    "start": 7.44,
+    "dur": 0.28
+   },
+   {
+    "text": "solved",
+    "start": 7.72,
+    "dur": 0.2
+   },
+   {
+    "text": "trace",
+    "start": 7.92,
+    "dur": 0.34
+   },
+   {
+    "text": "sat",
+    "start": 8.26,
+    "dur": 0.28
+   },
+   {
+    "text": "in",
+    "start": 8.54,
+    "dur": 0.14
+   },
+   {
+    "text": "the",
+    "start": 8.68,
+    "dur": 0.22
+   },
+   {
+    "text": "prompt,",
+    "start": 8.9,
+    "dur": 0.28
+   },
+   {
+    "text": "the",
+    "start": 9.54,
+    "dur": 0.14
+   },
+   {
+    "text": "repo,",
+    "start": 9.68,
+    "dur": 0.3
+   },
+   {
+    "text": "or",
+    "start": 9.99,
+    "dur": 0.148
+   },
+   {
+    "text": "a",
+    "start": 10.148,
+    "dur": 0.148
+   },
+   {
+    "text": "tool",
+    "start": 10.306,
+    "dur": 0.148
+   },
+   {
+    "text": "result,",
+    "start": 10.464,
+    "dur": 0.148
+   },
+   {
+    "text": "the",
+    "start": 11.56,
+    "dur": 0.22
+   },
+   {
+    "text": "agent",
+    "start": 11.78,
+    "dur": 0.38
+   },
+   {
+    "text": "graded",
+    "start": 12.16,
+    "dur": 0.5
+   },
+   {
+    "text": "its",
+    "start": 12.66,
+    "dur": 0.32
+   },
+   {
+    "text": "own",
+    "start": 12.98,
+    "dur": 0.22
+   },
+   {
+    "text": "homework.",
+    "start": 13.21,
+    "dur": 0.113
+   },
+   {
+    "text": "A",
+    "start": 13.94,
+    "dur": 0.12
+   },
+   {
+    "text": "green",
+    "start": 14.07,
+    "dur": 0.154
+   },
+   {
+    "text": "bar",
+    "start": 14.234,
+    "dur": 0.154
+   },
+   {
+    "text": "means",
+    "start": 14.398,
+    "dur": 0.154
+   },
+   {
+    "text": "the",
+    "start": 14.88,
+    "dur": 0.1
+   },
+   {
+    "text": "test",
+    "start": 14.98,
+    "dur": 0.28
+   },
+   {
+    "text": "was",
+    "start": 15.26,
+    "dur": 0.66
+   },
+   {
+    "text": "contaminated.",
+    "start": 15.93,
+    "dur": 0.31
+   },
+   {
+    "text": "Strip",
+    "start": 16.56,
+    "dur": 0.3
+   },
+   {
+    "text": "the",
+    "start": 16.86,
+    "dur": 0.24
+   },
+   {
+    "text": "key",
+    "start": 17.1,
+    "dur": 0.22
+   },
+   {
+    "text": "and",
+    "start": 17.32,
+    "dur": 0.28
+   },
+   {
+    "text": "run",
+    "start": 17.6,
+    "dur": 0.18
+   },
+   {
+    "text": "it",
+    "start": 17.78,
+    "dur": 0.14
+   },
+   {
+    "text": "again.",
+    "start": 17.92,
+    "dur": 0.22
+   },
+   {
+    "text": "If",
+    "start": 18.56,
+    "dur": 0.18
+   },
+   {
+    "text": "the",
+    "start": 18.74,
+    "dur": 0.22
+   },
+   {
+    "text": "score",
+    "start": 18.96,
+    "dur": 0.14
+   },
+   {
+    "text": "collapses,",
+    "start": 19.1,
+    "dur": 0.54
+   },
+   {
+    "text": "you",
+    "start": 20.14,
+    "dur": 0.14
+   },
+   {
+    "text": "measured",
+    "start": 20.28,
+    "dur": 0.22
+   },
+   {
+    "text": "recall.",
+    "start": 20.5,
+    "dur": 0.38
+   },
+   {
+    "text": "A",
+    "start": 21.34,
+    "dur": 0.24
+   },
+   {
+    "text": "real",
+    "start": 21.58,
+    "dur": 0.22
+   },
+   {
+    "text": "eval",
+    "start": 21.8,
+    "dur": 0.42
+   },
+   {
+    "text": "only",
+    "start": 22.22,
+    "dur": 0.42
+   },
+   {
+    "text": "counts",
+    "start": 22.64,
+    "dur": 0.34
+   },
+   {
+    "text": "once",
+    "start": 22.98,
+    "dur": 0.3
+   },
+   {
+    "text": "the",
+    "start": 23.28,
+    "dur": 0.22
+   },
+   {
+    "text": "answer",
+    "start": 23.5,
+    "dur": 0.24
+   },
+   {
+    "text": "is",
+    "start": 23.74,
+    "dur": 0.26
+   },
+   {
+    "text": "gone.",
+    "start": 24.0,
+    "dur": 0.26
+   },
+   {
+    "text": "Subscribe",
+    "start": 24.62,
+    "dur": 0.56
+   },
+   {
+    "text": "next",
+    "start": 25.48,
+    "dur": 0.3
+   },
+   {
+    "text": "Agent",
+    "start": 25.78,
+    "dur": 0.3
+   },
+   {
+    "text": "traps",
+    "start": 26.08,
+    "dur": 0.26
+   },
+   {
+    "text": "drop.",
+    "start": 26.34,
+    "dur": 0.42
+   }
+  ],
+  "llm_board": [
+   {
+    "type": "hook",
+    "cue": "Your eval passed because",
+    "text": "Your eval passed because the agent saw the answer key.",
+    "object": "EVAL",
+    "emoji": ""
+   },
+   {
+    "type": "code",
+    "cue": "That score is leakage",
+    "emoji": "",
+    "lines": [
+     "eval:",
+     "  prompt: task + key",
+     "  expect: \"return 42\""
+    ]
+   },
+   {
+    "type": "term_define",
+    "cue": "the rubric, or a",
+    "term": "Solved trace",
+    "definition": "a finished solution the agent can copy"
+   },
+   {
+    "type": "compare",
+    "cue": "the prompt, the repo",
+    "title": "Where the key sat",
+    "left": {
+     "title": "Prompt",
+     "items": [
+      "task text",
+      "expected output"
+     ]
+    },
+    "right": {
+     "title": "Repo and tool",
+     "items": [
+      "solved trace",
+      "tool result"
+     ]
+    }
+   },
+   {
+    "type": "term_define",
+    "cue": "the agent graded its",
+    "term": "Self-grading",
+    "definition": "one agent writes and then scores"
+   },
+   {
+    "type": "compare",
+    "cue": "A green bar means",
+    "title": "Green is not clean",
+    "left": {
+     "title": "Green bar",
+     "items": [
+      "suite looks passed"
+     ]
+    },
+    "right": {
+     "title": "Contaminated",
+     "items": [
+      "key sat in the"
+     ]
+    }
+   },
+   {
+    "type": "list",
+    "cue": "Strip the key and",
+    "items": [
+     {
+      "text": "Strip the key",
+      "emoji": ""
+     },
+     {
+      "text": "Run it again",
+      "emoji": ""
+     }
+    ],
+    "title": "Clean rerun"
+   },
+   {
+    "type": "term_define",
+    "cue": "If the score collapses",
+    "term": "Recall",
+    "definition": "a score from memory of the key"
+   },
+   {
+    "type": "compare",
+    "cue": "A real eval only",
+    "title": "When it counts",
+    "left": {
+     "title": "Answer present",
+     "items": [
+      "score is recall"
+     ]
+    },
+    "right": {
+     "title": "Answer gone",
+     "items": [
+      "score is real"
+     ]
+    }
+   },
+   {
+    "type": "cta",
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ],
+  "board_0610": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 3.348,
+    "cue": "Your eval passed because",
+    "text": "Your eval passed because the agent saw the answer key.",
+    "object": "EVAL",
+    "emoji": ""
+   },
+   {
+    "type": "code",
+    "start": 3.468,
+    "dur": 2.8,
+    "cue": "That score is leakage",
+    "emoji": "",
+    "lines": [
+     "eval:",
+     "  prompt: task + key",
+     "  expect: \"return 42\""
+    ]
+   },
+   {
+    "type": "term_define",
+    "start": 6.388,
+    "dur": 2.029,
+    "cue": "the rubric, or a",
+    "term": "Solved trace",
+    "definition": "a finished solution the agent can copy"
+   },
+   {
+    "type": "compare",
+    "start": 8.537,
+    "dur": 2.8,
+    "cue": "the prompt, the repo",
+    "title": "Where the key sat",
+    "left": {
+     "title": "Prompt",
+     "items": [
+      "task text",
+      "expected output"
+     ]
+    },
+    "right": {
+     "title": "Repo and tool",
+     "items": [
+      "solved trace",
+      "tool result"
+     ]
+    }
+   },
+   {
+    "type": "term_define",
+    "start": 11.457,
+    "dur": 2.273,
+    "cue": "the agent graded its",
+    "term": "Self-grading",
+    "definition": "one agent writes and then scores"
+   },
+   {
+    "type": "compare",
+    "start": 13.85,
+    "dur": 2.518,
+    "cue": "A green bar means",
+    "title": "Green is not clean",
+    "left": {
+     "title": "Green bar",
+     "items": [
+      "suite looks passed"
+     ]
+    },
+    "right": {
+     "title": "Contaminated",
+     "items": [
+      "key sat in the"
+     ]
+    }
+   },
+   {
+    "type": "list",
+    "start": 16.488,
+    "dur": 1.917,
+    "cue": "Strip the key and",
+    "items": [
+     {
+      "text": "Strip the key",
+      "emoji": ""
+     },
+     {
+      "text": "Run it again",
+      "emoji": ""
+     }
+    ],
+    "title": "Clean rerun"
+   },
+   {
+    "type": "term_define",
+    "start": 18.525,
+    "dur": 2.617,
+    "cue": "If the score collapses",
+    "term": "Recall",
+    "definition": "a score from memory of the key"
+   },
+   {
+    "type": "compare",
+    "start": 21.262,
+    "dur": 2.8,
+    "cue": "A real eval only",
+    "title": "When it counts",
+    "left": {
+     "title": "Answer present",
+     "items": [
+      "score is recall"
+     ]
+    },
+    "right": {
+     "title": "Answer gone",
+     "items": [
+      "score is real"
+     ]
+    }
+   },
+   {
+    "type": "cta",
+    "start": 24.182,
+    "dur": 3.488,
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ]
+ },
+ "1328": {
+  "subject": "The agent called undo on a tool with no undo. · Agent traps 3",
+  "script": "The agent called undo on a tool with no undo. That tool never had an undo, and the model invented one. Agents copy editor habits onto deletes, sends, and deploys. The call returns success. The previous state is gone. Read the schema before the agent runs the tool. Missing undo is a hard stop. If the tool cannot reverse it, the agent does not get to call it alone. No undo in the tool, no unsupervised call. Subscribe — next Agent traps trap.",
+  "topic_id": 46,
+  "duration": 29.98,
+  "words": [
+   {
+    "text": "The",
+    "start": 0.0,
+    "dur": 0.32
+   },
+   {
+    "text": "agent",
+    "start": 0.32,
+    "dur": 0.26
+   },
+   {
+    "text": "called",
+    "start": 0.58,
+    "dur": 0.3
+   },
+   {
+    "text": "undo",
+    "start": 0.88,
+    "dur": 0.48
+   },
+   {
+    "text": "on",
+    "start": 1.36,
+    "dur": 0.28
+   },
+   {
+    "text": "a",
+    "start": 1.64,
+    "dur": 0.22
+   },
+   {
+    "text": "tool",
+    "start": 1.86,
+    "dur": 0.2
+   },
+   {
+    "text": "with",
+    "start": 2.06,
+    "dur": 0.36
+   },
+   {
+    "text": "no",
+    "start": 2.42,
+    "dur": 0.28
+   },
+   {
+    "text": "undo.",
+    "start": 2.7,
+    "dur": 0.32
+   },
+   {
+    "text": "That",
+    "start": 3.46,
+    "dur": 0.22
+   },
+   {
+    "text": "tool",
+    "start": 3.68,
+    "dur": 0.24
+   },
+   {
+    "text": "never",
+    "start": 3.92,
+    "dur": 0.34
+   },
+   {
+    "text": "had",
+    "start": 4.26,
+    "dur": 0.22
+   },
+   {
+    "text": "an",
+    "start": 4.48,
+    "dur": 0.18
+   },
+   {
+    "text": "undo,",
+    "start": 4.66,
+    "dur": 0.36
+   },
+   {
+    "text": "and",
+    "start": 5.02,
+    "dur": 0.48
+   },
+   {
+    "text": "the",
+    "start": 5.5,
+    "dur": 0.22
+   },
+   {
+    "text": "model",
+    "start": 5.72,
+    "dur": 0.2
+   },
+   {
+    "text": "invented",
+    "start": 5.92,
+    "dur": 0.4
+   },
+   {
+    "text": "one.",
+    "start": 6.32,
+    "dur": 0.46
+   },
+   {
+    "text": "Agents",
+    "start": 7.08,
+    "dur": 0.32
+   },
+   {
+    "text": "copy",
+    "start": 7.4,
+    "dur": 0.4
+   },
+   {
+    "text": "editor",
+    "start": 7.8,
+    "dur": 0.32
+   },
+   {
+    "text": "habits",
+    "start": 8.12,
+    "dur": 0.34
+   },
+   {
+    "text": "onto",
+    "start": 8.46,
+    "dur": 0.26
+   },
+   {
+    "text": "deletes,",
+    "start": 8.72,
+    "dur": 0.64
+   },
+   {
+    "text": "sends,",
+    "start": 9.68,
+    "dur": 0.3
+   },
+   {
+    "text": "and",
+    "start": 10.3,
+    "dur": 0.28
+   },
+   {
+    "text": "deploys.",
+    "start": 10.58,
+    "dur": 0.34
+   },
+   {
+    "text": "The",
+    "start": 11.36,
+    "dur": 0.24
+   },
+   {
+    "text": "call",
+    "start": 11.6,
+    "dur": 0.12
+   },
+   {
+    "text": "returns",
+    "start": 11.72,
+    "dur": 0.38
+   },
+   {
+    "text": "success.",
+    "start": 12.1,
+    "dur": 0.54
+   },
+   {
+    "text": "The",
+    "start": 13.1,
+    "dur": 0.26
+   },
+   {
+    "text": "previous",
+    "start": 13.36,
+    "dur": 0.34
+   },
+   {
+    "text": "state",
+    "start": 13.7,
+    "dur": 0.24
+   },
+   {
+    "text": "is",
+    "start": 13.94,
+    "dur": 0.26
+   },
+   {
+    "text": "gone.",
+    "start": 14.2,
+    "dur": 0.24
+   },
+   {
+    "text": "Read",
+    "start": 14.78,
+    "dur": 0.22
+   },
+   {
+    "text": "the",
+    "start": 15.0,
+    "dur": 0.28
+   },
+   {
+    "text": "schema",
+    "start": 15.28,
+    "dur": 0.22
+   },
+   {
+    "text": "before",
+    "start": 15.5,
+    "dur": 0.42
+   },
+   {
+    "text": "the",
+    "start": 15.92,
+    "dur": 0.28
+   },
+   {
+    "text": "agent",
+    "start": 16.2,
+    "dur": 0.2
+   },
+   {
+    "text": "runs",
+    "start": 16.4,
+    "dur": 0.26
+   },
+   {
+    "text": "the",
+    "start": 16.66,
+    "dur": 0.26
+   },
+   {
+    "text": "tool.",
+    "start": 16.92,
+    "dur": 0.26
+   },
+   {
+    "text": "Missing",
+    "start": 17.6,
+    "dur": 0.34
+   },
+   {
+    "text": "undo",
+    "start": 17.94,
+    "dur": 0.28
+   },
+   {
+    "text": "is",
+    "start": 18.22,
+    "dur": 0.3
+   },
+   {
+    "text": "a",
+    "start": 18.52,
+    "dur": 0.18
+   },
+   {
+    "text": "hard",
+    "start": 18.7,
+    "dur": 0.22
+   },
+   {
+    "text": "stop.",
+    "start": 18.92,
+    "dur": 0.32
+   },
+   {
+    "text": "If",
+    "start": 19.62,
+    "dur": 0.18
+   },
+   {
+    "text": "the",
+    "start": 19.8,
+    "dur": 0.16
+   },
+   {
+    "text": "tool",
+    "start": 19.96,
+    "dur": 0.26
+   },
+   {
+    "text": "cannot",
+    "start": 20.23,
+    "dur": 0.11
+   },
+   {
+    "text": "reverse",
+    "start": 20.22,
+    "dur": 0.58
+   },
+   {
+    "text": "it,",
+    "start": 20.8,
+    "dur": 0.38
+   },
+   {
+    "text": "the",
+    "start": 21.4,
+    "dur": 0.26
+   },
+   {
+    "text": "agent",
+    "start": 21.66,
+    "dur": 0.24
+   },
+   {
+    "text": "does",
+    "start": 21.9,
+    "dur": 0.28
+   },
+   {
+    "text": "not",
+    "start": 22.18,
+    "dur": 0.22
+   },
+   {
+    "text": "get",
+    "start": 22.4,
+    "dur": 0.16
+   },
+   {
+    "text": "to",
+    "start": 22.56,
+    "dur": 0.16
+   },
+   {
+    "text": "call",
+    "start": 22.72,
+    "dur": 0.12
+   },
+   {
+    "text": "it",
+    "start": 22.84,
+    "dur": 0.2
+   },
+   {
+    "text": "alone.",
+    "start": 23.04,
+    "dur": 0.3
+   },
+   {
+    "text": "No",
+    "start": 23.78,
+    "dur": 0.22
+   },
+   {
+    "text": "undo",
+    "start": 24.0,
+    "dur": 0.48
+   },
+   {
+    "text": "in",
+    "start": 24.48,
+    "dur": 0.18
+   },
+   {
+    "text": "the",
+    "start": 24.66,
+    "dur": 0.24
+   },
+   {
+    "text": "tool,",
+    "start": 24.91,
+    "dur": 0.246
+   },
+   {
+    "text": "no",
+    "start": 25.166,
+    "dur": 0.246
+   },
+   {
+    "text": "unsupervised",
+    "start": 25.422,
+    "dur": 0.246
+   },
+   {
+    "text": "call.",
+    "start": 25.678,
+    "dur": 0.246
+   },
+   {
+    "text": "Subscribe",
+    "start": 26.18,
+    "dur": 0.72
+   },
+   {
+    "text": "next",
+    "start": 28.2,
+    "dur": 0.18
+   },
+   {
+    "text": "Agent",
+    "start": 28.38,
+    "dur": 0.36
+   },
+   {
+    "text": "traps",
+    "start": 28.74,
+    "dur": 0.32
+   },
+   {
+    "text": "trap.",
+    "start": 29.06,
+    "dur": 0.32
+   }
+  ],
+  "llm_board": [
+   {
+    "type": "hook",
+    "cue": "The agent called undo",
+    "text": "The agent called undo on a tool with no undo.",
+    "object": "AGENT",
+    "emoji": ""
+   },
+   {
+    "type": "code",
+    "cue": "That tool never had",
+    "emoji": "",
+    "lines": [
+     "name: delete_row",
+     "reversible: false",
+     "# not in schema",
+     "agent.call(\"undo\")"
+    ]
+   },
+   {
+    "type": "compare",
+    "cue": "Agents copy editor habits",
+    "title": "Habit copy",
+    "left": {
+     "title": "Editor",
+     "items": [
+      "undo is real",
+      "text comes back"
+     ]
+    },
+    "right": {
+     "title": "Live tools",
+     "items": [
+      "deletes",
+      "sends",
+      "deploys"
+     ]
+    }
+   },
+   {
+    "type": "quote",
+    "cue": "sends, and deploys.",
+    "text": "sends, and deploys.",
+    "attribution": ""
+   },
+   {
+    "type": "compare",
+    "cue": "The call returns success",
+    "title": "After the call",
+    "left": {
+     "title": "Response",
+     "items": [
+      "success: true"
+     ]
+    },
+    "right": {
+     "title": "State",
+     "items": [
+      "previous is gone"
+     ]
+    }
+   },
+   {
+    "type": "term_define",
+    "cue": "Read the schema before",
+    "term": "Schema",
+    "definition": "the real actions a tool declares"
+   },
+   {
+    "type": "term_define",
+    "cue": "Missing undo is a",
+    "term": "Hard stop",
+    "definition": "stop the agent when undo is absent"
+   },
+   {
+    "type": "term_define",
+    "cue": "If the tool cannot",
+    "term": "Irreversible",
+    "definition": "no way back to the previous state"
+   },
+   {
+    "type": "compare",
+    "cue": "the agent does not",
+    "title": "Who may call",
+    "left": {
+     "title": "Can reverse",
+     "items": [
+      "solo call OK"
+     ]
+    },
+    "right": {
+     "title": "Cannot reverse",
+     "items": [
+      "no solo call"
+     ]
+    }
+   },
+   {
+    "type": "quote",
+    "cue": "No undo in the",
+    "text": "No undo",
+    "emoji": "",
+    "attribution": ""
+   },
+   {
+    "type": "quote",
+    "cue": "no unsupervised call.",
+    "text": "no unsupervised call.",
+    "attribution": ""
+   },
+   {
+    "type": "cta",
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ],
+  "board_0610": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 3.28,
+    "cue": "The agent called undo",
+    "text": "The agent called undo on a tool with no undo.",
+    "object": "AGENT",
+    "emoji": ""
+   },
+   {
+    "type": "code",
+    "start": 3.4,
+    "dur": 2.8,
+    "cue": "That tool never had",
+    "emoji": "",
+    "lines": [
+     "name: delete_row",
+     "reversible: false",
+     "# not in schema",
+     "agent.call(\"undo\")"
+    ]
+   },
+   {
+    "type": "compare",
+    "start": 6.32,
+    "dur": 2.8,
+    "cue": "Agents copy editor habits",
+    "title": "Habit copy",
+    "left": {
+     "title": "Editor",
+     "items": [
+      "undo is real",
+      "text comes back"
+     ]
+    },
+    "right": {
+     "title": "Live tools",
+     "items": [
+      "deletes",
+      "sends",
+      "deploys"
+     ]
+    }
+   },
+   {
+    "type": "quote",
+    "start": 9.24,
+    "dur": 1.99,
+    "cue": "sends, and deploys.",
+    "text": "sends, and deploys.",
+    "attribution": ""
+   },
+   {
+    "type": "compare",
+    "start": 11.35,
+    "dur": 2.8,
+    "cue": "The call returns success",
+    "title": "After the call",
+    "left": {
+     "title": "Response",
+     "items": [
+      "success: true"
+     ]
+    },
+    "right": {
+     "title": "State",
+     "items": [
+      "previous is gone"
+     ]
+    }
+   },
+   {
+    "type": "term_define",
+    "start": 14.27,
+    "dur": 2.8,
+    "cue": "Read the schema before",
+    "term": "Schema",
+    "definition": "the real actions a tool declares"
+   },
+   {
+    "type": "term_define",
+    "start": 17.19,
+    "dur": 2.215,
+    "cue": "Missing undo is a",
+    "term": "Hard stop",
+    "definition": "stop the agent when undo is absent"
+   },
+   {
+    "type": "term_define",
+    "start": 19.525,
+    "dur": 1.68,
+    "cue": "If the tool cannot",
+    "term": "Irreversible",
+    "definition": "no way back to the previous state"
+   },
+   {
+    "type": "compare",
+    "start": 21.325,
+    "dur": 2.218,
+    "cue": "the agent does not",
+    "title": "Who may call",
+    "left": {
+     "title": "Can reverse",
+     "items": [
+      "solo call OK"
+     ]
+    },
+    "right": {
+     "title": "Cannot reverse",
+     "items": [
+      "no solo call"
+     ]
+    }
+   },
+   {
+    "type": "quote",
+    "start": 23.663,
+    "dur": 1.604,
+    "cue": "No undo in the",
+    "text": "No undo",
+    "emoji": "",
+    "attribution": ""
+   },
+   {
+    "type": "quote",
+    "start": 25.387,
+    "dur": 1.255,
+    "cue": "no unsupervised call.",
+    "text": "no unsupervised call.",
+    "attribution": ""
+   },
+   {
+    "type": "cta",
+    "start": 26.762,
+    "dur": 3.548,
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ]
+ },
+ "1318": {
+  "subject": "Your agent wrote to production with the staging tool. · Agent traps 1",
+  "script": "Your agent wrote to production with the staging tool. The name staging never checked the host. When the token, base URL, or database behind that tool is production, the agent ships a production write and reports a staging one. Credentials decide the environment. Give a write tool only the environment its secrets actually reach. A staging tool that can touch production is a production tool. Subscribe — next Agent traps trap.",
+  "topic_id": null,
+  "duration": 27.174,
+  "words": [
+   {
+    "text": "Your",
+    "start": 0.15,
+    "dur": 0.323
+   },
+   {
+    "text": "agent",
+    "start": 0.53,
+    "dur": 0.323
+   },
+   {
+    "text": "wrote",
+    "start": 0.91,
+    "dur": 0.323
+   },
+   {
+    "text": "to",
+    "start": 1.29,
+    "dur": 0.226
+   },
+   {
+    "text": "production",
+    "start": 1.556,
+    "dur": 0.323
+   },
+   {
+    "text": "with",
+    "start": 1.936,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 2.316,
+    "dur": 0.226
+   },
+   {
+    "text": "staging",
+    "start": 2.582,
+    "dur": 0.323
+   },
+   {
+    "text": "tool.",
+    "start": 2.962,
+    "dur": 0.323
+   },
+   {
+    "text": "The",
+    "start": 3.592,
+    "dur": 0.226
+   },
+   {
+    "text": "name",
+    "start": 3.858,
+    "dur": 0.323
+   },
+   {
+    "text": "staging",
+    "start": 4.238,
+    "dur": 0.323
+   },
+   {
+    "text": "never",
+    "start": 4.618,
+    "dur": 0.323
+   },
+   {
+    "text": "checked",
+    "start": 4.998,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 5.378,
+    "dur": 0.226
+   },
+   {
+    "text": "host.",
+    "start": 5.644,
+    "dur": 0.323
+   },
+   {
+    "text": "When",
+    "start": 6.274,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 6.654,
+    "dur": 0.226
+   },
+   {
+    "text": "token,",
+    "start": 6.92,
+    "dur": 0.323
+   },
+   {
+    "text": "base",
+    "start": 7.38,
+    "dur": 0.323
+   },
+   {
+    "text": "URL,",
+    "start": 7.76,
+    "dur": 0.323
+   },
+   {
+    "text": "or",
+    "start": 8.22,
+    "dur": 0.226
+   },
+   {
+    "text": "database",
+    "start": 8.486,
+    "dur": 0.323
+   },
+   {
+    "text": "behind",
+    "start": 8.866,
+    "dur": 0.323
+   },
+   {
+    "text": "that",
+    "start": 9.246,
+    "dur": 0.323
+   },
+   {
+    "text": "tool",
+    "start": 9.626,
+    "dur": 0.323
+   },
+   {
+    "text": "is",
+    "start": 10.006,
+    "dur": 0.226
+   },
+   {
+    "text": "production,",
+    "start": 10.272,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 10.732,
+    "dur": 0.226
+   },
+   {
+    "text": "agent",
+    "start": 10.998,
+    "dur": 0.323
+   },
+   {
+    "text": "ships",
+    "start": 11.378,
+    "dur": 0.323
+   },
+   {
+    "text": "a",
+    "start": 11.758,
+    "dur": 0.226
+   },
+   {
+    "text": "production",
+    "start": 12.024,
+    "dur": 0.323
+   },
+   {
+    "text": "write",
+    "start": 12.404,
+    "dur": 0.323
+   },
+   {
+    "text": "and",
+    "start": 12.784,
+    "dur": 0.226
+   },
+   {
+    "text": "reports",
+    "start": 13.05,
+    "dur": 0.323
+   },
+   {
+    "text": "a",
+    "start": 13.43,
+    "dur": 0.226
+   },
+   {
+    "text": "staging",
+    "start": 13.696,
+    "dur": 0.323
+   },
+   {
+    "text": "one.",
+    "start": 14.076,
+    "dur": 0.323
+   },
+   {
+    "text": "Credentials",
+    "start": 14.706,
+    "dur": 0.323
+   },
+   {
+    "text": "decide",
+    "start": 15.086,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 15.466,
+    "dur": 0.226
+   },
+   {
+    "text": "environment.",
+    "start": 15.732,
+    "dur": 0.323
+   },
+   {
+    "text": "Give",
+    "start": 16.362,
+    "dur": 0.323
+   },
+   {
+    "text": "a",
+    "start": 16.742,
+    "dur": 0.226
+   },
+   {
+    "text": "write",
+    "start": 17.008,
+    "dur": 0.323
+   },
+   {
+    "text": "tool",
+    "start": 17.388,
+    "dur": 0.323
+   },
+   {
+    "text": "only",
+    "start": 17.768,
+    "dur": 0.323
+   },
+   {
+    "text": "the",
+    "start": 18.148,
+    "dur": 0.226
+   },
+   {
+    "text": "environment",
+    "start": 18.414,
+    "dur": 0.323
+   },
+   {
+    "text": "its",
+    "start": 18.794,
+    "dur": 0.226
+   },
+   {
+    "text": "secrets",
+    "start": 19.06,
+    "dur": 0.323
+   },
+   {
+    "text": "actually",
+    "start": 19.44,
+    "dur": 0.323
+   },
+   {
+    "text": "reach.",
+    "start": 19.82,
+    "dur": 0.323
+   },
+   {
+    "text": "A",
+    "start": 20.45,
+    "dur": 0.226
+   },
+   {
+    "text": "staging",
+    "start": 20.716,
+    "dur": 0.323
+   },
+   {
+    "text": "tool",
+    "start": 21.096,
+    "dur": 0.323
+   },
+   {
+    "text": "that",
+    "start": 21.476,
+    "dur": 0.323
+   },
+   {
+    "text": "can",
+    "start": 21.856,
+    "dur": 0.226
+   },
+   {
+    "text": "touch",
+    "start": 22.122,
+    "dur": 0.323
+   },
+   {
+    "text": "production",
+    "start": 22.502,
+    "dur": 0.323
+   },
+   {
+    "text": "is",
+    "start": 22.882,
+    "dur": 0.226
+   },
+   {
+    "text": "a",
+    "start": 23.148,
+    "dur": 0.226
+   },
+   {
+    "text": "production",
+    "start": 23.414,
+    "dur": 0.323
+   },
+   {
+    "text": "tool.",
+    "start": 23.794,
+    "dur": 0.323
+   },
+   {
+    "text": "Subscribe",
+    "start": 24.424,
+    "dur": 0.323
+   },
+   {
+    "text": "next",
+    "start": 24.804,
+    "dur": 0.323
+   },
+   {
+    "text": "Agent",
+    "start": 25.184,
+    "dur": 0.323
+   },
+   {
+    "text": "traps",
+    "start": 25.564,
+    "dur": 0.323
+   },
+   {
+    "text": "trap.",
+    "start": 25.944,
+    "dur": 0.323
+   }
+  ],
+  "llm_board": [
+   {
+    "type": "hook",
+    "cue": "Your agent wrote to",
+    "text": "Your agent wrote to production with the staging tool",
+    "object": "AGENT",
+    "emoji": ""
+   },
+   {
+    "type": "command",
+    "cue": "The name staging never",
+    "emoji": "",
+    "command": "cat tools/staging.env"
+   },
+   {
+    "type": "compare",
+    "cue": "the token, base",
+    "title": "What the name skips"
+   },
+   {
+    "type": "term_define",
+    "cue": "tool is production"
+   },
+   {
+    "type": "compare",
+    "cue": "write and reports",
+    "title": "Same call"
+   },
+   {
+    "type": "term_define",
+    "cue": "Credentials decide"
+   },
+   {
+    "type": "term_define",
+    "cue": "only the environment"
+   },
+   {
+    "type": "quote",
+    "cue": "staging tool that",
+    "text": "A staging tool that can touch production is a production tool.",
+    "emoji": ""
+   },
+   {
+    "type": "cta",
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ],
+  "board_0610": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 2.93,
+    "cue": "Your agent wrote to",
+    "text": "Your agent wrote to production with the staging tool",
+    "object": "AGENT",
+    "emoji": ""
+   },
+   {
+    "type": "command",
+    "start": 3.05,
+    "dur": 2.255,
+    "cue": "The name staging never",
+    "emoji": "",
+    "command": "cat tools/staging.env"
+   },
+   {
+    "type": "compare",
+    "start": 5.425,
+    "dur": 3.0,
+    "cue": "the token, base",
+    "title": "What the name skips"
+   },
+   {
+    "type": "term_define",
+    "start": 8.545,
+    "dur": 2.81,
+    "cue": "tool is production"
+   },
+   {
+    "type": "compare",
+    "start": 11.475,
+    "dur": 2.415,
+    "cue": "write and reports",
+    "title": "Same call"
+   },
+   {
+    "type": "term_define",
+    "start": 14.01,
+    "dur": 3.0,
+    "cue": "Credentials decide"
+   },
+   {
+    "type": "term_define",
+    "start": 17.13,
+    "dur": 3.0,
+    "cue": "only the environment"
+   },
+   {
+    "type": "quote",
+    "start": 20.25,
+    "dur": 3.0,
+    "cue": "staging tool that",
+    "text": "A staging tool that can touch production is a production tool.",
+    "emoji": ""
+   },
+   {
+    "type": "cta",
+    "start": 23.37,
+    "dur": 3.51,
+    "cue": "Subscribe — next",
+    "text": "Subscribe · Agent traps",
+    "sub": "same series"
+   }
+  ]
+ },
+ "gate_b_0610": {
+  "1328": [
+   "sends, and deploys.",
+   "No undo",
+   "no unsupervised call."
+  ],
+  "1319_composed_78": [
+   "eval only counts",
+   "once the answer is gone."
+  ]
+ }
+}

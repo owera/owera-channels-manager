@@ -15,7 +15,7 @@ over two text cards unless each card is itself whole.
   WARNs: a code card the VO never speaks is invented (RR PT); a bare stat
       number spoken as a label ("da mensagem 30") is drawn "mensagem 30",
       static (no 0→30 count-up).
-EN / OS / Shipping keep the #78 rule.
+OS (EN) got the same rule on 09/10 (tests/verify_os_card_whole_sentence.py); other brands keep #78.
 """
 import json
 import sys

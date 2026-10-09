@@ -2602,9 +2602,11 @@ ok(len(_tz_calls) == 1 and "PRODUCT TEASER" in _tz_calls[0],
 ok(not any(b.get("type") in ("command", "code") for b in _tz)
    and "channels thumb" not in _tz_html,
    "#1385: the invented '$ channels thumb cover.png' card is gone from the board and the HTML")
-_q1 = [b for b in _tz if b.get("cue") == "Channels Manager is Owera's"]
-ok(_q1 and _q1[0]["type"] == "quote" and _q1[0]["text"] == "Channels Manager is Owera's builder for YouTube channels",
-   "#1385: its slot is a text card of the spoken clause: %r" % (_q1[0].get("text") if _q1 else None))
+# OS whole-sentence cards (CoS 09/10): the slot shows the WHOLE spoken
+# sentence, never its comma half ("…builder for YouTube channels").
+_q1 = [b for b in _tz if b.get("type") == "quote" and str(b.get("text") or "").startswith("Channels Manager is Owera's")]
+ok(_q1 and _q1[0]["text"] == "Channels Manager is Owera's builder for YouTube channels, and it's still in development.",
+   "#1385: its slot is a text card of the whole spoken sentence: %r" % (_q1[0].get("text") if _q1 else None))
 _soft = [b for b in _tz if b.get("text") == "Still building · Coming soon"]
 ok(len(_soft) == 1 and _soft[0]["cue"] == "Still building" and _tz[-2] is _soft[0] and _tz[-1]["type"] == "cta",
    "#1385: one 'Still building · Coming soon' card right before the endcard (v4 soft product card)")
