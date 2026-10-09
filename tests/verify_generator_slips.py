@@ -113,7 +113,16 @@ gs = craft.generator_slips_from_html(html)
 ok(isinstance(gs, list) and len(gs) >= 5, f"topic 47: {len(gs or [])} slips embedded in index.html")
 ok(any(s["kind"] == "cli_not_in_allowlist" for s in gs), "…including the invented terminal card")
 html1 = storyboard.compose(topic_id=1, **kw)
-ok(craft.generator_slips_from_html(html1) is None, "other topics: no slip record")
+# OS whole-sentence cards (CoS 09/10): an OS board records its fragment
+# repairs as slips too — but never a literal_cards slip off topic 47.
+_LIT_KINDS = {"cli_not_in_allowlist", "stat_not_in_allowlist", "quote_not_in_allowlist",
+              "stat_not_in_script", "attribution_dropped", "repeated_version_dropped"}
+gs1 = craft.generator_slips_from_html(html1) or []
+ok(not any(s["kind"] in _LIT_KINDS for s in gs1), "other topics: no literal_cards slip")
+ok(all(s["kind"].startswith(("fragment_", "whole_cards_")) for s in gs1),
+   f"other OS topics: only whole-card repair slips ({[s['kind'] for s in gs1]})")
+html2 = storyboard.compose(topic_id=1, **dict(kw, brand="owera"))
+ok(craft.generator_slips_from_html(html2) is None, "brand outside rr/os, other topic: no slip record")
 ok(craft.generator_slips_from_html("<html>") is None
    and craft.generator_slips_from_html('<script type="application/json" id="generator-slips">{bad</script>') is None,
    "fallback / malformed HTML → None")
@@ -138,8 +147,13 @@ rg = craft.video_maker_gate_of(cc, "short")
 ok(rg.get("generator_slips") == len(gs), "video_maker_gate_of (recompute) keeps generator_slips")
 cc1 = worker._creation_config(kw["subject"], dict(params, topic_id=1), html1, SCRIPT, kw["duration"],
                               "portrait", None, False, words=words, brand="os")
-ok("generator_slips" not in cc1 and "generator_slips" not in cc1["craft_gate"],
-   "other topics: no generator_slips keys")
+ok(all(s["kind"].startswith(("fragment_", "whole_cards_"))
+       for s in (cc1.get("generator_slips") or {}).get("slips") or []),
+   "other OS topics: generator_slips only ever carry whole-card repairs")
+cc2 = worker._creation_config(kw["subject"], dict(params, topic_id=1), html2, SCRIPT, kw["duration"],
+                              "portrait", None, False, words=words, brand="owera")
+ok("generator_slips" not in cc2 and "generator_slips" not in cc2["craft_gate"],
+   "other brand + topic: no generator_slips keys")
 ccf = worker._creation_config(kw["subject"], params, html, SCRIPT, kw["duration"], "portrait", None,
                               True, words=words, brand="os")
 ok("generator_slips" not in ccf, "fallback render: no slip record")

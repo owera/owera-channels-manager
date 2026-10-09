@@ -4172,8 +4172,15 @@ def stat_ordinal_unit(beat, script: str | None) -> str:
 
 
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
-                   pt: bool | None = None, sources=None) -> list[dict]:
-    """Every card-text rule violation on a board: [{"i","check","detail"}]."""
+                   pt: bool | None = None, sources=None,
+                   whole: bool | None = None) -> list[dict]:
+    """Every card-text rule violation on a board: [{"i","check","detail"}].
+
+    ``rr``: RR-only checks (invented output, PT counter, foreign terms).
+    ``whole`` (default ``rr``; CARD_VO_WHOLE_BRANDS, RR and OS): the
+    whole-sentence card exemptions (a rich card illustrating the whole-sentence
+    card of its sentence)."""
+    whole = rr if whole is None else bool(whole)
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
     if not board or not script:
@@ -4196,7 +4203,7 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                 k = group[-1]
                 if not is_continuation_card(b, board[k], script, pos=pos,
                                             prev_pos=anchors[k][1], prev_len=anchors[k][2],
-                                            whole=rr):
+                                            whole=whole):
                     out.append({"i": i, "check": "echo_card",
                                 "detail": f"card {i} {shown!r} is a second card for the sentence "
                                           f"card {group[0]} already carries"})
@@ -4222,7 +4229,7 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                                 "detail": f"card {i} shows {t!r} on a PT-BR card"
                                           + (" (use T1–T4)" if _QUARTER_RE.match(t) else "")})
         if (prev_mid is not None and not is_term_card(b)
-                and not (rr and illustrates_whole_card(b, board[prev_mid], script))
+                and not (whole and illustrates_whole_card(b, board[prev_mid], script))
                 and cards_near_duplicate(board[prev_mid], b)):
             out.append({"i": i, "check": "near_duplicate",
                         "detail": f"card {i} {shown!r} repeats card {prev_mid} "
@@ -4239,7 +4246,8 @@ def card_text_marker(beats, script: str | None, words=None, *, brand: str | None
         return None
     rr = (brand or "") in HOOK_PACE_BRANDS
     return {"version": CARD_TEXT_V1, "rr": rr,
-            "hits": card_text_hits(beats, script, words, rr=rr, sources=sources)}
+            "hits": card_text_hits(beats, script, words, rr=rr, sources=sources,
+                                   whole=card_vo_whole_applies(brand))}
 
 
 def card_text_check_hits(card_text: dict | None) -> list[str]:
@@ -4291,10 +4299,13 @@ CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment", "card_spans_senten
 #     and in the VO it does not start right after a content word — "errada da
 #     mensagem" cuts "A decisão errada…" mid noun phrase).
 # Gate B: card_vo_hits(whole=True) (card_vo marker "whole_sentence"); the
-# composer guard is storyboard._guard_whole_cards. EN / OS / Shipping keep the
-# #78 rule: their boards still rely on continuation cards to cover sentences
-# spoken longer than one card hold (2.8s + 1.1s lead).
-CARD_VO_WHOLE_BRANDS = HOOK_PACE_BRANDS
+# composer guard is storyboard._guard_whole_cards.
+# 2026-10-09 (CoS, OS #1319 / #1328 "sends, and deploys.", "No undo" | "no
+# unsupervised call."): the OS brand (EN shorts) gets the same rule. EN term
+# heuristics: see _EN_NOUN_LEAD / isolated_term_reason. The RR PT-only parts
+# (unspoken code → narration, the PT counter/ordinal, foreign terms) stay
+# behind HOOK_PACE_BRANDS / is_pt_text. Other brands keep the #78 rule.
+CARD_VO_WHOLE_BRANDS = HOOK_PACE_BRANDS | frozenset({"os"})
 CARD_TERM_MAX_WORDS = 3
 _STRONG_CLAUSE_RE = re.compile(r"\s*[;:—–]\s*|\s+-\s+")
 _TERM_EDGE_STOP = _FUNC_FOLD | frozenset(theme.fold(w) for w in """
@@ -4306,7 +4317,89 @@ outros outras mesmo mesma voce voces eu ele ela eles elas nos nada tudo algo alg
 ninguem coisa la aqui ali agora sempre nunca it this that these those you they we he
 she thing things something nothing everything
 peco faco digo vejo tenho ponho trago venho sinto sigo prefiro consigo confiro abro
+once after before since although though unless whether about into onto over under
+without per what which who whom whose how why where here there now again also too
+very still even never always own one ones i me him them us his her
+behind between across through around against among within toward towards upon via
+like near inside outside beyond during along
 """.split())
+# EN adverbs that never edge a noun phrase ("secrets actually"); nouns ending
+# in -ly ("supply", "reply", "family") stay terms.
+_EN_LY_NOUNS = frozenset({"supply", "reply", "family", "italy", "assembly", "anomaly",
+                          "rally", "ally", "belly", "jelly", "bully", "fly", "july"})
+
+
+def _en_adverb(t: str) -> bool:
+    return len(t) > 4 and t.endswith("ly") and t not in _EN_LY_NOUNS
+
+# EN (OS) terms. English nouns are often verb bases ("answer key", "hard
+# stop", "recall"), so on an EN script a verb-looking word does not make the
+# card a clause when the term sits in a noun slot of the VO: right after a
+# determiner / possessive / preposition (_EN_NOUN_LEAD) or right after a full
+# verb (object: "measured recall"), never after a modal/auxiliary or at the
+# sentence start (an imperative "Strip …"). In that slot a base form counts
+# as a noun anywhere in the term, an -ed / -ing word only as a modifier
+# before the head ("solved trace"); inflected verbs ("sends", "sat") never.
+_EN_NOUN_LEAD = frozenset("""
+a an the no your my our their its his her this that these those every each any some
+of in on for with by from into onto about per without own
+""".split())
+_EN_AUX = frozenset("""
+am is are was were be been being can could will would should may might must shall do
+does did don doesn didn won isn aren wasn weren cannot not never to t s ll ve re d
+has have had hasn haven hadn
+""".split())
+_EN_TERM_CONJ = frozenset({"and", "or", "but", "nor"})
+# "Strip | the key": an EN word followed by an article is a verb (or a
+# preposition) taking its object — never a standalone term.
+_EN_ARTICLE = frozenset({"a", "an", "the", "your", "my", "our", "their", "this",
+                         "these", "those", "every", "each"})
+
+
+def _pause_after(script: str | None) -> list[bool]:
+    """Per _sentence_token_index token: a , ; : — – follows it in the script."""
+    out: list[bool] = []
+    for sent in (x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())):
+        if not sent:
+            continue
+        f = theme.fold(sent)
+        for m in _SYNC_TOK_RE.finditer(f):
+            rest = f[m.end():].lstrip()
+            out.append(bool(rest) and rest[0] in ",;:—–-")
+    return out
+
+
+def _en_base_verb(t: str) -> bool:
+    """An uninflected EN verb base (a word that can also be a noun)."""
+    return t in _EN_VERB_BASES or (t in _VERB_WORDS and t + "s" in _VERB_WORDS) or (
+        t in _VERB_WORDS and t + "es" in _VERB_WORDS)
+
+
+def en_term_slot_ok(prev: str | None, prev_pause: bool = False) -> bool:
+    """EN: an isolated term may start right after ``prev`` (folded token):
+    sentence start, a function word, a number, a full verb (its object) or
+    a word followed by , ; : (a list item)."""
+    return (prev is None or prev in _FUNC_FOLD or prev in _TERM_EDGE_STOP or prev.isdigit()
+            or prev_pause or (prev not in _EN_AUX and _looks_like_verb(prev)))
+
+
+def _en_term_verbs_ok(ct: list[str], prev: str | None) -> bool:
+    """EN: the verb-looking words of term ``ct`` read as nouns in this slot."""
+    slot = prev is not None and (
+        prev in _EN_NOUN_LEAD
+        or (prev not in _EN_AUX and prev not in _FUNC_FOLD and _looks_like_verb(prev)))
+    if not slot:
+        return False
+    last = len(ct) - 1
+    for k, t in enumerate(ct):
+        if any(c.isdigit() for c in t) or not _looks_like_verb(t):
+            continue
+        if _en_base_verb(t):
+            continue
+        if k < last and (t.endswith("ed") or t.endswith("ing")):
+            continue
+        return False
+    return True
 
 
 # "teto | de VRAM": a term never stops before its "de …" complement.
@@ -4358,23 +4451,41 @@ def isolated_term_reason(text: str | None, script: str | None) -> str | None:
         return "empty"
     if len(ct) > CARD_TERM_MAX_WORDS:
         return f"{len(ct)} words (a term is 1–{CARD_TERM_MAX_WORDS})"
-    if any(_looks_like_verb(t) for t in raw if not any(c.isdigit() for c in t)):
+    en = not is_pt_text(script)
+    verbish = any(_looks_like_verb(t) for t in raw if not any(c.isdigit() for c in t))
+    if verbish and not en:
         return "has a verb (a clause, not a term)"
     if ct[0] in _TERM_EDGE_STOP or ct[-1] in _TERM_EDGE_STOP:
         return "starts/ends on a function word or conjunction"
+    if en and (_en_adverb(ct[0]) or _en_adverb(ct[-1])):
+        return "starts/ends on an adverb"
+    if en and (any(t in _EN_TERM_CONJ for t in ct) or "," in str(text or "")):
+        return "joins words with a comma/conjunction (a piece of a list, not a term)"
     toks, sid, _ = _sentence_token_index(script)
     p = _find_run(toks, ct, 0)
     if p < 0:
         return "not spoken by the VO"
-    why = "cuts a noun phrase (starts right after a content word in the VO)"
+    pause = _pause_after(script) if en else []
+    why = ("has a verb (a clause, not a term)" if verbish
+           else "cuts a noun phrase (starts right after a content word in the VO)")
     while p >= 0:
         prev = toks[p - 1] if p > 0 and sid[p - 1] == sid[p] else None
         q = p + len(ct)
         nxt = toks[q] if q < len(toks) and sid[q] == sid[p] else None
-        if nxt in _TERM_BINDING:
+        if verbish and not _en_term_verbs_ok(ct, prev):
+            pass   # EN: a verb-looking word outside a noun slot → a clause here
+        elif en and nxt in _EN_ARTICLE and not (pause and q - 1 < len(pause) and pause[q - 1]):
+            why = f"a verb + its object in the VO ('{ct[-1]} {nxt} …'), not a term"
+        elif nxt in _TERM_BINDING:
             why = f"cuts a noun phrase (the VO goes on '{ct[-1]} {nxt} …')"
         elif prev is None or prev in _FUNC_FOLD or prev in _TERM_EDGE_STOP or prev.isdigit():
             return None
+        elif en and prev not in _EN_AUX and _looks_like_verb(prev):
+            return None   # EN object right after a full verb ("measured recall")
+        elif en and p > 0 and p - 1 < len(pause) and pause[p - 1]:
+            return None   # EN list item after a comma ("the token, base URL, or …")
+        elif verbish:
+            why = "cuts a noun phrase (starts right after a content word in the VO)"
         p = _find_run(toks, ct, p + 1)
     return why
 
@@ -4591,7 +4702,7 @@ def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
 def card_vo_marker(beats, script: str | None,
                    content_format: str | None = "short", *,
                    brand: str | None = None) -> dict | None:
-    """creation_config["card_vo"] for a new short render (else None). RR
+    """creation_config["card_vo"] for a new short render (else None). RR + OS
     (CARD_VO_WHOLE_BRANDS) also gets the whole-sentence / isolated-term rule
     (``whole_sentence``: True)."""
     if (content_format or "short") == "long":

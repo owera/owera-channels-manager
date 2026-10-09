@@ -1554,12 +1554,19 @@ def _strip_mid_subscribe_beats(beats) -> None:
 # (annotate_sentences) and cards show whole sentences only.
 _SENT_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
 _SENT_CARD_MAX_WORDS = 12
+# Whole-sentence cards (RR + OS): a sentence with no strong clause seam is a
+# unit only up to this many words (OS #1318: a 23-word sentence became one
+# card); longer ones are covered by isolated-term cards.
+_WHOLE_UNIT_MAX_WORDS = 16
 _CLAUSE_RE = re.compile(r"[,;:—–]\s")
 # RR whole-sentence cards (craft.CARD_VO_WHOLE_BRANDS, Gate B #1443 F1): set by
 # compose for the whole board build. A generated card is then a whole
 # sentence, a whole strong clause (; : — –) or an isolated term — never a
 # comma / conjunction / preposition piece of a sentence.
 _WHOLE_CARDS = contextvars.ContextVar("storyboard_whole_cards", default=False)
+# 2026-10-09: OS (EN) gets whole cards too; the RR-only card-text checks
+# (invented output, PT counter, foreign terms) stay on the RR brand.
+_RR_CARDS = contextvars.ContextVar("storyboard_rr_cards", default=False)
 _STRONG_CLAUSE_SPLIT_RE = re.compile(r"[;:—–]\s")
 
 
@@ -1765,6 +1772,8 @@ def _speech_units(words, split_over: float | None = None, min_side: int = 3) -> 
                     return
         if not wws:
             return
+        if _WHOLE_CARDS.get() and len(tws) > _WHOLE_UNIT_MAX_WORDS:
+            return   # whole cards: a sentence too long for one card → terms cover it
         text = " ".join(tws).strip().rstrip(",;:—–").strip()
         units.append({"start": t_of(wws[0]), "end": t_of(wws[-1], True), "text": text,
                       "sfirst": first, "send": last})
@@ -2505,7 +2514,8 @@ def _soft_product_card(beats, script) -> None:
 
     keep = [b for j, b in enumerate(beats)
             if j == 0 or (b.get("type") or "") == "cta" or not _on_soft(b)]
-    card = {"type": "quote", "cue": cue, "text": text, "attribution": "", "plain": True}
+    card = {"type": "quote", "cue": cue, "text": text, "attribution": "", "plain": True,
+            "_soft": True}   # product status line: exempt from the whole-card guard
     # insert in script order: before the first card whose cue is spoken later
     stream = _tok(script or "")
     at = _find_subseq(stream, _tok(cue), 0)
@@ -2610,7 +2620,11 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
                     continue
                 k = craft.screen_text_key({"type": "quote", "text": u["text"]})
                 st = round(float(u["start"]), 3)
-                if (not k or (k, st) in seen_units or k in keys_llm or set(k.split()) <= hook_toks
+                # (whole cards: a term the VO says again after the claim may
+                # repeat a claim word — "production" — it costs weight, so the
+                # DP only takes it where no other card fits the holds)
+                if (not k or (k, st) in seen_units or k in keys_llm
+                        or (set(k.split()) <= hook_toks and not u.get("term"))
                         or st < h_t - 1e-6 or ("u", k, st) in banned):
                     continue
                 seen_units.add((k, st))
@@ -2671,6 +2685,12 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
         if n["pos"] <= prev_pos:
             return None
         term = craft.is_term_card(n["beat"])
+        if term and craft._find_run(toks, craft._sync_toks(n["beat"].get("text")),
+                                    max(prev_pos, 0)) != n["pos"]:
+            # the gate matches a card from the previous card's start: a term
+            # said again in between ("…the environment." | "environment")
+            # would anchor at that earlier spot and read late
+            return None
         if prev_key and n["key"] and (craft.screen_text_near(n["key"], prev_key) if term
                                       else _clashes(n["key"], prev_key)):
             return None
@@ -2777,7 +2797,8 @@ def _sync_dp(beats, words, duration: float, hook_max: float, script: str | None 
                         alt += [uids[j] for j in range(1, i - 1)
                                 if keys[j] == keys[i] and craft.is_term_card(board[j])]
             if script:
-                for h in craft.card_text_hits(board, script, words, sources=sources, rr=whole):
+                for h in craft.card_text_hits(board, script, words, sources=sources,
+                                              rr=whole and _RR_CARDS.get(), whole=whole):
                     if 0 < h["i"] < len(board) - 1:
                         bad.add(uids[h["i"]])
                 for i in _whole_fragment_ids(board, script):
@@ -2806,7 +2827,8 @@ def _whole_fragment_ids(beats, script) -> list[int]:
     if not _WHOLE_CARDS.get() or not script:
         return []
     return sorted({h["i"] for h in craft.card_vo_hits(beats, script, whole=True)
-                   if h["check"] == "card_fragment" and h.get("i") is not None})
+                   if h["check"] == "card_fragment" and h.get("i") is not None
+                   and not beats[h["i"]].get("_soft")})
 
 
 def _term_units(words, script) -> list[dict]:
@@ -2817,6 +2839,7 @@ def _term_units(words, script) -> list[dict]:
     from app.services import craft
     ws = [w for w in (words or []) if isinstance(w, dict) and "_s" in w and not w.get("_scta")]
     out = []
+    en = not craft.is_pt_text(script)
 
     def disp(w):
         return str(w.get("text") or "").strip(" ,.;:!?\"'()…—–“”")
@@ -2829,7 +2852,11 @@ def _term_units(words, script) -> list[dict]:
         prev = ws[j - 1] if j > 0 and ws[j - 1]["_s"] == w["_s"] else None
         if prev is not None:
             pf = _wfold(disp(prev))
-            if pf not in craft._FUNC_FOLD and pf not in craft._TERM_EDGE_STOP and not pf.isdigit():
+            if en:   # OS: also an object after a verb / a list item after a comma
+                if not craft.en_term_slot_ok(
+                        pf, str(prev.get("text") or "").rstrip().endswith((",", ";", ":"))):
+                    continue
+            elif pf not in craft._FUNC_FOLD and pf not in craft._TERM_EDGE_STOP and not pf.isdigit():
                 continue
         nxt = ws[j + 1] if j + 1 < len(ws) and ws[j + 1]["_s"] == w["_s"] else None
         text, last = d, w
@@ -2864,7 +2891,8 @@ def _guard_whole_cards(beats, script, words=None, slips=None, timed: bool = Fals
     in [start, start + 1.1s]) and a dropped card's time goes to the previous
     mid card only within the hold cap; when neither works the card stays
     (``fragment_unrepaired``) and Gate B (card_vo whole) blocks the render.
-    Hook, endcard and provided literal cards are never touched."""
+    Hook, endcard, provided literal cards and the v4 soft product card
+    ("Still building · Coming soon", teasers) are never touched."""
     from app.services import craft
     if not beats or not script or not _WHOLE_CARDS.get():
         return
@@ -2882,7 +2910,7 @@ def _guard_whole_cards(beats, script, words=None, slips=None, timed: bool = Fals
     for i, b in enumerate(beats):
         typ = b.get("type") or ""
         if ((i == 0 and typ == "hook") or typ in craft.CTA_TYPES or b.get("_lit")
-                or typ not in craft.TEXT_CARD_TYPES):
+                or b.get("_soft") or typ not in craft.TEXT_CARD_TYPES):
             continue
         why = craft.card_piece_reason(b.get("text"), script)
         if why is not None:
@@ -3421,11 +3449,12 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     from app.services import craft as _craft
     teaser = _craft.is_product_teaser(subject, topic_name)
     rr_brand = (brand or th.get("brand") or "") in _craft.HOOK_PACE_BRANDS
-    # RR (craft.CARD_VO_WHOLE_BRANDS): whole-sentence cards for the whole
+    # RR + OS (craft.CARD_VO_WHOLE_BRANDS): whole-sentence cards for the whole
     # board build — a text card is a whole sentence / strong clause or an
     # isolated term, never a piece of a sentence (Gate B #1443 F1).
     _wtok = _WHOLE_CARDS.set(_craft.card_vo_whole_applies(brand or th.get("brand"))
                              and (content_format or "short") != "long")
+    _rtok = _RR_CARDS.set(rr_brand)
     try:
         from app.services import topic_flags
         literal = topic_flags.has(topic_flags.LITERAL_CARDS, topic_id)
@@ -3541,7 +3570,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                 # near-duplicate filler from the local repair)
                 synced = not _craft.card_text_hits(beats, script, words,
                                                    sources=_craft.literal_sources(sources) if literal else None,
-                                                   rr=whole)
+                                                   rr=whole and rr_brand, whole=whole)
             if synced and _whole_fragment_ids(beats, script):
                 synced = False   # RR whole cards: the local repair left a sentence piece
             if not synced:
@@ -3581,4 +3610,5 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         return build_index_html(beats, th, resolution, width, height, duration,
                                 content_format=content_format, slips=slips)
     finally:
+        _RR_CARDS.reset(_rtok)
         _WHOLE_CARDS.reset(_wtok)
