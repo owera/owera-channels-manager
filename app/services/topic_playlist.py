@@ -9,7 +9,7 @@ from typing import Optional
 from sqlmodel import Session
 
 from app.models import Channel, OAuthStatus, Playlist, Topic, utcnow
-from app.services import quota, youtube
+from app.services import notify, quota, youtube
 
 
 def ensure_topic_playlist(session: Session, topic: Topic, channel: Channel) -> Optional[int]:
@@ -23,6 +23,12 @@ def ensure_topic_playlist(session: Session, topic: Topic, channel: Channel) -> O
         service = youtube.get_service(channel.slug)
         r = youtube.create_playlist(service, topic.name, topic.theme_prompt or "",
                                     channel.default_privacy)
+    except youtube.NeedsConnect as e:
+        # A dead token on a CONNECTED channel must not hide behind a playlist_add
+        # error (see metrics_loop.record_snapshot / playlists.sync). Render is
+        # often the first YouTube call during a publishing lull (BACKLOG 3b-c).
+        notify.mark_dead_committed(session, channel, str(e))
+        return None
     except Exception as e:
         quota.log(session, kind="playlist_add", status="error", channel_id=channel.id,
                   detail=f"auto-create playlist for '{topic.name}' failed: {e}")
