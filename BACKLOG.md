@@ -69,9 +69,11 @@ flag the operator step in the commit body.
   (Google 5xx during token refresh) is coerced to NeedsConnect by `_load_creds`, so a blip can
   false-positive a flip+page — distinguishing `invalid_grant` from transport errors is a youtube.py
   (HIGH) change; (b) cancelling a re-consent of a healthy CONNECTED channel still flips it to ERROR
-  (pre-existing) — now alerted, but a re-probe-before-flip would avoid halting it; (c)
-  `topic_playlist.ensure_topic_playlist` still swallows NeedsConnect (next probe catches the death
-  one tick later); (d) missing client_secret.json with a token present classifies EXPIRED — the
+  (pre-existing) — now alerted, but a re-probe-before-flip would avoid halting it; (c) ✅ DONE
+  (PR autoimprove/2026-10-10-playlist-needs-connect, item #72) —
+  `ensure_topic_playlist` routes NeedsConnect through mark_dead_committed
+  (render is often the first YouTube call during a publishing lull);
+  (d) missing client_secret.json with a token present classifies EXPIRED — the
   alert's Error text carries the real cause.
 - **why:** the expiry alert (#2) only fires from sites that flip `oauth_status`. Review of all token
   consumers found paths where a dead channel still dies silently: `metrics_loop.record_snapshot` and
@@ -1962,3 +1964,29 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-10-10-playlist-needs-connect) `ensure_topic_playlist` flips a dead token instead of swallowing NeedsConnect — normal
+- **resolution (2026-10-10):** `ensure_topic_playlist` catches
+  `youtube.NeedsConnect` before the generic create_playlist `Exception`
+  and routes it through `notify.mark_dead_committed` (same choke point
+  as metrics/playlists/admin). Token-present → EXPIRED; token-gone →
+  DISCONNECTED; one alert; no playlist row; no playlist_add JobRun
+  (the flip is the signal). A generic create_playlist raise still
+  logs playlist_add and leaves CONNECTED. Repeat on the now-dead
+  channel early-returns (not CONNECTED) with no second probe/alert.
+  A sibling CONNECTED channel is untouched. Isolated commit;
+  `publish_loop.py` / `youtube.py` untouched. Suites:
+  `tests/verify_topic_playlist.py` 32 → 48, `tests/verify_notify.py`
+  68 → 71.
+- **why (3b follow-up c):** the lazy playlist create is often the
+  first YouTube call on a render tick during a publishing lull.
+  `except Exception` logged `playlist_add` and left `oauth_status`
+  CONNECTED, so the death waited for the next metrics/analytics
+  probe (or the later publish `get_service`).
+- **caution:** normal (`topic_playlist.py` only; oauth death path
+  already owned by `notify.mark_dead_committed`). Isolated commit
+  + regression tests. Not a money-path file.
+- **acceptance:** `get_service` NeedsConnect on a CONNECTED channel
+  flips EXPIRED (token present) or DISCONNECTED (gone) and alerts
+  once; no playlist minted; a RuntimeError from create_playlist
+  still does not flip.
