@@ -69,6 +69,9 @@ def start() -> None:
         _safe(metrics_loop.tick, "metrics"),
         "interval", hours=settings.metrics_tick_hours,
         id="metrics", max_instances=1, coalesce=True,
+        # APScheduler default misfire grace is 1s: since 2026-10-10 every 6h/12h run
+        # woke 18s–11min late (busy process) and was silently dropped.
+        misfire_grace_time=3600,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
     # Per-video analytics: a daily snapshot per published video so the growth loop
@@ -79,6 +82,9 @@ def start() -> None:
         _safe(analytics_loop.tick, "analytics"),
         "interval", hours=settings.analytics_tick_hours,
         id="analytics", max_instances=1, coalesce=True,
+        # APScheduler default misfire grace is 1s: since 2026-10-10 every 6h/12h run
+        # woke 18s–11min late (busy process) and was silently dropped.
+        misfire_grace_time=3600,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
     # Auto-refill low topic idea queues. The tick no-ops unless the setting is on,
