@@ -1962,3 +1962,29 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 75. ✅ DONE (PR autoimprove/2026-10-12-render-oauth-skip) render submit skips a channel that is not connected — normal
+- **resolution (2026-10-12):** `render_loop._submit_new` continues past a
+  channel whose `oauth_status` is not `CONNECTED`, before playlist setup
+  and before a provided-script prepare. The row stays QUEUED (no render
+  JobRun, no YouTube call) so a reconnect can still pick it up. A later
+  CONNECTED sibling in the same tick still submits (`continue`, not
+  `return`). `GET /api/videos/queue-plan` mirrors that gate: the card
+  says `oauth expired` / `oauth disconnected` / `oauth error` with no
+  eta, and a paused channel still says `channel paused`. Suite:
+  `tests/verify_render.py` 154 → 173. Mutants 8/8 killed (drop, return,
+  expired-only, check after playlist, check after prepare, drop
+  queue-plan, hardcoded expired reason, oauth-before-paused).
+  Not bundled: a render already in flight still finishes; `_auto_produce`
+  can still promote drafts to QUEUED on a dead channel (they do not
+  start). Publish already skipped the upload.
+- **why (accepted residual of the 2026-10-10 playlist NeedsConnect PR):**
+  publish `tick` skips any channel that is not CONNECTED. Submit did
+  not, so a dead token still spent the day's render budget, and
+  `ensure_topic_playlist` called YouTube with that token.
+- **caution:** normal (`render_loop.py` submit gate + the queue-plan
+  mirror). Not publish/oauth money-path files.
+- **acceptance:** an EXPIRED, DISCONNECTED, or ERROR channel's queued
+  video stays QUEUED and does not call playlist or submit; a CONNECTED
+  sibling in the same tick still renders; queue-plan does not say
+  "next to render" for the dead channel.

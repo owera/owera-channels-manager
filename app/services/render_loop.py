@@ -17,7 +17,7 @@ from sqlmodel import Session, func, select
 
 from app.config import settings
 from app.db import app_settings, session_scope
-from app.models import Channel, RenderProfile, Topic, Video, VideoStatus, utcnow
+from app.models import Channel, OAuthStatus, RenderProfile, Topic, Video, VideoStatus, utcnow
 from app.services import metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.engines.worker import _has_visible_frames
@@ -564,6 +564,12 @@ def _submit_new(session: Session) -> None:
             continue  # still inside grok.Timeout cool-down
         channel = session.get(Channel, video.channel_id)
         if not channel or channel.paused:
+            continue
+        # Publish tick already skips a channel that is not CONNECTED. Starting
+        # a render here spends today's budget, and ensure_topic_playlist would
+        # call YouTube with the dead token. Leave the row QUEUED so a reconnect
+        # can pick it up. continue, not return: a later sibling may be healthy.
+        if channel.oauth_status != OAuthStatus.CONNECTED:
             continue
         # In-flight renders count against the budget too: gating on completed
         # renders alone overshoots to budget+concurrency-1, because a new render

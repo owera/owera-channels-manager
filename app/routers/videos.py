@@ -8,7 +8,7 @@ from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
 from app.db import app_settings, get_session
-from app.models import Channel, JobRun, Topic, Video, VideoStatus, utcnow
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, utcnow
 from app.schemas import (
     RejectBody,
     ReorderBody,
@@ -217,6 +217,10 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
         return {str(v.id): entry("scheduler paused") for v in queued}
     if ch.paused:
         return {str(v.id): entry("channel paused") for v in queued}
+    # Same gate as render_loop._submit_new: a dead token does not start a
+    # render, so the card must not say "next to render".
+    if ch.oauth_status != OAuthStatus.CONNECTED:
+        return {str(v.id): entry(f"oauth {ch.oauth_status}") for v in queued}
 
     budget = ch.daily_render_budget
     rendered = quota.rendered_today(session, channel_id)
