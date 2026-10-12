@@ -672,6 +672,120 @@ ok(plan[str(v_s.id)]["reason"] == "next to render",
 ok(plan[str(v_long.id)]["reason"] == "queued · renders today",
    "extra queued long is not labeled next when shorts need the mix slots")
 
+# Publish tick skips any channel that is not CONNECTED. _submit_new used to
+# start the render anyway, spending today's budget (and ensure_topic_playlist
+# hits YouTube) on a video that cannot upload until the token is healthy.
+# The skip has to be a continue, before playlist/prepare: a return would
+# starve a later CONNECTED sibling, and a check after prepare would fail a
+# misaligned provided script on the dead channel.
+print("submit_new: non-CONNECTED channel does not start a render")
+from app.services.craft import provided_script_hook_reason  # noqa: E402
+
+_playlist_calls = {"n": 0}
+_submit_calls = {"n": 0}
+
+
+def _count_playlist(session, topic, channel):
+    _playlist_calls["n"] += 1
+
+
+class _CountEngine:
+    def submit(self, video, params):
+        _submit_calls["n"] += 1
+        return f"task-{video.id}"
+
+
+render_loop.ensure_topic_playlist = _count_playlist
+render_loop.get_engine = lambda name: _CountEngine()
+
+s = fresh_session()
+set_concurrency(s, 1)
+dead = make_channel(s, slug="dead", oauth_status=OAuthStatus.EXPIRED,
+                    daily_render_budget=5)
+live = make_channel(s, slug="live", oauth_status=OAuthStatus.CONNECTED,
+                    daily_render_budget=5)
+ok(dead.id < live.id, "precondition: dead channel is visited first")
+td = make_topic(s, dead, content_format="short")
+tl = make_topic(s, live, content_format="short")
+vd = make_video(s, dead, td, status=VideoStatus.QUEUED)
+bad_script = "Totally unrelated opening sentence about bananas."
+ok(provided_script_hook_reason(
+       bad_script, title="Cache misses cost conversions",
+       subject="Cache misses cost conversions") is not None,
+   "precondition: this provided script is blocked before render")
+v_bad = make_video(
+    s, dead, td, status=VideoStatus.QUEUED,
+    subject="Cache misses cost conversions",
+    title="Cache misses cost conversions",
+    script=bad_script,
+    creation_config='{"script_source": "provided"}',
+)
+vl = make_video(s, live, tl, status=VideoStatus.QUEUED)
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, vd.id).status == VideoStatus.QUEUED,
+   "EXPIRED channel's queued video stays QUEUED")
+ok(s.get(Video, v_bad.id).status == VideoStatus.QUEUED
+   and s.get(Video, v_bad.id).error is None,
+   "EXPIRED channel does not fail a misaligned provided script")
+ok(s.get(Video, vl.id).status == VideoStatus.RENDERING,
+   "CONNECTED sibling still submits in the same tick (continue, not return)")
+ok(_submit_calls["n"] == 1 and _playlist_calls["n"] == 1,
+   "playlist and engine.submit run only for the CONNECTED channel")
+ok(s.exec(select(JobRun).where(
+    JobRun.kind == "render", JobRun.channel_id == dead.id)).all() == [],
+   "EXPIRED channel writes no render JobRun")
+
+for status, slug in (
+    (OAuthStatus.DISCONNECTED, "disc"),
+    (OAuthStatus.ERROR, "err"),
+):
+    _playlist_calls["n"] = 0
+    _submit_calls["n"] = 0
+    s = fresh_session()
+    set_concurrency(s, 1)
+    ch = make_channel(s, slug=slug, oauth_status=status, daily_render_budget=5)
+    t = make_topic(s, ch, content_format="short")
+    v = make_video(s, ch, t, status=VideoStatus.QUEUED)
+    render_loop._submit_new(s)
+    s.commit()
+    ok(s.get(Video, v.id).status == VideoStatus.QUEUED,
+       f"{status} channel's queued video stays QUEUED")
+    ok(_submit_calls["n"] == 0 and _playlist_calls["n"] == 0,
+       f"{status} channel does not call playlist or submit")
+
+print("queue-plan: non-CONNECTED labels the oauth status, not next to render")
+s = fresh_session()
+set_concurrency(s, 4)
+for status in (OAuthStatus.EXPIRED, OAuthStatus.DISCONNECTED, OAuthStatus.ERROR):
+    ch = make_channel(s, slug=f"q-{status}", oauth_status=status,
+                      daily_render_budget=5)
+    t = make_topic(s, ch, content_format="short")
+    v = make_video(s, ch, t, status=VideoStatus.QUEUED)
+    plan = queue_plan(channel_id=ch.id, session=s)
+    ok(plan[str(v.id)]["reason"] == f"oauth {status}",
+       f"queue-plan names oauth {status} instead of next to render")
+    ok(plan[str(v.id)]["eta"] is None, f"queue-plan oauth {status} has no eta")
+
+ch = make_channel(s, slug="paused-dead", paused=True,
+                  oauth_status=OAuthStatus.EXPIRED)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v.id)]["reason"] == "channel paused",
+   "paused is reported before oauth")
+
+ch = make_channel(s, slug="ok-oauth", oauth_status=OAuthStatus.CONNECTED,
+                  daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v.id)]["reason"] == "next to render",
+   "CONNECTED channel is still labeled next to render")
+
+render_loop.ensure_topic_playlist = lambda session, topic, channel: None
+render_loop.get_engine = lambda name: FakeEngine()
+
 # ══ Non-budget lifecycle: recovery, timeout/retry, finalize (backlog 7) ════════
 
 import json  # noqa: E402
