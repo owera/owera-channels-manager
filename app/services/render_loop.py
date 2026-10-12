@@ -10,14 +10,14 @@ import time
 import logging
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlmodel import Session, func, select
 
 from app.config import settings
 from app.db import app_settings, session_scope
-from app.models import Channel, RenderProfile, Topic, Video, VideoStatus, utcnow
+from app.models import Channel, JobRun, RenderProfile, Topic, Video, VideoStatus, utcnow
 from app.services import metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.engines.worker import _has_visible_frames
@@ -684,6 +684,55 @@ def _take_weighted_shorts(short_pairs: list[tuple[Video, Topic]], n: int) -> lis
     return picks
 
 
+_BREAKER_DETAIL = "auto-produce paused: last render failed"
+
+
+def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
+    """Why auto-produce must not promote a draft on ``ch`` right now, or None.
+
+    A FAILED render frees its render slot (rendered_today counts successes only),
+    so without this every failure pulled a fresh draft into the same broken path
+    (ch1 2026-10-11 21:05 → 10-12 04:15 BRT: 7 drafts burned — 4× edge-tts 403,
+    3× timeout). Trip on the channel's latest *terminal* render outcome being an
+    error inside the cool-down window. Transient retries ("transient error ...")
+    re-queue the same video and consume no draft, so they don't count. Reset:
+    a successful render, the window expiring, or an operator re-queueing the
+    failed video (it becomes QUEUED/RENDERING — active work, the next outcome
+    decides)."""
+    hours = int(settings.auto_produce_fail_cooldown_hours or 0)
+    if hours <= 0:
+        return None
+    last = session.exec(
+        select(JobRun).where(
+            JobRun.channel_id == ch.id, JobRun.kind == "render",
+            JobRun.status.in_(("success", "error")),
+            ~JobRun.detail.startswith("transient error"))
+        .order_by(JobRun.created_at.desc(), JobRun.id.desc())
+    ).first()
+    if last is None or last.status != "error":
+        return None
+    at = last.created_at
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - at > timedelta(hours=hours):
+        return None
+    return (f"{_BREAKER_DETAIL} (video {last.video_id}: {(last.detail or '')[:120]}); "
+            f"no new draft for {hours}h or until a render succeeds / is re-queued")
+
+
+def _note_breaker(session: Session, ch: Channel, reason: str) -> None:
+    """Log the trip once per failing video (not every 15s tick)."""
+    prev = session.exec(
+        select(JobRun).where(JobRun.channel_id == ch.id, JobRun.kind == "produce",
+                             JobRun.status == "held")
+        .order_by(JobRun.created_at.desc(), JobRun.id.desc())
+    ).first()
+    if prev is not None and (prev.detail or "") == reason[:1000]:
+        return
+    quota.log(session, kind="produce", status="held", channel_id=ch.id, detail=reason)
+    logger.warning("auto-produce breaker on channel %s: %s", ch.slug, reason)
+
+
 def _auto_produce(session: Session) -> None:
     """Promote DRAFT -> QUEUED to fill today's free render capacity.
 
@@ -716,6 +765,10 @@ def _auto_produce(session: Session) -> None:
         ).one()
         headroom = ch.daily_render_budget - quota.rendered_today(session, ch.id) - active
         if headroom <= 0:
+            continue
+        breaker = _render_breaker_reason(session, ch)
+        if breaker:
+            _note_breaker(session, ch, breaker)
             continue
         rows = session.exec(
             select(Video, Topic).join(Topic, Topic.id == Video.topic_id)

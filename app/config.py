@@ -82,6 +82,24 @@ class Settings(BaseSettings):
     # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).
     tts_attempts: int = 3                     # env: MANAGER_TTS_ATTEMPTS
     tts_retry_backoff_seconds: list[int] = [5, 20]  # sleep before attempt 2, 3, ...
+    # edge-tts synthesis endpoint (2026-10-12): since Oct 2026 the legacy host
+    # speech.platform.bing.com answers the synthesis WebSocket with 403 (rany2/edge-tts
+    # #490; ch1 #1448/#1461/#1462/#1463). Edge 155 synthesizes through
+    # api.msedgeservices.com, which still accepts the legacy client token (given as
+    # Ocp-Apim-Subscription-Key) + legacy Sec-MS-GEC. edge-tts 7.2.8 (latest on PyPI)
+    # still points at the old host; the fix is upstream PR #491 (unreleased).
+    # "" = use the library default (old behavior). The voice list stays on the old host.
+    tts_edge_wss_url: str = (                 # env: MANAGER_TTS_EDGE_WSS_URL
+        "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+        "?Ocp-Apim-Subscription-Key={token}"
+    )
+    # Auto-produce circuit breaker (2026-10-12): a FAILED render frees a render slot
+    # (rendered_today counts successes only), so _auto_produce pulled a fresh draft
+    # after every failure — ch1 burned 7 drafts overnight on the same 403. After a
+    # final (non-transient-retry) render failure, stop promoting drafts on that
+    # channel for this long, or until a render succeeds / the failed video is
+    # re-queued by an operator. 0 disables the breaker.
+    auto_produce_fail_cooldown_hours: int = 12  # env: MANAGER_AUTO_PRODUCE_FAIL_COOLDOWN_HOURS
 
     # HuggingFace token for MusicGen music generation (env: MANAGER_HF_TOKEN or HF_TOKEN)
     hf_token: str = ""

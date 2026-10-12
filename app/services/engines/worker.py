@@ -1112,6 +1112,20 @@ def _voice(params: dict) -> str:
     return re.sub(r"-(Male|Female)$", "", v)        # edge-tts wants the bare voice id
 
 
+def _apply_edge_tts_endpoint() -> None:
+    """Point edge-tts at ``settings.tts_edge_wss_url`` (see config: legacy host 403s).
+
+    edge-tts reads ``communicate.WSS_URL`` at connect time, so overriding the module
+    attribute is enough; the DRM token / Sec-MS-GEC / headers stay the library's.
+    Empty setting = library default."""
+    url = (settings.tts_edge_wss_url or "").strip()
+    if not url:
+        return
+    import edge_tts.communicate as _comm
+    from edge_tts.constants import TRUSTED_CLIENT_TOKEN
+    _comm.WSS_URL = url.replace("{token}", TRUSTED_CLIENT_TOKEN)
+
+
 def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
     """Synthesize narration and capture per-word timing.
 
@@ -1131,6 +1145,7 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
     import edge_tts
     from app.services import craft
 
+    _apply_edge_tts_endpoint()
     display_text = text
     text = craft.tts_spoken_text(text, voice)
 
