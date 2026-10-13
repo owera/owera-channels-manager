@@ -1345,6 +1345,58 @@ ok(_compose(already_has_code_llm, allowed_types=PHASE_A + ["code"]) is not None
    and n_has[0] == 1,
    "draft that already has a code beat does not retry")
 
+ok(storyboard._snippet_lines("Rerank that list and keep five.") ==
+   ["ranked = rerank(chunks)", "return ranked[:5]"],
+   "_snippet_lines grounds a rerank script (ch1-code golden)")
+ok(storyboard._snippet_lines("Corta o chunk. Tamanho fixo parte a frase.")[0]
+   .startswith("split("),
+   "_snippet_lines grounds a chunking script (ch2-concept golden)")
+ok(storyboard._snippet_lines("Um servidor MCP para tudo")[0] == "@mcp.tool()",
+   "_snippet_lines grounds an MCP/integração script")
+
+inj = [
+    {"type": "hook", "cue": "alpha", "text": "H"},
+    {"type": "quote", "cue": "five", "text": "five"},
+    {"type": "cta", "cue": "delta", "text": "X"},
+]
+storyboard._ensure_code_beat(
+    inj, "Rerank that list and keep five.", PHASE_A + ["code"])
+ok(inj[1]["type"] == "code" and inj[1]["lines"][0].startswith("ranked"),
+   "_ensure_code_beat converts the first mid quote into a rerank snippet")
+ok(inj[1]["cue"] == "five", "_ensure_code_beat keeps the original cue")
+
+n_rr = [0]
+
+
+def rr_missing_code_llm(*a, **k):
+    n_rr[0] += 1
+    return _board()
+
+
+_compose(rr_missing_code_llm, allowed_types=PHASE_A + ["code"], brand="rr")
+ok(n_rr[0] == 2,
+   "RR brand still retries once when the draft has no code (was skipped)")
+
+n_inj = [0]
+
+
+def still_no_code_llm(*a, **k):
+    n_inj[0] += 1
+    return _board()
+
+
+inj_html = _compose(
+    still_no_code_llm,
+    allowed_types=PHASE_A + ["code"],
+    script="Rerank that list and keep five. One call. Subscribe — next memory trap.",
+    subject="Fix Your Slow RAG: Add a Reranking Step in Five Lines",
+    brand="os",
+)
+ok(n_inj[0] == 2, "OS no-code draft retries once then injects (no third llm call)")
+ok("beat code" in inj_html, "OS backstop injects a code beat when retry also has none")
+ok("ranked = rerank(chunks)" in inj_html,
+   "injected rerank snippet lands in the HTML (ch1-code shape)")
+
 sub_mid = _compose(
     lambda *a, **k: _board(extra=[{
         "type": "statement", "cue": "echo foxtrot", "text": "Subscribe now",
