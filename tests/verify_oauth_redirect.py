@@ -603,11 +603,57 @@ ok(channel_row()["status"] == OAuthStatus.CONNECTED,
 ok("st-expired" not in channels_router._pending_flows,
    "and the expired entry is consumed")
 
+# The double-click success above wrote a still-valid grant. Replace it with
+# seed_tokens()'s non-google-auth blob so get_service raises NeedsConnect —
+# a has_token-only mutant (file present → skip the flip) dies here.
+seed_tokens()
+set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
 state_real = start_consent()
 r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_real}")
 row = channel_row()
 ok(row["status"] == OAuthStatus.ERROR and "access_denied" in (row["error"] or ""),
-   "a genuine cancel of a pending consent still flips to ERROR")
+   "a genuine cancel of a pending consent still flips to ERROR when the token is dead")
+
+# 3b(b): re-probe before flip. seed_tokens() is not a google-auth credential
+# (get_service → NeedsConnect), so the pin above is the dead-token path. A
+# working token must survive cancel AND a token-exchange blip — same fail-open
+# as GrantRejected. A mutant that only re-probes the error= branch (not the
+# except Exception path) dies on the exchange-failure pin.
+print("re-probe before flip: a healthy token survives cancel and exchange failure")
+set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
+_orig_gs = youtube.get_service
+_gs_slugs = []
+
+
+def _healthy_service(slug):
+    _gs_slugs.append(slug)
+    return object()
+
+
+youtube.get_service = _healthy_service
+try:
+    state_ok = start_consent()
+    r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_ok}")
+    row = channel_row()
+    ok(row["status"] == OAuthStatus.CONNECTED and not row["error"],
+       "cancelling a re-consent leaves a CONNECTED channel whose token still refreshes CONNECTED")
+    ok("Connection failed" in r.text, "the cancel page still renders")
+    ok(_gs_slugs == [SLUG2], "cancel re-probes get_service with the channel slug")
+
+    set_channel(oauth_status=OAuthStatus.CONNECTED, oauth_error=None)
+    _gs_slugs.clear()
+    before_ex = (TOKEN.read_bytes(), BAK.read_bytes())
+    r = consent({"_status": 500, "error": "internal_failure"}, dict(IDENT))
+    row = channel_row()
+    ok("Connection failed" in r.text, "token-exchange failure still shows the failure page")
+    ok(row["status"] == OAuthStatus.CONNECTED and not row["error"],
+       "token-exchange failure leaves a CONNECTED channel whose token still refreshes CONNECTED")
+    ok(_gs_slugs == [SLUG2],
+       "exchange-failure re-probes get_service (not only the error= cancel branch)")
+    ok((TOKEN.read_bytes(), BAK.read_bytes()) == before_ex,
+       "token-exchange failure with a healthy token still wrote nothing")
+finally:
+    youtube.get_service = _orig_gs
 
 _token_srv.shutdown()
 print(f"ALL {_checks} CHECKS PASSED")
