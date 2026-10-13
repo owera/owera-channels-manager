@@ -1326,6 +1326,54 @@ def _code_ok(beats, allowed) -> bool:
     return any(b.get("type") in ("code", "command") for b in beats)
 
 
+def _snippet_lines(script: str) -> list[str]:
+    """A ≤5-line Python stub that names the thing the narration describes.
+
+    Rule 2b allows a snippet even when the VO never reads code. The tokens are
+    taken from the script so a rerank short does not draw ``split()`` and an
+    MCP short does not draw ``rerank()``. Fallback is a generic ``run(step)``."""
+    low = (script or "").lower()
+    if "rerank" in low:
+        return ["ranked = rerank(chunks)", "return ranked[:5]"]
+    if "mcp" in low or "integra" in low:
+        return ["@mcp.tool()", "def run(q):", "  return db(q)"]
+    if "chunk" in low or "split" in low:
+        return ["split(text,", '  by="section",', "  overlap=50)"]
+    if "memory" in low or "load(" in low:
+        return ['state = load("memory")', "prompt += state"]
+    return ["result = run(step)", "return result"]
+
+
+def _ensure_code_beat(beats, script, allowed) -> None:
+    """Deterministic R2 backstop after the prompt retry still has no snippet.
+
+    Converts the first mid ``quote``/``statement`` (else the first non-hook/cta
+    mid) into a ``code`` beat. Timing/cue stay so align_storyboard is unchanged.
+    No-op when code/command are not allowed or a snippet is already present."""
+    if _code_ok(beats, allowed) or not beats:
+        return
+    idx = None
+    for i, b in enumerate(beats):
+        typ = b.get("type") or ""
+        if typ in ("hook", "cta"):
+            continue
+        if typ in ("quote", "statement"):
+            idx = i
+            break
+        if idx is None:
+            idx = i
+    if idx is None:
+        return
+    cue = beats[idx].get("cue") or ""
+    beats[idx] = {
+        "type": "code",
+        "cue": cue,
+        "lang": "python",
+        "lines": _snippet_lines(script),
+        "highlight": [0],
+    }
+
+
 # CTA used to force a Follow/Siga verb (R7). Strategy inverted: shorts close on
 # builder/confiança, and Follow/Siga is banned in generation + validation.
 _FOLLOW_VERBS = {
@@ -3498,20 +3546,31 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
 
         # R2: if code/command is allowed but the draft has neither, push once for a snippet.
         # Keep the retry only when it actually adds one (otherwise keep the varied original).
-        if not teaser and not literal and not rr_brand and not _code_ok(beats, allowed):
+        # RR used to skip this block (`not rr_brand`), which made the spoken-lines
+        # instruction dead code and left PT tool/chunking shorts with zero snippets
+        # (2026-10-13 ch2-concept golden). Retry on RR too; the extra clause still
+        # forbids invented output there.
+        if not teaser and not literal and not _code_ok(beats, allowed):
             retry = llm(
                 user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
                 "cta-last, keep variety (at most " +
                 ("one" if content_format != "long" else "two") +
                 " statement beat(s)), and include EXACTLY one "
                 "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
-                "that shows the thing the narration only describes (terminal, receipt, API bill)." +
+                "that shows the thing the narration only describes "
+                "(the function, call, or config — not a billing receipt unless the VO is about a bill)." +
                 (" Output lines only when the narration says them — never invented output."
                  if rr_brand else ""),
                 system=system, max_tokens=1500).strip()
             rb = parse_storyboard(retry, allowed)
             if rb and _code_ok(rb, allowed):
                 beats = rb
+        # OS/non-RR: prompt retry still loses (2026-10-13 ch1-code golden: 13 beats,
+        # zero code, "five" quote instead of the five-line rerank). Convert a mid
+        # quote/statement into a snippet. Skip RR — unspoken code is demoted there.
+        if (not teaser and not literal and not rr_brand
+                and not _code_ok(beats, allowed)):
+            _ensure_code_beat(beats, script, allowed)
 
         # Quote cards are sentence-bounded: each word knows its script sentence.
         words = annotate_sentences(words, script)
