@@ -263,9 +263,32 @@ assert set(_GRANT_HINTS) <= youtube.GRANT_CODES, "stale GrantRejected code in _G
 
 
 def _fail_consent(session: Session, ch: Channel, error: str) -> None:
-    """A failed consent halts publishing just like an expiry: flip to ERROR
-    through the choke point so a previously-CONNECTED channel alerts (a
-    reconnect of an already-dead one stays silent)."""
+    """A failed consent of a pending flow.
+
+    Re-probe before flipping a CONNECTED channel (BACKLOG 3b(b)): cancelling
+    a re-consent — or a token-exchange blip on one — must not halt publishing
+    while the existing token still refreshes. Same fail-open as GrantRejected.
+    A missing or dead token still flips to ERROR through the choke point so a
+    first-time connect (or a reconnect of an already-dead channel) records the
+    failure; a reconnect of an already-dead one stays silent (no CONNECTED→dead
+    transition). A probe exception other than NeedsConnect also fails open —
+    we could not prove the token is dead, so we must not halt the channel.
+    """
+    if ch.oauth_status == OAuthStatus.CONNECTED:
+        try:
+            youtube.get_service(ch.slug)
+        except youtube.NeedsConnect:
+            pass
+        except Exception as e:
+            logger.warning("consent for channel '%s' cancelled/failed (%s); "
+                           "token probe raised %s — status left CONNECTED",
+                           ch.slug, error, e)
+            return
+        else:
+            logger.warning("consent for channel '%s' cancelled/failed (%s); "
+                           "existing token still refreshes — status left CONNECTED",
+                           ch.slug, error)
+            return
     notify.mark_dead_committed(session, ch, error, status=OAuthStatus.ERROR)
 
 
@@ -296,8 +319,8 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
         # durable trace (the callback page is the only other one). Sibling
         # pending starts deliberately survive a rejection (unlike a success)
         # so the operator can retry from the other tab with the right
-        # account; the cost is that cancelling that tab instead still flips
-        # (the re-probe-before-flip in BACKLOG 4c would remove that too).
+        # account; cancelling that tab re-probes and leaves CONNECTED when
+        # the existing token still refreshes (3b(b)).
         logger.warning("consent for channel '%s' rejected (%s): %s", ch.slug, e.code, e)
         msg = str(e)[:400] + _GRANT_HINTS.get(e.code, "")
         return HTMLResponse(_callback_html("Consent rejected", msg, False))

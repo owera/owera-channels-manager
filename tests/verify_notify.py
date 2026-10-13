@@ -444,10 +444,57 @@ seed_flow("st-live", ch.id)
 channels_router.oauth_callback(ch.id, None, code=None, state="st-live",
                                error="access_denied", session=s)
 s.refresh(ch)
-ok(ch.oauth_status == OAuthStatus.ERROR, "a failed consent flips a CONNECTED channel to ERROR")
+ok(ch.oauth_status == OAuthStatus.ERROR,
+   "a failed consent of a dead token still flips a CONNECTED channel to ERROR")
 ok(len(cap.records) == 1, "and alerts exactly once")
 ok("st-live" not in channels_router._pending_flows,
    "the failed consent consumed its pending flow")
+
+# 3b(b): re-probe before flip. Cancelling a re-consent of a healthy CONNECTED
+# channel must not halt publishing — the existing token still refreshes
+# (same fail-open as GrantRejected). The dead-token case above is the
+# discriminator for a mutant that always leaves CONNECTED.
+ch_healthy = make_channel(s, slug="ch-consent-healthy")
+_orig_gs = youtube.get_service
+youtube.get_service = lambda slug: object()
+try:
+    seed_flow("st-healthy", ch_healthy.id)
+    channels_router.oauth_callback(ch_healthy.id, None, code=None, state="st-healthy",
+                                   error="access_denied", session=s)
+finally:
+    youtube.get_service = _orig_gs
+s.refresh(ch_healthy)
+ok(ch_healthy.oauth_status == OAuthStatus.CONNECTED and ch_healthy.oauth_error is None,
+   "cancelling a re-consent leaves a CONNECTED channel whose token still refreshes CONNECTED")
+ok(len(cap.records) == 1, "and alerts nothing (the dead-token flip is still the only page)")
+ok("st-healthy" not in channels_router._pending_flows,
+   "the cancelled healthy re-consent still consumed its pending flow")
+
+# Probe blip (not NeedsConnect) must fail open — a Google/transport surprise
+# during cancel must not 500 the callback or halt a CONNECTED channel.
+ch_blip = make_channel(s, slug="ch-consent-blip")
+
+
+def _probe_blip(slug):
+    raise RuntimeError("probe blip")
+
+
+youtube.get_service = _probe_blip
+try:
+    seed_flow("st-blip", ch_blip.id)
+    page = channels_router.oauth_callback(
+        ch_blip.id, None, code=None, state="st-blip",
+        error="access_denied", session=s)
+finally:
+    youtube.get_service = _orig_gs
+s.refresh(ch_blip)
+ok(ch_blip.oauth_status == OAuthStatus.CONNECTED and ch_blip.oauth_error is None,
+   "a non-NeedsConnect probe exception leaves CONNECTED (fail open)")
+ok("Connection failed" in str(getattr(page, "body", page)),
+   "the cancel page still renders when the probe blips")
+ok(len(cap.records) == 1, "a probe blip alerts nothing")
+ok("st-blip" not in channels_router._pending_flows,
+   "the blip cancel still consumed its pending flow")
 
 ch_dead = make_channel(s, slug="ch-consent-dead", oauth_status=OAuthStatus.EXPIRED)
 seed_flow("st-dead", ch_dead.id)

@@ -68,8 +68,12 @@ flag the operator step in the commit body.
 - **follow-ups (accepted tradeoffs, do separately if they bite):** (a) a *transient* RefreshError
   (Google 5xx during token refresh) is coerced to NeedsConnect by `_load_creds`, so a blip can
   false-positive a flip+page — distinguishing `invalid_grant` from transport errors is a youtube.py
-  (HIGH) change; (b) cancelling a re-consent of a healthy CONNECTED channel still flips it to ERROR
-  (pre-existing) — now alerted, but a re-probe-before-flip would avoid halting it; (c)
+  (HIGH) change; (b) ✅ DONE (PR autoimprove/2026-10-13-consent-cancel-reprobe) — `_fail_consent`
+  re-probes `youtube.get_service` before flipping a CONNECTED channel, so cancelling (or a
+  token-exchange blip on) a re-consent leaves a healthy token CONNECTED with no alert. A dead
+  token still flips to ERROR through `mark_dead_committed`. Probe exceptions other than
+  NeedsConnect fail open. Suites: `verify_notify.py` 68 → 75, `verify_oauth_redirect.py`
+  72 → 79; (c)
   `topic_playlist.ensure_topic_playlist` still swallows NeedsConnect (next probe catches the death
   one tick later); (d) missing client_secret.json with a token present classifies EXPIRED — the
   alert's Error text carries the real cause.
@@ -143,11 +147,11 @@ flag the operator step in the commit body.
   first consent; a replayed `?error=` hit (browser-history) matches no pending entry and leaves the
   channel untouched (the old always-flip-on-error pin in `verify_notify.py` was replaced); a
   verified success supersedes the channel's other pending starts; a 30-min TTL enforced at
-  consumption plus a 32-entry cap bound the registry. Accepted residuals: a cancel arriving after a
-  manager restart is now silent (the next probe catches a genuinely dead token), and sibling starts
-  deliberately survive a GrantRejected so the other tab can retry with the right account —
-  cancelling that tab instead still flips (the re-probe-before-flip idea from 3b would remove that
-  too). Suites: `verify_oauth_redirect.py` 32 → 50, `verify_notify.py` 62 → 68 checks.
+  consumption plus a 32-entry cap bound the registry. Accepted residual: a cancel arriving after a
+  manager restart is now silent (the next probe catches a genuinely dead token). Sibling starts
+  still survive a GrantRejected so the other tab can retry with the right account; cancelling that
+  tab now re-probes (3b(b) / #72) and leaves CONNECTED when the existing token still refreshes.
+  Suites: `verify_oauth_redirect.py` 32 → 50, `verify_notify.py` 62 → 68 checks.
   (Original problem, for context: keyed by channel id, a second `/oauth/start` overwrote the
   pending flow, completing the FIRST consent failed the exchange and flipped a CONNECTED channel
   to ERROR, and any `?error=` hit with no pending flow flipped too.)
@@ -1962,3 +1966,27 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-10-13-consent-cancel-reprobe) Re-probe before flipping a cancelled CONNECTED re-consent — HIGH
+- **resolution (2026-10-13):** `_fail_consent` is the choke point for a pending
+  consent that comes back `error=` / no code, and for a token-exchange
+  exception. A CONNECTED channel is re-probed via `youtube.get_service`
+  first: success (or any exception other than `NeedsConnect`) leaves
+  status CONNECTED, logs a warning, writes no oauth_error, alerts
+  nothing. `NeedsConnect` still flips to ERROR through
+  `notify.mark_dead_committed` (first-time connect / already-dead
+  reconnect unchanged). Same fail-open as `GrantRejected`. Isolated
+  HIGH oauth commit; `youtube.py` / `publish_loop.py` untouched.
+  Suites: `tests/verify_notify.py` 68 → 75, `tests/verify_oauth_redirect.py`
+  72 → 79 (healthy cancel + healthy exchange-failure + slug pin + probe-blip
+  fail-open; dead-token cancel still ERROR).
+- **why (3b follow-up (b) / 4c(a) residual):** cancelling a re-consent of a
+  healthy CONNECTED channel flipped it to ERROR and halted publishing
+  even though the existing token still refreshed. GrantRejected already
+  failed open; cancel did not.
+- **caution:** HIGH (`channels.py` oauth callback). Isolated commit +
+  regression tests. Do not bundle other oauth work.
+- **acceptance:** CONNECTED + working token + cancel stays CONNECTED with
+  no alert; CONNECTED + dead token + cancel still ERROR + one alert;
+  token-exchange failure of a working token stays CONNECTED; first-time /
+  already-dead cancel still ERROR.
