@@ -1962,3 +1962,30 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-10-14-breaker-orphan) auto-produce breaker ignores orphan-recovery JobRuns — normal
+- **resolution (2026-10-14):** `_render_breaker_reason` skips render error
+  rows whose detail starts with `transient error` or
+  `_ORPHAN_RECOVERY_DETAIL` (`recovered orphaned render — re-queued`).
+  `recover_orphaned_renders` logs that constant. A recovery row alone,
+  a success with a newer recovery row, and a real
+  `recover_orphaned_renders` on an in-flight HyperFrames row still
+  promote a draft. A terminal 403 with a newer recovery row still
+  blocks. An empty-detail success (what `_finalize` writes) still
+  resets the breaker under the extra `NOT LIKE`. Suite:
+  `tests/verify_autoproduce_breaker.py` 11 → 21.
+- **why:** the 12h breaker (default `auto_produce_fail_cooldown_hours`)
+  treated the restart re-queue row as the channel's latest terminal
+  render failure. Every manager restart that interrupted an in-flight
+  HyperFrames render paused draft promotion until cooldown or a later
+  success. The video was re-queued, not failed — same class as a
+  transient retry, which the breaker already skipped.
+- **caution:** normal (`render_loop.py` breaker filter only). Not a
+  publish/oauth path. Isolated commit.
+- **acceptance:** an orphan-recovery JobRun does not pause auto-produce;
+  a newer recovery row does not hide an earlier terminal failure; a
+  success under a newer recovery row still promotes.
+- **follow-up (not bundled):** `provided script blocked before render
+  (no slot used)` is also `kind=render status=error` and still trips
+  the breaker for the whole channel. That is a content gate on one
+  video, not a broken render path.

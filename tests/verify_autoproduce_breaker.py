@@ -4,12 +4,18 @@ ch1 2026-10-11 21:05 → 10-12 04:15 BRT: every FAILED render freed its slot
 (rendered_today counts successes only) and _auto_produce queued the next draft
 into the same broken path — 7 drafts burned (4× edge-tts 403, 3× timeout).
 
+Orphan recovery is not that failure. recover_orphaned_renders re-queues an
+in-flight HyperFrames render and logs kind=render status=error. Counting that
+row paused auto-produce for the whole cool-down after every restart.
+
 Also pins the edge-tts endpoint override (legacy host speech.platform.bing.com
 returns 403; api.msedgeservices.com accepts the same client token).
 
 Run: PYTHONPATH=. .venv/bin/python tests/verify_autoproduce_breaker.py
 """
+import inspect
 import sys
+from contextlib import contextmanager
 from datetime import timedelta
 
 from sqlalchemy.pool import StaticPool
@@ -119,6 +125,87 @@ quota.log(s5, kind="render", status="error", channel_id=other.id, detail="render
 render_loop._auto_produce(s5); s5.commit()
 ok(len(queued(s5)) == 1, "failure on channel B does not hold channel A")
 
+print("breaker: orphan recovery is not a terminal failure")
+ok("recovered orphaned render" in render_loop._ORPHAN_RECOVERY_DETAIL,
+   "recovery detail keeps the historical wording verify_render pins")
+ok("_ORPHAN_RECOVERY_DETAIL" in inspect.getsource(render_loop.recover_orphaned_renders),
+   "recover_orphaned_renders logs the prefix the breaker skips")
+s6, ch6, _ = setup()
+quota.log(s6, kind="render", status="error", channel_id=ch6.id,
+          detail=render_loop._ORPHAN_RECOVERY_DETAIL)
+s6.commit()
+render_loop._auto_produce(s6); s6.commit()
+ok(len(queued(s6)) == 1, "orphan-recovery row alone does not pause auto-produce")
+
+print("breaker: a newer recovery row does not hide a terminal 403")
+s7, ch7, ids7 = setup(budget=2)
+quota.log(s7, kind="render", status="error", channel_id=ch7.id, video_id=ids7[0],
+          detail="WSServerHandshakeError: 403, message='Invalid response status'")
+s7.commit()
+quota.log(s7, kind="render", status="error", channel_id=ch7.id, video_id=ids7[0],
+          detail=render_loop._ORPHAN_RECOVERY_DETAIL)
+s7.commit()
+render_loop._auto_produce(s7); s7.commit()
+ok(queued(s7) == [], "terminal 403 still blocks when recovery is the newer row")
+
+print("breaker: a success then a restart recovery still promotes")
+s8, ch8, _ = setup(budget=2)
+quota.log(s8, kind="render", status="success", channel_id=ch8.id, detail="render finished")
+s8.commit()
+quota.log(s8, kind="render", status="error", channel_id=ch8.id,
+          detail=render_loop._ORPHAN_RECOVERY_DETAIL)
+s8.commit()
+render_loop._auto_produce(s8); s8.commit()
+ok(len(queued(s8)) == 1,
+   "success remains the latest terminal outcome under a newer recovery row")
+
+print("breaker: finalize's empty-detail success still resets under the new filter")
+s8b, ch8b, _ = setup(budget=2)
+quota.log(s8b, kind="render", status="error", channel_id=ch8b.id,
+          detail="WSServerHandshakeError: 403, message='Invalid response status'")
+s8b.commit()
+quota.log(s8b, kind="render", status="success", channel_id=ch8b.id)  # detail None → ""
+s8b.commit()
+saved = s8b.exec(select(JobRun).where(JobRun.status == "success")).all()
+ok(len(saved) == 1 and (saved[0].detail or "") == "",
+   "precondition: success row stores the empty detail finalize writes")
+render_loop._auto_produce(s8b); s8b.commit()
+ok(len(queued(s8b)) == 1,
+   "empty-detail success is still the latest terminal outcome (not dropped by NOT LIKE)")
+
+print("breaker: real recover_orphaned_renders does not pause the channel")
+
+
+@contextmanager
+def _scoped(session):
+    yield session
+    session.commit()
+
+
+s9, ch9, ids9 = setup(budget=2, drafts=2)
+orphan = Video(channel_id=ch9.id, topic_id=s9.get(Video, ids9[0]).topic_id,
+               subject="Agent trap orphan · Agent traps 9",
+               status=VideoStatus.RENDERING, engine="hyperframes",
+               mpt_task_id="hf-orphan", render_progress=40)
+s9.add(orphan); s9.commit(); s9.refresh(orphan)
+_orig_scope = render_loop.session_scope
+render_loop.session_scope = lambda: _scoped(s9)
+try:
+    render_loop.recover_orphaned_renders()
+finally:
+    render_loop.session_scope = _orig_scope
+s9.refresh(orphan)
+ok(orphan.status == VideoStatus.QUEUED and orphan.mpt_task_id is None,
+   "in-process orphan was re-queued before auto-produce")
+recov = s9.exec(select(JobRun).where(
+    JobRun.kind == "render", JobRun.status == "error",
+    JobRun.detail == render_loop._ORPHAN_RECOVERY_DETAIL)).all()
+ok(len(recov) == 1, "recovery wrote the exact detail the breaker skips")
+render_loop._auto_produce(s9); s9.commit()
+q9 = queued(s9)
+ok(orphan.id in q9 and len(q9) == 2,
+   "a draft was still promoted after the real recovery JobRun")
+
 print("edge-tts endpoint override")
 import edge_tts.communicate as comm
 from app.services.engines import worker
@@ -126,4 +213,4 @@ worker._apply_edge_tts_endpoint()
 ok(comm.WSS_URL.startswith("wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=")
    and "{token}" not in comm.WSS_URL, "WSS_URL points at api.msedgeservices.com with the client token")
 
-print(f"\nall {_checks} checks passed")
+print(f"\nALL {_checks} CHECKS PASSED")
