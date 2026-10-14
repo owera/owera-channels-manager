@@ -58,7 +58,8 @@ def _from_meta(subject: str, meta: dict) -> dict:
 
 def finalize_description(description: str, language_code: str | None,
                          channel_yt_id: str | None, playlist_yt_id: str | None,
-                         chapter_lines: list[str] | None = None) -> str:
+                         chapter_lines: list[str] | None = None,
+                         newsletter_line: str | None = None) -> str:
     """Append the chapters list (long-form, when derivable) and the subscribe-CTA +
     links block (localized). Called at publish time. Idempotent: if a block is
     already present (publish retry), it is not appended again."""
@@ -76,6 +77,9 @@ def finalize_description(description: str, language_code: str | None,
     if playlist_yt_id:
         block.append(f"{lines['playlist']} "
                      f"https://www.youtube.com/playlist?list={playlist_yt_id}")
+    # OS newsletter (newsletter.description_line; None while placeholder / RR).
+    if newsletter_line and newsletter_line not in base:
+        block.append(newsletter_line)
     if block:
         segments.append("\n".join(block))
     if not segments:

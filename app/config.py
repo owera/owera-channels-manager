@@ -145,6 +145,13 @@ class Settings(BaseSettings):
     # "storyboard" = new typed-beat path; "legacy" = old clip-array path (kill switch).
     composition_version: str = "storyboard"
 
+    # --- Newsletter (OS channel only; app/services/newsletter.py) ---------------
+    # env MANAGER_NEWSLETTER_URL / MANAGER_NEWSLETTER_TEXT. While either is empty
+    # or the "TODO-CMO" placeholder, nothing is published (no description line,
+    # no endcard line). RR never gets it.
+    newsletter_url: str = "TODO-CMO"
+    newsletter_text: str = "TODO-CMO"
+
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:
     # MANAGER_TOPIC_FLAGS as a JSON object, e.g.

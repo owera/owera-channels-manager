@@ -596,6 +596,8 @@ def _base_css(width: int, height: int, th: dict) -> str:
         ".cta .cta-box{background:var(--fg);color:var(--bg);font-weight:900;border-radius:18px;"
         "padding:.5em .9em;font-size:calc(var(--fs)*1.05);display:inline-flex;align-items:center;gap:.3em}"
         ".cta .cta-sub{font-size:var(--body-fs);color:var(--fg-dim);margin-top:.5em;font-weight:600}"
+        ".cta .cta-news{font-size:calc(var(--body-fs)*.75);color:var(--fg-dim);margin-top:.6em;"
+        "font-weight:500;letter-spacing:.02em}"
         # --- Phase B/C (code / command / diagram) ---
         ".code-lang{font-family:var(--mono);font-size:var(--body-fs);color:var(--accent);"
         "font-weight:700;margin-bottom:.3em;text-transform:lowercase}"
@@ -845,27 +847,42 @@ def render_quote(b, ctx):
     return _shell(i, b, "quote", inner), _wrap(i, ctx, tw)
 
 
+def _newsletter_line(ctx):
+    """OS-only newsletter text under the LAST cta card (render-time only; the
+    beat JSON / chip are untouched). None while placeholder / RR / not last."""
+    if not ctx.get("is_last") or ctx.get("brand") != "os":
+        return None
+    from app.services import newsletter
+    return newsletter.endcard_text(ctx.get("brand"))
+
+
 def render_cta(b, ctx):
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
+    nl = _newsletter_line(ctx)
+    news = ('<div class="cta-news">' + theme.esc(nl) + "</div>") if nl else ""
     chip = bool(b.get("endcard")) or (b.get("text") or "").startswith("·")
     if chip:
         # Series endcard: one-line chip, optional micro. No arrow, no neon fill.
         micro = ('<div class="cta-micro">' + theme.esc(b["sub"]) + "</div>") if b.get("sub") else ""
-        inner = '<div class="cta-chip">' + theme.esc(b["text"]) + "</div>" + micro
+        inner = '<div class="cta-chip">' + theme.esc(b["text"]) + "</div>" + micro + news
         tw = [
             _from(bid + " .cta-chip", s, "opacity:0,y:12", "opacity:1,y:0", dur=0.28, ease="power2.out"),
         ]
         if b.get("sub"):
             tw.append(_from(bid + " .cta-micro", s + 0.18, "opacity:0", "opacity:1", dur=0.22))
+        if news:
+            tw.append(_from(bid + " .cta-news", s + 0.3, "opacity:0", "opacity:1", dur=0.22))
         return _shell(i, b, "cta", inner), _wrap(i, ctx, tw)
     sub = ('<div class="cta-sub">' + theme.esc(b["sub"]) + "</div>") if b.get("sub") else ""
-    inner = '<div class="cta-box">' + theme.esc(b["text"]) + "</div>" + sub
+    inner = '<div class="cta-box">' + theme.esc(b["text"]) + "</div>" + sub + news
     tw = [
         _from(bid + " .cta-box", s, "opacity:0,scale:0.6", "opacity:1,scale:1", dur=0.32, ease="back.out(2)"),
     ]
     if b.get("sub"):
         tw.append(_from(bid + " .cta-sub", s + 0.3, "opacity:0", "opacity:1", dur=0.3))
+    if news:
+        tw.append(_from(bid + " .cta-news", s + 0.4, "opacity:0", "opacity:1", dur=0.3))
     return _shell(i, b, "cta", inner), _wrap(i, ctx, tw)
 
 
