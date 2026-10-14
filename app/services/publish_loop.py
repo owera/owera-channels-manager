@@ -457,9 +457,13 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     if topic and topic.content_format == "long":
         from app.services import chapters
         ch_lines = chapters.chapter_lines_for_video(video)
+    from app.services import newsletter
+    from app.services.engines import theme as _theme
+    _brand = _theme.infer_brand(channel.id, channel.slug, channel.name)
     video.description = metadata.finalize_description(
         video.description or "", language_code, channel.yt_channel_id,
-        pl.yt_playlist_id if pl else None, chapter_lines=ch_lines)
+        pl.yt_playlist_id if pl else None, chapter_lines=ch_lines,
+        newsletter_line=newsletter.description_line(_brand))
     session.add(video)
     session.commit()
 
