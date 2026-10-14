@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
+from app.services import review_guard as _rg_vmp; _rg_vmp.vm_pass_required_reason = lambda v: None  # test-only stub: pre-vm_pass-lock flow (lock has no off switch since 14/10; pinned in verify_vm_pass_topics / verify_approve_guard)
 from app.config import settings
 from app.models import Channel, OAuthStatus, Video, VideoStatus
 from app.routers import channels as channels_router

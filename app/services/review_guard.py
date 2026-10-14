@@ -23,8 +23,8 @@ matches) and _finalize drops any vm_pass carried in creation_config, so a stale
 vm_pass never carries over to a new render. Records written before the
 "artifact" field existed keep the path-only check.
 
-vm_pass required on EVERY topic by default (topic_flags.VM_PASS_REQUIRED =
-["*"], exemptions in VM_PASS_EXEMPT; Rodrigo 08/10 after OS #1449/#1450 were
+vm_pass required on EVERY video, no exemptions (former topic_flags
+vm_pass_required/vm_pass_exempt removed 14/10; Rodrigo 08/10 after OS #1449/#1450 were
 published without Gate B): approve (API / growth agent / manual), skip-gate
 auto-approve, retry-republish and the publish loop all need vm_pass on the
 current render (vm_pass_required_reason, 409 "held: needs vm_pass"); any actor
@@ -171,19 +171,14 @@ VM_PASS_HELD = "held: needs vm_pass"
 def vm_pass_required_reason(v) -> str | None:
     """Why this video may not be approved / auto-approved / published, else None.
 
-    Every topic by default (topic_flags.VM_PASS_REQUIRED = ["*"], minus
-    topic_flags.VM_PASS_EXEMPT) needs the VM's Gate B PASS on the CURRENT render
+    Every video on every topic (no exemption flag, no env switch) needs the VM's Gate B PASS on the CURRENT render
     (vm_pass_of: a PASS recorded for an older render never counts). Same lock
     as the CM teaser (#71/#73), without its Channels-only actor rule.
     #1449/#1450 (OS topic 47, VM FAIL P0 08/10) were auto-approved and
     published without Gate B (Rodrigo 08/10 15:11)."""
-    from app.services import topic_flags
-
+    # NO exceptions (Rodrigo 14/10): the old topic_flags vm_pass_required /
+    # vm_pass_exempt switches are gone — every video, every topic, every actor.
     tid = getattr(v, "topic_id", None)
-    if not topic_flags.has(topic_flags.VM_PASS_REQUIRED, tid):
-        return None
-    if topic_flags.has(topic_flags.VM_PASS_EXEMPT, tid):
-        return None
     if vm_pass_of(v) is not None:
         return None
     return (f"{VM_PASS_HELD} — the VM's Gate B PASS on this render is required before "
@@ -237,3 +232,34 @@ def drop_teaser_ideas(ideas) -> list:
         if not is_cm_teaser(probe):
             out.append(idea)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Approval audit (who approved what, when). One ApprovalAudit row per approval,
+# same commit as the status flip; refused approvals write nothing.
+GROWTH_ACTORS = frozenset({"growth", "growth-agent", "growth_agent", "agent"})
+USER_ACTORS = frozenset({"dashboard", "channels", "rodrigo", "rrecio", "user", "operator"})
+SYSTEM_ACTORS = frozenset({"skip-gate", "system"})
+
+
+def actor_kind(actor: str | None) -> str:
+    """'user' | 'growth_agent' | 'system' | 'api' for an actor string."""
+    a = (actor or "").lower()
+    if a in GROWTH_ACTORS or a.startswith("growth"):
+        return "growth_agent"
+    if a in USER_ACTORS:
+        return "user"
+    if a in SYSTEM_ACTORS:
+        return "system"
+    return "api"
+
+
+def record_approval(session, v, actor: str, path: str):
+    """Add an ApprovalAudit row (caller commits). Needs vm_pass on v."""
+    from app.models import ApprovalAudit
+    rec = vm_pass_of(v) or {}
+    row = ApprovalAudit(video_id=v.id, channel_id=v.channel_id, actor=actor or "unknown",
+                        actor_kind=actor_kind(actor), path=path,
+                        vm_pass_actor=rec.get("actor"), video_path=v.video_path)
+    session.add(row)
+    return row

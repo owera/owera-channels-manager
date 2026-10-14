@@ -78,8 +78,8 @@ ok(Settings().topic_flags.get("literal_cards") == [47]
 ok(topic_flags.has(topic_flags.LITERAL_CARDS, 47) and not topic_flags.has(topic_flags.LITERAL_CARDS, 1),
    "topic 47 flagged, topic 1 not")
 _orig = settings.topic_flags
-settings.topic_flags = {"vm_pass_required": [47]}
-ok(topic_flags.has(topic_flags.LITERAL_CARDS, 47), "overriding vm_pass_required keeps literal_cards' default")
+settings.topic_flags = {"tight_mid_cards": [1]}
+ok(topic_flags.has(topic_flags.LITERAL_CARDS, 47), "overriding another flag keeps literal_cards' default")
 settings.topic_flags = _orig
 
 print("allowlist (os-1449 SCRIPT_PROPOSED.md format + JSON)")

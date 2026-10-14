@@ -15,7 +15,7 @@ from datetime import timedelta
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-import os as _os; _os.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'
+from app.services import review_guard as _rg_vmp; _rg_vmp.vm_pass_required_reason = lambda v: None  # test-only stub (lock has no off switch since 14/10)
 from app.config import settings
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, utcnow
 from app.services import episode_guard as _eg

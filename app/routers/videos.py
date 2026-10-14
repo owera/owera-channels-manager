@@ -697,8 +697,8 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     block = review_guard.teaser_approve_block(v, actor, _topic.name if _topic else None)
     if block:
         raise HTTPException(block[0], block[1])
-    # vm_pass required (default: every topic, minus vm_pass_exempt): VM Gate B
-    # PASS on this render — 409 "held: needs vm_pass" (growth agent included)
+    # vm_pass required on EVERY video, no exemption (14/10): VM Gate B PASS on
+    # this render — 409 "held: needs vm_pass" (growth agent / API / dashboard)
     need_vm = review_guard.vm_pass_required_reason(v)
     if need_vm:
         raise HTTPException(409, need_vm)
@@ -723,7 +723,9 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
         raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
-              detail=f"approved via API: {v.status} -> approved; craft_review=pass; actor={actor}")
+              detail=f"approved via API: {v.status} -> approved; craft_review=pass; "
+                     f"actor_kind={review_guard.actor_kind(actor)}; actor={actor}")
+    review_guard.record_approval(session, v, actor, "approve")
     v.status = VideoStatus.APPROVED
     v.craft_review = craft.CRAFT_REVIEW_PASS
     v.approved_at = utcnow()
@@ -773,7 +775,7 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
             session: Session = Depends(get_session)):
     """Record the Video Maker's Gate B PASS on the CURRENT render (Channels/VM
     only; X-Actor: channels|vm). Required before any video can be approved
-    (every topic by default; topic_flags vm_pass_required / vm_pass_exempt).
+    (every video, no exemptions).
     Body (optional): {"note": "..."}. Bound to video_path: a re-render clears it."""
     v = session.get(Video, video_id)
     if not v:
@@ -799,7 +801,7 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
 
 
 @router.post("/{video_id}/retry")
-def retry(video_id: int, session: Session = Depends(get_session)):
+def retry(video_id: int, request: Request, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
@@ -824,7 +826,9 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         quota.log(session, kind="retry", status="success", video_id=v.id,
                   channel_id=v.channel_id,
                   detail=f"retried via API: {v.status} -> approved "
-                         f"(publish failure, artifact kept, re-publish); craft_review=pass")
+                         f"(publish failure, artifact kept, re-publish); craft_review=pass; "
+                         f"actor={review_guard.actor_of(request)}")
+        review_guard.record_approval(session, v, review_guard.actor_of(request), "retry")
         # Reset the stuck-publish cap so an operator/agent retry after a diagnosed
         # root cause (token parse, network) gets a full publish_max_retries budget
         # instead of one hang and an immediate give-up (retry_count already at cap).

@@ -3,21 +3,20 @@ auto-approved and published without Gate B; Rodrigo 08/10 15:11: all topics).
 
 Run: PYTHONPATH=. .venv/bin/python tests/verify_vm_pass_topics.py
 
-settings.topic_flags["vm_pass_required"] (env MANAGER_TOPIC_FLAGS, default
-["*"] = every topic) minus "vm_pass_exempt" (default []) need the Video
+EVERY video (no exemption: the old vm_pass_required / vm_pass_exempt
+topic flags were removed 14/10 and are ignored if still set) needs the Video
 Maker's Gate B PASS on the CURRENT render — the CM teaser lock (#71/#73)
 without its Channels-only actor rule. Pins:
-  * config: default all topics / no exemptions; an env object with only the
-    exemption keeps required=["*"]; a list narrows it; [] turns it off;
+  * config: no exemption flags exist; legacy keys in settings are ignored;
   * approve (growth agent / manual / Channels): 409 "held: needs vm_pass"
     without vm_pass — topic 47 AND a non-listed topic; 200 with vm_pass on
     this render (any actor); a vm_pass from an older render (other path, or
-    the same path overwritten by a re-render) → 409; vm_pass_exempt works and
-    does not leak;
+    the same path overwritten by a re-render) → 409; legacy exempt / off flags
+    do not bypass;
   * retry-republish (publish-side failure → approved): 409 without vm_pass;
   * skip-gate auto-approve at render finalize: parked in review (pending,
     error names the lock); a finalize drops any vm_pass carried over; a
-    non-listed topic is held too; an exempt topic still auto-approves;
+    non-listed topic is held too; a legacy-exempt topic is held too;
   * publish loop: an approved row without vm_pass is parked in review before
     PUBLISHING (never uploaded); with vm_pass it proceeds.
 In-memory DB + TestClient; craft publish gate stubbed (not under test).
@@ -53,33 +52,12 @@ def ok(cond, msg):
     print("  ok:", msg)
 
 
-print("config")
+print("config (exemption flags removed 14/10)")
 _dflt = Settings().topic_flags
-ok(_dflt.get("vm_pass_required") == ["*"] and _dflt.get("vm_pass_exempt") == []
-   and topic_flags.DEFAULTS[topic_flags.VM_PASS_REQUIRED] == ("*",)
-   and topic_flags.DEFAULTS[topic_flags.VM_PASS_EXEMPT] == (),
-   "default: vm_pass required on ALL topics, no exemptions")
-ok(all(topic_flags.has(topic_flags.VM_PASS_REQUIRED, t) for t in (47, 3, 1, None))
-   and not topic_flags.has(topic_flags.VM_PASS_EXEMPT, 3),
-   "every topic (listed or not) carries vm_pass_required by default")
+ok("vm_pass_required" not in _dflt and "vm_pass_exempt" not in _dflt
+   and not hasattr(topic_flags, "VM_PASS_EXEMPT") and not hasattr(topic_flags, "VM_PASS_REQUIRED"),
+   "no vm_pass_required / vm_pass_exempt flag left in config or topic_flags")
 _orig_flags = settings.topic_flags
-settings.topic_flags = {"vm_pass_exempt": [3]}
-ok(topic_flags.has(topic_flags.VM_PASS_REQUIRED, 47) and topic_flags.has(topic_flags.VM_PASS_EXEMPT, 3)
-   and not topic_flags.has(topic_flags.VM_PASS_EXEMPT, 47),
-   "env object with only the exemption keeps required=['*'] and exempts topic 3")
-settings.topic_flags = {"vm_pass_required": [47, "52", "junk"]}
-ok(topic_flags.topics_with(topic_flags.VM_PASS_REQUIRED) == frozenset({47, 52})
-   and not topic_flags.has(topic_flags.VM_PASS_REQUIRED, 3),
-   "a list narrows the requirement to those topics (ints / numeric strings; junk ignored)")
-settings.topic_flags = {"vm_pass_required": []}
-ok(not topic_flags.has(topic_flags.VM_PASS_REQUIRED, 47), "an empty list turns the lock off")
-settings.topic_flags = _orig_flags
-os.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_exempt": [12, 31]}'
-try:
-    ok(Settings().topic_flags == {"vm_pass_exempt": [12, 31]},
-       "MANAGER_TOPIC_FLAGS env (JSON object) is read")
-finally:
-    os.environ.pop("MANAGER_TOPIC_FLAGS", None)
 
 _ART = Path(tempfile.mkdtemp(prefix="vm-pass-topics-"))
 
@@ -195,18 +173,17 @@ try:
            f"topic 3 (not listed anywhere) without vm_pass → 409 too ({r.status_code})")
         r = client.post(f"/api/videos/{n}/approve", auth=GROWTH, headers={"X-Actor": "channels"})
         ok(r.status_code == 409, "…for any actor (manual / Channels included)")
-        settings.topic_flags = {"vm_pass_exempt": [3]}
-        ok(review_guard.vm_pass_required_reason(get(n)) is None, "vm_pass_exempt [3] → topic 3 exempt")
+        settings.topic_flags = {"vm_pass_exempt": [3, "*"]}
+        ok((review_guard.vm_pass_required_reason(get(n)) or "").startswith("held: needs vm_pass"),
+           "legacy vm_pass_exempt [3,'*'] in settings is ignored (no bypass)")
         r = client.post(f"/api/videos/{n}/approve", auth=GROWTH)
-        ok(r.status_code == 200, "exempt topic approves without vm_pass")
-        x47 = add(title="Still locked. · Agent traps 18", status=VideoStatus.REVIEW, video_path=art("x47"))
-        ok(client.post(f"/api/videos/{x47}/approve", auth=GROWTH).status_code == 409,
-           "the exemption does not leak to other topics")
-        settings.topic_flags = {"vm_pass_required": [47]}
+        ok(r.status_code == 409 and r.json()["detail"].startswith("held: needs vm_pass"),
+           "exempt-flagged topic still 409 held without vm_pass")
+        settings.topic_flags = {"vm_pass_required": []}
         n2 = add(topic_id=3, title="Narrowed. · Agent memory 6", status=VideoStatus.REVIEW,
                  video_path=art("n2"))
-        ok(client.post(f"/api/videos/{n2}/approve", auth=GROWTH).status_code == 200,
-           "narrowed list [47]: topic 3 approves without vm_pass")
+        ok(client.post(f"/api/videos/{n2}/approve", auth=GROWTH).status_code == 409,
+           "legacy vm_pass_required [] (off switch) is ignored → 409")
         settings.topic_flags = _orig_flags
 
         print("retry-republish")
@@ -272,8 +249,8 @@ try:
                  mpt_task_id="t-q4")
         v = finalize(q4, {"beats": []})
         settings.topic_flags = _orig_flags
-        ok(v.status == VideoStatus.APPROVED and v.craft_review == craft.CRAFT_REVIEW_PASS,
-           "exempt topic still auto-approves on a skip-gate channel")
+        ok(v.status == VideoStatus.REVIEW and (v.error or "").startswith("held: needs vm_pass"),
+           "legacy exempt flag no longer lets skip-gate auto-approve")
 
         print("publish loop (defense in depth)")
         p = add(title="Publish. · Agent traps 16", status=VideoStatus.APPROVED,
