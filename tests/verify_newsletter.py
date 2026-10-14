@@ -75,6 +75,52 @@ try:
     ok(newsletter.endcard_text("os") is None, "Subscribe-CTA text dropped from endcard (chip owns Subscribe)")
     ok(theme.infer_brand(1, "owera", "Owera Software") == "os"
        and theme.infer_brand(2, "rodrigo-recio", "Rodrigo Recio") == "rr", "publish brand: ch1 os / ch2 rr")
+
+    print("1) 5000-char description limit")
+    settings.newsletter_text = "Weekly agent notes"
+    line = newsletter.description_line("os")
+    for n in (4700, 4850, 4990, 6000):
+        base_n = ("word " * (n // 5))[:n]
+        dd = metadata.finalize_description(base_n, "en-US", "UCx", "PLx", newsletter_line=line)
+        ok(len(dd) <= 5000, f"base {n}: <= 5000 ({len(dd)})")
+        ok("youtube.com/channel/UCx?sub_confirmation=1\n" in dd + "\n"
+           and dd.rstrip().splitlines()[-1] in ("▶ Full series: https://www.youtube.com/playlist?list=PLx", line),
+           f"base {n}: links block whole (reserved), last line intact")
+        ok(line in dd or line not in dd and all(l != line[:len(l)] or l == "" for l in dd.splitlines()[-2:]),
+           f"base {n}: newsletter whole or absent")
+        ok(not any(l and l != line and line.startswith(l) for l in dd.splitlines()),
+           f"base {n}: newsletter never cut mid-line")
+    fits = metadata.finalize_description("word " * 900, "en-US", "UCx", "PLx", newsletter_line=line)
+    ok(line in fits, "newsletter kept when it fits")
+    tight = "w" * (5000 - 2 - len(metadata.finalize_description("", "en-US", "UCx", "PLx")) - 5)
+    dt = metadata.finalize_description(tight, "en-US", "UCx", "PLx", newsletter_line=line)
+    ok(line not in dt and tight in dt and len(dt) <= 5000,
+       "newsletter omitted (not truncated) when only it doesn't fit; base intact")
+
+    print("2) URL validation")
+    settings.newsletter_text = "Weekly agent notes"
+    for bad in ("http://news.example.com/x", "https://", "https:///path", "https://news.example.com/a b",
+                " https://news.example.com/x", "https://news.example.com/x\n", "ftp://news.example.com",
+                "https://news.exa\tmple.com", "javascript:alert(1)", "https://news.example.com/<x>"):
+        settings.newsletter_url = bad
+        ok(newsletter.config() is None, f"rejected {bad!r}")
+    settings.newsletter_url = "https://news.example.com/os?ref=yt"
+    ok(newsletter.config() is not None, "https + host accepted")
+
+    print("3) text: < > stripped, 60 chars at a word boundary")
+    settings.newsletter_text = "<b>Weekly</b> agent >notes<"
+    t = newsletter.config()[1]
+    ok("<" not in t and ">" not in t and "Weekly" in t and "notes" in t, f"< > stripped ({t!r})")
+    ok("<" not in newsletter.description_line("os") and "<" not in (newsletter.endcard_text("os") or ""),
+       "no < > in description line / endcard")
+    settings.newsletter_text = "Weekly notes on agent memory traps for engineers shipping production agents"
+    t = newsletter.config()[1]
+    ok(len(t) <= 60 and settings.newsletter_text.startswith(t)
+       and settings.newsletter_text[len(t)] == " ", f"cut at word boundary ({len(t)}: {t!r})")
+    settings.newsletter_text = "x" * 80
+    ok(len(newsletter.config()[1]) == 60, "single long word: hard cut at 60")
+    settings.newsletter_text = "<<>>"
+    ok(newsletter.config() is None, "text that is only < > → omitted")
 finally:
     settings.newsletter_url, settings.newsletter_text = _u, _t
 

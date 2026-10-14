@@ -70,22 +70,52 @@ def finalize_description(description: str, language_code: str | None,
     segments = []
     if chapter_lines and lines["chapters"] not in base:
         segments.append(lines["chapters"] + "\n" + "\n".join(chapter_lines))
-    block = []
+    links = []
     if channel_yt_id:
-        block.append(f"{lines['subscribe']} "
+        links.append(f"{lines['subscribe']} "
                      f"https://www.youtube.com/channel/{channel_yt_id}?{_SUB_CONFIRM_MARKER}")
     if playlist_yt_id:
-        block.append(f"{lines['playlist']} "
+        links.append(f"{lines['playlist']} "
                      f"https://www.youtube.com/playlist?list={playlist_yt_id}")
     # OS newsletter (newsletter.description_line; None while placeholder / RR).
-    if newsletter_line and newsletter_line not in base:
-        block.append(newsletter_line)
-    if block:
-        segments.append("\n".join(block))
-    if not segments:
-        return base
-    out = (base + "\n\n" + "\n\n".join(segments)).strip()
-    return out[:5000]
+    nl = newsletter_line if newsletter_line and newsletter_line not in base else None
+
+    def _tail(with_nl: bool) -> str:
+        block = links + ([nl] if with_nl and nl else [])
+        segs = segments + (["\n".join(block)] if block else [])
+        return "\n\n".join(segs)
+
+    tail = _tail(True)
+    if nl and len(base) + 2 + len(tail) > DESCRIPTION_MAX:
+        tail = _tail(False)          # newsletter only when it fits whole
+    if not tail:
+        return base[:DESCRIPTION_MAX]
+    if len(tail) > DESCRIPTION_MAX:  # pathological chapters: whole lines only
+        tail = _cut_at(tail, DESCRIPTION_MAX, "\n")
+        return tail.strip()
+    room = DESCRIPTION_MAX - 2 - len(tail)   # links block space reserved
+    if len(base) > room:
+        base = _cut_at(base, room, None).rstrip()
+    return ((base + "\n\n" + tail) if base else tail).strip()
+
+
+DESCRIPTION_MAX = 5000
+
+
+def _cut_at(text: str, limit: int, sep: str | None) -> str:
+    """Cut text to <= limit at the last line break (sep="\n") or, for the base
+    description, the last line break / space; hard cut only when there is none."""
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    seps = [sep] if sep else ["\n", " "]
+    for c in seps:
+        i = head.rfind(c)
+        if i > 0:
+            return head[:i]
+    return "" if sep else head
 
 
 def _llm_fallback(subject: str, script: str, content_format: str = "short",
