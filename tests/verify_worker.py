@@ -526,6 +526,44 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-14 ch1-code golden: unpatterned subject, grok inspected cwd and locked
+# "The scratch folder is empty" onto frame0/title (object SCRATCH).
+_FLAKE_1014 = (
+    "The scratch folder is empty. Your RAG is slow and still wrong. "
+    "You pulled twenty chunks and called it context."
+)
+ok(worker._strip_script_preamble(_FLAKE_1014)
+   .startswith("Your RAG is slow and still wrong."),
+   "10-14 ch1-code flake: 'The scratch folder is empty' drops")
+ok("scratch folder" not in worker._strip_script_preamble(_FLAKE_1014).lower(),
+   "10-14 scratch-folder CoT does not leak into the VO")
+ok("You pulled twenty chunks and called it context." in worker._strip_script_preamble(_FLAKE_1014),
+   "spoken claim after the scratch-folder CoT is kept")
+ok(worker._strip_script_preamble(
+    "You built the index from scratch. Rank what you found."
+).startswith("You built the index from scratch."),
+   "a real 'from scratch' hook is not treated as cwd-inspection CoT")
+ok(worker._strip_script_preamble("The scratch folder is empty.")
+   == "The scratch folder is empty.",
+   "all-preamble scratch-folder script is kept so the word-count retry still has text")
+
+# after2 10-14: scratch-folder gone, grok then locked a craft-brief leftover
+# "The hook has to hit the slow-RAG pain…" onto frame0 (same class as 10-03).
+_FLAKE_1014_HOOK = (
+    "The hook has to hit the slow-RAG pain in one short sentence, then land a "
+    "clear reranking verdict. Your RAG is slow and still wrong. "
+    "Top-k search is not a ranker."
+)
+ok(worker._strip_script_preamble(_FLAKE_1014_HOOK)
+   .startswith("Your RAG is slow and still wrong."),
+   "10-14 after2 flake: 'The hook has to hit the slow-RAG pain' drops")
+ok("The hook has to" not in worker._strip_script_preamble(_FLAKE_1014_HOOK),
+   "10-14 hook-has-to CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "The hook is the first three seconds. Rank what you found."
+).startswith("The hook is the first three seconds."),
+   "a real 'The hook is the first three seconds' line is not treated as CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
