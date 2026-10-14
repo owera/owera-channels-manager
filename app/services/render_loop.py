@@ -53,6 +53,12 @@ _GROK_TIMEOUT_BACKOFF_LO_S = 30
 _GROK_TIMEOUT_BACKOFF_HI_S = 60
 _grok_timeout_not_before: dict[int, float] = {}
 
+# Restart re-queue, not a failed render. recover_orphaned_renders logs this
+# as kind=render status=error; the auto-produce breaker must look past it
+# (same class as a "transient error" retry). A 12h pause after every restart
+# that interrupted an in-flight HyperFrames render is not a broken path.
+_ORPHAN_RECOVERY_DETAIL = "recovered orphaned render — re-queued"
+
 
 def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool) -> None:
     """Re-queue a failed-to-finish render, or mark FAILED once the budget is spent.
@@ -107,7 +113,7 @@ def recover_orphaned_renders() -> None:
             v.error = None
             session.add(v)
             quota.log(session, kind="render", status="error", video_id=v.id,
-                      channel_id=v.channel_id, detail="recovered orphaned render — re-queued")
+                      channel_id=v.channel_id, detail=_ORPHAN_RECOVERY_DETAIL)
             n += 1
         if n:
             logger.info("recovered %d orphaned in-process render(s) at startup", n)
@@ -686,6 +692,14 @@ def _take_weighted_shorts(short_pairs: list[tuple[Video, Topic]], n: int) -> lis
 
 _BREAKER_DETAIL = "auto-produce paused: last render failed"
 
+# Not a terminal render outcome. The breaker skips these and keeps looking:
+# a transient retry re-queues the same video, and orphan recovery re-queues
+# work a restart interrupted. Neither means the next draft would hit a broken path.
+_NONTERMINAL_RENDER_ERROR_PREFIXES = (
+    "transient error",
+    _ORPHAN_RECOVERY_DETAIL,
+)
+
 
 def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
     """Why auto-produce must not promote a draft on ``ch`` right now, or None.
@@ -694,8 +708,11 @@ def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
     so without this every failure pulled a fresh draft into the same broken path
     (ch1 2026-10-11 21:05 → 10-12 04:15 BRT: 7 drafts burned — 4× edge-tts 403,
     3× timeout). Trip on the channel's latest *terminal* render outcome being an
-    error inside the cool-down window. Transient retries ("transient error ...")
-    re-queue the same video and consume no draft, so they don't count. Reset:
+    error inside the cool-down window. Non-terminal rows are skipped: transient
+    retries ("transient error ...") re-queue the same video and consume no draft,
+    and orphan recovery (_ORPHAN_RECOVERY_DETAIL) is a restart re-queue, not a
+    failed render — counting it paused auto-produce for the whole cool-down after
+    every restart that interrupted an in-flight HyperFrames render. Reset:
     a successful render, the window expiring, or an operator re-queueing the
     failed video (it becomes QUEUED/RENDERING — active work, the next outcome
     decides)."""
@@ -706,7 +723,8 @@ def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
         select(JobRun).where(
             JobRun.channel_id == ch.id, JobRun.kind == "render",
             JobRun.status.in_(("success", "error")),
-            ~JobRun.detail.startswith("transient error"))
+            *[~JobRun.detail.startswith(prefix)
+              for prefix in _NONTERMINAL_RENDER_ERROR_PREFIXES])
         .order_by(JobRun.created_at.desc(), JobRun.id.desc())
     ).first()
     if last is None or last.status != "error":
