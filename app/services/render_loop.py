@@ -130,7 +130,7 @@ def _effective_skip_gate(video: Video, channel: Channel) -> bool:
 
 
 def _vm_pass_missing(video: Video) -> str | None:
-    """review_guard.vm_pass_required_reason (topic_flags vm_pass_required)."""
+    """review_guard.vm_pass_required_reason (mandatory, no exemptions)."""
     from app.services import review_guard
     return review_guard.vm_pass_required_reason(video)
 
@@ -311,6 +311,8 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.error = _vm_pass_missing(video)
         video.approved_at = None
     elif _effective_skip_gate(video, channel):
+        from app.services import review_guard
+        review_guard.record_approval(session, video, "skip-gate", "skip_gate")
         video.status = VideoStatus.APPROVED
         video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = utcnow()

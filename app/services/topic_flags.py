@@ -6,15 +6,10 @@ from the settings object falls back to DEFAULTS, so an env override of one flag
 never drops another one's default.
 
 Flags:
-  * VM_PASS_REQUIRED ("vm_pass_required", default ["*"] = ALL topics) —
-    approve (API / growth agent / manual), skip-gate auto-approve,
-    retry-republish and the publish loop need the Video Maker's Gate B PASS
-    (creation_config["vm_pass"]) on the CURRENT render artifact
-    (review_guard.vm_pass_required_reason; 409 "held: needs vm_pass").
-    Rodrigo 08/10 15:11, after #1449/#1450 (OS topic 47) were auto-approved
-    and published without Gate B. A per-topic list (e.g. [47]) narrows it.
-  * VM_PASS_EXEMPT ("vm_pass_exempt", default [] = none) — topics exempt from
-    VM_PASS_REQUIRED.
+  * (removed 14/10) vm_pass_required / vm_pass_exempt: the VM Gate B PASS is
+    now mandatory for EVERY video with no per-topic switch
+    (review_guard.vm_pass_required_reason). Those keys in MANAGER_TOPIC_FLAGS
+    are ignored.
   * LITERAL_CARDS ("literal_cards", default [47] — OS "named tool") — the
     storyboard never invents on-screen evidence (VM FAIL P0 #1449: invented
     PowerShell `MissingTerminator`, a misquote attributed to the Cursor forum,
@@ -34,14 +29,10 @@ Flags:
 from __future__ import annotations
 
 ALL = "*"
-VM_PASS_REQUIRED = "vm_pass_required"
-VM_PASS_EXEMPT = "vm_pass_exempt"
 LITERAL_CARDS = "literal_cards"
 TIGHT_MID_CARDS = "tight_mid_cards"
 
 DEFAULTS: dict[str, tuple] = {
-    VM_PASS_REQUIRED: (ALL,),
-    VM_PASS_EXEMPT: (),
     LITERAL_CARDS: (47,),
     TIGHT_MID_CARDS: (47,),
 }

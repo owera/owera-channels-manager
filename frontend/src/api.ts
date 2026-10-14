@@ -479,7 +479,8 @@ export const useMut = () => {
       onSuccess: () => invalidate(qc, ["videos", "dashboard"]),
     }),
     approveVideo: useMutation({
-      mutationFn: ({ id, body }: any) => api(`/videos/${id}/approve`, { method: "POST", body: j(body || {}) }),
+      mutationFn: ({ id, body }: any) => api(`/videos/${id}/approve`, { method: "POST", body: j(body || {}),
+        headers: { "content-type": "application/json", "X-Actor": "dashboard" } }),
       onSuccess: () => invalidate(qc, ["videos", "video", "dashboard"]),
     }),
     rejectVideo: useMutation({

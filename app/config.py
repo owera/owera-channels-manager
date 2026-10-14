@@ -148,16 +148,11 @@ class Settings(BaseSettings):
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:
     # MANAGER_TOPIC_FLAGS as a JSON object, e.g.
-    #   MANAGER_TOPIC_FLAGS='{"vm_pass_exempt": [12, 31]}'
+    #   MANAGER_TOPIC_FLAGS='{"literal_cards": [47, 12]}'
     # A flag missing from the env object keeps its code default
     # (topic_flags.DEFAULTS), so overriding one flag never silently drops another.
-    #   vm_pass_required (default ["*"] = ALL topics): approve (API / growth agent
-    #     / manual), skip-gate auto-approve, retry-republish and publish need the
-    #     VM's Gate B PASS (POST /api/videos/{id}/vm-pass) on the CURRENT render;
-    #     409 "held: needs vm_pass" otherwise (Rodrigo 08/10 after #1449/#1450,
-    #     OS topic 47, were auto-approved and published without Gate B). A list
-    #     of ids (e.g. [47]) narrows it to those topics; [] turns it off.
-    #   vm_pass_exempt (default []): topics exempt from vm_pass_required.
+    #   vm_pass_required / vm_pass_exempt: REMOVED (14/10) — VM Gate B PASS is
+    #     mandatory on every video, no switch; those keys are ignored.
     #   literal_cards (default [47], OS "named tool"): the storyboard never
     #     invents on-screen evidence — rule 2b (required snippet) off; log /
     #     error / command / quote / stat cards ONLY from the video's explicit
@@ -168,8 +163,7 @@ class Settings(BaseSettings):
     #     consecutive cards; the ≤2.5s first cut (VM FAIL P0 #1449, CMO 08/10).
     #   tight_mid_cards (default [47]): mid cards hold ≤2.48s (≈2.60s measured
     #     with the fade) instead of 2.80 (≈2.92) — generator only; Gate B keeps 2.80.
-    topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": [],
-                                               "literal_cards": [47], "tight_mid_cards": [47]}
+    topic_flags: dict[str, list[int | str]] = {"literal_cards": [47], "tight_mid_cards": [47]}
 
 
 settings = Settings()

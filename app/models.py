@@ -199,6 +199,21 @@ class JobRun(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class ApprovalAudit(SQLModel, table=True):
+    """Who approved a video (one row per approval; new table, create_all adds it).
+    actor_kind: user | growth_agent | system | api. path: approve | retry |
+    skip_gate. Written in the same commit as the -> approved flip."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    video_id: int = Field(foreign_key="video.id", index=True)
+    channel_id: Optional[int] = Field(default=None, foreign_key="channel.id", index=True)
+    actor: str
+    actor_kind: str
+    path: str
+    vm_pass_actor: Optional[str] = None
+    video_path: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class ChannelMetric(SQLModel, table=True):
     """A point-in-time snapshot of a channel's public YouTube statistics, recorded
     daily by the scheduler so the UI can show subscriber/view/video trends."""
