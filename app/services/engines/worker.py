@@ -1112,6 +1112,26 @@ def _voice(params: dict) -> str:
     return re.sub(r"-(Male|Female)$", "", v)        # edge-tts wants the bare voice id
 
 
+def _tts_retryable(exc: BaseException) -> bool:
+    """True when an in-process TTS retry (tts_attempts / backoff) is worth it.
+
+    NoAudioReceived: empty stream, same voice+text succeed minutes later (v1360).
+    WSServerHandshakeError 429: synthesis websocket rate-limit (2026-10-15
+    golden-set burst). 403 handshake is the dead legacy host — not retryable.
+    """
+    import edge_tts
+    if isinstance(exc, edge_tts.exceptions.NoAudioReceived):
+        return True
+    if type(exc).__name__ == "WSServerHandshakeError":
+        status = getattr(exc, "status", None)
+        if status == 429:
+            return True
+        # aiohttp puts the code in the message even when status is unset
+        if str(exc).lstrip().startswith("429"):
+            return True
+    return False
+
+
 def _apply_edge_tts_endpoint() -> None:
     """Point edge-tts at ``settings.tts_edge_wss_url`` (see config: legacy host 403s).
 
@@ -1167,8 +1187,11 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
                     })
 
     # NoAudioReceived = the service closed the turn without audio (upstream flake /
-    # throttle, not bad params: same voice + text succeed minutes later). Retry
-    # in-process with a short backoff before failing the render (see config).
+    # throttle, not bad params: same voice + text succeed minutes later). 429 on
+    # the synthesis websocket is the same class (2026-10-15 golden set: 3/4
+    # WSServerHandshakeError: 429 in a burst; the 4th call after ~10 min succeeded).
+    # Retry in-process with a short backoff before failing the render (see config).
+    # 403 handshake is the dead host (10-12) — do NOT retry that here.
     attempts = max(1, int(settings.tts_attempts or 1))
     backoff = list(settings.tts_retry_backoff_seconds or [])
     for attempt in range(1, attempts + 1):
@@ -1176,12 +1199,13 @@ def _tts(text: str, voice: str, out_path: Path) -> list[dict]:
         try:
             asyncio.run(_gen())
             break
-        except edge_tts.exceptions.NoAudioReceived as e:
-            if attempt >= attempts:
+        except Exception as e:
+            if not _tts_retryable(e) or attempt >= attempts:
                 raise
             delay = backoff[min(attempt - 1, len(backoff) - 1)] if backoff else 0
-            logger.warning("edge-tts NoAudioReceived (voice=%s, attempt %d/%d): %s; "
-                           "retrying in %ss", voice, attempt, attempts, e, delay)
+            logger.warning("edge-tts %s (voice=%s, attempt %d/%d): %s; "
+                           "retrying in %ss", type(e).__name__, voice, attempt,
+                           attempts, e, delay)
             time.sleep(delay)
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"edge-tts produced no audio for voice {voice}")

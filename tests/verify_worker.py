@@ -835,6 +835,86 @@ with tempfile.TemporaryDirectory() as _td:
     except _edge_tts.exceptions.NoAudioReceived:
         pass
     ok(_FakeComm.calls == 1 and _sleeps == [], "tts_attempts=1 → no retry (kill switch)")
+
+print("_tts: WSServerHandshakeError 429 retry (2026-10-15 golden-set throttle)")
+
+
+class _HS429(Exception):
+    status = 429
+
+    def __str__(self):
+        return "429, message='Invalid response status'"
+
+
+_HS429.__name__ = "WSServerHandshakeError"
+
+
+class _HS403(Exception):
+    status = 403
+
+    def __str__(self):
+        return "403, message='Invalid response status'"
+
+
+_HS403.__name__ = "WSServerHandshakeError"
+
+
+class _Fake429:
+    plan: list = []
+    calls = 0
+
+    def __init__(self, text, voice, **kw):
+        pass
+
+    async def stream(self):
+        i = _Fake429.calls
+        _Fake429.calls += 1
+        if _Fake429.plan[i] == "429":
+            raise _HS429()
+        if _Fake429.plan[i] == "403":
+            raise _HS403()
+        yield {"type": "WordBoundary", "text": "hi", "offset": 0, "duration": 1e7}
+        yield {"type": "audio", "data": b"ID3fake"}
+
+
+ok(worker._tts_retryable(_HS429()) is True, "429 handshake is retryable")
+ok(worker._tts_retryable(_HS403()) is False, "403 handshake is not retryable")
+ok(worker._tts_retryable(RuntimeError("429 in a random error")) is False,
+   "bare 429 in another exception is not retryable")
+
+with tempfile.TemporaryDirectory() as _td:
+    _out = Path(_td) / "n429.mp3"
+    _sleeps = []
+    settings.tts_attempts, settings.tts_retry_backoff_seconds = 3, [5, 20]
+    _Fake429.plan, _Fake429.calls = ["429", "429", "ok"], 0
+    with patch.object(_edge_tts, "Communicate", _Fake429), \
+            patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+        _w = worker._tts("hello", "en-US-AndrewNeural", _out)
+    ok(_Fake429.calls == 3 and _out.read_bytes() == b"ID3fake",
+       "two 429 handshakes then success → audio written on attempt 3")
+    ok(_sleeps == [5, 20], "429 uses the same 5s/20s backoff")
+
+    _Fake429.plan, _Fake429.calls, _sleeps[:] = ["429", "429", "429"], 0, []
+    _raised429 = False
+    try:
+        with patch.object(_edge_tts, "Communicate", _Fake429), \
+                patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+            worker._tts("hello", "en-US-AndrewNeural", _out)
+    except _HS429:
+        _raised429 = True
+    ok(_raised429 and _Fake429.calls == 3,
+       "persistent 429 re-raises after tts_attempts")
+
+    _Fake429.plan, _Fake429.calls, _sleeps[:] = ["403"], 0, []
+    _raised403 = False
+    try:
+        with patch.object(_edge_tts, "Communicate", _Fake429), \
+                patch.object(worker.time, "sleep", side_effect=_sleeps.append):
+            worker._tts("hello", "en-US-AndrewNeural", _out)
+    except _HS403:
+        _raised403 = True
+    ok(_raised403 and _Fake429.calls == 1 and _sleeps == [],
+       "403 handshake fails immediately (dead host, no retry)")
 settings.tts_attempts, settings.tts_retry_backoff_seconds = _orig_att, _orig_bo
 
 
