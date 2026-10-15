@@ -5,10 +5,12 @@ ch1 2026-10-11 21:05 → 10-12 04:15 BRT: every FAILED render freed its slot
 into the same broken path — 7 drafts burned (4× edge-tts 403, 3× timeout).
 
 Also pins the edge-tts endpoint override (legacy host speech.platform.bing.com
-returns 403; api.msedgeservices.com accepts the same client token).
+returns 403; api.msedgeservices.com accepts the same client token), and that a
+provided-script hook block (one video, no slot) does not pause the channel.
 
 Run: PYTHONPATH=. .venv/bin/python tests/verify_autoproduce_breaker.py
 """
+import json
 import sys
 from datetime import timedelta
 
@@ -119,6 +121,57 @@ quota.log(s5, kind="render", status="error", channel_id=other.id, detail="render
 render_loop._auto_produce(s5); s5.commit()
 ok(len(queued(s5)) == 1, "failure on channel B does not hold channel A")
 
+print("breaker: provided-script content block does not pause the channel")
+s6, ch6, _ = setup()
+prefix = render_loop._SCRIPT_BLOCK_DETAIL_PREFIX
+quota.log(s6, kind="render", status="error", channel_id=ch6.id,
+          detail=f"{prefix}: hook mismatch")
+s6.commit()
+render_loop._auto_produce(s6); s6.commit()
+ok(len(queued(s6)) == 1, "provided-script block alone does not pause auto-produce")
+
+print("breaker: a newer script-block does not hide an earlier terminal failure")
+s7, ch7, _ = setup()
+quota.log(s7, kind="render", status="error", channel_id=ch7.id,
+          detail="WSServerHandshakeError: 403, message='Invalid response status'")
+s7.commit()
+quota.log(s7, kind="render", status="error", channel_id=ch7.id,
+          detail=f"{prefix}: hook mismatch")
+s7.commit()
+render_loop._auto_produce(s7); s7.commit()
+ok(len(queued(s7)) == 0, "terminal 403 still blocks when a script-block row is newer")
+
+print("breaker: empty-detail success still resets under the script-block filter")
+s8, ch8, _ = setup()
+quota.log(s8, kind="render", status="error", channel_id=ch8.id, detail="render timed out")
+s8.commit()
+quota.log(s8, kind="render", status="success", channel_id=ch8.id, detail="")
+ch8.daily_render_budget = 2  # the success counts in rendered_today; leave 1 slot
+s8.add(ch8); s8.commit()
+render_loop._auto_produce(s8); s8.commit()
+ok(len(queued(s8)) == 1, "empty-detail success still resets the breaker")
+
+print("breaker: the real provided-script gate logs the prefix and does not pause")
+s9, ch9, ids9 = setup()
+bad = s9.get(Video, ids9[0])
+bad.status = VideoStatus.QUEUED
+bad.title = "The cache miss costs the conversion"
+bad.subject = "The cache miss costs the conversion"
+bad.script = "Totally unrelated opening sentence about something else."
+bad.creation_config = json.dumps({"script_source": "provided"})
+s9.add(bad); s9.commit()
+got = render_loop._prepare_provided_script(s9, bad, ch9, "short", None)
+s9.commit()
+ok(got is None, "misaligned provided script returns None (no render)")
+ok(bad.status == VideoStatus.FAILED, "that video is parked FAILED")
+row = s9.exec(select(JobRun).where(JobRun.video_id == bad.id, JobRun.kind == "render",
+                                   JobRun.status == "error")).first()
+ok(row is not None and row.detail.startswith(prefix),
+   "the gate logs the breaker prefix (wording cannot drift)")
+render_loop._auto_produce(s9); s9.commit()
+ok(len(queued(s9)) == 1, "a sibling draft is still promoted after the script block")
+ok(s9.get(Video, bad.id).status == VideoStatus.FAILED, "the blocked video stays FAILED")
+
 print("edge-tts endpoint override")
 import edge_tts.communicate as comm
 from app.services.engines import worker
@@ -126,4 +179,4 @@ worker._apply_edge_tts_endpoint()
 ok(comm.WSS_URL.startswith("wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=")
    and "{token}" not in comm.WSS_URL, "WSS_URL points at api.msedgeservices.com with the client token")
 
-print(f"\nall {_checks} checks passed")
+print(f"\nALL {_checks} CHECKS PASSED")

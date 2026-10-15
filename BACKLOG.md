@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 73. ✅ DONE (PR autoimprove/2026-10-15-breaker-script-block) provided-script block does not pause auto-produce — normal
+- **resolution (2026-10-15):** `_render_breaker_reason` skips render error
+  rows whose detail starts with `_SCRIPT_BLOCK_DETAIL_PREFIX`
+  (`provided script blocked before render (no slot used)`), the same way
+  it already skips `transient error`, and keeps looking. `_prepare_provided_script`
+  logs that constant. A script-block row alone still promotes a sibling
+  draft. A terminal 403 with a newer script-block row still blocks. An
+  empty-detail success (what `_finalize` writes) still resets the breaker.
+  The real hook gate on a misaligned provided script parks that video
+  FAILED, logs the prefix, and does not hold the channel. Suite:
+  `tests/verify_autoproduce_breaker.py` 11 → 19.
+- **why (follow-up left by the orphan-recovery breaker fix):** a provided
+  script that fails the hook gate is one video's content problem. It logs
+  `kind=render status=error` and spends no render slot. The 12h breaker
+  treated that row as a broken render path and stopped promoting every
+  other draft on the channel until cooldown or a later success.
+- **caution:** normal (`render_loop.py` breaker filter + the log prefix
+  only). Not a publish/oauth path. Isolated commit.
+- **acceptance:** a provided-script block does not pause auto-produce; a
+  newer script-block row does not hide an earlier terminal failure; the
+  logged detail and the filter share one constant.

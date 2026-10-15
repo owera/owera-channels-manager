@@ -166,7 +166,7 @@ def _prepare_provided_script(session: Session, video: Video, channel: Channel,
         video.craft_review = craft.CRAFT_REVIEW_FAIL
         quota.log(session, kind="render", status="error", video_id=video.id,
                   channel_id=channel.id,
-                  detail=f"provided script blocked before render (no slot used): {blocked}")
+                  detail=f"{_SCRIPT_BLOCK_DETAIL_PREFIX}: {blocked}")
         return None
     series_src = video.title if craft.spoken_title_ok(video.title) else video.subject
     prepared, edits = craft.prepare_provided_script(
@@ -686,6 +686,12 @@ def _take_weighted_shorts(short_pairs: list[tuple[Video, Topic]], n: int) -> lis
 
 _BREAKER_DETAIL = "auto-produce paused: last render failed"
 
+# A provided script that fails the hook gate parks THAT video FAILED and logs
+# kind=render status=error, but no render slot was spent and the path is not
+# broken. The breaker must skip this prefix (same as "transient error") or one
+# misaligned script pauses draft promotion for the whole channel for 12h.
+_SCRIPT_BLOCK_DETAIL_PREFIX = "provided script blocked before render (no slot used)"
+
 
 def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
     """Why auto-produce must not promote a draft on ``ch`` right now, or None.
@@ -695,7 +701,10 @@ def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
     (ch1 2026-10-11 21:05 → 10-12 04:15 BRT: 7 drafts burned — 4× edge-tts 403,
     3× timeout). Trip on the channel's latest *terminal* render outcome being an
     error inside the cool-down window. Transient retries ("transient error ...")
-    re-queue the same video and consume no draft, so they don't count. Reset:
+    re-queue the same video and consume no draft, so they don't count. A
+    provided-script hook block (``_SCRIPT_BLOCK_DETAIL_PREFIX``) fails one video
+    before any slot is spent; it is not a broken render path, so it doesn't
+    count either — the query keeps looking at the previous outcome. Reset:
     a successful render, the window expiring, or an operator re-queueing the
     failed video (it becomes QUEUED/RENDERING — active work, the next outcome
     decides)."""
@@ -706,7 +715,8 @@ def _render_breaker_reason(session: Session, ch: Channel) -> str | None:
         select(JobRun).where(
             JobRun.channel_id == ch.id, JobRun.kind == "render",
             JobRun.status.in_(("success", "error")),
-            ~JobRun.detail.startswith("transient error"))
+            ~JobRun.detail.startswith("transient error"),
+            ~JobRun.detail.startswith(_SCRIPT_BLOCK_DETAIL_PREFIX))
         .order_by(JobRun.created_at.desc(), JobRun.id.desc())
     ).first()
     if last is None or last.status != "error":
