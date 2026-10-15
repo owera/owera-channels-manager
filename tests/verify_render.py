@@ -1099,6 +1099,8 @@ for _sig, _label in (
      "NoAudioReceived (edge-tts empty stream, 08-31 v1213)"),
     ("BlockingIOError: [Errno 35] Resource temporarily unavailable",
      "BlockingIOError (09-03 midnight EAGAIN storm)"),
+    ("WSServerHandshakeError: 429, message='Invalid response status'",
+     "edge-tts 429 handshake (2026-10-15 golden-set throttle)"),
 ):
     s = fresh_session()
     use_engine(StubEngine(poll_result={"state": STATE_FAILED, "error": _sig}))
@@ -1110,6 +1112,20 @@ for _sig, _label in (
     s.commit()
     ok(s.get(Video, v.id).status == VideoStatus.QUEUED,
        f"{_label} is classified transient")
+
+s = fresh_session()
+use_engine(StubEngine(poll_result={
+    "state": STATE_FAILED,
+    "error": "WSServerHandshakeError: 403, message='Invalid response status'",
+}))
+ch = make_channel(s)
+t = make_topic(s, ch, content_format="short")
+v = make_video(s, ch, t, status=VideoStatus.RENDERING, mpt_task_id="tts-403",
+               last_attempt_at=NOW)
+render_loop._advance_in_flight(s)
+s.commit()
+ok(s.get(Video, v.id).status == VideoStatus.FAILED,
+   "edge-tts 403 handshake stays terminal (dead host, 10-12 breaker)")
 
 s = fresh_session()
 use_engine(StubEngine(poll_result={

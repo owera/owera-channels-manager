@@ -36,6 +36,8 @@ logger = logging.getLogger("manager.render")
 # and rendered_today only counts success, so a bounded re-queue is free.
 # 2026-09-03: BlockingIOError Errno 35 (EAGAIN) on 14 concurrent midnight
 # renders went FAILED at retry_count=0. Pipe/FD contention, no artifact.
+# 2026-10-15: edge-tts WSServerHandshakeError: 429 (rate-limit on
+# api.msedgeservices.com). Distinct from 403 (dead legacy host, terminal).
 _TRANSIENT = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
@@ -44,6 +46,7 @@ _TRANSIENT = (
     "grok.Timeout",
     "NoAudioReceived",
     "BlockingIOError",
+    "WSServerHandshakeError: 429",
 )
 
 # Post-Timeout cool-down before _submit_new re-picks a QUEUED row. Avoids

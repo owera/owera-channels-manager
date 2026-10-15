@@ -78,8 +78,11 @@ class Settings(BaseSettings):
     # Accepted values per the CLI model catalog: low | medium | high | xhigh.
     grok_compose_reasoning_effort: str = "medium"  # env: MANAGER_GROK_COMPOSE_REASONING_EFFORT
     # edge-tts NoAudioReceived is an upstream flake (2026-09-26 21:00-21:53 BRT: 4 of
-    # 8 en-US calls, then clean). Retry in-process before failing the whole render so
-    # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).
+    # 8 en-US calls, then clean). 429 on the synthesis websocket is the same class
+    # (2026-10-15 golden set: 3/4 WSServerHandshakeError: 429 in a burst). Retry
+    # in-process before failing the whole render so a short blip does not burn the
+    # video's render retry budget in ~2 minutes (v1360). 403 handshake is the dead
+    # host (10-12) — not covered by this retry.
     tts_attempts: int = 3                     # env: MANAGER_TTS_ATTEMPTS
     tts_retry_backoff_seconds: list[int] = [5, 20]  # sleep before attempt 2, 3, ...
     # edge-tts synthesis endpoint (2026-10-12): since Oct 2026 the legacy host

@@ -30,6 +30,7 @@ from app.services import quota
 # add a bare "timed out" — that would retry CLI TimeoutExpired (30 min npx).
 # 2026-08-31: edge-tts NoAudioReceived (v1213) — no artifact, retryable.
 # 2026-09-03: BlockingIOError Errno 35 on 14 concurrent midnight renders.
+# 2026-10-15: edge-tts WSServerHandshakeError: 429 (throttle). Not 403.
 TRANSIENT_SIGNATURES = (
     "overloaded_error", "rate_limit_error", "RateLimitError",
     "overloaded", "529", "503",
@@ -38,6 +39,7 @@ TRANSIENT_SIGNATURES = (
     "grok.Timeout",
     "NoAudioReceived",
     "BlockingIOError",
+    "WSServerHandshakeError: 429",
 )
 
 # Tunable thresholds (could move to the Settings table later).
