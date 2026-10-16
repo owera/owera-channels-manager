@@ -10,7 +10,7 @@ duplicate_episode_reason(session, video) is None or why the row may not
 leave review toward publish:
   * the title repeats its episode number (two ``· Series N`` suffixes, the
     ``Series N`` again in the head, or an ``Ep N`` / ``Episode N`` / ``#N``
-    marker in the head next to the suffix);
+    marker in the head whose N is that same suffix number);
   * another video on the SAME channel already holds that series + number:
     a row that aired or is committed to air (approved / publishing /
     published). Two rows still in review with the same number can both sit
@@ -59,10 +59,14 @@ def title_repeat_reason(title: str | None) -> str | None:
     head = t.split("·", 1)[0]
     if re.search(r"(?<!\w)" + re.escape(label) + r"\s+0*" + str(n) + r"\b", head, re.IGNORECASE):
         return f"{REASON_PREFIX}: '{label} {n}' is repeated in the title head"
-    m = _EP_MARK_RE.search(head)
-    if m:
-        return (f"{REASON_PREFIX}: title head carries an episode marker {m.group(0).strip()!r} "
-                f"next to the series number '{label} {n}'")
+    # Any #N / Ep N used to count, so "Issue #1406 … · Local 12" was parked
+    # as a duplicate of episode 12 and never published. Only a marker whose
+    # number IS this episode repeats it. A later match still counts when an
+    # earlier hash is a different number ("#1406 then Ep 12").
+    for m in _EP_MARK_RE.finditer(head):
+        if int(m.group(1)) == n:
+            return (f"{REASON_PREFIX}: title head carries an episode marker {m.group(0).strip()!r} "
+                    f"next to the series number '{label} {n}'")
     return None
 
 

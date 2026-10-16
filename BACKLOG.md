@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 74. ✅ DONE (PR autoimprove/2026-10-16-episode-marker) an episode marker counts only when it is this episode — normal
+- **resolution (2026-10-16):** `title_repeat_reason` flags an `Ep` /
+  `Episode` / `Episódio` / `#N` in the title head only when that N is the
+  series suffix number. It walks every marker, so a different `#1406`
+  before `Ep 12` still repeats Local 12. `#03` still matches Shipping 3
+  (`int`). Two `· Series N` suffixes still repeat even when the numbers
+  differ. `Issue #1406 broke the lock file. · Local 12` is not a repeat,
+  and `duplicate_episode_reason` leaves that APPROVED row alone.
+  Suite: `tests/verify_episode_dup.py` 42 → 48. Dropping the number
+  compare fails the `#1406` check; checking only the first marker fails
+  the later `Ep 12`; comparing the raw digits fails `#03`.
+- **why:** any hash-number in the claim was "a duplicate episode", so a
+  PR number or a different episode word parked the row in review before
+  upload. The publish loop, approve, skip-gate finalize, and the
+  review-ready digest all use this predicate.
+- **caution:** normal (`episode_guard.py` only). `publish_loop.py` is
+  not edited. Not an oauth path.
+- **acceptance:** `Issue #1406 … · Local 12` and `Ep 4 … · Shipping 3`
+  are not repeats. `#3` / `#03` / `Ep 3` next to Shipping 3 still are.
+  `#1406 then Ep 12 · Local 12` still is. A unique `#1406` episode is
+  not blocked on the approve/publish path.
