@@ -748,9 +748,11 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
     NOT exposed by the YouTube Analytics API v2 targeted queries — every query form
     returns 400 "Unknown identifier (impressions)". The old second query silently
     failed forever, so every impressions/ctr=0 stored before this date was a
-    fabricated default, not a measurement. Impressions/CTR stay 0 in VideoMetric
-    (Studio-only data); use traffic_json (browse/suggested/search views) as the
-    discovery signal instead.
+    fabricated default, not a measurement. This query therefore never fills
+    impressions/CTR; since 2026-10-06 they come from the YouTube Reporting API
+    (channel_reach_basic_a1, services/reach_loop.py), which writes them into
+    VideoMetric.impressions / VideoMetric.ctr. traffic_json (browse/suggested/
+    search views) stays the complementary discovery signal.
 
     ``empty`` is True when the API returned no row at all (values stay
     zero-filled for callers that want numbers); analytics_loop stores NULL
@@ -817,6 +819,134 @@ def fetch_traffic_sources(analytics, channel_yt_id: str, video_id: str,
         except Exception:
             pass
     return out
+
+
+# ---- Reporting API (bulk daily reports: thumbnail impressions + CTR) -------
+#
+# The only API surface that returns video_thumbnail_impressions / CTR for a
+# channel (the Analytics v2 targeted queries reject them, see above). One
+# reporting job per channel generates one CSV per Pacific day; reach_loop
+# downloads, aggregates and stores them. Accepts the yt-analytics.readonly scope
+# that is already part of CONSENT_SCOPES — no new consent is requested here.
+
+REACH_REPORT_TYPE = "channel_reach_basic_a1"
+REACH_JOB_NAME = "owera-channels-manager reach basic"
+
+
+class ReportingNotAuthorized(Exception):
+    """HTTP 401/403 from the Reporting API: the token lacks the scope
+    (``kind="scope"``), the API is not enabled in the Cloud project
+    (``"api_disabled"``), or another refusal (``"forbidden"``). Callers log and
+    skip the channel — never trigger a re-auth or touch the channel's status."""
+
+    def __init__(self, message: str, *, kind: str):
+        super().__init__(message)
+        self.kind = kind
+
+
+def get_reporting_service(slug: str):
+    """YouTube Reporting API v1 client from the channel's existing token (same
+    credential load as get_analytics_service). Raises NeedsConnect if the token
+    is missing/unrefreshable — callers treat that as 'skip', not 'reconnect'."""
+    if not has_client_secret(slug):
+        raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
+    creds = _load_creds(slug, CONSENT_SCOPES)
+    if creds is None:
+        raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
+    return build("youtubereporting", "v1", credentials=creds)
+
+
+def _reporting_error(e: HttpError) -> Exception:
+    """Map a Reporting API HttpError: 401/403 → ReportingNotAuthorized (with a
+    kind), daily caps → QuotaExceeded, anything else unchanged."""
+    try:
+        status = int(getattr(getattr(e, "resp", None), "status", 0) or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status in (401, 403):
+        body = (getattr(e, "content", b"") or b"").decode("utf-8", "ignore")
+        low = body.lower()
+        if "insufficient" in low or "scope" in low:
+            kind = "scope"
+        elif ("accessnotconfigured" in low or "service_disabled" in low
+              or "has not been used" in low or "is disabled" in low):
+            kind = "api_disabled"
+        else:
+            kind = "forbidden"
+        try:
+            msg = json.loads(body)["error"]["message"]
+        except Exception:
+            msg = body[:200] or str(e)
+        return ReportingNotAuthorized(f"HTTP {status} ({kind}): {msg}", kind=kind)
+    return _classify(e)
+
+
+def _reporting_call(request):
+    """Execute a Reporting API request: 5xx retried (same backoff as
+    analytics), errors mapped through _reporting_error."""
+    try:
+        return _execute_with_backoff(request)
+    except HttpError as e:
+        raise _reporting_error(e)
+
+
+def ensure_reach_job(reporting) -> tuple[str, bool]:
+    """Idempotent: return ``(job_id, created)`` for this channel's
+    channel_reach_basic_a1 job, creating it only when none exists."""
+    page = None
+    while True:
+        kw = {"pageToken": page} if page else {}
+        resp = _reporting_call(reporting.jobs().list(**kw))
+        for job in resp.get("jobs") or []:
+            if job.get("reportTypeId") == REACH_REPORT_TYPE and job.get("id"):
+                return job["id"], False
+        page = resp.get("nextPageToken")
+        if not page:
+            break
+    job = _reporting_call(reporting.jobs().create(
+        body={"reportTypeId": REACH_REPORT_TYPE, "name": REACH_JOB_NAME}))
+    return job["id"], True
+
+
+def list_reports(reporting, job_id: str) -> list[dict]:
+    """Every report currently available for the job (Google keeps ~60 days,
+    30 for the historical ones) — {id, startTime, endTime, createTime,
+    downloadUrl}. The processed-report ledger, not createdAfter, decides what
+    is new, so a report that failed to download is retried next tick."""
+    out: list[dict] = []
+    page = None
+    while True:
+        kw = {"jobId": job_id}
+        if page:
+            kw["pageToken"] = page
+        resp = _reporting_call(reporting.jobs().reports().list(**kw))
+        out.extend(resp.get("reports") or [])
+        page = resp.get("nextPageToken")
+        if not page:
+            return out
+
+
+def download_report(reporting, url: str) -> bytes:
+    """Download one report CSV (official sample: media().download_media with
+    the report's downloadUrl as the uri). Gunzips if Google sent it gzipped."""
+    import gzip
+    import io
+    from googleapiclient.http import MediaIoBaseDownload
+
+    request = reporting.media().download_media(resourceName=" ")
+    request.uri = url
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    try:
+        while not done:
+            _status, done = downloader.next_chunk(num_retries=2)
+    except HttpError as e:
+        raise _reporting_error(e)
+    data = buf.getvalue()
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    return data
 
 
 # Daily-cap reasons: both the API project quota and the per-channel upload cap.

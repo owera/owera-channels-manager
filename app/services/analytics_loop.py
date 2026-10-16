@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Video, VideoMetric, VideoStatus
-from app.services import notify, quota, youtube
+from app.services import notify, quota, reach_loop, youtube
 from app.services.quota import _day_start
 
 logger = logging.getLogger("manager.analytics")
@@ -110,6 +110,11 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
         return None
     if data.get("empty") and (now - pub) < timedelta(hours=_NULL_WHEN_EMPTY_HOURS):
         data = {**data, **{k: None for k in _METRIC_FIELDS}}
+    elif (reach := reach_loop.reach_totals(session, video.id)) is not None:
+        # Analytics v2 cannot return impressions/CTR (always 0 from the query);
+        # carry the Reporting API totals (reach_loop) into the new snapshot so the
+        # leaderboard doesn't fall back to 0 until the next reach tick.
+        data = {**data, "impressions": reach[0], "ctr": reach[1]}
     # Traffic-source attribution: only worth a query once the video has views.
     traffic_json = None
     if (data["views"] or 0) > 0:
