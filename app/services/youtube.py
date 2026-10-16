@@ -71,6 +71,20 @@ class NeedsConnect(Exception):
     """Token missing or unrefreshable — UI must trigger an interactive connect."""
 
 
+def auth_blip_message(exc: BaseException) -> str | None:
+    """Message when ``exc`` is a retryable token refresh, else None.
+
+    google-auth sets ``RefreshError.retryable`` after it has already retried
+    5xx / 429 / temporarily_unavailable. ``_load_creds`` re-raises those so
+    they are not ``NeedsConnect``. Callers that only catch ``NeedsConnect``
+    (admin 409, playlist 400) use this to answer 503 without flipping the
+    channel. ``invalid_grant`` is not retryable and must not match.
+    """
+    if isinstance(exc, RefreshError) and getattr(exc, "retryable", False):
+        return str(exc)
+    return None
+
+
 class GrantRejected(Exception):
     """A freshly-exchanged consent grant failed verification BEFORE anything was
     saved — no token written, no channel state changed. `code` identifies which
@@ -200,11 +214,20 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-        except RefreshError:
-            # Refresh token revoked/expired (invalid_grant). Return None so get_service
-            # raises the clean NeedsConnect that callers already handle — instead of
-            # leaking a RefreshError that leaves an upload stuck in PUBLISHING (mislabeled
-            # a "stall" by the recovery loop) and never flags the channel for reconnect.
+        except RefreshError as e:
+            # google-auth sets retryable after it has already retried 5xx / 429 /
+            # temporarily_unavailable. That is a blip, not a revoked grant.
+            # Returning None makes get_service raise NeedsConnect, and the
+            # oauth-status probe then flips a healthy channel to EXPIRED.
+            # Re-raise so callers that already treat a non-NeedsConnect as
+            # "skip this tick" (publish reverts PUBLISHING → APPROVED; metrics
+            # and analytics do not page) can retry. invalid_grant and any
+            # RefreshError that is not explicitly retryable stay None: the
+            # token will not start working on its own, and get_service turns
+            # that into the NeedsConnect those callers already mark dead.
+            # getattr: a RefreshError with no retryable flag fails closed.
+            if getattr(e, "retryable", False):
+                raise
             return None
         try:
             changed = tp.read_text() != raw if tp.exists() else True

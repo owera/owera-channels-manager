@@ -383,7 +383,14 @@ def oauth_status(channel_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404, "channel not found")
     try:
         _probe_connected(session, ch, youtube.get_service(ch.slug))
-    except Exception as e:  # NeedsConnect, refresh failure, bad/old-scope token, etc.
+    except youtube.NeedsConnect as e:
         notify.mark_dead_committed(session, ch, str(e))
+    except Exception as e:
+        # A retryable token refresh (Google 5xx / 429) and any other probe
+        # blip are not a revoked grant. This route used to mark_dead on every
+        # exception, so one blip flipped CONNECTED → EXPIRED and halted
+        # publish until a reconnect. The dashboard polls here every 2.5s;
+        # leave the row alone and let the next poll retry.
+        logger.warning("oauth-status probe skipped for %s: %s", ch.slug, e)
     return {"oauth_status": ch.oauth_status, "error": ch.oauth_error,
             "has_client_secret": youtube.has_client_secret(ch.slug)}

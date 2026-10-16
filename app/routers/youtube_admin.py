@@ -35,6 +35,15 @@ def _connected(session: Session, channel_id: int):
         # without one.
         notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(409, f"channel not connected: {e}")
+    except Exception as e:
+        # A retryable refresh used to come out of get_service as NeedsConnect
+        # (409 + mark_dead). It is now re-raised. This page loads overview,
+        # subscriptions, and subscribers on open — a Google 5xx must be a
+        # 503 the client can retry, not a 500, and must not flip the channel.
+        blip = youtube.auth_blip_message(e)
+        if blip is None:
+            raise
+        raise HTTPException(503, f"youtube auth temporarily unavailable: {blip}") from e
 
 
 # ---- Overview & branding -------------------------------------------------

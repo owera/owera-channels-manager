@@ -1181,6 +1181,99 @@ ok(traf["sources"]["EXT_URL"] == {"views": 0, "watch_min": 0},
 
 
 # ---------------------------------------------------------------------------
+# Retryable refresh is not a dead token (BACKLOG 3b-a)
+# ---------------------------------------------------------------------------
+# Google's RefreshError.retryable is True after it has already retried 5xx /
+# 429 / temporarily_unavailable. Pre-fix _load_creds returned None for every
+# RefreshError, so get_service raised NeedsConnect and the oauth-status probe
+# flipped a healthy channel to EXPIRED. invalid_grant stays NeedsConnect.
+print("\nretryable RefreshError is not a revoked token")
+from datetime import datetime, timedelta, timezone
+from google.auth.exceptions import RefreshError
+
+_expired = {
+    "token": "ya29.expired",
+    "refresh_token": "1//still-good",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_id": "x.apps.googleusercontent.com",
+    "client_secret": "y",
+    "expiry": (datetime.now(timezone.utc) - timedelta(hours=2)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"),
+}
+os.makedirs(Path(_TMP) / "refresh-blip", exist_ok=True)
+(Path(_TMP) / "refresh-blip" / "client_secret.json").write_text("{}")
+_token_path = Path(_TMP) / "refresh-blip" / "token.json"
+_token_bytes = json.dumps(_expired)
+_token_path.write_text(_token_bytes)
+_orig_refresh = youtube.Credentials.refresh
+
+
+def _raise_retryable(self, request):
+    raise RefreshError("internal_failure: backendError", retryable=True)
+
+
+def _raise_revoked(self, request):
+    raise RefreshError("invalid_grant: Token has been expired or revoked.",
+                       retryable=False)
+
+
+def _raise_bare(self, request):
+    # No retryable= kw: google-auth defaults it to False (fail closed).
+    raise RefreshError("invalid_grant")
+
+
+youtube.Credentials.refresh = _raise_retryable
+try:
+    try:
+        youtube.get_service("refresh-blip")
+        ok(False, "retryable refresh must not return a client")
+    except RefreshError as e:
+        ok(e.retryable is True, "retryable refresh propagates RefreshError")
+    except youtube.NeedsConnect as e:
+        ok(False, f"retryable refresh must not be NeedsConnect ({e})")
+    ok(_token_path.read_text() == _token_bytes,
+       "a retryable refresh does not rewrite token.json")
+    try:
+        youtube.get_analytics_service("refresh-blip")
+        ok(False, "analytics retryable refresh must not return a client")
+    except RefreshError:
+        ok(True, "analytics load propagates the same retryable RefreshError")
+    except youtube.NeedsConnect as e:
+        ok(False, f"analytics retryable refresh must not be NeedsConnect ({e})")
+    ok(_token_path.read_text() == _token_bytes,
+       "analytics retryable refresh does not rewrite token.json")
+finally:
+    youtube.Credentials.refresh = _orig_refresh
+
+youtube.Credentials.refresh = _raise_revoked
+try:
+    try:
+        youtube.get_service("refresh-blip")
+        ok(False, "invalid_grant must not return a client")
+    except youtube.NeedsConnect as e:
+        ok("refresh-blip" in str(e) and "reconnect" in str(e),
+           "invalid_grant is still NeedsConnect (reconnect)")
+    except RefreshError as e:
+        ok(False, f"invalid_grant must not leak RefreshError ({e})")
+    ok(_token_path.read_text() == _token_bytes,
+       "invalid_grant does not rewrite token.json")
+finally:
+    youtube.Credentials.refresh = _orig_refresh
+
+youtube.Credentials.refresh = _raise_bare
+try:
+    try:
+        youtube.get_service("refresh-blip")
+        ok(False, "bare RefreshError must not return a client")
+    except youtube.NeedsConnect:
+        ok(True, "RefreshError without retryable=True stays NeedsConnect")
+    except RefreshError as e:
+        ok(False, f"bare RefreshError must not leak ({e})")
+finally:
+    youtube.Credentials.refresh = _orig_refresh
+
+
+# ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
 _restore_creds_dir()

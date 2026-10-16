@@ -33,6 +33,11 @@ def sync(channel_id: int, session: Session = Depends(get_session)):
         # A dead token must not hide behind the 400 (see youtube_admin._connected).
         notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(400, f"connect the channel first: {e}")
+    except Exception as e:
+        blip = youtube.auth_blip_message(e)
+        if blip is None:
+            raise
+        raise HTTPException(503, f"youtube auth temporarily unavailable: {blip}") from e
     remote = youtube.list_playlists(service)
     existing = {p.yt_playlist_id: p for p in
                 session.exec(select(Playlist).where(Playlist.channel_id == channel_id)).all()}
@@ -59,6 +64,11 @@ def create(channel_id: int, body: PlaylistCreate, session: Session = Depends(get
         # A dead token must not hide behind the 400 (see youtube_admin._connected).
         notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(400, f"connect the channel first: {e}")
+    except Exception as e:
+        blip = youtube.auth_blip_message(e)
+        if blip is None:
+            raise
+        raise HTTPException(503, f"youtube auth temporarily unavailable: {blip}") from e
     r = youtube.create_playlist(service, body.title, body.description, body.privacy)
     p = Playlist(channel_id=channel_id, last_synced_at=utcnow(), **r)
     session.add(p)

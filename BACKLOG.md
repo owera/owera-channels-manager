@@ -65,10 +65,9 @@ flag the operator step in the commit body.
   (`youtube_admin._connected`), playlist sync/create 400s, the oauth-status probe, and failed
   consents (CONNECTED→ERROR now alerts; stale/replayed callbacks no longer touch status). Operator
   `/disconnect` deliberately stays silent. Regression suite: `tests/verify_notify.py` (62 checks).
-- **follow-ups (accepted tradeoffs, do separately if they bite):** (a) a *transient* RefreshError
-  (Google 5xx during token refresh) is coerced to NeedsConnect by `_load_creds`, so a blip can
-  false-positive a flip+page — distinguishing `invalid_grant` from transport errors is a youtube.py
-  (HIGH) change; (b) cancelling a re-consent of a healthy CONNECTED channel still flips it to ERROR
+- **follow-ups (accepted tradeoffs, do separately if they bite):** (a) ✅ DONE as #72 —
+  a *transient* RefreshError (Google 5xx during token refresh) was coerced to NeedsConnect by
+  `_load_creds`, so a blip could false-positive a flip+page; (b) cancelling a re-consent of a healthy CONNECTED channel still flips it to ERROR
   (pre-existing) — now alerted, but a re-probe-before-flip would avoid halting it; (c)
   `topic_playlist.ensure_topic_playlist` still swallows NeedsConnect (next probe catches the death
   one tick later); (d) missing client_secret.json with a token present classifies EXPIRED — the
@@ -1962,3 +1961,30 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-10-16-retryable-refresh) retryable token refresh is not a dead channel — HIGH
+- **resolution (2026-10-16):** `_load_creds` re-raises `RefreshError` when
+  `retryable` is true (google-auth sets that after it has already retried
+  5xx / 429 / `temporarily_unavailable`) and still returns None for
+  `invalid_grant` and any `RefreshError` that is not explicitly retryable.
+  `GET /oauth-status` only `mark_dead`s on `NeedsConnect`; any other probe
+  exception is a warning and leaves the row alone. The dashboard polls that
+  route every 2.5s, so the old blanket `except Exception` flipped a healthy
+  channel on one blip. YouTube admin (`_connected`) and playlist sync/create
+  answer **503** `temporarily unavailable` for that blip and do not flip —
+  they used to inherit the false `NeedsConnect` and return 409/400 plus a
+  page. A non-retryable `RefreshError` is not turned into that 503.
+  Publish, metrics, and analytics already treated a non-`NeedsConnect` as
+  skip-this-tick (publish reverts `PUBLISHING` → `APPROVED` and commits).
+  Token file bytes are unchanged on both paths. Suites:
+  `tests/verify_youtube.py` 212 → 219, `tests/verify_notify.py` 68 → 79.
+- **why (BACKLOG 3b follow-up a):** every `RefreshError` became
+  `NeedsConnect`. A Google 5xx during refresh paged the operator and halted
+  publish until a reconnect, even though the refresh token was still good.
+- **caution:** HIGH (`youtube.py` refresh + the oauth-status probe only).
+- **acceptance:** a retryable refresh raises `RefreshError` from
+  `get_service` and `get_analytics_service`, does not rewrite `token.json`,
+  and the oauth-status probe stays `CONNECTED` with no alert. Admin and
+  playlist routes answer 503 and do not flip. `invalid_grant` and a
+  `RefreshError` with no `retryable` flag are still `NeedsConnect`. A
+  non-retryable `RefreshError` handed to admin is not a 503.

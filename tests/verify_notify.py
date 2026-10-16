@@ -400,6 +400,70 @@ s.refresh(ch_pl)
 ok(ch_pl.oauth_status == OAuthStatus.EXPIRED and len(cap.records) == 2,
    "and the flip alerts exactly once through the same choke point")
 cap.close()
+
+# A retryable refresh is re-raised by get_service (not NeedsConnect). These
+# routes used to see NeedsConnect and answer 409/400 + mark_dead. They must
+# answer 503 and leave the channel CONNECTED. A non-retryable RefreshError
+# must not be laundered into that 503.
+print("admin/playlist: retryable refresh is 503 and does not flip")
+from google.auth.exceptions import RefreshError
+from app.schemas import PlaylistCreate
+
+s = fresh_session()
+ch = make_channel(s, slug="ch-blip-admin", oauth_status=OAuthStatus.CONNECTED,
+                  yt_channel_id="UCadmin")
+cap = CaptureAlerts()
+
+
+def _raise_retryable(slug):
+    raise RefreshError("internal_failure: backendError", retryable=True)
+
+
+def _raise_not_retryable(slug):
+    raise RefreshError("invalid_grant: revoked", retryable=False)
+
+
+youtube.get_service = _raise_retryable
+try:
+    youtube_admin._connected(s, ch.id)
+    ok(False, "retryable refresh must not return a service")
+except HTTPException as e:
+    ok(e.status_code == 503 and "temporarily unavailable" in str(e.detail),
+       "admin _connected answers 503 on a retryable refresh")
+s.refresh(ch)
+ok(ch.oauth_status == OAuthStatus.CONNECTED and ch.oauth_error is None,
+   "admin 503 does not flip the channel")
+ok(len(cap.records) == 0, "admin 503 pages nobody")
+
+try:
+    playlists_router.sync(ch.id, session=s)
+    ok(False, "playlist sync must not succeed on a retryable refresh")
+except HTTPException as e:
+    ok(e.status_code == 503 and "temporarily unavailable" in str(e.detail),
+       "playlist sync answers 503 on a retryable refresh")
+try:
+    playlists_router.create(
+        ch.id, PlaylistCreate(title="Series"), session=s)
+    ok(False, "playlist create must not succeed on a retryable refresh")
+except HTTPException as e:
+    ok(e.status_code == 503 and "temporarily unavailable" in str(e.detail),
+       "playlist create answers 503 on a retryable refresh")
+s.refresh(ch)
+ok(ch.oauth_status == OAuthStatus.CONNECTED and len(cap.records) == 0,
+   "playlist 503s leave the channel CONNECTED and silent")
+
+youtube.get_service = _raise_not_retryable
+try:
+    youtube_admin._connected(s, ch.id)
+    ok(False, "non-retryable RefreshError must not return a service")
+except HTTPException as e:
+    ok(False, f"non-retryable RefreshError must not become HTTP {e.status_code}")
+except RefreshError:
+    ok(True, "non-retryable RefreshError is not turned into a 503")
+s.refresh(ch)
+ok(ch.oauth_status == OAuthStatus.CONNECTED,
+   "a non-retryable RefreshError that escaped get_service does not flip here")
+cap.close()
 youtube.get_service, youtube.has_token = _orig_get, _orig_has
 
 # --- wiring: oauth-status route alerts on discovery, silent when healthy ------
@@ -427,6 +491,33 @@ channels_router.oauth_status(ch2.id, session=s)
 ok(len(cap.records) == 1, "a healthy check alerts nothing")
 cap.close()
 youtube.get_service, youtube.has_token = _orig_get, _orig_has
+
+# A Google 5xx during refresh is RefreshError(retryable=True), not NeedsConnect.
+# The dashboard polls this route every 2.5s; treating the blip as a dead token
+# halted publishing until a reconnect (BACKLOG 3b-a).
+print("oauth-status: retryable refresh leaves a CONNECTED channel alone")
+from google.auth.exceptions import RefreshError
+
+s = fresh_session()
+ch = make_channel(s, slug="ch-blip", oauth_status=OAuthStatus.CONNECTED,
+                  yt_channel_id="UChealthy", yt_channel_title="Healthy")
+
+
+def _raise_retryable_refresh(slug):
+    raise RefreshError("internal_failure: backendError", retryable=True)
+
+
+youtube.get_service = _raise_retryable_refresh
+cap = CaptureAlerts()
+out = channels_router.oauth_status(ch.id, session=s)
+s.refresh(ch)
+ok(out["oauth_status"] == OAuthStatus.CONNECTED,
+   "a retryable refresh reports the channel still CONNECTED")
+ok(ch.oauth_status == OAuthStatus.CONNECTED and ch.oauth_error is None,
+   "and does not flip or store an oauth_error")
+ok(len(cap.records) == 0, "and pages nobody")
+cap.close()
+youtube.get_service = _orig_get
 
 # --- wiring: a failed reconnect consent alerts a previously-live channel ------
 print("oauth_callback wiring: failed consent alerts once; stale callbacks don't kill")
