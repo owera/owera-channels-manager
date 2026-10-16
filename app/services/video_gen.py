@@ -32,7 +32,9 @@ LANGUAGE_CODES = {
 # você colou já passa de IA 172. Vou conferir o próximo número….Texto…").
 # Drop those leading sentences. A line that is only planning is discarded —
 # unlike script preamble, there is no word-count retry that needs the
-# original text kept.
+# original text kept. 10-03 draft 1418 glued "The next episode number has to
+# stay consistent…" + "I'll check the workspace for the series counter…" onto
+# a Chat-vs-Prod claim.
 _IDEA_COT_START = re.compile(
     r"^(?:"
     r"vou conferir o cat[aá]logo|"
@@ -41,7 +43,9 @@ _IDEA_COT_START = re.compile(
     r"conferindo a contagem|"
     r"the hook has to|"
     r"the first line has to|"
+    r"the next episode number|"
     r"i'll check how|"
+    r"i'll check the workspace|"
     r"checking the workspace|"
     r"the script has to|"
     r"the tests pin|"
