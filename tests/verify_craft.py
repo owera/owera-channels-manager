@@ -145,7 +145,11 @@ ok(craft.opening_object("Ollama na RTX ainda cabe")["kind"] == "terminal"
    and craft.opening_object("Ollama na RTX ainda cabe")["prompt"] == "$ ollama run",
    "Ollama → terminal / Ollama prompt (noun of the phrase)")
 ok(craft.opening_object("The API is now a paid product")["kind"] == "receipt",
-   "API/paid/product → receipt / API stub")
+   "paid/product → receipt (api alone is not a billing widget)")
+ok(craft.opening_object("Cada API nova vira mais uma integração")["label"] == "MCP",
+   "API + integração → MCP (api must not steal RECEIPT before integração)")
+ok(craft.opening_object("Cada API nova vira mais uma integração")["kind"] != "receipt",
+   "MCP explainer hook is not a billing RECEIPT")
 ok(craft.opening_object("Hello Hook")["label"] == "HELLO",
    "unkeyed copy mines the first distinctive noun (not OBJECT/RECEIPT)")
 ok(craft.opening_object("")["label"] == "OBJECT",
