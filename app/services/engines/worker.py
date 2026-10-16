@@ -542,7 +542,8 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 # maps to the Agent memory series" / "The tests pin this to the Agent memory
 # series" / "Checking the workspace for the series name"; 09-22: the word-count
 # retry leaked "Conferindo a contagem para ficar na faixa de 70 a 100 palavras"
-# onto frame0/title). Frame0/title lock that garbage onto the video. Strip
+# onto frame0/title; 10-05: "The channel locks the first spoken line to the
+# title…"). Frame0/title lock that garbage onto the video. Strip
 # leading assistant-planning sentences only — a real @workspace / Copilot hook
 # is not first-person planning.
 _PREAMBLE_START = re.compile(
@@ -553,6 +554,9 @@ _PREAMBLE_START = re.compile(
     r"Conferindo a contagem|"
     r"The tests pin|The title maps|The title is a two-beat|"
     r"This title is tied|"
+    r"The channel locks|"
+    r"I['']m checking that alignment|"
+    r"The first line has to|"
     r"The endcard|"
     r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
@@ -580,6 +584,8 @@ _PREAMBLE_BODY = re.compile(
     r"series notes|"
     r"named series|"
     r"channel rules|"
+    r"first spoken line|"
+    r"alignment rule|"
     r"generic take)\b",
     re.I,
 )

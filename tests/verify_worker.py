@@ -526,6 +526,35 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-05 ch1-concept golden: unpatterned subject, frame0 locked three
+# craft-brief leftovers ("The channel locks the first spoken line…",
+# "I'm checking that alignment rule…", "The first line has to stay…").
+_FLAKE_1005 = (
+    "The channel locks the first spoken line to the title and closes on a series endcard. "
+    "I'm checking that alignment rule so the hook and the last line both pass. "
+    "The first line has to stay the title hook, and the last line has to be the Agent memory endcard. "
+    "Your AI agent forgets everything between chats. The model is stateless."
+)
+ok(worker._strip_script_preamble(_FLAKE_1005).startswith(
+    "Your AI agent forgets everything between chats."),
+   "10-05 ch1-concept flake: 'The channel locks the first spoken line' drops")
+ok("first spoken line" not in worker._strip_script_preamble(_FLAKE_1005).lower()
+   and "alignment rule" not in worker._strip_script_preamble(_FLAKE_1005).lower()
+   and "the first line has to" not in worker._strip_script_preamble(_FLAKE_1005).lower(),
+   "10-05 channel-locks / alignment-rule CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "The channel is down. Rank what you found."
+).startswith("The channel is down."),
+   "a real 'The channel is down' hook is not treated as craft-brief CoT")
+ok(worker._strip_script_preamble(
+    "I'm checking production logs. Rank what you found."
+).startswith("I'm checking production logs."),
+   "a real 'I'm checking production logs' hook is not treated as alignment-rule CoT")
+ok(worker._strip_script_preamble(
+    "The first line of the stack is the leak. Rank what you found."
+).startswith("The first line of the stack is the leak."),
+   "a real 'The first line of the stack' claim is not treated as first-line-has-to CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
