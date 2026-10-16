@@ -8,8 +8,9 @@ stayed passive (issues digest only) — ch2 died silently for days. These checks
 pin the push side: notify.mark_dead()/mark_dead_committed() are the single
 choke point for CONNECTED -> dead transitions, emitting exactly one alert per
 incident (with a working reconnect recipe) from every discovery site — publish
-loop, metrics/analytics loops, admin 409s, playlist endpoints, the oauth-status
-probe, and failed consents — while repeated checks against an already-dead
+loop, metrics/analytics loops, admin 409s, playlist endpoints, the lazy
+topic-playlist create (render's first YouTube call during a lull), the
+oauth-status probe, and failed consents — while repeated checks against an already-dead
 channel, operator disconnects, transient failures, scope-only analytics gaps,
 and stale/replayed OAuth callbacks all stay silent. The alert never precedes
 the commit, and webhook delivery is inert-by-default and best-effort (its
@@ -29,11 +30,12 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
 from app.config import settings
-from app.models import Channel, OAuthStatus, Video, VideoStatus
+from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import channels as channels_router
 from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
-from app.services import analytics_loop, metrics_loop, notify, publish_loop, youtube
+from app.services import (analytics_loop, metrics_loop, notify, publish_loop,
+                          topic_playlist, youtube)
 
 # Craft-gate B (8f9ed39): `_publish_one` bounces a failing Credits/IA title
 # to REVIEW before get_service. Fixtures must pass the pre-approve lock so
@@ -399,6 +401,22 @@ ok(code == 400, "playlist sync on a dead channel still answers 400")
 s.refresh(ch_pl)
 ok(ch_pl.oauth_status == OAuthStatus.EXPIRED and len(cap.records) == 2,
    "and the flip alerts exactly once through the same choke point")
+
+# topic_playlist.ensure_topic_playlist shared the same gap class: a
+# NeedsConnect from get_service logged playlist_add and left CONNECTED
+# (3b-c). Render is often the first YouTube call during a publishing lull.
+ch_tp = make_channel(s, slug="ch-topic-pl")
+t_tp = Topic(channel_id=ch_tp.id, name="RAG")
+s.add(t_tp)
+s.commit()
+s.refresh(t_tp)
+ok(topic_playlist.ensure_topic_playlist(s, t_tp, ch_tp) is None,
+   "ensure_topic_playlist on a dead token returns None")
+s.refresh(ch_tp)
+ok(ch_tp.oauth_status == OAuthStatus.EXPIRED and len(cap.records) == 3,
+   "and the lazy-playlist path flips+alerts through the same choke point")
+topic_playlist.ensure_topic_playlist(s, t_tp, ch_tp)
+ok(len(cap.records) == 3, "a repeat ensure on the dead channel stays silent")
 cap.close()
 youtube.get_service, youtube.has_token = _orig_get, _orig_has
 

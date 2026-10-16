@@ -11,6 +11,11 @@ had a direct test. Covers every branch:
     mapped, channel not CONNECTED)
   - a create_playlist failure logs an error and returns None without mapping the
     topic or leaving a half-written Playlist row
+  - get_service NeedsConnect on a CONNECTED channel flips through
+    notify.mark_dead_committed (EXPIRED if the token file is present,
+    DISCONNECTED if gone), alerts once, mints nothing, and does not log a
+    playlist_add error — render is often the first YouTube call during a
+    publishing lull (3b-c); a generic create_playlist raise still does not flip
   - the happy path creates the Playlist, maps topic.playlist_id to the new DB
     FK (an int, not the 34-char yt id), and logs the 50-unit quota cost
   - theme_prompt=None is passed to the API as "" (the `or ""` guard)
@@ -159,6 +164,9 @@ try:
     ok("Agents" in (errs[0].detail or "") and "failed" in (errs[0].detail or ""),
        "the error log names the topic and says it failed")
     ok(errs[0].quota_cost == 0, "a failed create records no quota spend")
+    s.refresh(ch)
+    ok(ch.oauth_status == OAuthStatus.CONNECTED,
+       "a generic create_playlist error does not flip the channel dead")
     youtube.create_playlist = _fake_create_playlist  # restore for the happy path
 
     # --- happy path ----------------------------------------------------------
@@ -195,6 +203,78 @@ try:
     topic_playlist.ensure_topic_playlist(s, t, ch)
     ok(_calls["create_playlist"] == [("No Prompt", "", "public")],
        "a None theme_prompt is sent as '' (never the string 'None')")
+
+    # --- NeedsConnect on a CONNECTED channel flips dead (3b-c) ---------------
+    # The generic `except Exception` used to log playlist_add and leave
+    # CONNECTED; the next metrics/analytics tick caught it. Render is often
+    # the first YouTube call during a publishing lull, so this is the alert.
+    print("NeedsConnect -> mark_dead, no playlist mint, no playlist_add error")
+
+    from app.services import notify
+
+    def _raise_needs(slug):
+        _calls["get_service"].append(slug)
+        raise youtube.NeedsConnect(f"token dead for {slug}")
+
+    _ORIG_HAS = youtube.has_token
+    youtube.get_service = _raise_needs
+    youtube.has_token = lambda slug: True
+    _alerts = []
+    _orig_alert = notify.alert_dead
+
+    def _capture_alert(*a, **k):
+        _alerts.append((a, k))
+
+    notify.alert_dead = _capture_alert
+    try:
+        s = fresh_session()
+        ch = make_channel(s, slug="ch-dead")
+        sibling = make_channel(s, slug="ch-sib")
+        t = make_topic(s, ch, name="Agents")
+        _reset_calls()
+        ok(topic_playlist.ensure_topic_playlist(s, t, ch) is None,
+           "NeedsConnect returns None")
+        ok(_calls["create_playlist"] == [],
+           "NeedsConnect never calls create_playlist")
+        ok(_calls["get_service"] == ["ch-dead"],
+           "NeedsConnect still resolved the service by slug")
+        ok(playlists(s) == [], "NeedsConnect leaves no Playlist row")
+        s.refresh(t)
+        ok(t.playlist_id is None, "NeedsConnect leaves the topic unmapped")
+        s.refresh(ch)
+        ok(ch.oauth_status == OAuthStatus.EXPIRED,
+           "NeedsConnect flips a CONNECTED channel to EXPIRED (committed)")
+        s.refresh(sibling)
+        ok(sibling.oauth_status == OAuthStatus.CONNECTED,
+           "NeedsConnect leaves a sibling CONNECTED channel untouched")
+        ok([j for j in jobruns(s) if j.kind == "playlist_add"] == [],
+           "NeedsConnect is not a playlist_add error (the flip is the signal)")
+        ok(len(_alerts) == 1, "NeedsConnect alerts exactly once")
+
+        _reset_calls()
+        ok(topic_playlist.ensure_topic_playlist(s, t, ch) is None,
+           "a repeat on the now-EXPIRED channel still returns None")
+        ok(_calls["get_service"] == [],
+           "a repeat never re-probes get_service (early-return on not CONNECTED)")
+        ok(len(_alerts) == 1, "a repeat stays silent")
+
+        youtube.has_token = lambda slug: False
+        s2 = fresh_session()
+        ch2 = make_channel(s2, slug="ch-gone")
+        t2 = make_topic(s2, ch2)
+        _alerts.clear()
+        _reset_calls()
+        ok(topic_playlist.ensure_topic_playlist(s2, t2, ch2) is None,
+           "missing token file still returns None")
+        s2.refresh(ch2)
+        ok(ch2.oauth_status == OAuthStatus.DISCONNECTED,
+           "missing token file classifies DISCONNECTED, not EXPIRED")
+        ok(len(_alerts) == 1, "missing token file alerts exactly once")
+    finally:
+        youtube.get_service = _fake_get_service
+        youtube.has_token = _ORIG_HAS
+        notify.alert_dead = _orig_alert
+        youtube.create_playlist = _fake_create_playlist
 finally:
     youtube.get_service, youtube.create_playlist = _ORIG_GET, _ORIG_CREATE
 
