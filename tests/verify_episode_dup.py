@@ -8,7 +8,7 @@ representation video_gen.renumber_series continues from). VM Gate B 06/10:
 Pins:
   * parsing: last "· Series N" group, label case/space-insensitive;
   * number repeated within the title → blocked (two suffixes, "Series N" in
-    the head, "Ep N"/"Episode N"/"#N" marker in the head);
+    the head, "Ep N"/"Episode N"/"#N" only when that N is the series number);
   * number already used in that series on the channel by an approved /
     publishing / published row → blocked; other channel, other series,
     rejected / failed / review siblings, longs with no number → not blocked;
@@ -71,8 +71,15 @@ ok(R("Shipping 3: the preview passed. · Shipping 3") is not None
    "'Shipping 3' again in the head → repeated")
 ok(R("shipping 03 — the preview passed · Shipping 3") is not None, "head repeat is case/zero-pad insensitive")
 for head in ("Ep 3 — the preview passed", "Ep. 3: the preview passed", "Episode 3: the preview passed",
-             "Episódio 3: o preview passou", "#3 The preview passed"):
+             "Episódio 3: o preview passou", "#3 The preview passed", "#03 The preview passed"):
     ok(R(head + " · Shipping 3") is not None, f"episode marker in head ({head.split()[0]}) → repeated")
+ok(R("Issue #1406 broke the lock file. · Local 12") is None,
+   "a #N that is not the series number is content, not a repeat")
+ok(R("Ep 4 — the preview passed. · Shipping 3") is None,
+   "an Ep N that is not the series number is content, not a repeat")
+ok(R("Issue #1406 then Ep 12. · Local 12") is not None
+   and "Ep 12" in R("Issue #1406 then Ep 12. · Local 12"),
+   "a later marker that matches the series number still repeats")
 ok(R("Shipping 4 lessons. · Shipping 3") is None,
    "a different number after the series word in the head is content, not a repeat")
 ok(R("Shipping 3 the preview passed") is None, "no suffix → nothing to repeat")
@@ -145,6 +152,12 @@ ok(reason(add(title=None, subject="Subject only. · Agent memory 1", status=Vide
 ok(reason(add(title="No number at all", status=VideoStatus.REVIEW)) is None, "no episode number → fine")
 ok(reason(add(title="Ep 7: x · Agent memory 7", status=VideoStatus.REVIEW)).startswith("duplicate episode number"),
    "a title repeat blocks even without a sibling")
+ok(reason(add(title="Issue #1406 broke the lock file. · Local 12",
+              status=VideoStatus.APPROVED)) is None,
+   "approve/publish path: a different #N does not block a unique episode")
+ok(reason(add(title="Issue #1406 then Ep 12. · Local 12",
+              status=VideoStatus.REVIEW)) is not None,
+   "approve/publish path: a later matching marker still blocks")
 
 print("approve (409)")
 
