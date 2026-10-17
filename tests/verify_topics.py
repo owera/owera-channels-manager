@@ -33,6 +33,15 @@ videos to the wrong series); ``false`` writes 0, which publish treats
 as unlinked but is not None. Create's ``if body.playlist_id`` skips
 the falsy 0 and returns 201 unbound. These checks pin both paths.
 
+#47/#49 floored blank ``Video.subject``. ``Topic.name`` is the same
+NOT NULL string: create ``body.name.strip()`` persisted ``""`` /
+``"   "``, and PATCH ``setattr``s ``TopicUpdate.name`` (Optional[str])
+straight onto the row, so JSON null is SQL NULL and a whitespace-only
+SPA save (``disabled={!name}`` is truthy for ``"   "``) wipes the
+label autogen / overflow / the dashboard use. These checks pin POST
+and PATCH name null/blank/whitespace as 4xx writing nothing, and that
+a typed name still strips.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -178,6 +187,15 @@ def n_topics():
 def topic_names():
     with Session(engine) as s:
         return {t.name for t in s.exec(select(Topic)).all()}
+
+
+def topic_ids():
+    with Session(engine) as s:
+        return {t.id for t in s.exec(select(Topic)).all()}
+
+
+def post_topic(**body):
+    return client.post("/api/topics", auth=auth, json=body)
 
 
 def draft_count(topic_id):
@@ -868,6 +886,159 @@ try:
     ok('_reject_bool_playlist' in tu_pl
        and '@field_validator("playlist_id", mode="before")' in tu_pl,
        "TopicUpdate._reject_bool_playlist is mode=before on playlist_id")
+
+    print("PATCH /api/topics/{id}: null/blank name is 400, writes nothing")
+    live_name = topic_name(2)
+    live_weight = topic_weight(2)
+    live_format = topic_format(2)
+    sibling_name = topic_name(3)
+    ok(live_name, "precondition: topic 2 has a non-empty name")
+
+    r = patch_topic(2, name="  Live renamed  ")
+    ok(r.status_code == 200, "whitespace-padded name is 200")
+    ok(r.json().get("name") == "Live renamed",
+       "PATCH strips surrounding whitespace (same as create)")
+    ok(topic_name(2) == "Live renamed", "stripped PATCH name persisted")
+    ok(topic_name(3) == sibling_name, "name PATCH left sibling topic 3")
+
+    r = patch_topic(2, name=live_name)
+    ok(r.status_code == 200, "restore topic 2 original name")
+    ok(topic_name(2) == live_name, "topic 2 name restored")
+
+    r = patch_topic(2, name=None)
+    ok(r.status_code == 400, "PATCH name=null is 400")
+    ok("non-empty" in r.text and "name" in r.text.lower(),
+       "null-name 400 names the name floor (not a generic 400)")
+    ok(topic_name(2) == live_name, "name=null writes nothing")
+    ok(topic_name(2) is not None, "null PATCH did not persist SQL NULL into name")
+
+    r = patch_topic(2, name="")
+    ok(r.status_code == 400, "PATCH name=\"\" is 400 (SPA empty-save)")
+    ok(topic_name(2) == live_name, "empty name writes nothing")
+
+    r = patch_topic(2, name="   ")
+    ok(r.status_code == 400, "PATCH whitespace-only name is 400")
+    ok(topic_name(2) == live_name, "whitespace-only name writes nothing")
+
+    r = patch_topic(2, name=None, weight=3)
+    ok(r.status_code == 400, "mixed PATCH with name=null is 400")
+    ok(topic_name(2) == live_name, "400 mixed PATCH left name")
+    ok(topic_weight(2) == live_weight, "400 mixed PATCH did not smuggle weight")
+
+    r = patch_topic(2, name="", weight=3)
+    ok(r.status_code == 400, "mixed PATCH with empty name is 400")
+    ok(topic_weight(2) == live_weight, "400 empty-name mixed PATCH left weight")
+
+    r = patch_topic(2, name=False)
+    ok(r.status_code in (400, 422),
+       "PATCH name=false is 4xx (must not coerce to 'False')")
+    ok(topic_name(2) == live_name, "name=false writes nothing")
+
+    r = patch_topic(2, name=True)
+    ok(r.status_code in (400, 422), "PATCH name=true is 4xx")
+    ok(topic_name(2) == live_name, "name=true writes nothing")
+
+    r = patch_topic(2, weight=live_weight)
+    ok(r.status_code == 200, "weight-only PATCH is 200")
+    ok(topic_name(2) == live_name, "weight-only PATCH left name")
+    ok(topic_format(2) == live_format, "name-floor probes left content_format")
+    ok(topic_name(3) == sibling_name, "name-floor probes left sibling topic 3")
+
+    r = patch_topic(99999, name="")
+    ok(r.status_code == 404,
+       "PATCH empty name on a missing topic is still 404 (topic gate first)")
+    r = client.patch("/api/topics/2", json={"name": ""})
+    ok(r.status_code == 401, "PATCH empty name still requires auth")
+    ok(topic_name(2) == live_name, "unauthenticated empty-name PATCH wrote nothing")
+
+    print("POST /api/topics: blank/whitespace name is 400, writes no row")
+    n_before = n_topics()
+    ids_before = topic_ids()
+    names_before = topic_names()
+
+    r = post_topic(channel_id=1, name="  New Topic  ")
+    ok(r.status_code == 201, "whitespace-padded create name is 201")
+    ok(r.json().get("name") == "New Topic",
+       "POST strips surrounding whitespace (same as PATCH)")
+    created_id = r.json()["id"]
+    ok(topic_name(created_id) == "New Topic", "stripped create name persisted")
+    ok(created_id not in ids_before, "valid POST minted a new id")
+    ok(n_topics() == n_before + 1, "valid POST added exactly one row")
+
+    n_before = n_topics()
+    ids_before = topic_ids()
+
+    r = post_topic(channel_id=1, name="")
+    ok(r.status_code == 400, "POST name=\"\" is 400")
+    ok("non-empty" in r.text and "name" in r.text.lower(),
+       "empty-name POST 400 names the name floor (not a generic 400)")
+    ok(n_topics() == n_before, "POST name=\"\" creates no row")
+    ok(topic_ids() == ids_before, "POST name=\"\" did not mint an id")
+
+    r = post_topic(channel_id=1, name="   ")
+    ok(r.status_code == 400, "POST whitespace-only name is 400")
+    ok(n_topics() == n_before, "POST whitespace-only name creates no row")
+
+    r = post_topic(channel_id=1, name=None)
+    ok(r.status_code == 422, "POST name=null is 422 (required str, not Optional)")
+    ok(n_topics() == n_before, "POST name=null creates no row")
+
+    r = post_topic(channel_id=1)
+    ok(r.status_code == 422, "POST omitted name is 422")
+    ok(n_topics() == n_before, "POST omitted name creates no row")
+
+    r = post_topic(channel_id=1, name="", content_format="long")
+    ok(r.status_code == 400, "mixed POST with empty name is 400")
+    ok(n_topics() == n_before, "400 mixed POST creates no row")
+    ok("BlankLong" not in topic_names() and "" not in topic_names(),
+       "400 mixed POST did not persist a blank or leftover-named row")
+
+    r = post_topic(channel_id=1, name=False)
+    ok(r.status_code in (400, 422),
+       "POST name=false is 4xx (must not coerce to 'False')")
+    ok(n_topics() == n_before, "POST name=false creates no row")
+
+    r = post_topic(channel_id=1, name=True)
+    ok(r.status_code in (400, 422), "POST name=true is 4xx")
+    ok(n_topics() == n_before, "POST name=true creates no row")
+
+    r = post_topic(channel_id=999, name="nope")
+    ok(r.status_code == 404, "POST missing channel is 404")
+    ok(n_topics() == n_before, "404 POST creates no row")
+
+    r = post_topic(channel_id=999, name="")
+    ok(r.status_code == 404,
+       "POST empty name on a missing channel is still 404 (channel gate first)")
+    ok(n_topics() == n_before, "404 empty-name POST creates no row")
+
+    r = client.post("/api/topics", json={"channel_id": 1, "name": "no-auth"})
+    ok(r.status_code == 401, "POST still requires auth")
+    ok(n_topics() == n_before, "unauthenticated POST creates no row")
+
+    ok(topic_name(2) == live_name, "topic 2 untouched after every create probe")
+    ok(topic_name(3) == sibling_name, "topic 3 untouched after every create probe")
+    ok(topic_name(created_id) == "New Topic",
+       "earlier valid create was not clobbered by the 400s")
+    ok(names_before <= topic_names(),
+       "create probes did not rename any pre-existing topic")
+
+    src_update = inspect.getsource(topics_router.update_topic)
+    src_create = inspect.getsource(topics_router.create_topic)
+    # Pin the CALL, not the word _require_str — create_topic's comment
+    # also names the helper, which made find("_require_str") < session.add
+    # survive an add-then-floor mutant (HTTPException rolls back so the
+    # behavioral 400/no-row pins stay green).
+    ok('_require_str(fields, "name"' in src_update,
+       "update_topic floors name through _require_str "
+       "(setattr of the raw body is how blank/null names enter the DB)")
+    ok('_require_str(fields, "name"' in src_create,
+       "create_topic floors name through _require_str "
+       "(strip-onto-the-row persisted whitespace-only as empty)")
+    ok(src_update.find('_require_str(fields, "name"') < src_update.find("setattr"),
+       "update_topic _require_str is before setattr "
+       "(a floor-after-setattr 400 still writes on a dirty session)")
+    ok(0 <= src_create.find('_require_str(fields, "name"') < src_create.find("session.add"),
+       "create_topic _require_str is before session.add")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()

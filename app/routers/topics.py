@@ -33,6 +33,23 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
         raise HTTPException(400, hint)
 
 
+def _require_str(fields: dict, key: str, hint: str) -> None:
+    """Reject JSON null / blank / non-str before they hit the DB.
+
+    ``Topic.name`` is NOT NULL. PATCH ``setattr``s ``TopicUpdate.name``
+    (Optional[str]) straight onto it, so JSON null persists SQL NULL and
+    ``""`` / ``"   "`` wipe the label autogen, overflow, and the dashboard
+    use. Create used to ``body.name.strip()`` onto the row, so whitespace
+    persisted empty. The SPA ``disabled={!name}`` is truthy for ``"   "``.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, str) or not v.strip():
+        raise HTTPException(400, hint)
+    fields[key] = v.strip()
+
+
 def _canonical_format(fmt) -> str:
     """Same == "long" / else-short gate as render/issues/publish/autofill.
 
@@ -70,9 +87,17 @@ def create_topic(body: TopicCreate, session: Session = Depends(get_session)):
     ch = session.get(Channel, body.channel_id)
     if not ch:
         raise HTTPException(404, "channel not found")
+    # PATCH already floors through _require_str. Create used to strip
+    # straight onto the row, so "" / "   " persisted an empty name
+    # (dashboard card blank; autogen/overflow key off t.name). Null is
+    # already 422 (TopicCreate.name is a required str).
+    fields = {"name": body.name}
+    _require_str(fields, "name",
+                 "name must be a non-empty string "
+                 "(null/blank wipes the topic label autogen and the dashboard use)")
     mx = session.exec(select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
     topic = Topic(
-        channel_id=ch.id, name=body.name.strip(), theme_prompt=body.theme_prompt,
+        channel_id=ch.id, name=fields["name"], theme_prompt=body.theme_prompt,
         content_format=_canonical_format(body.content_format),
         render_profile_id=body.render_profile_id, position=(mx or 0) + 1,
     )
@@ -106,6 +131,9 @@ def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(ge
                  "weight must be >= 0 "
                  "(null is treated as 1 and would unpark: "
                  "weight is None -> 1)")
+    _require_str(fields, "name",
+                 "name must be a non-empty string "
+                 "(null/blank wipes the topic label autogen and the dashboard use)")
     for k, v in fields.items():
         setattr(t, k, v)
     t.updated_at = utcnow()

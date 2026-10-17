@@ -1962,3 +1962,43 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-10-17-topic-name-floor) POST/PATCH /api/topics reject blank/null name — normal
+- **resolution (2026-10-17):** `_require_str` is the choke point on
+  create and PATCH `name` after the channel/topic 404 and before
+  `session.add` / `setattr`. JSON null / blank / whitespace-only 400.
+  A valid name is stripped (create already stripped; PATCH did not).
+  JSON bool is already 4xx (`str` / `Optional[str]` do not coerce).
+  Null on create is already 422 (required `str`). A 400 mixed body
+  writes none of the fields. Suite: `tests/verify_topics.py`
+  269 → 335. Isolated
+  commit; no money-path files. SPA `disabled={!name}` is truthy for
+  `"   "` — whitespace Save was a wipe, now a 400; restore-on-empty
+  is the follow-up (not bundled), same class as #48 after #47.
+- **why (found 2026-10-17 ranking remaining setattr after #47/#49):**
+  `Topic.name` is NOT NULL. PATCH `setattr`s `TopicUpdate.name`
+  (`Optional[str]`) straight onto it. JSON null persists SQL NULL;
+  `""` / `"   "` wipe the label autogen, overflow, and the dashboard
+  use. Create `body.name.strip()` persisted whitespace-only as empty.
+  The SPA enable gate is `disabled={!name}`, so `"   "` still POSTs
+  and PATCHes.
+- **caution:** normal (`topics.py` only; not a money-path file).
+  Isolated commit + regression tests.
+- **acceptance:** PATCH/POST name=null / `""` / `"   "` is 4xx and
+  writes nothing; a typed name still persists (stripped); weight-only
+  PATCH leaves name; missing channel + empty name is still 404;
+  sibling untouched.
+
+### 73. Channels.tsx topic-name empty/whitespace restores instead of PATCHing `"   "` — normal
+- **why (found shipping #72, not bundled):** after the API floor,
+  whitespace-only Save is a 400 instead of a wipe. `disabled={!name}`
+  is truthy for `"   "`, so clearing to spaces and clicking Save
+  still fires. Same class as #48 after #47.
+- **approach:** trim before the enable gate / mutate; empty restores
+  `topic.name` and skips the PATCH (create skips the POST). Reuse
+  the Board subject-restore pattern.
+- **caution:** normal (SPA only). Isolated commit + regression tests.
+  `npm run build` required.
+- **acceptance:** empty / whitespace-only topic name does not PATCH
+  or POST; field restores to the current value; a typed name still
+  saves (stripped).
