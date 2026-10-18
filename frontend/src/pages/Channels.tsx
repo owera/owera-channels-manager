@@ -25,6 +25,16 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
     setFormat(topic.content_format);
     setEditing(true);
   };
+  const saveTopic = () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setName(topic.name);
+      return;
+    }
+    m.updateTopic.mutate(
+      { id: topic.id, body: { name: trimmed, theme_prompt: prompt || null, content_format: format } },
+      { onSuccess: () => setEditing(false) });
+  };
   const c: Record<string, number> = topic.video_counts || {};
   const drafts = c.draft || 0;
   const live = c.published || 0;
@@ -94,10 +104,8 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
             ))}
           </div>
         </Field>
-        <button className="btn btn-signal w-full" disabled={!name || m.updateTopic.isPending}
-          onClick={() => m.updateTopic.mutate(
-            { id: topic.id, body: { name, theme_prompt: prompt || null, content_format: format } },
-            { onSuccess: () => setEditing(false) })}>
+        <button className="btn btn-signal w-full" disabled={m.updateTopic.isPending}
+          onClick={saveTopic}>
           {m.updateTopic.isPending ? "saving…" : "save changes"}
         </button>
       </Modal>
@@ -112,6 +120,16 @@ function ContentTopics({ channel }: { channel: Channel }) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [format, setFormat] = useState<"short" | "long">("short");
+  const addTopic = () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setName("");
+      return;
+    }
+    m.createTopic.mutate(
+      { channel_id: channel.id, name: trimmed, theme_prompt: prompt || null, content_format: format },
+      { onSuccess: () => { setOpen(false); setName(""); setPrompt(""); setFormat("short"); } });
+  };
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
@@ -151,10 +169,8 @@ function ContentTopics({ channel }: { channel: Channel }) {
           </div>
         </Field>
         <div className="text-[12px] text-fog-400 mb-3 font-mono">a playlist is created automatically when the topic's first video is produced</div>
-        <button className="btn btn-signal w-full" disabled={!name || m.createTopic.isPending}
-          onClick={() => m.createTopic.mutate(
-            { channel_id: channel.id, name, theme_prompt: prompt || null, content_format: format },
-            { onSuccess: () => { setOpen(false); setName(""); setPrompt(""); setFormat("short"); } })}>
+        <button className="btn btn-signal w-full" disabled={m.createTopic.isPending}
+          onClick={addTopic}>
           {m.createTopic.isPending ? "creating…" : "create topic"}
         </button>
       </Modal>

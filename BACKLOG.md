@@ -1962,3 +1962,22 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 73. ✅ DONE (PR autoimprove/2026-10-18-topic-name-restore) Channels.tsx topic-name empty/whitespace restores instead of PATCHing `"   "` — normal
+- **resolution (2026-10-18):** `saveTopic` / `addTopic` trim first. Empty
+  or whitespace restores (`topic.name` on edit, `""` on create) and
+  returns before `updateTopic` / `createTopic`. A typed name is sent
+  trimmed, with the same prompt and format. The buttons stay enabled
+  while idle so that click is the restore (Board subject restore).
+  `disabled={!name}` was truthy for `"   "`. Suite:
+  `tests/verify_topics.py` 268 → 295. The Add-channel modal still uses
+  the truthy-name gate (not this item).
+- **why (found shipping the topic-name API floor, not bundled):** after
+  that floor, whitespace Save is a 400 instead of a wipe. On current
+  main the same click still PATCHes `"   "`. Same class as #48 after #47.
+- **approach:** trim before the gate and the mutate. Empty restores and
+  skips the request. Reuse the Board subject-restore pattern.
+- **caution:** normal (SPA only). Isolated commit. `npm run build` required.
+- **acceptance:** empty / whitespace-only topic name does not PATCH or
+  POST; the field restores to the current value; a typed name still
+  saves (stripped).

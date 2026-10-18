@@ -70,6 +70,98 @@ def ok(cond, msg):
 ok(Path(topics_router.__file__).resolve().parents[2] == Path(__file__).resolve().parents[1],
    "topics module loaded from this tree")
 
+# Channels.tsx is the live SPA path for topic names. ``disabled={!name}``
+# is truthy for ``"   "``, so Save and Create sent the raw textarea
+# (a wipe on current main; a 400 once the name floor is merged). Empty
+# and whitespace restore and return before mutate — the Board subject
+# restore. A typed name is trimmed. The channel-add modal is a different
+# field and stays on the old gate.
+print("Channels.tsx topic name: empty/whitespace restores and skips mutate")
+_ch = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Channels.tsx").read_text()
+_card_s = _ch.find("function TopicCard")
+_add_s = _ch.find("function ContentTopics")
+_detail_s = _ch.find("function ChannelDetail")
+ok(_card_s >= 0 and _add_s > _card_s and _detail_s > _add_s,
+   "Channels.tsx still has TopicCard, ContentTopics, ChannelDetail in order")
+_card = _ch[_card_s:_add_s]
+_add = _ch[_add_s:_detail_s]
+_save_s = _card.find("const saveTopic =")
+_save_e = _card.find("\n  const c:", _save_s)
+ok(_save_s >= 0 and _save_e > _save_s,
+   "TopicCard has saveTopic before the video-count const")
+_save = _card[_save_s:_save_e]
+_edit_gate = (
+    "    const trimmed = name.trim();\n"
+    "    if (!trimmed) {\n"
+    "      setName(topic.name);\n"
+    "      return;\n"
+    "    }\n"
+)
+ok(_edit_gate in _save,
+   "empty/whitespace edit restores topic.name and returns (does not PATCH)")
+_gate_at = _save.find(_edit_gate)
+_after_gate = _save[_gate_at + len(_edit_gate):]
+_mut_at = _after_gate.find("updateTopic.mutate")
+ok(_mut_at >= 0 and "return" not in _after_gate[:_mut_at],
+   "edit mutate is reachable after the empty gate (not an unconditional return)")
+ok("name: trimmed" in _save, "edit PATCHes the trimmed name")
+ok("body: { name," not in _save, "edit does not PATCH the raw textarea")
+ok("theme_prompt: prompt || null, content_format: format" in _save,
+   "edit still sends prompt and format with the trimmed name")
+ok(_card.count("updateTopic.mutate") == 1, "TopicCard has one updateTopic.mutate")
+ok("onClick={saveTopic}" in _card, "save button calls saveTopic")
+ok("disabled={m.updateTopic.isPending}\n          onClick={saveTopic}>" in _card,
+   "save is disabled only while pending (blank/whitespace click restores)")
+ok("disabled={!name || m.updateTopic" not in _card,
+   "edit enable gate is not the truthy-name check")
+ok("disabled={!name.trim()" not in _card,
+   "edit does not disable on trim (that click is the restore)")
+_trim_at = _save.find("name.trim()")
+_restore_at = _save.find("setName(topic.name)")
+_ret_at = _save.find("return;", _restore_at)
+_mut2 = _save.find("updateTopic.mutate")
+ok(0 <= _trim_at < _restore_at < _ret_at < _mut2,
+   "trim then restore+return BEFORE mutate (empty never PATCHes)")
+
+_add_fn_s = _add.find("const addTopic =")
+_add_fn_e = _add.find("\n  return (", _add_fn_s)
+ok(_add_fn_s >= 0 and _add_fn_e > _add_fn_s,
+   "ContentTopics has addTopic before its JSX return")
+_add_fn = _add[_add_fn_s:_add_fn_e]
+_create_gate = (
+    "    const trimmed = name.trim();\n"
+    "    if (!trimmed) {\n"
+    '      setName("");\n'
+    "      return;\n"
+    "    }\n"
+)
+ok(_create_gate in _add_fn,
+   "empty/whitespace create restores \"\" and returns (does not POST)")
+_cg = _add_fn.find(_create_gate)
+_after_c = _add_fn[_cg + len(_create_gate):]
+_cmut = _after_c.find("createTopic.mutate")
+ok(_cmut >= 0 and "return" not in _after_c[:_cmut],
+   "create mutate is reachable after the empty gate")
+ok("name: trimmed" in _add_fn, "create POSTs the trimmed name")
+ok("name, theme_prompt" not in _add, "create does not POST the raw textarea")
+ok("theme_prompt: prompt || null, content_format: format" in _add_fn,
+   "create still sends prompt and format with the trimmed name")
+ok(_add.count("createTopic.mutate") == 1, "ContentTopics has one createTopic.mutate")
+ok("onClick={addTopic}" in _add, "create button calls addTopic")
+ok("disabled={m.createTopic.isPending}\n          onClick={addTopic}>" in _add,
+   "create is disabled only while pending (blank/whitespace click restores)")
+ok("disabled={!name || m.createTopic" not in _add,
+   "create enable gate is not the truthy-name check")
+ok("disabled={!name.trim()" not in _add,
+   "create does not disable on trim (that click is the restore)")
+_ch_add = _ch.find('title="Add channel"')
+ok(_ch_add > _detail_s, "channel-add modal is outside the topic slices")
+_ch_modal = _ch[_ch_add:]
+ok("disabled={!name || m.createChannel.isPending}" in _ch_modal,
+   "channel-add still uses the truthy-name gate (not this item)")
+ok("mutate({ name, slug: name }" in _ch_modal,
+   "channel-add still sends the raw name (not bundled)")
+
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
