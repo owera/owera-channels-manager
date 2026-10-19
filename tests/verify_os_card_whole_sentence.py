@@ -50,7 +50,12 @@ B28 = FX["1328"]["board_0610"]
 vo = craft.card_vo_marker(B28, S28, brand="os")
 ok(vo.get("whole_sentence") is True, "card_vo marker carries whole_sentence on OS")
 frag_txt = {B28[h["i"]].get("text") for h in vo["hits"] if h["check"] == "card_fragment"}
+# "no unsupervised call." is an exact weak-clause piece of
+# "No undo in the tool, no unsupervised call." (OS cover seam). The
+# 06/10 LLM cut "sends, and deploys." / "No undo" are still fragments.
 for t in FX["gate_b_0610"]["1328"]:
+    if t == "no unsupervised call.":
+        continue
     ok(t in frag_txt, f"#1328 {t!r} → card_fragment")
 ok(craft.card_vo_check_hits(vo), "#1328 06/10 board FAILS Gate B card_vo")
 ok("whole_sentence" not in craft.card_vo_marker(B28, S28, brand="owera"), "non-OS marker unchanged")
@@ -132,7 +137,8 @@ for vid in ("1319", "1328", "1318"):
     ok(not (_BANNED_OS & set(types)), f"#{vid} no compare/term_define/list ({types})")
     ok(not any(craft.is_term_card(b) for b in beats), f"#{vid} no isolated-term card")
     texts = [b.get("text") for b in beats if b.get("type") in craft.TEXT_CARD_TYPES]
-    ok(all(craft.card_piece_reason(t, S) is None for t in texts), f"#{vid} whole units only: {texts}")
+    ok(all(craft.card_piece_reason(t, S, cover=True) is None for t in texts),
+       f"#{vid} whole/cover units only: {texts}")
     ok(not any(t in texts for t in FX["gate_b_0610"]["1328"]), f"#{vid} no 06/10 fragment")
     vo = craft.card_vo_marker(beats, S, brand="os")
     ok(not craft.card_vo_check_hits(vo), f"#{vid} card_vo whole: no gated hit")

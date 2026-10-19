@@ -2993,18 +2993,20 @@ def _guard_whole_cards(beats, script, words=None, slips=None, timed: bool = Fals
     beats[:] = out
 
 
-def _cap_statements(beats, content_format=None) -> None:
+def _cap_statements(beats, content_format=None, *, os_vo: bool = False) -> None:
     """Gate C backstop: Shorts keep ≤1 statement. Extra cards become quotes.
 
     Variety retry is prompt-level and loses (v1262: 3 statements + code/cmp
     still shipped FAIL C). Deterministic conversion after demote, before align.
     Quotes keep the on-screen line; they are not statement-spam. Long-form
-    is unchanged (stmt cap 2, no Gate C).
+    is unchanged (stmt cap 2, no Gate C). OS VO-sentence boards emit no
+    statement (slide_spam is Gate C: a statement/list that only re-displays
+    narration with no rich type).
     """
     from app.services import craft
     if (content_format or "short") == "long":
         return
-    cap = craft.STATEMENT_MAX_SHORTS
+    cap = 0 if os_vo else craft.STATEMENT_MAX_SHORTS
     seen = 0
     for b in beats:
         if (b.get("type") or "") != "statement":
@@ -3312,12 +3314,17 @@ def _merge_on_screen(beats, script, on_screen, allowed) -> None:
         return None
 
     lit = []
+    _lit_keep = frozenset({"code", "command", "quote", "stat"})
     for rb in on_screen if isinstance(on_screen, list) else []:
-        _tok_mark = _CUT_MARK.set(True)
-        try:
-            cb = _coerce_beat(rb, set(allowed or [])) if isinstance(rb, dict) else None
-        finally:
-            _CUT_MARK.reset(_tok_mark)
+        if (isinstance(rb, dict) and rb.get("_lit")
+                and (rb.get("type") or "") in _lit_keep):
+            cb = dict(rb)
+        else:
+            _tok_mark = _CUT_MARK.set(True)
+            try:
+                cb = _coerce_beat(rb, set(allowed or [])) if isinstance(rb, dict) else None
+            finally:
+                _CUT_MARK.reset(_tok_mark)
         if not cb or (cb.get("type") or "") == "hook" or (cb.get("type") or "") in craft.CTA_TYPES:
             continue
         p = _cue_token_pos(stoks, cb)
@@ -3470,27 +3477,71 @@ def _hook_covers_sentence(sent: str, hook_text: str) -> bool:
     return any(ht[k:k + len(st)] == st for k in range(len(ht) - len(st) + 1))
 
 
-def _os_sentence_units(sent: str) -> list[str]:
-    """One VO sentence, or its strong-clause units when too long for a mid card (#96)."""
+def _pack_clause_parts(parts: list[str], max_words: int = _SENT_CARD_MAX_WORDS,
+                       min_words: int = 3) -> list[str]:
+    """Join short pieces; split a run that exceeds ``max_words``."""
+    from app.services import craft
+    return craft.pack_clause_parts(parts, max_words=max_words, min_words=min_words)
+
+
+def _os_strong_parts(sent: str) -> list[str]:
+    return [p.strip() for p in _STRONG_CLAUSE_SPLIT_RE.split(sent) if p.strip()]
+
+
+def _os_weak_parts(sent: str) -> list[str]:
+    from app.services import craft
+    return craft.weak_clause_parts(sent)
+
+
+def _os_unit_echoes(unit: str, neighbors) -> bool:
+    """True when a clause piece would echo a neighbouring card (no echo)."""
+    from app.services import craft
+    u = (unit or "").strip()
+    if not u:
+        return False
+    uk = craft.screen_text_key({"type": "quote", "text": u})
+    for raw in neighbors or []:
+        if isinstance(raw, dict):
+            n = craft.beat_screen_text(raw) or raw.get("text") or ""
+        else:
+            n = str(raw or "")
+        n = n.strip()
+        if not n:
+            continue
+        nk = craft.screen_text_key({"type": "quote", "text": n})
+        if not nk:
+            continue
+        if craft.screen_text_near(uk, nk) or craft.screen_text_fragment(uk, nk):
+            return True
+        if craft.text_in_script(u, n) or craft.text_in_script(n, u):
+            return True
+    return False
+
+
+def _os_sentence_units(sent: str, *, force: bool = False, neighbors=None) -> list[str]:
+    """One VO sentence, or clause units when it cannot fit a mid card.
+
+    Order: whole sentence → #96 strong-clause (``; : — –``) → comma /
+    coordinating conjunction. Each piece is a literal contiguous VO span
+    with no echo of a neighbouring card; if any piece would echo, keep
+    the whole sentence (caller then ``cap_extended_spoken``). ``force``
+    skips the short-sentence early return so a long spoken span can still
+    split.
+    """
     sent = (sent or "").strip()
     if not sent:
         return []
-    if len(sent.split()) <= _SENT_CARD_MAX_WORDS:
+    if not force and len(sent.split()) <= _SENT_CARD_MAX_WORDS:
         return [sent]
-    parts = [p.strip() for p in _STRONG_CLAUSE_SPLIT_RE.split(sent) if p.strip()]
+    parts = _os_strong_parts(sent)
+    if len(parts) <= 1:
+        parts = _os_weak_parts(sent)
     if len(parts) <= 1:
         return [sent]
-    out, buf = [], ""
-    for p in parts:
-        cand = (buf + " " + p).strip() if buf else p
-        if buf and len(cand.split()) > _SENT_CARD_MAX_WORDS:
-            out.append(buf)
-            buf = p
-        else:
-            buf = cand
-    if buf:
-        out.append(buf)
-    return out or [sent]
+    units = _pack_clause_parts(parts) or [sent]
+    if neighbors and len(units) > 1 and any(_os_unit_echoes(u, neighbors) for u in units):
+        return [sent]
+    return units
 
 
 def _allowlist_as_on_screen(script, sources) -> list[dict]:
@@ -3535,7 +3586,7 @@ def _os_vo_sentence_beats(*, subject, script) -> list[dict]:
             continue
         if _hook_covers_sentence(sent, hook):
             continue
-        for unit in _os_sentence_units(sent):
+        for unit in _os_sentence_units(sent, neighbors=beats):
             beats.append({"type": "quote", "text": unit, "cue": unit, "plain": True,
                           "attribution": ""})
     beats.append({"type": "cta", "text": "Subscribe", "cue": ""})
@@ -3666,8 +3717,9 @@ def _sentence_at_time(script, words, t0: float, t1: float) -> str | None:
     sent = sents[best_sid]
     if craft.is_endcard_vo_sentence(sent) or craft.contains_subscribe_cta(sent):
         return None
-    units = _os_sentence_units(sent)
-    return (units[0] if units else sent) or None
+    # Whole sentence only — a weak-clause piece can echo the previous card
+    # ("Registration works" after "…and registration works.").
+    return sent or None
 
 
 def _plain_os_literal_mids(beats, script, sources, *, os: bool, literal: bool,
@@ -3710,6 +3762,152 @@ def _plain_os_literal_mids(beats, script, sources, *, os: bool, literal: bool,
     beats[:] = out
 
 
+def _os_time_unit_card(unit: str, words, floor: float, cap: float) -> dict | None:
+    """One clause card snapped to its spoken span, packed after ``floor``."""
+    from app.services import craft
+    span = craft.spoken_span(unit, words)
+    if not span:
+        return None
+    start = max(float(floor), float(span[0]))
+    end = min(float(span[1]) + craft.QUOTE_HOLD_TAIL_S, start + cap)
+    if end < start + _MIN_DUR:
+        end = start + _MIN_DUR
+    return {"type": "quote", "text": unit, "cue": unit, "plain": True,
+            "attribution": "", "start": round(start, 3),
+            "dur": round(max(_MIN_DUR, end - start), 3)}
+
+
+def _os_extend_spoken(prev: dict, cur_st: float, words, slips=None) -> bool:
+    """Last resort: hold prev while its own words play (last word + 0.3s)."""
+    from app.services import craft
+    text = craft.beat_screen_text(prev) or prev.get("text") or prev.get("cue")
+    span = craft.spoken_span(text, words)
+    if not span:
+        return False
+    fade = craft.BEAT_GAP_S
+    try:
+        start = float(prev.get("start") or 0)
+    except (TypeError, ValueError):
+        return False
+    end = min(float(cur_st) - fade, float(span[1]) + craft.QUOTE_HOLD_TAIL_S)
+    if end <= start + _MIN_DUR - 1e-6:
+        return False
+    prev["dur"] = round(end - start, 3)
+    prev["cap_extended_spoken"] = True
+    _slip(slips, "cap_extended_spoken", prev,
+          [f"hold {prev['dur']:.2f}s through last spoken word + "
+           f"{craft.QUOTE_HOLD_TAIL_S:.1f}s (never into the next sentence)"])
+    return True
+
+
+def _os_cover_spoken_holes(beats, script, words, slips=None) -> None:
+    """Close a hole > BLANK_GAP_MAX_S after a mid-capped sentence.
+
+    Order: #96 strong-clause split → comma / coordinating conjunction →
+    ``cap_extended_spoken`` (hold last spoken word + QUOTE_HOLD_TAIL_S,
+    never into the next sentence).
+    """
+    from app.services import craft
+    if not beats or not words:
+        return
+    fade = craft.BEAT_GAP_S
+    budget = craft.BLANK_GAP_MAX_S
+    cap = _mid_max()
+    out = [beats[0]]
+    for cur in beats[1:]:
+        prev = out[-1]
+        try:
+            prev_end = float(prev.get("start") or 0) + float(prev.get("dur") or 0)
+            cur_st = float(cur.get("start") or 0)
+        except (TypeError, ValueError):
+            out.append(cur)
+            continue
+        extra = cur_st - prev_end - fade
+        if extra <= budget + 1e-6:
+            out.append(cur)
+            continue
+        typ = prev.get("type") or ""
+        if (typ == "hook" or typ in craft.CTA_TYPES
+                or craft.is_literal_quote_beat(prev) or prev.get("_lit")):
+            out.append(cur)
+            continue
+        text = (craft.beat_screen_text(prev) or prev.get("text") or "").strip()
+        span = craft.spoken_span(text, words)
+        spoken = (float(span[1]) - float(span[0])) if span else 0.0
+        if text and spoken > cap + 1e-6:
+            neighbors = list(out[:-1]) + [cur]
+            units = _os_sentence_units(text, force=True, neighbors=neighbors)
+            cur_txt = cur.get("text") or ""
+            clean = []
+            for u in units:
+                if not u:
+                    continue
+                if cur_txt and craft.text_in_script(u, cur_txt):
+                    continue
+                if _os_unit_echoes(u, neighbors):
+                    continue
+                clean.append(u)
+            if len(clean) > 1:
+                cards, floor = [], float(prev.get("start") or 0)
+                for u in clean:
+                    span_u = craft.spoken_span(u, words)
+                    # enter at the first spoken word: shrink the previous
+                    # piece so this one is never late (card sync).
+                    if cards and span_u:
+                        need = float(span_u[0]) - _GAP
+                        new_dur = need - float(cards[-1]["start"])
+                        if new_dur >= _MIN_DUR - 1e-6:
+                            cards[-1]["dur"] = round(new_dur, 3)
+                            floor = float(cards[-1]["start"]) + float(cards[-1]["dur"]) + _GAP
+                    card = _os_time_unit_card(u, words, floor, cap)
+                    if not card:
+                        continue
+                    # merge a too-short piece into the previous unit
+                    if cards and float(card["dur"]) <= _MIN_DUR + 1e-6:
+                        nxt_st = float(card["start"])
+                        cards[-1]["dur"] = round(max(
+                            float(cards[-1]["dur"]),
+                            nxt_st + float(card["dur"]) - float(cards[-1]["start"])), 3)
+                        cards[-1]["text"] = (cards[-1]["text"] + " " + u).strip()
+                        cards[-1]["cue"] = cards[-1]["text"]
+                        floor = float(cards[-1]["start"]) + float(cards[-1]["dur"]) + _GAP
+                        continue
+                    cards.append(card)
+                    floor = float(card["start"]) + float(card["dur"]) + _GAP
+                if len(cards) >= 1:
+                    out[-1] = cards[0]
+                    out.extend(cards[1:])
+                    prev = out[-1]
+                    try:
+                        prev_end = (float(prev.get("start") or 0)
+                                    + float(prev.get("dur") or 0))
+                    except (TypeError, ValueError):
+                        prev_end = cur_st
+                    extra = cur_st - prev_end - fade
+                    if extra > budget + 1e-6:
+                        _os_extend_spoken(prev, cur_st, words, slips)
+                    _slip(slips, "os_clause_split", cards[0],
+                          [f"{len(cards)} clause cards for {text[:60]!r}"])
+                    out.append(cur)
+                    continue
+        if extra > budget + 1e-6:
+            _os_extend_spoken(prev, cur_st, words, slips)
+        out.append(cur)
+    # CTA: pull it onto the last mid so a leftover hole does not FAIL blank_gap
+    if (len(out) >= 2 and (out[-1].get("type") or "") in craft.CTA_TYPES):
+        prev, cta = out[-2], out[-1]
+        try:
+            prev_end = float(prev.get("start") or 0) + float(prev.get("dur") or 0)
+            cta_st = float(cta.get("start") or 0)
+        except (TypeError, ValueError):
+            prev_end, cta_st = 0.0, 0.0
+        extra = cta_st - prev_end - fade
+        if extra > budget + 1e-6:
+            if not _os_extend_spoken(prev, cta_st, words, slips):
+                cta["start"] = round(prev_end + fade, 3)
+    beats[:] = out
+
+
 def _fill_blank_gaps(beats, script, words, slips=None) -> None:
     """After a convert/drop: a hole > BLANK_GAP_MAX_S beyond the fade gets a
     whole-sentence VO card for that span."""
@@ -3737,7 +3935,8 @@ def _fill_blank_gaps(beats, script, words, slips=None) -> None:
                     st = max(st, float(span[0]))
             dur = cur_st - st - fade
             used = (craft.beat_screen_text(prev), craft.beat_screen_text(cur))
-            echo = sent and any(craft.text_in_script(sent, u) for u in used if u)
+            echo = sent and (_os_unit_echoes(sent, used)
+                             or any(craft.text_in_script(sent, u) for u in used if u))
             if sent and not echo and dur >= _MIN_DUR:
                 fill = {"type": "quote", "text": sent, "cue": sent, "plain": True,
                         "attribution": "", "start": round(st, 3),
@@ -3747,12 +3946,13 @@ def _fill_blank_gaps(beats, script, words, slips=None) -> None:
                       [f"{extra:.2f}s hole → {sent[:80]!r}"])
             elif extra > budget + 1e-6 and not echo:
                 # Stretch only within stale leftover and (non-quote) mid cap.
-                # A leftover after a long quote stays a hole — do not echo.
+                # A leftover after a long quote / cap_extended_spoken stays a
+                # hole — do not echo and do not recap a spoken-span hold.
                 max_end = cur_st - fade
                 span = craft.spoken_span(craft.beat_screen_text(prev), words)
                 if span:
                     max_end = min(max_end, float(span[1]) + craft.STALE_CARD_MAX_S)
-                if not craft.is_literal_quote_beat(prev):
+                if not craft.is_spoken_span_hold(prev, words):
                     max_end = min(max_end, float(prev.get("start") or 0) + _mid_max())
                 new_dur = round(max(_MIN_DUR, max_end - float(prev.get("start") or 0)), 3)
                 if new_dur > float(prev.get("dur") or 0) + 1e-6:
@@ -3830,6 +4030,9 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     importing worker)."""
     allowed = list(allowed_types or ["hook", "statement", "stat", "compare", "list",
                                       "term_define", "quote", "cta"])
+    # allowlist log/error/command cards stay as those types (Gate C rich
+    # types). Default allowed_types omitted code/command and _coerce_beat
+    # then downgraded them to statement → slide_spam.
     th = theme.resolve(topic_id, subject, brand=brand,
                        channel_id=channel_id, channel_slug=channel_slug)
     from app.services import craft as _craft
@@ -3849,6 +4052,10 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     try:
         from app.services import topic_flags
         literal = topic_flags.has(topic_flags.LITERAL_CARDS, topic_id)
+        if os_vo or literal:
+            for t in ("code", "command"):
+                if t not in allowed:
+                    allowed.append(t)
         # literal topics: the explicit on-screen allowlist (craft.on_screen_allow)
         # is the ONLY source for log / error / command / quote / stat cards
         sources = on_screen_allow
@@ -3931,7 +4138,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         if teaser:
             _replace_fabricated_cli(beats, script)
             _soft_product_card(beats, script)
-        _cap_statements(beats, content_format)
+        _cap_statements(beats, content_format, os_vo=os_vo)
         if not os_vo:
             _fix_verbless_cards(beats, script)
             if whole and slips is not None and _craft.is_pt_text(script):
@@ -4021,6 +4228,8 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                                    literal=literal, slips=slips)
             if os_brand and not os_vo:
                 _snap_os_cards_to_speech(beats, words, script)
+            if os_vo:
+                _os_cover_spoken_holes(beats, script, words, slips)
             _fill_blank_gaps(beats, script, words, slips)
         if literal:
             # timing/sync fillers are narration words: never dressed as a quotation

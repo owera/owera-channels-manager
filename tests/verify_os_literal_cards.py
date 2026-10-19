@@ -570,12 +570,25 @@ ok(float(q["dur"]) > craft.MID_BEAT_MAX_S, "literal quote exceeds mid cap")
 ok("stale_card" not in s1452["after_kinds"] or not any(
     "beat[2]" in r and "mid card" in r for r in (s1452["ga"].get("reasons") or [])),
    "Gate B does not FAIL the CAPIError quote for the cap")
+ok(s1452["ga"]["checks"]["B"] == "PASS" and s1452["ga"]["checks"]["C"] == "PASS"
+   and s1452["ga"]["result"] == "PASS",
+   f"#1452 AFTER Gate B+C PASS ({s1452['ga'].get('reasons')})")
+ok("blank_gap" not in s1452["after_kinds"] and "slide_spam" not in s1452["after_kinds"],
+   f"#1452 AFTER no blank_gap/slide_spam ({s1452['after_kinds']})")
 ok(s1465["hook_before"] > 5, f"#1465 BEFORE hook frozen ({s1465['hook_before']}s)")
 ok(s1465["hook_after"] <= 4.1, f"#1465 AFTER hook ≤ ~4s ({s1465['hook_after']})")
 ok("stale_card" not in s1465["after_kinds"] or s1465["hook_after"] <= 4.1,
    "#1465 AFTER hook is not the stale hit")
+ok(s1465["ga"]["result"] == "PASS" and s1465["ga"]["checks"]["B"] == "PASS",
+   f"#1465 AFTER Gate B PASS ({s1465['ga'].get('reasons')})")
+ok("blank_gap" not in s1465["after_kinds"],
+   f"#1465 AFTER no blank_gap ({s1465['after_kinds']})")
 ok("allowlist_required" in s1453["before_kinds"] or s1453["before_B"] == "FAIL",
    "#1453 topic 47 without allowlist is a Gate B FAIL")
+ok(s1453["ga"]["checks"]["B"] == "FAIL"
+   and s1453["after_kinds"] == ["allowlist_required"],
+   f"#1453 AFTER only allowlist_required ({s1453['after_kinds']} {s1453['ga'].get('reasons')})")
+ok(s1453["ga"]["checks"]["C"] == "PASS", "#1453 AFTER Gate C PASS")
 
 index = [
     "# Gate B before/after — OS #1452, #1453, #1465",
@@ -583,6 +596,19 @@ index = [
     "BEFORE = board visível dos `VM_FAIL_*.md` (main `c35e110`).",
     "AFTER = gerador determinístico deste branch (1 frase da VO; quote literal "
     "segura o span inteiro + 0,3s; sem compare/term/list/termo isolado).",
+    "",
+    "Quando o span falado de uma frase passa do cap mid e deixaria um buraco "
+    "> 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); "
+    "(2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO "
+    "sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o "
+    "card plain segura até a última palavra falada + 0,3s (nunca na frase "
+    "seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem "
+    "`blank_gap`).",
+    "",
+    "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): "
+    "statement/list que só reexibe a narração sem tipo rico "
+    "(code/command/diagram/compare/stat). O gerador OS não emite statement "
+    "(allowlist log fica `code`) e junta peças curtas demais da mesma frase.",
     "",
     "Âncoras de fala dos VM_FAIL (whisper). Resto das palavras preenche o vão "
     "entre âncoras até `duration − END_TAIL_S`. Sem render/TTS novo.",

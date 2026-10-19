@@ -3,13 +3,17 @@
 BEFORE = board visível dos `VM_FAIL_*.md` (main `c35e110`).
 AFTER = gerador determinístico deste branch (1 frase da VO; quote literal segura o span inteiro + 0,3s; sem compare/term/list/termo isolado).
 
+Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); (2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o card plain segura até a última palavra falada + 0,3s (nunca na frase seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem `blank_gap`).
+
+`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): statement/list que só reexibe a narração sem tipo rico (code/command/diagram/compare/stat). O gerador OS não emite statement (allowlist log fica `code`) e junta peças curtas demais da mesma frase.
+
 Âncoras de fala dos VM_FAIL (whisper). Resto das palavras preenche o vão entre âncoras até `duration − END_TAIL_S`. Sem render/TTS novo.
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
-| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | blank_gap, slide_spam | 2.33s | 1.88s |
-| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | blank_gap, allowlist_required | 2.33s | 1.98s |
-| #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | blank_gap | 7.43s | 3.08s |
+| #1452 | 47 | FAIL | PASS | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | — | 2.33s | 1.88s |
+| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | allowlist_required | 2.33s | 1.98s |
+| #1465 | 7 | FAIL | PASS | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | — | 7.43s | 3.08s |
 
 Tabelas por vídeo abaixo.
 
@@ -51,25 +55,26 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 | # | type | start | dur | end | text |
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 1.88 | 1.88 | One folder broke Copilot CLI. |
-| 1 | quote | 2.00 | 2.48 | 4.48 | Add a directory with the add-dir flag, and every Claude subagent failed on the spot. |
-| 2 | quote | 8.04 | 3.31 | 11.35 | A maximum of 4 blocks with cache_control may be provided. |
-| 3 | statement | 11.94 | 0.50 | 12.44 | Found 5. |
-| 4 | quote | 12.56 | 1.78 | 14.34 | One block over the limit. |
-| 5 | quote | 14.46 | 2.48 | 16.94 | The parent agent got an empty answer. |
-| 6 | quote | 17.34 | 2.48 | 19.82 | Update Copilot CLI, and Anthropic subagents keep working with extra directories. |
-| 7 | quote | 21.87 | 1.94 | 23.81 | Exact version in the description. |
-| 8 | quote | 23.93 | 1.53 | 25.45 | Subagent came back empty? |
-| 9 | quote | 25.57 | 2.48 | 28.05 | Read its error, not the parent's. |
-| 10 | cta | 28.74 | 2.56 | 31.30 | Subscribe · Agent traps same series |
+| 1 | quote | 2.00 | 2.48 | 4.48 | Add a directory with the add-dir flag |
+| 2 | quote | 4.82 | 3.10 | 7.92 | and every Claude subagent failed on the spot. |
+| 3 | quote | 8.04 | 3.31 | 11.35 | A maximum of 4 blocks with cache_control may be provided. |
+| 4 | code | 11.94 | 0.50 | 12.44 | Found 5. |
+| 5 | quote | 12.56 | 1.78 | 14.34 | One block over the limit. |
+| 6 | quote | 14.46 | 2.48 | 16.94 | The parent agent got an empty answer. |
+| 7 | quote | 17.34 | 1.11 | 18.45 | Update Copilot CLI |
+| 8 | quote | 18.57 | 3.17 | 21.75 | and Anthropic subagents keep working with extra directories. |
+| 9 | quote | 21.87 | 1.94 | 23.81 | Exact version in the description. |
+| 10 | quote | 23.93 | 1.53 | 25.45 | Subagent came back empty? |
+| 11 | quote | 25.57 | 2.35 | 27.92 | Read its error, not the parent's. |
+| 12 | cta | 28.07 | 2.56 | 30.63 | Subscribe · Agent traps same series |
 
-**Gate B:** `FAIL` / result `FAIL`
+**Gate B:** `PASS` / result `PASS`
 
-**kinds:** blank_gap, slide_spam
+**kinds:** (none)
 
 **reasons:**
 
-- [B] Blank gap: FAIL — beat[1]→beat[2] hole at 4.48s of 3.56s (3.44s beyond 0.12s fade; max 0.50s extra); beat[6]→beat[7] hole at 19.82s of 2.05s (1.93s beyond 0.12s fade; max 0.50s extra); beat[9]→beat[10] hole at 28.05s of 0.69s (0.57s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
-- [C] Spoken list/slide spam: FAIL — list/statement only re-displays narration with no rich type (beat[3] type=statement; need code/command/diagram/compare/stat in the middle)
+- (none)
 
 ---
 
@@ -112,12 +117,12 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 1.98 | 1.98 | One type hint broke MCP tools. |
 | 1 | quote | 2.10 | 2.48 | 4.58 | On Python three ten the tool failed. |
-| 2 | quote | 5.19 | 2.48 | 7.67 | NotRequired is the optional key on the TypedDict. |
+| 2 | quote | 5.19 | 3.41 | 8.60 | NotRequired is the optional key on the TypedDict. |
 | 3 | quote | 8.72 | 0.76 | 9.48 | Clean registration. |
 | 4 | quote | 9.60 | 2.09 | 11.68 | Pydantic called the annotation invalid. |
 | 5 | quote | 11.80 | 2.48 | 14.28 | Python three eleven and up were fine. |
-| 6 | quote | 14.89 | 2.48 | 17.37 | Update the MCP Python SDK and registration works. |
-| 7 | quote | 18.42 | 2.48 | 20.90 | Registration works, and optional keys are left out instead of sent as null. |
+| 6 | quote | 14.89 | 3.41 | 18.30 | Update the MCP Python SDK and registration works. |
+| 7 | quote | 18.42 | 3.96 | 22.38 | Registration works, and optional keys are left out instead of sent as null. |
 | 8 | quote | 22.50 | 2.17 | 24.66 | Exact version in the description. |
 | 9 | quote | 24.79 | 1.71 | 26.49 | Old Python in prod? |
 | 10 | quote | 26.61 | 1.25 | 27.87 | Test registration there. |
@@ -125,11 +130,10 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** blank_gap, allowlist_required
+**kinds:** allowlist_required
 
 **reasons:**
 
-- [B] Blank gap: FAIL — beat[2]→beat[3] hole at 7.67s of 1.05s (0.93s beyond 0.12s fade; max 0.50s extra); beat[6]→beat[7] hole at 17.37s of 1.05s (0.93s beyond 0.12s fade; max 0.50s extra); beat[7]→beat[8] hole at 20.90s of 1.60s (1.48s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
 
 ---
@@ -170,19 +174,21 @@ BEFORE = board visível do `VM_FAIL_0465.md` (main `c35e110`). AFTER = `storyboa
 | 0 | hook | 0.00 | 3.08 | 3.08 | The crew failed the handoff. tasks.yaml was empty. |
 | 1 | quote | 3.20 | 2.80 | 6.00 | So the next agent received nothing to do. |
 | 2 | quote | 6.40 | 2.80 | 9.20 | CrewAI will not invent the work for you. |
-| 3 | quote | 9.61 | 2.80 | 12.41 | The crew runner only moves what that file declares. |
-| 4 | quote | 13.21 | 2.80 | 16.01 | A task needs a description, an expected output, and an agent. |
-| 5 | quote | 17.62 | 1.48 | 19.10 | The handoff never starts. |
-| 6 | quote | 19.22 | 2.80 | 22.02 | The crew logs will not fill a blank file. |
-| 7 | quote | 22.82 | 2.80 | 25.62 | Before you run, write each task in tasks.yaml. |
-| 8 | quote | 26.03 | 1.48 | 27.51 | Empty file, empty crew. |
-| 9 | cta | 27.67 | 2.50 | 30.17 | Subscribe · CrewAI same series |
+| 3 | quote | 9.61 | 3.48 | 13.09 | The crew runner only moves what that file declares. |
+| 4 | quote | 13.21 | 1.88 | 15.09 | A task needs a description |
+| 5 | quote | 15.21 | 1.08 | 16.30 | an expected output |
+| 6 | quote | 16.41 | 1.42 | 17.84 | and an agent. |
+| 7 | quote | 17.62 | 1.48 | 19.10 | The handoff never starts. |
+| 8 | quote | 19.22 | 3.48 | 22.70 | The crew logs will not fill a blank file. |
+| 9 | quote | 22.82 | 2.80 | 25.62 | Before you run, write each task in tasks.yaml. |
+| 10 | quote | 26.03 | 1.48 | 27.51 | Empty file, empty crew. |
+| 11 | cta | 27.67 | 2.50 | 30.17 | Subscribe · CrewAI same series |
 
-**Gate B:** `FAIL` / result `FAIL`
+**Gate B:** `PASS` / result `PASS`
 
-**kinds:** blank_gap
+**kinds:** (none)
 
 **reasons:**
 
-- [B] Blank gap: FAIL — beat[3]→beat[4] hole at 12.41s of 0.80s (0.68s beyond 0.12s fade; max 0.50s extra); beat[4]→beat[5] hole at 16.01s of 1.61s (1.49s beyond 0.12s fade; max 0.50s extra); beat[6]→beat[7] hole at 22.02s of 0.80s (0.68s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
+- (none)
 

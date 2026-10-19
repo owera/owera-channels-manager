@@ -1192,6 +1192,9 @@ _BEAT_SNAP_KEYS = (
     "isolated",
     # OS literal quote: hold the whole spoken span (mid-cap exception)
     "literal_quote",
+    # OS last-resort hold while the card's own words are still spoken
+    # (last word + QUOTE_HOLD_TAIL_S). Gate B skips the mid-cap check.
+    "cap_extended_spoken",
     # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
     "unit_first",
 )
@@ -1628,6 +1631,31 @@ def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
     return False
 
 
+def is_spoken_span_hold(beat: dict | None, words=None, sources=None) -> bool:
+    """Mid-cap exception: literal quote, or a plain VO card flagged / timed
+    as ``cap_extended_spoken`` (holds last spoken word + QUOTE_HOLD_TAIL_S)."""
+    if is_literal_quote_beat(beat, sources):
+        return True
+    if not isinstance(beat, dict):
+        return False
+    if beat.get("cap_extended_spoken"):
+        return True
+    if not words:
+        return False
+    text = beat.get("text") or beat_screen_text(beat)
+    span = spoken_span(text, words)
+    if not span:
+        return False
+    try:
+        hold = float(beat.get("dur") or 0)
+        start = float(beat.get("start") or 0)
+    except (TypeError, ValueError):
+        return False
+    expect = float(span[1]) + QUOTE_HOLD_TAIL_S
+    return (hold > MID_BEAT_MAX_S - 1e-6
+            and abs((start + hold) - expect) < 0.06)
+
+
 _BODY_FIELDS = frozenset({"text"})
 
 
@@ -1644,7 +1672,7 @@ def _part_is_literal(field: str, text: str, script: str | None, sources=None, *,
         if field == "value" and stat_allowed(raw, sources):
             return True
     if typ in ("quote", "statement") and field in _BODY_FIELDS:
-        if is_whole_unit(raw, script):
+        if is_whole_unit(raw, script) or is_cover_unit(raw, script):
             return True
         # Soft product chip ("Still building · Coming soon"): two VO
         # sentences joined by the middot, not one whole unit.
@@ -2943,7 +2971,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         if btype == "hook":
             continue
         # CMO: a literal quote holds its whole spoken span (even past mid cap).
-        if is_literal_quote_beat(b, sources):
+        # cap_extended_spoken: last resort for a plain VO card whose spoken
+        # span exceeds the cap (hold last word + QUOTE_HOLD_TAIL_S).
+        if is_spoken_span_hold(b, words, sources):
             continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
@@ -4747,6 +4777,15 @@ CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment", "card_spans_senten
 CARD_VO_WHOLE_BRANDS = HOOK_PACE_BRANDS | frozenset({"os"})
 CARD_TERM_MAX_WORDS = 3
 _STRONG_CLAUSE_RE = re.compile(r"\s*[;:—–]\s*|\s+-\s+")
+# Next-weakest OS seam when a sentence exceeds the mid cap and has no #96
+# strong clause: comma, or a coordinating conjunction.
+_WEAK_CLAUSE_SPLIT_RE = re.compile(
+    r"(,\s+(?:and|but|or|so|nor)\s+|,\s+|\s+(?:and|but|or|so|nor)\s+)",
+    re.I,
+)
+_WEAK_CONJ_DELIM_RE = re.compile(
+    r"^(?:,\s+)?(?:and|but|or|so|nor)\s+$", re.I)
+_WEAK_COMMA_DELIM_RE = re.compile(r"^,\s+$")
 _TERM_EDGE_STOP = _FUNC_FOLD | frozenset(theme.fold(w) for w in """
 quando enquanto porque pois entao logo depois antes ate como onde pra para pro
 assim tambem ainda so ja nem e ou mas se que and or but so then when because
@@ -4881,6 +4920,88 @@ def is_whole_unit(text: str | None, script: str | None) -> bool:
     return bool(ct) and any(ct == r for r in whole_unit_texts(script))
 
 
+def weak_clause_parts(sent: str) -> list[str]:
+    """Split one sentence on comma / coordinating conjunction. Conjunction
+    stays on the right-hand piece so each part is a contiguous VO span."""
+    sent = (sent or "").strip()
+    if not sent:
+        return []
+    bits = _WEAK_CLAUSE_SPLIT_RE.split(sent)
+    parts, buf = [], ""
+    for bit in bits:
+        if not bit or not str(bit).strip():
+            continue
+        if _WEAK_COMMA_DELIM_RE.match(bit):
+            if buf:
+                parts.append(buf.strip())
+                buf = ""
+            continue
+        if _WEAK_CONJ_DELIM_RE.match(bit):
+            if buf:
+                parts.append(buf.strip())
+            buf = re.sub(r"^,\s+", "", bit).strip()
+            continue
+        buf = (buf + " " + bit).strip() if buf else bit.strip()
+    if buf:
+        parts.append(buf.strip())
+    return [p for p in parts if p]
+
+
+def pack_clause_parts(parts: list[str], max_words: int = 12,
+                      min_words: int = 3) -> list[str]:
+    """Join short pieces; split a run that exceeds ``max_words``.
+
+    Same packing the OS generator uses so Gate B cover units match the
+    cards it emits (not mid-list fragments like ``sends, and deploys.``).
+    """
+    out, buf = [], ""
+    for p in parts:
+        p = (p or "").strip()
+        if not p:
+            continue
+        cand = (buf + " " + p).strip() if buf else p
+        if buf and len(cand.split()) > max_words:
+            out.append(buf)
+            buf = p
+        elif len(p.split()) < min_words:
+            buf = cand
+        else:
+            if buf and len(buf.split()) < min_words:
+                buf = cand
+            else:
+                if buf:
+                    out.append(buf)
+                buf = p
+    if buf:
+        if out and len(buf.split()) < min_words:
+            out[-1] = (out[-1] + " " + buf).strip()
+        else:
+            out.append(buf)
+    return out or [p for p in parts if (p or "").strip()]
+
+
+def weak_unit_texts(script: str | None) -> list[list[str]]:
+    """Token runs of packed weak-clause pieces (comma / coordinating
+    conjunction). Mid-list concatenations (``sends, and deploys.``) are
+    not cover units — only a packed clause from the seam."""
+    runs = []
+    for sent in (x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())
+                 if x.strip()):
+        for p in pack_clause_parts(weak_clause_parts(sent)):
+            toks = _sync_toks(p)
+            if len(toks) >= 3:
+                runs.append(toks)
+    return runs
+
+
+def is_cover_unit(text: str | None, script: str | None) -> bool:
+    """Whole sentence / strong clause, or a weak-clause piece (OS cover)."""
+    if is_whole_unit(text, script):
+        return True
+    ct = _sync_toks(text)
+    return bool(ct) and any(ct == r for r in weak_unit_texts(script))
+
+
 def isolated_term_reason(text: str | None, script: str | None) -> str | None:
     """None when the card text is an isolated term the VO speaks (1–3 words,
     noun phrase or number, not a piece of a sentence); else why not."""
@@ -4929,10 +5050,15 @@ def isolated_term_reason(text: str | None, script: str | None) -> str | None:
     return why
 
 
-def card_piece_reason(text: str | None, script: str | None) -> str | None:
+def card_piece_reason(text: str | None, script: str | None, *,
+                      cover: bool = False) -> str | None:
     """None when a text card is a whole sentence / clause unit or an isolated
-    term (RR whole-sentence rule); else a short reason."""
-    if is_whole_unit(text, script):
+    term (RR whole-sentence rule); else a short reason.
+
+    ``cover`` (OS VO-sentence path): a weak-clause piece (comma / coordinating
+    conjunction) also counts as a whole unit.
+    """
+    if is_whole_unit(text, script) or (cover and is_cover_unit(text, script)):
         return None
     why = isolated_term_reason(text, script)
     if why is None:
@@ -4947,7 +5073,8 @@ def _spoken_sentence_ids(sents: list[str]) -> list[int]:
 
 def card_vo_hits(beats, script: str | None, *,
                  allow_continuation: bool | None = None,
-                 whole: bool = False) -> list[dict]:
+                 whole: bool = False,
+                 cover: bool = False) -> list[dict]:
     """Card ⊂ VO violations: [{"i","check","detail"}] (i=None for a sentence).
 
     Text cards (statement/quote) are matched in the VO after normalising
@@ -5107,11 +5234,12 @@ def card_vo_hits(beats, script: str | None, *,
                     f"card {e['i']} stops before the sentence {sents[k][:80]!r} ends "
                     "(no card shows its next words)")
     if whole_rule:
-        out = _whole_card_hits(board, script, out, sents, sid, toks)
+        out = _whole_card_hits(board, script, out, sents, sid, toks, cover=cover)
     return out
 
 
-def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
+def _whole_card_hits(board, script, out, sents, sid, toks, *,
+                     cover: bool = False) -> list[dict]:
     """card_vo_hits(whole=True) post-pass (see card_piece_reason)."""
     piece: dict[int, str | None] = {}
     for i, b in enumerate(board):
@@ -5121,7 +5249,7 @@ def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
         ct = _sync_toks(b.get("text"))
         if not ct or _find_run(toks, ct, 0) < 0:
             continue  # card_not_in_vo already
-        piece[i] = card_piece_reason(b.get("text"), script)
+        piece[i] = card_piece_reason(b.get("text"), script, cover=cover)
     res = [h for h in out if not (h["check"] in ("card_fragment", "echo_card") and h.get("i") in piece
                                   and piece[h["i"]] is None
                                   and (h["check"] == "card_fragment" or is_term_card(board[h["i"]])))]
@@ -5147,10 +5275,11 @@ def card_vo_marker(beats, script: str | None,
     if (content_format or "short") == "long":
         return None
     whole = card_vo_whole_applies(brand)
+    cover = whole and (brand or "") == "os" and OS_VO_SENTENCE_CARDS
     return {"version": CARD_VO_V1, "source": "card_source_text+vo_script",
             "continuation": CARD_VO_ALLOW_CONTINUATION,
             **({"whole_sentence": True} if whole else {}),
-            "hits": card_vo_hits(beats, script, whole=whole)}
+            "hits": card_vo_hits(beats, script, whole=whole, cover=cover)}
 
 
 def card_vo_check_hits(card_vo: dict | None) -> list[str]:

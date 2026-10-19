@@ -258,6 +258,85 @@ gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT, sources=A
 ok(gg["checks"]["B"] != "FAIL" or not any("mid card" in r and "beat[1]" in r for r in gg["reasons"]),
    f"Gate B hold check exempts the literal quote ({gg.get('reasons')})")
 
+print("OS cover order: strong clause → weak clause → cap_extended_spoken")
+long_and = ("Add a directory with the add-dir flag, and every Claude subagent "
+            "failed on the spot.")
+ok(storyboard._os_strong_parts(long_and) == [long_and],
+   "no #96 strong seam on comma/and")
+weak = storyboard._os_weak_parts(long_and)
+ok(len(weak) == 2 and weak[0].startswith("Add a directory")
+   and weak[1].lstrip().startswith("and every"),
+   f"weak split on comma/and ({weak})")
+ok(all(craft.is_cover_unit(p, SCRIPT) for p in weak),
+   "each weak piece is a cover unit")
+ok(craft.card_piece_reason("sends, and deploys.", SCRIPT) is not None,
+   "RR-style comma fragment is still not a whole unit")
+units = storyboard._os_sentence_units(long_and, force=True)
+ok(len(units) >= 2, f"force-split long sentence ({units})")
+
+# last-resort extend: no seam, spoken span > cap, hole before the next card
+plain = "Exact version in the description."
+pw, t0 = [], 2.0
+for w in plain.split():
+    pw.append({"text": w.strip("."), "start": round(t0, 3), "dur": 0.7})
+    t0 += 0.75
+# spoken ~ 4.5s, next card at 8.0
+ext = [
+    {"type": "hook", "start": 0.0, "dur": 1.8, "text": "One folder broke Copilot CLI.",
+     "object": "terminal"},
+    {"type": "quote", "start": 2.0, "dur": 2.48, "text": plain, "plain": True},
+    {"type": "cta", "start": 8.0, "dur": 2.5, "text": "Subscribe · Agent traps"},
+]
+storyboard._os_cover_spoken_holes(ext, SCRIPT, pw)
+ok(ext[1].get("cap_extended_spoken") is True, "no-seam long hold → cap_extended_spoken")
+ok(abs((ext[1]["start"] + ext[1]["dur"]) - (pw[-1]["start"] + pw[-1]["dur"] + 0.3)) < 0.08,
+   f"extended hold ends last word + 0.3 ({ext[1]['start'] + ext[1]['dur']:.2f})")
+gx = craft.video_maker_gate(ext, beat_timing=craft.BEAT_TIMING_CURRENT, words=pw,
+                            script=SCRIPT, brand="os")
+ok(not any("mid card" in r and "beat[1]" in r for r in (gx.get("reasons") or [])),
+   f"Gate B does not FAIL cap_extended_spoken for the cap ({gx.get('reasons')})")
+
+# Weak-clause piece that echoes the previous sentence is not its own card
+# (#1453: "Registration works" after "…and registration works.").
+reg_prev = "Update the MCP Python SDK and registration works."
+reg_sent = ("Registration works, and optional keys are left out instead of "
+            "sent as null.")
+ok(storyboard._os_unit_echoes("Registration works", [reg_prev]),
+   "weak piece 'Registration works' echoes the previous sentence")
+ok(storyboard._os_sentence_units(reg_sent, force=True, neighbors=[reg_prev])
+   == [reg_sent],
+   "echoing weak split is refused — keep the whole sentence")
+reg_script = (
+    "One type hint broke MCP tools. Update the MCP Python SDK and registration "
+    "works. Registration works, and optional keys are left out instead of sent "
+    "as null. Subscribe — next agent trap."
+)
+reg_beats = storyboard._os_vo_sentence_beats(
+    subject="One type hint broke MCP tools. · Agent traps 14", script=reg_script)
+reg_texts = [b.get("text") or "" for b in reg_beats]
+ok(not any(t.strip().rstrip(".") == "Registration works" for t in reg_texts),
+   f"generator does not emit the echoing piece ({reg_texts})")
+ok(any("optional keys are left out" in t and t.startswith("Registration works")
+       for t in reg_texts),
+   "whole sentence stays one card when the weak split would echo")
+
+print("slide_spam is Gate C (existing): statement/list echoing narration, no rich type")
+ok(craft.STATEMENT_MAX_SHORTS == 1, "STATEMENT_MAX_SHORTS = 1")
+ok("code" in craft.OBJECT_BEAT_TYPES and "compare" in craft.OBJECT_BEAT_TYPES,
+   "rich types = code/command/diagram/compare/stat")
+# OS board with allowlist log must stay code, not statement
+html_os = storyboard.compose(
+    subject=SUBJECT, script=SCRIPT, words=W, duration=DUR, resolution="portrait",
+    width=1080, height=1920, topic_id=47, content_format="short", language="English",
+    llm=boom, brand="os", topic_name="Agent traps", on_screen_allow=ALLOW)
+os_b = craft.beats_from_html(html_os)
+ok(any((b.get("type") or "") == "code"
+       and "Found 5" in " ".join(b.get("lines") or [b.get("text") or ""])
+       for b in os_b),
+   f"allowlist log stays code ({[b.get('type') for b in os_b]})")
+ok(not any((b.get("type") or "") == "statement" for b in os_b),
+   "OS VO board has no statement (no slide_spam)")
+
 print("isolated term is banned on OS even when allowlisted")
 term_allow = [{"kind": "quote", "text": "cache_control", "source": "https://example.test"}]
 ok_term = [
