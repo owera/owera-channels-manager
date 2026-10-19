@@ -3646,7 +3646,8 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
     Align / sync can leave a sentence card several seconds late (the hook
     ate the window). Snap mids to ``spoken_span`` then pack overlaps so
     card sync and stale_card stay clean. Literal quotes are timed separately.
-    After the CTA start push, clamp end to ``duration`` (do not overrun).
+    After the CTA is placed on its spoken line (or packed when the cue is
+    unmatched), clamp end to ``duration`` (do not overrun).
     """
     from app.services import craft
     if not beats or not words:
@@ -3687,19 +3688,35 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
                 cur["start"] = round(floor, 3)
     if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
         last, cta = beats[-2], beats[-1]
-        span = craft.spoken_span(last.get("text") or last.get("cue"), words)
         try:
-            last_end = float(last.get("start") or 0) + float(last.get("dur") or 0)
+            last_st = float(last.get("start") or 0)
+            last_end = last_st + float(last.get("dur") or 0)
             cta_st = float(cta.get("start") or 0)
         except (TypeError, ValueError):
-            last_end, cta_st = 0.0, 0.0
-        need = last_end + _GAP
-        if span:
-            need = max(need, float(span[1]) + _GAP)
-        if cta_st < need - 1e-6:
-            if duration is not None and need + _MIN_DUR > float(duration) + 1e-9:
+            last_st, last_end, cta_st = 0.0, 0.0, 0.0
+        # Sit the chip on the spoken CTA line (cue). Do not pack it to
+        # last_end+_GAP when that lands after Subscribe — that is a
+        # compose bug, not a sync-threshold issue.
+        cta_sp = craft.spoken_span(cta.get("cue") or "", words)
+        if cta_sp:
+            want = float(cta_sp[0])
+            if duration is not None and want + _MIN_DUR > float(duration) + 1e-9:
                 return False
-            cta["start"] = round(need, 3)
+            if last_end > want - _GAP + 1e-6:
+                room = want - _GAP - last_st
+                if room < _MIN_DUR - 1e-9:
+                    return False
+                last["dur"] = round(room, 3)
+            cta["start"] = round(want, 3)
+        else:
+            span = craft.spoken_span(last.get("text") or last.get("cue"), words)
+            need = last_end + _GAP
+            if span:
+                need = max(need, float(span[1]) + _GAP)
+            if cta_st < need - 1e-6:
+                if duration is not None and need + _MIN_DUR > float(duration) + 1e-9:
+                    return False
+                cta["start"] = round(need, 3)
     return _clamp_os_cta_to_duration(beats, duration)
 
 
@@ -4038,12 +4055,17 @@ def _time_literal_quotes(beats, words, sources=None) -> None:
                 if sources is None or not craft.source_literal(text, sources, {"quote"}):
                     continue
         elif typ in craft.CLI_BEAT_TYPES:
-            lines = craft.cli_lines(b)
-            if not lines:
-                continue
-            text = lines[0] if len(lines) == 1 else " ".join(lines)
-            if sources is None or not craft.source_literal(text, sources, craft.CLI_ALLOW_KINDS):
-                continue
+            if craft.is_allowlisted_source_card(b, sources):
+                text = str(b.get("cue") or "").strip()
+                if not text:
+                    continue
+            else:
+                lines = craft.cli_lines(b)
+                if not lines:
+                    continue
+                text = lines[0] if len(lines) == 1 else " ".join(lines)
+                if sources is None or not craft.source_literal(text, sources, craft.CLI_ALLOW_KINDS):
+                    continue
         else:
             continue
         span = craft.spoken_span(text, words)
@@ -4065,6 +4087,11 @@ def _time_literal_quotes(beats, words, sources=None) -> None:
         except (TypeError, ValueError):
             continue
         if st < floor - 1e-6:
+            if (cur.get("type") or "") in craft.CTA_TYPES:
+                # Do not push the endcard off its spoken line. Shrink the
+                # last mid; snap/clamp own the chip.
+                prev["dur"] = round(max(_MIN_DUR, st - _GAP - float(prev.get("start") or 0)), 3)
+                continue
             cur["start"] = round(floor, 3)
 
 

@@ -1,0 +1,362 @@
+{
+  "script": "One type hint broke MCP tools. Python three ten. The tool returned a TypedDict. One key was NotRequired. It failed at registration, before it ever ran. Pydantic called the annotation invalid. Python three eleven and up were fine. Update the MCP Python SDK. Registration works. Optional keys are left out instead of sent as null. Exact version in the description. Old Python in prod? Test registration there. Subscribe — next agent trap.",
+  "duration": 31.24,
+  "n_words": 71,
+  "words": [
+    {
+      "text": "One",
+      "start": 0.113,
+      "dur": 0.138
+    },
+    {
+      "text": "type",
+      "start": 0.263,
+      "dur": 0.25
+    },
+    {
+      "text": "hint",
+      "start": 0.525,
+      "dur": 0.175
+    },
+    {
+      "text": "broke",
+      "start": 0.713,
+      "dur": 0.312
+    },
+    {
+      "text": "MCP",
+      "start": 1.15,
+      "dur": 0.487
+    },
+    {
+      "text": "tools",
+      "start": 1.65,
+      "dur": 0.475
+    },
+    {
+      "text": "Python",
+      "start": 2.55,
+      "dur": 0.463
+    },
+    {
+      "text": "three",
+      "start": 3.075,
+      "dur": 0.25
+    },
+    {
+      "text": "ten",
+      "start": 3.337,
+      "dur": 0.375
+    },
+    {
+      "text": "The",
+      "start": 4.138,
+      "dur": 0.062
+    },
+    {
+      "text": "tool",
+      "start": 4.213,
+      "dur": 0.3
+    },
+    {
+      "text": "returned",
+      "start": 4.525,
+      "dur": 0.375
+    },
+    {
+      "text": "a",
+      "start": 4.912,
+      "dur": 0.037
+    },
+    {
+      "text": "TypedDict",
+      "start": 4.963,
+      "dur": 0.713
+    },
+    {
+      "text": "One",
+      "start": 6.1,
+      "dur": 0.188
+    },
+    {
+      "text": "key",
+      "start": 6.3,
+      "dur": 0.25
+    },
+    {
+      "text": "was",
+      "start": 6.562,
+      "dur": 0.15
+    },
+    {
+      "text": "NotRequired",
+      "start": 6.725,
+      "dur": 0.713
+    },
+    {
+      "text": "It",
+      "start": 7.862,
+      "dur": 0.087
+    },
+    {
+      "text": "failed",
+      "start": 7.963,
+      "dur": 0.338
+    },
+    {
+      "text": "at",
+      "start": 8.312,
+      "dur": 0.1
+    },
+    {
+      "text": "registration",
+      "start": 8.425,
+      "dur": 0.713
+    },
+    {
+      "text": "before",
+      "start": 9.387,
+      "dur": 0.325
+    },
+    {
+      "text": "it",
+      "start": 9.725,
+      "dur": 0.075
+    },
+    {
+      "text": "ever",
+      "start": 9.812,
+      "dur": 0.2
+    },
+    {
+      "text": "ran",
+      "start": 10.025,
+      "dur": 0.35
+    },
+    {
+      "text": "Pydantic",
+      "start": 10.8,
+      "dur": 0.588
+    },
+    {
+      "text": "called",
+      "start": 11.463,
+      "dur": 0.263
+    },
+    {
+      "text": "the",
+      "start": 11.738,
+      "dur": 0.087
+    },
+    {
+      "text": "annotation",
+      "start": 11.838,
+      "dur": 0.613
+    },
+    {
+      "text": "invalid",
+      "start": 12.463,
+      "dur": 0.537
+    },
+    {
+      "text": "Python",
+      "start": 13.425,
+      "dur": 0.388
+    },
+    {
+      "text": "three",
+      "start": 13.825,
+      "dur": 0.287
+    },
+    {
+      "text": "eleven",
+      "start": 14.125,
+      "dur": 0.438
+    },
+    {
+      "text": "and",
+      "start": 14.713,
+      "dur": 0.138
+    },
+    {
+      "text": "up",
+      "start": 14.863,
+      "dur": 0.138
+    },
+    {
+      "text": "were",
+      "start": 15.012,
+      "dur": 0.113
+    },
+    {
+      "text": "fine",
+      "start": 15.137,
+      "dur": 0.4
+    },
+    {
+      "text": "Update",
+      "start": 15.95,
+      "dur": 0.4
+    },
+    {
+      "text": "the",
+      "start": 16.363,
+      "dur": 0.113
+    },
+    {
+      "text": "MCP",
+      "start": 16.488,
+      "dur": 0.588
+    },
+    {
+      "text": "Python",
+      "start": 17.087,
+      "dur": 0.588
+    },
+    {
+      "text": "SDK",
+      "start": 17.762,
+      "dur": 0.662
+    },
+    {
+      "text": "Registration",
+      "start": 18.837,
+      "dur": 0.588
+    },
+    {
+      "text": "works",
+      "start": 19.438,
+      "dur": 0.463
+    },
+    {
+      "text": "Optional",
+      "start": 20.312,
+      "dur": 0.4
+    },
+    {
+      "text": "keys",
+      "start": 20.725,
+      "dur": 0.325
+    },
+    {
+      "text": "are",
+      "start": 21.062,
+      "dur": 0.1
+    },
+    {
+      "text": "left",
+      "start": 21.175,
+      "dur": 0.287
+    },
+    {
+      "text": "out",
+      "start": 21.475,
+      "dur": 0.2
+    },
+    {
+      "text": "instead",
+      "start": 21.688,
+      "dur": 0.35
+    },
+    {
+      "text": "of",
+      "start": 22.05,
+      "dur": 0.075
+    },
+    {
+      "text": "sent",
+      "start": 22.137,
+      "dur": 0.338
+    },
+    {
+      "text": "as",
+      "start": 22.7,
+      "dur": 0.138
+    },
+    {
+      "text": "null",
+      "start": 22.85,
+      "dur": 0.338
+    },
+    {
+      "text": "Exact",
+      "start": 23.6,
+      "dur": 0.45
+    },
+    {
+      "text": "version",
+      "start": 24.062,
+      "dur": 0.463
+    },
+    {
+      "text": "in",
+      "start": 24.625,
+      "dur": 0.1
+    },
+    {
+      "text": "the",
+      "start": 24.738,
+      "dur": 0.075
+    },
+    {
+      "text": "description",
+      "start": 24.825,
+      "dur": 0.588
+    },
+    {
+      "text": "Old",
+      "start": 25.825,
+      "dur": 0.188
+    },
+    {
+      "text": "Python",
+      "start": 26.025,
+      "dur": 0.438
+    },
+    {
+      "text": "in",
+      "start": 26.475,
+      "dur": 0.075
+    },
+    {
+      "text": "prod",
+      "start": 26.562,
+      "dur": 0.375
+    },
+    {
+      "text": "Test",
+      "start": 27.35,
+      "dur": 0.263
+    },
+    {
+      "text": "registration",
+      "start": 27.625,
+      "dur": 0.65
+    },
+    {
+      "text": "there",
+      "start": 28.288,
+      "dur": 0.263
+    },
+    {
+      "text": "Subscribe",
+      "start": 28.962,
+      "dur": 0.575
+    },
+    {
+      "text": "next",
+      "start": 29.85,
+      "dur": 0.263
+    },
+    {
+      "text": "agent",
+      "start": 30.125,
+      "dur": 0.237
+    },
+    {
+      "text": "trap",
+      "start": 30.375,
+      "dur": 0.362
+    }
+  ]
+}
