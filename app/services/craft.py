@@ -1086,10 +1086,8 @@ BLANK_GAP_MAX_S = 0.5
 # card. Kill switch: False restores the LLM compare/term_define/list/isolated
 # template path on OS. RR is unchanged either way.
 OS_VO_SENTENCE_CARDS = True
-# Literal quote hold tail: card exits last spoken word + this, then the
-# hold is capped at the mid-card max. If the spoken span itself exceeds
-# the cap, we still start at the first word and hold only to the cap
-# (CMO open: do we keep the leftover off-screen?).
+# Literal quote hold tail (CMO): enter at first spoken word, hold the
+# whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
 # stale_card: leftover hold after the card's last spoken word (same budget
 # as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
@@ -1703,10 +1701,12 @@ def os_card_hits(beats, script: str | None, sources=None) -> list[dict]:
     """OS-only Gate B hits: banned templates + non-literal card text.
 
     compare/list → vs_card_not_allowed; term_define / isolated quote →
-    single_term_card unless that exact term is in on_screen_allow; an
-    allowlisted term shown again on the very next card → echo_card; any
-    other mid/hook copy that is neither VO-literal nor allowlist-literal
-    → card_text_not_literal. CTA/endcard is the series chip (exempt).
+    single_term_card (never allowed on OS, even if the term is in
+    on_screen_allow — allowlist kinds log/error/command/quote/stat stay
+    as those types, not isolated-term cards); a term shown again on the
+    very next card → echo_card; any other mid/hook copy that is neither
+    VO-literal nor allowlist-literal → card_text_not_literal.
+    CTA/endcard is the series chip (exempt).
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1727,19 +1727,15 @@ def os_card_hits(beats, script: str | None, sources=None) -> list[dict]:
             continue
         if typ in OS_BANNED_TERM or is_term_card(b):
             term = str(b.get("term") or b.get("text") or "").strip()
-            allowed_term = os_term_allowlisted(b, sources)
-            if not allowed_term:
-                out.append({"i": i, "check": "single_term_card",
-                            "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
-                                      "term_define card (OS: only if that exact term is "
-                                      "in on_screen_allow)"})
+            out.append({"i": i, "check": "single_term_card",
+                        "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
+                                  "term_define card (OS mid cards are whole VO sentences)"})
             if prev is not None and term and text_in_script(term, beat_screen_text(board[prev])):
                 out.append({"i": i, "check": "echo_card",
                             "detail": f"card {i} repeats term {term!r} right after "
                                       f"card {prev} already showed it"})
-            if not allowed_term:
-                prev = i
-                continue
+            prev = i
+            continue
         if script and not card_is_literal(b, script, sources):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
@@ -2946,8 +2942,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
-        # Quotes hold the spoken span up to the mid cap (start = first word).
-        # A span longer than the cap is an open CMO call — generator caps it.
+        # CMO: a literal quote holds its whole spoken span (even past mid cap).
+        if is_literal_quote_beat(b, sources):
+            continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
         hold_cap = cta_hold if is_cta else mid_hold
@@ -3059,8 +3056,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             reasons.append(
                 "[B] OS cards: FAIL — " + "; ".join(os_live) +
                 ". OS mid cards are one whole VO sentence (or its strong-clause "
-                "units); no compare/VS; no isolated term unless that exact term "
-                "is in on_screen_allow; copy is VO-literal or allowlist-literal."
+                "units); no compare/VS, term_define, list, or isolated term; "
+                "copy is VO-literal or allowlist-literal."
             )
     elif script and (sources is not None or (cli_check or {}).get("literal")):
         lit_live = [f"{h.get('check')}: {h.get('detail')}"

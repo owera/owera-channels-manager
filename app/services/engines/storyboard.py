@@ -1155,12 +1155,13 @@ _LITERAL_CARD_RULE = (
 
 
 _OS_CARD_RULE = (
-    "9. OS CARDS: every mid card is a whole VO sentence (or a whole strong clause) as "
-    "a plain text card, OR a verbatim on_screen_allow line. NEVER emit a compare or "
-    "VS template. NEVER emit a term_define or isolated single-term card unless that "
-    "exact term is a whole on_screen_allow entry. Never invent a subtitle. A quote "
-    "(or quote-like log/error card) enters at the first spoken word of that text — "
-    "no lead — and holds the spoken span up to the mid-card cap.\n\n")
+    "9. OS CARDS: every mid card is a whole VO sentence (or a whole strong clause "
+    "when that sentence exceeds the mid-card cap) as a plain text card, OR a "
+    "verbatim on_screen_allow log/error/command/quote/stat line. NEVER emit a "
+    "compare or VS template. NEVER emit a term_define or isolated single-term "
+    "card — not even when the term is in the allowlist. Never invent a subtitle. "
+    "A literal quote enters at the first spoken word (no lead) and holds the "
+    "whole spoken span, even past the mid-card cap.\n\n")
 
 
 _CARD_TEXT_RULE = (
@@ -3625,7 +3626,7 @@ def _cap_os_hook(beats, words, script=None) -> None:
 
 
 def _drop_os_term_cards(beats, sources=None) -> None:
-    """OS: drop isolated-term fillers that are not an exact allowlist term.
+    """OS: drop every isolated-term filler (allowlist does not save it).
 
     Holes are left for ``_fill_blank_gaps`` (do not pull the next card
     earlier — that would put a quote on screen before its first word).
@@ -3635,8 +3636,8 @@ def _drop_os_term_cards(beats, sources=None) -> None:
         return
     kept = []
     for i, b in enumerate(beats):
-        if i and craft.is_term_card(b) and not craft.os_term_allowlisted(b, sources):
-            logger.info("storyboard: OS dropped isolated term %r (not in allowlist)",
+        if i and craft.is_term_card(b):
+            logger.info("storyboard: OS dropped isolated term %r",
                         (b.get("text") or "")[:60])
             continue
         kept.append(b)
@@ -3686,12 +3687,7 @@ def _plain_os_literal_mids(beats, script, sources, *, os: bool, literal: bool,
         if os and typ in craft.OS_BANNED_COMPARE | craft.OS_BANNED_LIST:
             reason, kind = "VS/list template", "vs_card_not_allowed"
         elif os and (typ in craft.OS_BANNED_TERM or craft.is_term_card(b)):
-            if not craft.os_term_allowlisted(b, sources):
-                reason, kind = "isolated term not allowlisted", "single_term_card"
-            elif out and craft.text_in_script(
-                    str(b.get("term") or b.get("text") or ""),
-                    craft.beat_screen_text(out[-1])):
-                reason, kind = "term echo", "echo_card"
+            reason, kind = "isolated term / term_define", "single_term_card"
         if reason is None and literal and not craft.card_is_literal(b, script, sources):
             reason, kind = "non-literal field", "card_text_not_literal"
         if reason:
@@ -3750,27 +3746,31 @@ def _fill_blank_gaps(beats, script, words, slips=None) -> None:
                 _slip(slips, "blank_gap_filled", fill,
                       [f"{extra:.2f}s hole → {sent[:80]!r}"])
             elif extra > budget + 1e-6 and not echo:
-                # last resort: stretch the previous VO card so Gate B
-                # blank_gap does not fire (stale_card may still).
-                prev["dur"] = round(max(_MIN_DUR, cur_st - fade - float(prev.get("start") or 0)), 3)
-                _slip(slips, "blank_gap_stretched", prev,
-                      [f"{extra:.2f}s hole stretched into previous card"])
-            # echo: leftover after a capped long quote — leave the hole
-            # (CMO open: span > mid cap; do not start earlier / do not echo).
+                # Stretch only within stale leftover and (non-quote) mid cap.
+                # A leftover after a long quote stays a hole — do not echo.
+                max_end = cur_st - fade
+                span = craft.spoken_span(craft.beat_screen_text(prev), words)
+                if span:
+                    max_end = min(max_end, float(span[1]) + craft.STALE_CARD_MAX_S)
+                if not craft.is_literal_quote_beat(prev):
+                    max_end = min(max_end, float(prev.get("start") or 0) + _mid_max())
+                new_dur = round(max(_MIN_DUR, max_end - float(prev.get("start") or 0)), 3)
+                if new_dur > float(prev.get("dur") or 0) + 1e-6:
+                    prev["dur"] = new_dur
+                    _slip(slips, "blank_gap_stretched", prev,
+                          [f"{extra:.2f}s hole stretched into previous card"])
         out.append(cur)
     beats[:] = out
 
 
 def _time_literal_quotes(beats, words, sources=None) -> None:
-    """Quote timing: enter at first spoken word (no lead), hold the spoken
-    span + QUOTE_HOLD_TAIL_S up to the mid-card cap. If the spoken span
-    itself exceeds the cap, hold the cap from the first word (CMO open).
-    Later cards shift so they do not overlap.
+    """CMO quote timing: enter at first spoken word, hold the whole span,
+    exit last spoken word + QUOTE_HOLD_TAIL_S. Mid-cap exception (literal
+    quotes only). Later cards shift so they do not overlap.
     """
     from app.services import craft
     if not beats or not words:
         return
-    cap = _mid_max()
     for b in beats:
         typ = b.get("type") or ""
         text = None
@@ -3794,16 +3794,8 @@ def _time_literal_quotes(beats, words, sources=None) -> None:
         if not span:
             continue
         t0, t1 = span
-        spoken = float(t1) - float(t0)
-        raw_hold = spoken + craft.QUOTE_HOLD_TAIL_S
-        hold = min(max(_MIN_DUR, raw_hold), cap)
-        if raw_hold > cap + 1e-6:
-            logger.info(
-                "storyboard: quote hold %.2fs (span %.2fs) > mid cap %.2fs — "
-                "holding cap from first word (CMO open)", raw_hold, spoken, cap)
-            b["quote_capped"] = True
         b["start"] = round(float(t0), 3)
-        b["dur"] = round(hold, 3)
+        b["dur"] = round(max(_MIN_DUR, float(t1) + craft.QUOTE_HOLD_TAIL_S - float(t0)), 3)
         if typ == "quote":
             b["literal_quote"] = True
     for i in range(1, len(beats)):

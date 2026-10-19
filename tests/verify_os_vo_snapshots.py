@@ -2,13 +2,14 @@
 
 Run: PYTHONPATH=. .venv/bin/python tests/verify_os_vo_snapshots.py
 
-The attached snapshots have script + timed beats + card_sync speech_start,
-but NO TTS word timings and there is no VM_FAIL.md. Words are synthesized
-from the script (uniform over duration − END_TAIL_S), then nudged so each
-card_sync cue lands near its speech_start. No real render/TTS.
+The attached snapshots have script + timed beats + card_sync speech_start
+but no TTS word timings. Words are synthesized from the script (uniform
+over duration − END_TAIL_S), then nudged so each card_sync cue lands near
+its speech_start. No real render/TTS.
 
-BEFORE = the snapshot board (current main). AFTER = this branch's OS
-VO-sentence compose on the same script/subject/duration/topic.
+Canonical before/after (VM_FAIL live boards + whisper anchors) is
+``docs/gate-b-os-before-after.md`` (written by verify_os_literal_cards).
+This file keeps a snapshot-only replay as a second proof.
 """
 from __future__ import annotations
 
@@ -23,6 +24,14 @@ _checks = 0
 ART = Path("/opt/cursor/artifacts")
 ART.mkdir(parents=True, exist_ok=True)
 UPLOADS = Path("/home/ubuntu/.cursor/projects/workspace/uploads")
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "os-gate-b"
+
+
+def _snap_path(name: str) -> Path:
+    for p in (FIXTURES / name, UPLOADS / name):
+        if p.is_file():
+            return p
+    return FIXTURES / name
 
 
 def ok(cond, msg):
@@ -35,9 +44,9 @@ def ok(cond, msg):
 
 
 SNAPS = {
-    1452: UPLOADS / "snapshot-2026-10-19_07c2.json",
-    1453: UPLOADS / "snapshot-2026-10-19_64c7.json",
-    1465: UPLOADS / "snapshot-2026-10-19_706f.json",
+    1452: _snap_path("snapshot-2026-10-19_07c2.json"),
+    1453: _snap_path("snapshot-2026-10-19_64c7.json"),
+    1465: _snap_path("snapshot-2026-10-19_706f.json"),
 }
 
 
