@@ -3,7 +3,7 @@
 BEFORE = board visível dos `VM_FAIL_*.md` (main `c35e110`).
 AFTER = gerador determinístico deste branch (1 frase da VO; quote literal segura o span inteiro + 0,3s; sem compare/term/list/termo isolado).
 
-Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); (2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o card plain segura até a última palavra falada + 0,3s (nunca na frase seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem `blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` (4,5s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.
+Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); (2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o card plain segura até a última palavra falada + 0,3s (nunca na frase seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem `blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` (3,0s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.
 
 `slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): statement/list que só reexibe a narração sem tipo rico (code/command/diagram/compare/stat). O gerador OS não emite statement (allowlist log fica `code`) e junta peças curtas demais da mesma frase.
 
@@ -11,9 +11,9 @@ Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s a
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
-| #1452 | 47 | FAIL | PASS | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | — | 2.33s | 1.88s |
-| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | allowlist_required | 2.33s | 1.98s |
-| #1465 | 7 | FAIL | PASS | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | — | 7.43s | 3.08s |
+| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | sentence_too_long | 2.33s | 1.88s |
+| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | sentence_too_long, allowlist_required | 2.33s | 1.98s |
+| #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech | sentence_too_long | 7.43s | 3.08s |
 
 Tabelas por vídeo abaixo.
 
@@ -43,12 +43,13 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** card_text, os_cards, card_timing, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech
+**kinds:** card_text, os_cards, card_timing, sentence_too_long, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech
 
 **reasons:**
 
 - [B] Card text: FAIL — single_term_card: card 1 type=term_define 'add-dir flag that adds a directory' is an isolated-term / term_define card (OS mid cards are whole VO sentences); vs_card_not_allowed: card 2 type=compare 'Claude subagent Claude subagent every one On the spot failed' is a VS/list template (OS mid cards are whole VO sentences); single_term_card: card 4 type=term_define 'cache_control maximum of 4 blocks' is an isolated-term / term_define card (OS mid cards are whole VO sentences); echo_card: card 4 repeats term 'cache_control' right after card 3 already showed it; single_term_card: card 5 type=quote 'cache_control' is an isolated-term / term_define card (OS mid cards are whole VO sentences); echo_card: card 5 repeats term 'cache_control' right after card 4 already showed it; vs_card_not_allowed: card 6 type=compare 'Over the limit Found 5 Limit one block over' is a VS/list template (OS mid cards are whole VO sentences); single_term_card: card 8 type=term_define 'Copilot CLI update for Anthropic subagents' is an isolated-term / term_define card (OS mid cards are whole VO sentences); vs_card_not_allowed: card 9 type=compare 'Directories extra directories Subagents keep working' is a VS/list template (OS mid cards are whole VO sentences); single_term_card: card 10 type=term_define 'version exact version in the description' is an isolated-term / term_define card (OS mid cards are whole VO sentences); vs_card_not_allowed: card 12 type=compare "Subagent its error Parent not the parent's" is a VS/list template (OS mid cards are whole VO sentences). One card per spoken sentence, quotes only of words the VO says, no invented tool output, PT-BR copy on PT cards, no back-to-back near-duplicate cards.
 - [B] Card timing: FAIL — quote_before_speech: card 3 quote starts at 7.07s, first spoken word at 8.04s (must enter at the first word); quote_before_speech: card 5 quote starts at 9.70s, first spoken word at 9.88s (must enter at the first word); stale_card: card 1 type=term_define ends at 4.93s, last spoken word at 4.33s (0.60s leftover; max 0.50s); stale_card: card 5 type=quote ends at 11.73s, last spoken word at 10.14s (1.59s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).
+- [B] Sentence too long: FAIL — sentence_too_long: card 3 'A maximum of 4 blocks with cache_control may be provided.' spoken 3.01s (first word 8.04s–last word 11.05s; max 3.0s) — split the sentence. A cap_extended_spoken or literal-quote card may not cover more than 3.0s of speech (first word to last word) — split the sentence.
 
 ### AFTER (este branch, 1 frase da VO)
 
@@ -68,13 +69,13 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 | 11 | quote | 25.57 | 2.35 | 27.92 | Read its error, not the parent's. |
 | 12 | cta | 28.07 | 2.56 | 30.63 | Subscribe · Agent traps same series |
 
-**Gate B:** `PASS` / result `PASS`
+**Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** (none)
+**kinds:** sentence_too_long
 
 **reasons:**
 
-- (none)
+- [B] Sentence too long: FAIL — sentence_too_long: card 2 'and every Claude subagent failed on the spot.' spoken 3.14s (first word 4.82s–last word 7.96s; max 3.0s) — split the sentence; sentence_too_long: card 3 'A maximum of 4 blocks with cache_control may be provided.' spoken 3.01s (first word 8.04s–last word 11.05s; max 3.0s) — split the sentence; sentence_too_long: card 8 'and Anthropic subagents keep working with extra directories.' spoken 3.20s (first word 18.57s–last word 21.78s; max 3.0s) — split the sentence. A cap_extended_spoken or literal-quote card may not cover more than 3.0s of speech (first word to last word) — split the sentence.
 
 ---
 
@@ -103,12 +104,13 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** card_text, os_cards, card_timing, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech
+**kinds:** card_text, os_cards, card_timing, sentence_too_long, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech
 
 **reasons:**
 
 - [B] Card text: FAIL — single_term_card: card 1 type=term_define 'Python three ten runtime where the tool failed' is an isolated-term / term_define card (OS mid cards are whole VO sentences); single_term_card: card 2 type=term_define 'NotRequired optional key on the TypedDict' is an isolated-term / term_define card (OS mid cards are whole VO sentences); single_term_card: card 3 type=quote 'registration' is an isolated-term / term_define card (OS mid cards are whole VO sentences); single_term_card: card 4 type=term_define 'Pydantic called the annotation invalid' is an isolated-term / term_define card (OS mid cards are whole VO sentences); vs_card_not_allowed: card 5 type=compare 'Python runtime three ten tool failed three eleven and up wer' is a VS/list template (OS mid cards are whole VO sentences); single_term_card: card 6 type=term_define 'MCP Python SDK update it and registration works' is an isolated-term / term_define card (OS mid cards are whole VO sentences); single_term_card: card 8 type=term_define 'Optional keys NotRequired fields on the return' is an isolated-term / term_define card (OS mid cards are whole VO sentences); echo_card: card 8 repeats term 'Optional keys' right after card 7 already showed it; vs_card_not_allowed: card 9 type=compare 'Instead of Left out not as null Sent as null null on the wir' is a VS/list template (OS mid cards are whole VO sentences); single_term_card: card 11 type=term_define 'Old Python test registration in prod' is an isolated-term / term_define card (OS mid cards are whole VO sentences); single_term_card: card 12 type=quote 'prod' is an isolated-term / term_define card (OS mid cards are whole VO sentences); echo_card: card 12 repeats term 'prod' right after card 11 already showed it. One card per spoken sentence, quotes only of words the VO says, no invented tool output, PT-BR copy on PT cards, no back-to-back near-duplicate cards.
 - [B] Card timing: FAIL — quote_before_speech: card 3 quote starts at 6.97s, first spoken word at 9.16s (must enter at the first word); quote_before_speech: card 7 quote starts at 17.37s, first spoken word at 18.42s (must enter at the first word); stale_card: card 12 type=quote ends at 27.90s, last spoken word at 26.48s (1.42s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).
+- [B] Sentence too long: FAIL — sentence_too_long: card 7 'Registration works, and optional keys are left out instead of sent as null.' spoken 4.03s (first word 18.42s–last word 22.45s; max 3.0s) — split the sentence. A cap_extended_spoken or literal-quote card may not cover more than 3.0s of speech (first word to last word) — split the sentence.
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
 
 ### AFTER (este branch, 1 frase da VO)
@@ -130,10 +132,11 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** allowlist_required
+**kinds:** sentence_too_long, allowlist_required
 
 **reasons:**
 
+- [B] Sentence too long: FAIL — sentence_too_long: card 2 'NotRequired is the optional key on the TypedDict.' spoken 3.41s (first word 5.19s–last word 8.60s; max 3.0s) — split the sentence; sentence_too_long: card 6 'Update the MCP Python SDK and registration works.' spoken 3.41s (first word 14.89s–last word 18.30s; max 3.0s) — split the sentence; sentence_too_long: card 7 'Registration works, and optional keys are left out instead of sent as null.' spoken 4.03s (first word 18.42s–last word 22.45s; max 3.0s) — split the sentence. A cap_extended_spoken or literal-quote card may not cover more than 3.0s of speech (first word to last word) — split the sentence.
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
 
 ---
@@ -184,11 +187,11 @@ BEFORE = board visível do `VM_FAIL_0465.md` (main `c35e110`). AFTER = `storyboa
 | 10 | quote | 26.03 | 1.48 | 27.51 | Empty file, empty crew. |
 | 11 | cta | 27.67 | 2.50 | 30.17 | Subscribe · CrewAI same series |
 
-**Gate B:** `PASS` / result `PASS`
+**Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** (none)
+**kinds:** sentence_too_long
 
 **reasons:**
 
-- (none)
+- [B] Sentence too long: FAIL — sentence_too_long: card 3 'The crew runner only moves what that file declares.' spoken 3.52s (first word 9.61s–last word 13.13s; max 3.0s) — split the sentence; sentence_too_long: card 8 'The crew logs will not fill a blank file.' spoken 3.52s (first word 19.22s–last word 22.74s; max 3.0s) — split the sentence. A cap_extended_spoken or literal-quote card may not cover more than 3.0s of speech (first word to last word) — split the sentence.
 

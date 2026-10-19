@@ -571,32 +571,47 @@ ok(float(q["dur"]) > craft.MID_BEAT_MAX_S, "literal quote exceeds mid cap")
 ok("stale_card" not in s1452["after_kinds"] or not any(
     "beat[2]" in r and "mid card" in r for r in (s1452["ga"].get("reasons") or [])),
    "Gate B does not FAIL the CAPIError quote for the cap")
-ok(s1452["ga"]["checks"]["B"] == "PASS" and s1452["ga"]["checks"]["C"] == "PASS"
-   and s1452["ga"]["result"] == "PASS",
-   f"#1452 AFTER Gate B+C PASS ({s1452['ga'].get('reasons')})")
+ok(s1452["ga"]["checks"]["C"] == "PASS",
+   f"#1452 AFTER Gate C PASS ({s1452['ga'].get('reasons')})")
 ok("blank_gap" not in s1452["after_kinds"] and "slide_spam" not in s1452["after_kinds"],
    f"#1452 AFTER no blank_gap/slide_spam ({s1452['after_kinds']})")
+ok(s1452["ga"]["checks"]["B"] == "FAIL"
+   and "sentence_too_long" in s1452["after_kinds"],
+   f"#1452 AFTER Gate B FAIL sentence_too_long "
+   f"({s1452['after_kinds']} {s1452['ga'].get('reasons')})")
+ok(any("CAPIError" in (h.get("detail") or "")
+       or "maximum of 4 blocks" in (h.get("detail") or "")
+       for h in craft.sentence_too_long_hits(s1452["after"], w1452, ALLOW1452)),
+   "#1452 CAPIError quote spoken ~3.06s (8.04–11.1) is sentence_too_long")
 ok(s1465["hook_before"] > 5, f"#1465 BEFORE hook frozen ({s1465['hook_before']}s)")
 ok(s1465["hook_after"] <= 4.1, f"#1465 AFTER hook ≤ ~4s ({s1465['hook_after']})")
 ok("stale_card" not in s1465["after_kinds"] or s1465["hook_after"] <= 4.1,
    "#1465 AFTER hook is not the stale hit")
-ok(s1465["ga"]["result"] == "PASS" and s1465["ga"]["checks"]["B"] == "PASS",
-   f"#1465 AFTER Gate B PASS ({s1465['ga'].get('reasons')})")
-ok("blank_gap" not in s1465["after_kinds"],
-   f"#1465 AFTER no blank_gap ({s1465['after_kinds']})")
+ok(s1465["ga"]["checks"]["B"] == "FAIL"
+   and "sentence_too_long" in s1465["after_kinds"],
+   f"#1465 AFTER Gate B FAIL sentence_too_long "
+   f"({s1465['after_kinds']} {s1465['ga'].get('reasons')})")
+ok("blank_gap" not in s1465["after_kinds"] and "slide_spam" not in s1465["after_kinds"],
+   f"#1465 AFTER no blank_gap/slide_spam ({s1465['after_kinds']})")
+ok(any("crew runner" in (h.get("detail") or "")
+       for h in craft.sentence_too_long_hits(s1465["after"], w1465)),
+   "#1465 'The crew runner…' spoken ~3.52s is sentence_too_long")
 ok("allowlist_required" in s1453["before_kinds"] or s1453["before_B"] == "FAIL",
    "#1453 topic 47 without allowlist is a Gate B FAIL")
 ok(s1453["ga"]["checks"]["B"] == "FAIL"
-   and s1453["after_kinds"] == ["allowlist_required"],
-   f"#1453 AFTER only allowlist_required ({s1453['after_kinds']} {s1453['ga'].get('reasons')})")
+   and "allowlist_required" in s1453["after_kinds"]
+   and "sentence_too_long" in s1453["after_kinds"],
+   f"#1453 AFTER allowlist_required + sentence_too_long "
+   f"({s1453['after_kinds']} {s1453['ga'].get('reasons')})")
 ok(s1453["ga"]["checks"]["C"] == "PASS", "#1453 AFTER Gate C PASS")
 q1453 = next((b for b in s1453["after"]
               if "optional keys are left out" in (b.get("text") or "")), None)
 ok(q1453 is not None, "#1453 AFTER has the long registration sentence")
-ok(float(q1453["dur"]) < 4.5
-   and not any(h.get("check") == "sentence_too_long"
-               for h in craft.sentence_too_long_hits(s1453["after"], w1453)),
-   f"#1453 ~{float(q1453['dur']):.2f}s hold (18.42–22.38) is under 4.5s")
+ok(any(h.get("check") == "sentence_too_long"
+       and "optional keys" in (h.get("detail") or "")
+       for h in craft.sentence_too_long_hits(s1453["after"], w1453)),
+   f"#1453 ~{float(q1453['dur']):.2f}s hold (18.42–22.38) FAILs 3.0s "
+   f"sentence_too_long")
 
 index = [
     "# Gate B before/after — OS #1452, #1453, #1465",
@@ -612,7 +627,7 @@ index = [
     "card plain segura até a última palavra falada + 0,3s (nunca na frase "
     "seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem "
     "`blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` "
-    "(4,5s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.",
+    "(3,0s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.",
     "",
     "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): "
     "statement/list que só reexibe a narração sem tipo rico "

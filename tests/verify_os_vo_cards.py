@@ -295,12 +295,12 @@ gx = craft.video_maker_gate(ext, beat_timing=craft.BEAT_TIMING_CURRENT, words=pw
                             script=SCRIPT, brand="os")
 ok(not any("mid card" in r and "beat[1]" in r for r in (gx.get("reasons") or [])),
    f"Gate B does not FAIL cap_extended_spoken for the cap ({gx.get('reasons')})")
-ok(not any(h.get("check") == "sentence_too_long"
-           for h in craft.sentence_too_long_hits(ext, pw)),
-   "existing ~4.45s cap_extended_spoken is under the 4.5s hard limit")
+ok(any(h.get("check") == "sentence_too_long"
+       for h in craft.sentence_too_long_hits(ext, pw)),
+   "existing ~4.45s cap_extended_spoken FAILs the 3.0s hard limit")
 
-print("sentence_too_long: 4.5s passes, 4.51s fails (plain + quote)")
-ok(craft.SENTENCE_SPOKEN_MAX_S == 4.5, "SENTENCE_SPOKEN_MAX_S = 4.5")
+print("sentence_too_long: 3.0s passes, 3.01s fails (plain + quote)")
+ok(craft.SENTENCE_SPOKEN_MAX_S == 3.0, "SENTENCE_SPOKEN_MAX_S = 3.0")
 
 
 def _spoken_words(text, t0, spoken):
@@ -336,28 +336,28 @@ def _span_board(text, words, *, literal=False, cap_ext=False):
 SENT_HOLD = "Exact version in the description."
 for kind, kw in (("plain cap_extended_spoken", {"cap_ext": True}),
                  ("literal quote", {"literal": True})):
-    w45 = _spoken_words(SENT_HOLD, 1.0, 4.5)
-    b45 = _span_board(SENT_HOLD, w45, **kw)
-    span45 = craft.spoken_span(SENT_HOLD, w45)
-    ok(abs((span45[1] - span45[0]) - 4.5) < 1e-3, f"{kind} 4.5s span measured")
-    h45 = craft.sentence_too_long_hits(b45, w45)
-    g45 = craft.video_maker_gate(b45, beat_timing=craft.BEAT_TIMING_CURRENT,
-                                 words=w45, script=SCRIPT, brand="os")
-    ok(not h45 and not any("sentence_too_long" in r for r in (g45.get("reasons") or [])),
-       f"{kind} 4.50s spoken span PASSES sentence_too_long")
-    w451 = _spoken_words(SENT_HOLD, 1.0, 4.51)
-    b451 = _span_board(SENT_HOLD, w451, **kw)
-    h451 = craft.sentence_too_long_hits(b451, w451)
-    g451 = craft.video_maker_gate(b451, beat_timing=craft.BEAT_TIMING_CURRENT,
-                                  words=w451, script=SCRIPT, brand="os")
-    ok(h451 and h451[0]["check"] == "sentence_too_long"
-       and "Exact version in the description." in h451[0]["detail"]
-       and "4.51" in h451[0]["detail"],
-       f"{kind} 4.51s names the sentence and duration ({h451})")
-    ok(g451["checks"]["B"] == "FAIL"
-       and any("sentence_too_long" in r for r in (g451.get("reasons") or []))
-       and any(k.get("check") == "sentence_too_long" for k in (g451.get("kinds") or [])),
-       f"{kind} 4.51s Gate B FAIL sentence_too_long")
+    w30 = _spoken_words(SENT_HOLD, 1.0, 3.0)
+    b30 = _span_board(SENT_HOLD, w30, **kw)
+    span30 = craft.spoken_span(SENT_HOLD, w30)
+    ok(abs((span30[1] - span30[0]) - 3.0) < 1e-3, f"{kind} 3.0s span measured")
+    h30 = craft.sentence_too_long_hits(b30, w30)
+    g30 = craft.video_maker_gate(b30, beat_timing=craft.BEAT_TIMING_CURRENT,
+                                 words=w30, script=SCRIPT, brand="os")
+    ok(not h30 and not any("sentence_too_long" in r for r in (g30.get("reasons") or [])),
+       f"{kind} 3.00s spoken span PASSES sentence_too_long")
+    w301 = _spoken_words(SENT_HOLD, 1.0, 3.01)
+    b301 = _span_board(SENT_HOLD, w301, **kw)
+    h301 = craft.sentence_too_long_hits(b301, w301)
+    g301 = craft.video_maker_gate(b301, beat_timing=craft.BEAT_TIMING_CURRENT,
+                                  words=w301, script=SCRIPT, brand="os")
+    ok(h301 and h301[0]["check"] == "sentence_too_long"
+       and "Exact version in the description." in h301[0]["detail"]
+       and "3.01" in h301[0]["detail"],
+       f"{kind} 3.01s names the sentence and duration ({h301})")
+    ok(g301["checks"]["B"] == "FAIL"
+       and any("sentence_too_long" in r for r in (g301.get("reasons") or []))
+       and any(k.get("check") == "sentence_too_long" for k in (g301.get("kinds") or [])),
+       f"{kind} 3.01s Gate B FAIL sentence_too_long")
 
 # Weak-clause piece that echoes the previous sentence is not its own card
 # (#1453: "Registration works" after "…and registration works.").

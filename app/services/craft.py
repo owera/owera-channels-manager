@@ -1089,10 +1089,11 @@ OS_VO_SENTENCE_CARDS = True
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
-# CMO: a cap_extended_spoken plain VO card or a literal quote that holds
-# its whole spoken span FAILs Gate B (sentence_too_long) when first word
-# → last word exceeds this. The generator is unchanged; the script splits.
-SENTENCE_SPOKEN_MAX_S = 4.5
+# CMO + VM (final): a cap_extended_spoken plain VO card or a literal quote
+# that holds its whole spoken span FAILs Gate B (sentence_too_long) when
+# first word → last word exceeds this. The generator is unchanged (still
+# splits strong-clause then comma/conjunction first); the script splits.
+SENTENCE_SPOKEN_MAX_S = 3.0
 # stale_card: leftover hold after the card's last spoken word (same budget
 # as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
 STALE_CARD_MAX_S = BLANK_GAP_MAX_S
@@ -1845,10 +1846,10 @@ def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
 
 
 def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
-    """cap_extended_spoken / literal-quote card whose spoken span > 4.5s.
+    """cap_extended_spoken / literal-quote card whose spoken span > 3.0s.
 
-    Spoken span = first word → last word (not the visual hold). A 4.50s
-    span passes; 4.51s FAILs. Hook / CTA are exempt. Regular mid cards
+    Spoken span = first word → last word (not the visual hold). A 3.00s
+    span passes; 3.01s FAILs. Hook / CTA are exempt. Regular mid cards
     that do not hold the whole span are not this check.
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
@@ -5349,10 +5350,10 @@ def card_vo_check_hits(card_vo: dict | None) -> list[str]:
 # sentence is spoken within one card hold + its lead (2.8s + 1.1s ≈ 3.9s);
 # continuation cards stay the exception. Soft target only — the script
 # generator asks once for a rewrite and the render logs/records the measure.
-# Gate B hard fail for a whole-span hold is SENTENCE_SPOKEN_MAX_S (4.5s).
+# Gate B hard fail for a whole-span hold is SENTENCE_SPOKEN_MAX_S (3.0s).
 SENTENCE_SPOKEN_SOFT_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
 SPOKEN_WORDS_PER_S = 3.2  # edge-tts pt-BR/en ~3.1–3.5 w/s (#1423); low = conservative
-SENTENCE_MAX_WORDS = 12  # pinned to the 3.9s soft rewrite (not 4.5)
+SENTENCE_MAX_WORDS = 12  # pinned to the 3.9s soft rewrite (not the 3.0s hard fail)
 
 
 def long_spoken_sentences(script: str | None, words=None,
