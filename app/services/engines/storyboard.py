@@ -3597,16 +3597,60 @@ def _os_vo_sentence_beats(*, subject, script) -> list[dict]:
     return beats
 
 
-def _snap_os_cards_to_speech(beats, words, script=None) -> None:
+def _clamp_os_cta_to_duration(beats, duration) -> bool:
+    """After OS snap: CTA must end at or before ``duration`` (shrink dur, keep start).
+
+    ``_cap_endcard`` pins the chip to the tail first; ``_snap_os_cards_to_speech``
+    may then push ``cta.start`` later without shrinking ``dur``, which overruns
+    the video and FAILs ``cta_after_video_end`` on every new OS board. Keep a
+    ``_MIN_DUR`` visible chip. If start is already past the video (sync left
+    the chip stranded after mids snapped back), pull it onto the tail after
+    the last card. If even that slot is shorter than ``_MIN_DUR``, return
+    False and do not write an overrun (compose fails closed).
+    """
+    from app.services import craft
+    if duration is None or not beats:
+        return True
+    cta = beats[-1]
+    if (cta.get("type") or "") not in craft.CTA_TYPES:
+        return True
+    try:
+        start = float(cta.get("start") or 0)
+        dur = float(cta.get("dur") or 0)
+        limit = float(duration)
+    except (TypeError, ValueError):
+        return True
+    if start + _MIN_DUR > limit + 1e-9:
+        prev_end = 0.0
+        if len(beats) >= 2:
+            try:
+                prev_end = (float(beats[-2].get("start") or 0)
+                            + float(beats[-2].get("dur") or 0))
+            except (TypeError, ValueError):
+                prev_end = 0.0
+        need = prev_end + _GAP
+        hold = min(max(_MIN_DUR, dur), _ENDCARD_MAX, limit - need)
+        if hold < _MIN_DUR - 1e-9:
+            return False
+        cta["start"] = round(limit - hold, 3)
+        cta["dur"] = round(hold, 3)
+        return True
+    if start + dur > limit + 1e-9:
+        cta["dur"] = round(limit - start, 3)
+    return True
+
+
+def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
     """OS VO-sentence cards: each mid card starts on its first spoken word.
 
     Align / sync can leave a sentence card several seconds late (the hook
     ate the window). Snap mids to ``spoken_span`` then pack overlaps so
     card sync and stale_card stay clean. Literal quotes are timed separately.
+    After the CTA start push, clamp end to ``duration`` (do not overrun).
     """
     from app.services import craft
     if not beats or not words:
-        return
+        return True
     for i, b in enumerate(beats):
         typ = b.get("type") or ""
         if typ == "hook" or typ in craft.CTA_TYPES or b.get("literal_quote"):
@@ -3653,7 +3697,10 @@ def _snap_os_cards_to_speech(beats, words, script=None) -> None:
         if span:
             need = max(need, float(span[1]) + _GAP)
         if cta_st < need - 1e-6:
+            if duration is not None and need + _MIN_DUR > float(duration) + 1e-9:
+                return False
             cta["start"] = round(need, 3)
+    return _clamp_os_cta_to_duration(beats, duration)
 
 
 def _cap_os_hook(beats, words, script=None) -> None:
@@ -4232,17 +4279,27 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         _time_literal_quotes(beats, words, sources if literal else None)
         if os_vo:
             _cap_os_hook(beats, words, script)
-            _snap_os_cards_to_speech(beats, words, script)
+            if not _snap_os_cards_to_speech(beats, words, script, duration):
+                logger.info("storyboard: OS CTA cannot fit in %.2fs after snap — fail closed",
+                            float(duration or 0))
+                return None
             _drop_os_term_cards(beats, sources)
         os_brand = (brand or th.get("brand") or "") == "os"
         if (os_brand or literal) and not teaser:
             _plain_os_literal_mids(beats, script, sources, os=os_brand,
                                    literal=literal, slips=slips)
             if os_brand and not os_vo:
-                _snap_os_cards_to_speech(beats, words, script)
+                if not _snap_os_cards_to_speech(beats, words, script, duration):
+                    logger.info("storyboard: OS CTA cannot fit in %.2fs after snap — fail closed",
+                                float(duration or 0))
+                    return None
             if os_vo:
                 _os_cover_spoken_holes(beats, script, words, slips)
             _fill_blank_gaps(beats, script, words, slips)
+            if os_brand and not _clamp_os_cta_to_duration(beats, duration):
+                logger.info("storyboard: OS CTA cannot fit in %.2fs — fail closed",
+                            float(duration or 0))
+                return None
         if literal:
             # timing/sync fillers are narration words: never dressed as a quotation
             _plain_unsourced_quotes(beats, script, sources, slips)

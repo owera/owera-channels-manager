@@ -458,5 +458,78 @@ ok(craft.CODE_READ_MIN_S == 1.2 and craft.CARD_ENTER_LEAD_MAX_S == 0.3,
    "code-read floor 1.2s; enter-lead max 0.3s")
 
 
+print("CTA clamp after OS snap (no video overrun)")
+# Generic: _cap_endcard pins CTA to duration; snap pushes start later.
+gen_words = [
+    {"text": "Hello", "start": 14.0, "dur": 0.4},
+    {"text": "world", "start": 14.5, "dur": 0.5},
+    {"text": "this", "start": 15.1, "dur": 0.3},
+    {"text": "is", "start": 15.5, "dur": 0.3},
+    {"text": "speech", "start": 16.0, "dur": 0.4},
+]
+gen = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook line here.",
+     "object": "terminal"},
+    {"type": "quote", "start": 2.12, "dur": 2.5,
+     "text": "Hello world this is speech"},
+    {"type": "cta", "start": 16.22, "dur": 3.78, "text": "Subscribe · Agent traps"},
+]
+storyboard._cap_endcard(gen, 20.0, gen_words)
+# Pretend snap has not run: pin CTA end to 20.0, then push start later.
+gen[-1]["start"] = 16.22
+gen[-1]["dur"] = 3.78  # end 20.0
+ok(abs(float(gen[-1]["start"]) + float(gen[-1]["dur"]) - 20.0) < 1e-6,
+   "generic CTA is pinned to duration before snap")
+ok(storyboard._snap_os_cards_to_speech(gen, gen_words, duration=20.0) is True,
+   "generic snap+clamp succeeds")
+cta_end = float(gen[-1]["start"]) + float(gen[-1]["dur"])
+ok(cta_end <= 20.0 + 1e-6, f"generic CTA ends at {cta_end:.2f} ≤ 20.00")
+ok(float(gen[-1]["dur"]) + 1e-9 >= storyboard._MIN_DUR,
+   f"generic CTA keeps min visibility ({gen[-1]['dur']})")
+ok(not craft.cta_after_video_end_hits(gen, 20.0),
+   "generic board has no cta_after_video_end")
+
+# #1453 revised board: last mid + CTA pinned to 31.24, snap pushes start.
+from tests.os_gate_b_real_vo import snapshot_script, whisper_words
+S1453 = snapshot_script(1453)
+w1453 = whisper_words(1453)
+D1453 = 31.24
+rev = [
+    {"type": "hook", "start": 0.0, "dur": 2.56, "text": "One type hint broke MCP tools.",
+     "object": "terminal"},
+    {"type": "quote", "start": 25.04, "dur": 2.48, "text": "Old Python in prod?"},
+    {"type": "quote", "start": 27.12, "dur": 1.20, "text": "Test registration there."},
+    {"type": "cta", "start": 27.46, "dur": 3.78, "text": "Subscribe · Agent traps"},
+]
+storyboard._cap_endcard(rev, D1453, w1453)
+rev[-1]["start"] = round(D1453 - 3.78, 3)
+rev[-1]["dur"] = 3.78
+ok(abs(float(rev[-1]["start"]) + float(rev[-1]["dur"]) - D1453) < 1e-6,
+   f"#1453 revised CTA pinned to {D1453} before snap")
+ok(storyboard._snap_os_cards_to_speech(rev, w1453, S1453, duration=D1453) is True,
+   "#1453 revised snap+clamp succeeds")
+rev_end = float(rev[-1]["start"]) + float(rev[-1]["dur"])
+ok(rev_end <= D1453 + 1e-6, f"#1453 revised CTA ends at {rev_end:.2f} ≤ {D1453}")
+ok(float(rev[-1]["dur"]) + 1e-9 >= storyboard._MIN_DUR,
+   f"#1453 revised CTA keeps min visibility ({rev[-1]['dur']})")
+ok(not craft.cta_after_video_end_hits(rev, D1453),
+   "#1453 revised board has no cta_after_video_end")
+
+# Cannot fit: last spoken + gap leaves less than _MIN_DUR before duration.
+tight = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook line here.",
+     "object": "terminal"},
+    {"type": "quote", "start": 14.0, "dur": 2.5,
+     "text": "Hello world this is speech"},
+    {"type": "cta", "start": 14.22, "dur": 3.78, "text": "Subscribe · Agent traps"},
+]
+ok(storyboard._snap_os_cards_to_speech(tight, gen_words, duration=16.8) is False,
+   "CTA that cannot keep min visibility FAILs closed")
+# Fail-closed: compose returns None. Do not ship start+dur past duration.
+ok(float(tight[-1]["start"]) + storyboard._MIN_DUR > 16.8 + 1e-9
+   or float(tight[-1]["start"]) + float(tight[-1]["dur"]) > 16.8 + 1e-6,
+   "cannot-fit does not accept an overrun as success")
+
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")

@@ -13,8 +13,8 @@ Checks novos: `card_exits_early`, `card_enters_early` (lead > 0,3s), `card_overl
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
-| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, cta_after_video_end, code_read_too_short | 2.33s | 2.38s |
-| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, blank_gap, sentence_too_long, card_exits_early, cta_after_video_end, allowlist_required | 2.33s | 2.56s |
+| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, code_read_too_short | 2.33s | 2.38s |
+| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, allowlist_required, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required | 2.33s | 2.56s |
 | #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source | 7.43s | 3.62s |
 
 Tabelas por vídeo abaixo.
@@ -71,18 +71,17 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 | 9 | quote | 22.32 | 2.16 | 24.48 | Exact version in the description. |
 | 10 | quote | 24.60 | 1.46 | 26.06 | Subagent came back empty? |
 | 11 | quote | 26.18 | 2.10 | 28.28 | Read its error, not the parent's. |
-| 12 | cta | 28.54 | 2.47 | 31.01 | Subscribe · Agent traps same series |
+| 12 | cta | 28.54 | 2.05 | 30.59 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, sentence_too_long, card_exits_early, cta_after_video_end, code_read_too_short
+**kinds:** beat_hold, sentence_too_long, card_exits_early, code_read_too_short
 
 **reasons:**
 
 - [B] Beats ≤3.0s incl. fade: FAIL — beat[3] type=quote mid card 3.98s incl. fade (hold 3.78s + 0.20s fade; limit 3.0s); beat[8] type=quote mid card 4.04s incl. fade (hold 3.84s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
 - [B] Sentence too long: FAIL — sentence_too_long: card 3 'A maximum of 4 blocks with cache_control may be provided.' spoken 3.54s (first word 8.04s–last word 11.58s; max 3.0s) — split the sentence; sentence_too_long: card 8 'and Anthropic subagents keep working with extra directories.' spoken 3.72s (first word 18.36s–last word 22.08s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
 - [B] Card exits early: FAIL — card_exits_early: card 2 ends at 7.62s, last spoken word at 7.96s (must hold through the last word); card_exits_early: card 7 ends at 18.24s, last spoken word at 18.36s (must hold through the last word). A card must hold through its last spoken word.
-- [B] CTA after video end: FAIL — cta_after_video_end: card 12 CTA ends at 31.01s, video ends at 30.59s. The CTA must end at or before the video duration.
 - [B] Code read time: FAIL — code_read_too_short: card 4 'Found 5.' held 0.84s (min 1.2s to read a code/command line). Code/command cards need ≥1.2s on screen.
 
 ---
@@ -138,19 +137,18 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 | 8 | quote | 23.24 | 1.68 | 24.92 | Exact version in the description. |
 | 9 | quote | 25.04 | 1.68 | 26.72 | Old Python in prod? |
 | 10 | quote | 27.12 | 1.20 | 28.32 | Test registration there. |
-| 11 | cta | 32.86 | 2.94 | 35.80 | Subscribe · Agent traps same series |
+| 11 | cta | 28.44 | 2.32 | 30.76 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, blank_gap, sentence_too_long, card_exits_early, cta_after_video_end, allowlist_required
+**kinds:** beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required
 
 **reasons:**
 
 - [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 4.42s incl. fade (hold 4.22s + 0.20s fade; limit 3.0s); beat[7] type=quote mid card 3.58s incl. fade (hold 3.38s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Blank gap: FAIL — beat[6]→beat[7] hole at 18.24s of 1.48s (1.36s beyond 0.12s fade; max 0.50s extra); beat[10]→beat[11] hole at 28.32s of 4.54s (4.42s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
+- [B] Blank gap: FAIL — beat[6]→beat[7] hole at 18.24s of 1.48s (1.36s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
 - [B] Sentence too long: FAIL — sentence_too_long: card 2 'a tool that returns a TypedDict with a NotRequired key failed at registration' spoken 4.34s (first word 4.28s–last word 8.62s; max 3.0s) — split the sentence; sentence_too_long: card 7 'and optional keys are left out instead of sent as null.' spoken 3.08s (first word 19.72s–last word 22.80s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
 - [B] Card exits early: FAIL — card_exits_early: card 2 ends at 8.50s, last spoken word at 8.62s (must hold through the last word); card_exits_early: card 8 ends at 24.92s, last spoken word at 25.04s (must hold through the last word). A card must hold through its last spoken word.
-- [B] CTA after video end: FAIL — cta_after_video_end: card 11 CTA ends at 35.80s, video ends at 30.76s. The CTA must end at or before the video duration.
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
 
 ---
