@@ -1606,6 +1606,26 @@ def blank_gap_hits(beats, duration=None) -> list[str]:
     return hits
 
 
+def _card_spoken_text(b, sources=None) -> str:
+    """TTS text that maps a card onto word timings.
+
+    Allowlisted source cards (on-screen text byte-identical to an
+    on_screen_allow error/log/command/code entry) are not spoken by design.
+    Their spoken span is the cue. A CLI card that is not on that list maps
+    via its on-screen copy (so a 1-char drift still FAILs unspoken). Empty
+    or unspoken cue on an allowlisted card also FAILs.
+    """
+    typ = (b.get("type") or "") if isinstance(b, dict) else ""
+    if typ in CLI_BEAT_TYPES:
+        screen = source_card_screen_text(b)
+        if screen:
+            if is_allowlisted_source_card(b, sources):
+                cue = str(b.get("cue") or "").strip()
+                return cue or screen
+            return screen
+    return (b.get("text") or b.get("cue") or beat_screen_text(b)) if isinstance(b, dict) else ""
+
+
 def spoken_span(text, words) -> tuple[float, float] | None:
     """(first_word_start, last_word_end) of ``text`` in TTS words, or None."""
     ct = _sync_toks(text)
@@ -1853,12 +1873,13 @@ def quote_like_text(beat: dict | None) -> str | None:
     return None
 
 
-def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def quote_before_speech_hits(beats, words, sources=None, *,
+                             fail_closed: bool = True) -> list[dict]:
     """Quote / quote-like log card that appears before its first spoken word.
 
     FAIL when start < first-word start − SYNC_TOL_S (0.05s). No lead.
     ``fail_closed`` (OS): missing words / no spoken span FAIL. RR stays
-    fail-open (empty / continue).
+    fail-open (empty / continue). Allowlisted source cards map via the cue.
     """
     out: list[dict] = []
     board = [b for b in (beats or []) if isinstance(b, dict)]
@@ -1870,10 +1891,11 @@ def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[
             continue
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        span = spoken_span(text, words)
+        spoken = _card_spoken_text(b, sources)
+        span = spoken_span(spoken, words)
         if not span:
             if fail_closed:
-                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
+                out.append(_unspoken_card_hit(i, b.get("type") or "", spoken or text))
             continue
         start = _cue_start(b)
         if start < span[0] - SYNC_TOL_S - 1e-6:
@@ -1883,12 +1905,13 @@ def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[
     return out
 
 
-def stale_card_hits(beats, words, script: str | None = None, *,
+def stale_card_hits(beats, words, script: str | None = None, sources=None, *,
                     fail_closed: bool = True) -> list[dict]:
     """Card (including hook) still up > STALE_CARD_MAX_S after its last word.
 
     Maps the card to the spoken span of its on-screen / cue text (hook: the
-    claim). CTA/endcard is exempt (it holds the closer through video end).
+    claim). Allowlisted source cards map via the cue. CTA/endcard is exempt
+    (it holds the closer through video end).
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1900,7 +1923,7 @@ def stale_card_hits(beats, words, script: str | None = None, *,
         typ = b.get("type") or ""
         if typ in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if span is None and script and i == 0 and typ == "hook":
             # two-sentence title head: last word of the shown claim
@@ -1942,7 +1965,7 @@ def sentence_too_long_hits(beats, words, sources=None, *,
         typ = b.get("type") or ""
         if typ == "hook" or typ in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -1960,7 +1983,8 @@ def sentence_too_long_hits(beats, words, sources=None, *,
     return out
 
 
-def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def card_exits_early_hits(beats, words, sources=None, *,
+                          fail_closed: bool = True) -> list[dict]:
     """Card ends before its last spoken word (timing defect)."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1971,7 +1995,7 @@ def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dic
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -1987,7 +2011,8 @@ def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dic
     return out
 
 
-def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def card_enters_early_hits(beats, words, sources=None, *,
+                           fail_closed: bool = True) -> list[dict]:
     """Card appears more than CARD_ENTER_LEAD_MAX_S before its speech."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1998,7 +2023,7 @@ def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[di
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -2133,11 +2158,11 @@ def card_timing_hits(beats, words, script: str | None = None,
                      sources=None, duration=None, *,
                      fail_closed: bool = True) -> list[dict]:
     """stale_card + quote_before_speech + sentence_too_long + timing defects."""
-    return (quote_before_speech_hits(beats, words, fail_closed=fail_closed)
-            + stale_card_hits(beats, words, script, fail_closed=fail_closed)
+    return (quote_before_speech_hits(beats, words, sources, fail_closed=fail_closed)
+            + stale_card_hits(beats, words, script, sources, fail_closed=fail_closed)
             + sentence_too_long_hits(beats, words, sources, fail_closed=fail_closed)
-            + card_exits_early_hits(beats, words, fail_closed=fail_closed)
-            + card_enters_early_hits(beats, words, fail_closed=fail_closed)
+            + card_exits_early_hits(beats, words, sources, fail_closed=fail_closed)
+            + card_enters_early_hits(beats, words, sources, fail_closed=fail_closed)
             + card_time_overlap_hits(beats)
             + cta_after_video_end_hits(beats, duration)
             + code_read_too_short_hits(beats))
@@ -2988,6 +3013,10 @@ def fabricated_cli(beats, script: str | None) -> list[dict]:
 LITERAL_V1 = "lit_v1"
 ON_SCREEN_KINDS = ("log", "error", "command", "quote", "stat")
 CLI_ALLOW_KINDS = frozenset({"log", "error", "command"})
+# Source-card unspoken exemption: on-screen text must be byte-identical to
+# an on_screen_allow entry of one of these kinds. "code" is accepted as a
+# kind alias (beat type code; on_screen_allow otherwise drops unknown kinds).
+SOURCE_CARD_ALLOW_KINDS = frozenset({"error", "log", "command", "code"})
 _SRC_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
                            "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u00ab": '"',
                            "\u00bb": '"', "\u2010": "-", "\u2011": "-", "\u2012": "-",
@@ -3104,6 +3133,51 @@ def _allow_lines(allow, kinds=None):
         if kinds and e["kind"] not in kinds:
             continue
         yield e, [e["text"]] + [x for x in e["text"].splitlines() if x.strip()]
+
+
+def source_card_allow_texts(allow) -> tuple[str, ...]:
+    """Exact on_screen_allow texts for source-card kinds (error/log/command/code).
+
+    Byte-identical match only — no fold, no ellipsis cut. Kind ``code`` is
+    read from the raw list because ``on_screen_allow`` drops unknown kinds.
+    """
+    out, seen = [], set()
+
+    def _add(text):
+        if isinstance(text, str) and text not in seen:
+            seen.add(text)
+            out.append(text)
+
+    for e in on_screen_allow(allow):
+        if e["kind"] in SOURCE_CARD_ALLOW_KINDS:
+            _add(e["text"])
+    raw = parse_allowlist_md(allow) if isinstance(allow, str) else allow
+    if isinstance(raw, list):
+        for x in raw:
+            if not isinstance(x, dict):
+                continue
+            if str(x.get("kind") or "").strip().lower() == "code":
+                _add(x.get("text"))
+    return tuple(out)
+
+
+def source_card_screen_text(beat: dict | None) -> str | None:
+    """On-screen CLI copy used for the source-card allowlist match."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") not in CLI_BEAT_TYPES:
+        return None
+    lines = cli_lines(beat)
+    if lines:
+        return lines[0] if len(lines) == 1 else " ".join(lines)
+    t = beat.get("text")
+    return str(t) if t else None
+
+
+def is_allowlisted_source_card(beat: dict | None, sources) -> bool:
+    """True when the card's on-screen text is byte-identical to a source entry."""
+    screen = source_card_screen_text(beat)
+    if screen is None or sources is None:
+        return False
+    return any(screen == t for t in source_card_allow_texts(sources))
 
 
 def source_literal(text, allow, kinds=None) -> bool:
