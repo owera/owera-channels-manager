@@ -9,7 +9,7 @@ Checks novos: `card_exits_early`, `card_enters_early` (lead > 0,3s), `card_overl
 
 `slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`).
 
-Âncoras: timestamps whisper reais em `tests/fixtures/os-gate-b/whisper-2026-10-19.json` (sem interpolação; pin que não casa uma palavra falha).
+Âncoras: timestamps whisper reais + visibilidade BEFORE (mp4, 30fps) em `tests/fixtures/os-gate-b/whisper-2026-10-19.json` (sem interpolação; pin que não casa uma palavra falha). Hold visual cruza com essa lista.
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
