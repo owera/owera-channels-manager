@@ -1666,8 +1666,11 @@ def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
 
 
 def is_spoken_span_hold(beat: dict | None, words=None, sources=None) -> bool:
-    """Mid-cap exception: literal quote, or a plain VO card flagged / timed
-    as ``cap_extended_spoken`` (holds last spoken word + QUOTE_HOLD_TAIL_S)."""
+    """Generator timing helper: literal quote / cap_extended_spoken.
+
+    Gate B visual hold (``video_maker_gate`` mid ≤3.0s incl. fade) does
+    **not** use this — every mid card, quotes included, FAILs over the cap.
+    """
     if is_literal_quote_beat(beat, sources):
         return True
     if not isinstance(beat, dict):
@@ -1803,6 +1806,12 @@ def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[di
         if typ in CTA_TYPES:
             prev = None
             continue
+        # Hook (incl. a two-sentence title head) is Gate A / overlay claim —
+        # not an OS mid-card literal. #1465: "The crew failed the handoff.
+        # tasks.yaml was empty." must not FAIL card_text_not_literal.
+        if i == 0 and typ == "hook":
+            prev = None
+            continue
         shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
         if typ in OS_BANNED_COMPARE or typ in OS_BANNED_LIST:
             out.append({"i": i, "check": "vs_card_not_allowed",
@@ -1844,19 +1853,27 @@ def quote_like_text(beat: dict | None) -> str | None:
     return None
 
 
-def quote_before_speech_hits(beats, words) -> list[dict]:
+def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
     """Quote / quote-like log card that appears before its first spoken word.
 
     FAIL when start < first-word start − SYNC_TOL_S (0.05s). No lead.
+    ``fail_closed`` (OS): missing words / no spoken span FAIL. RR stays
+    fail-open (empty / continue).
     """
     out: list[dict] = []
     board = [b for b in (beats or []) if isinstance(b, dict)]
+    if board and not words:
+        return [_missing_words_hit()] if fail_closed else []
     for i, b in enumerate(board):
         text = quote_like_text(b)
         if not text:
             continue
+        if (b.get("type") or "") in CTA_TYPES:
+            continue
         span = spoken_span(text, words)
         if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
             continue
         start = _cue_start(b)
         if start < span[0] - SYNC_TOL_S - 1e-6:
@@ -1866,7 +1883,8 @@ def quote_before_speech_hits(beats, words) -> list[dict]:
     return out
 
 
-def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
+def stale_card_hits(beats, words, script: str | None = None, *,
+                    fail_closed: bool = True) -> list[dict]:
     """Card (including hook) still up > STALE_CARD_MAX_S after its last word.
 
     Maps the card to the spoken span of its on-screen / cue text (hook: the
@@ -1874,8 +1892,10 @@ def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
-    if not board or not words:
+    if not board:
         return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
     for i, b in enumerate(board):
         typ = b.get("type") or ""
         if typ in CTA_TYPES:
@@ -1886,6 +1906,8 @@ def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
             # two-sentence title head: last word of the shown claim
             span = spoken_span(text, words)
         if span is None:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, typ, text))
             continue
         end = _cue_start(b) + _cue_span(board, i)
         leftover = end - span[1]
@@ -1901,7 +1923,8 @@ def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
     return out
 
 
-def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
+def sentence_too_long_hits(beats, words, sources=None, *,
+                           fail_closed: bool = True) -> list[dict]:
     """Any mid card whose spoken span > 3.0s, quotes included.
 
     Spoken span = first word → last word (not the visual hold). A 3.00s
@@ -1911,8 +1934,10 @@ def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
-    if not board or not words:
+    if not board:
         return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
     for i, b in enumerate(board):
         typ = b.get("type") or ""
         if typ == "hook" or typ in CTA_TYPES:
@@ -1920,6 +1945,8 @@ def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
         text = b.get("text") or b.get("cue") or beat_screen_text(b)
         span = spoken_span(text, words)
         if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, typ, text))
             continue
         secs = float(span[1]) - float(span[0])
         if secs > SENTENCE_SPOKEN_MAX_S + 1e-6:
@@ -1933,18 +1960,22 @@ def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
     return out
 
 
-def card_exits_early_hits(beats, words) -> list[dict]:
+def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
     """Card ends before its last spoken word (timing defect)."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
-    if not board or not words:
+    if not board:
         return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
         text = b.get("text") or b.get("cue") or beat_screen_text(b)
         span = spoken_span(text, words)
         if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
             continue
         end = _cue_start(b) + _cue_span(board, i)
         if end < float(span[1]) - SYNC_TOL_S - 1e-6:
@@ -1956,18 +1987,22 @@ def card_exits_early_hits(beats, words) -> list[dict]:
     return out
 
 
-def card_enters_early_hits(beats, words) -> list[dict]:
+def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
     """Card appears more than CARD_ENTER_LEAD_MAX_S before its speech."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
-    if not board or not words:
+    if not board:
         return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
         text = b.get("text") or b.get("cue") or beat_screen_text(b)
         span = spoken_span(text, words)
         if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
             continue
         start = _cue_start(b)
         lead = float(span[0]) - start
@@ -2075,11 +2110,17 @@ def code_read_too_short_hits(beats) -> list[dict]:
     return out
 
 
-def description_missing_source_hits(description) -> list[dict]:
-    """Description present but with no public http(s) source link."""
-    if description is None:
+def description_missing_source_hits(description, *, required: bool = False) -> list[dict]:
+    """Description with no public http(s) source link.
+
+    ``description is None`` and ``required=False`` is a no-op (compose time,
+    before metadata exists). After the description exists — post-render
+    craft_review / approve, or ``required=True`` for OS — missing text or
+    a missing public URL is a FAIL.
+    """
+    if description is None and not required:
         return []
-    text = str(description)
+    text = str(description or "")
     if _PUBLIC_SOURCE_RE.search(text):
         return []
     return [{"i": None, "check": "description_missing_source",
@@ -2087,25 +2128,48 @@ def description_missing_source_hits(description) -> list[dict]:
 
 
 def card_timing_hits(beats, words, script: str | None = None,
-                     sources=None, duration=None) -> list[dict]:
+                     sources=None, duration=None, *,
+                     fail_closed: bool = True) -> list[dict]:
     """stale_card + quote_before_speech + sentence_too_long + timing defects."""
-    return (quote_before_speech_hits(beats, words)
-            + stale_card_hits(beats, words, script)
-            + sentence_too_long_hits(beats, words, sources)
-            + card_exits_early_hits(beats, words)
-            + card_enters_early_hits(beats, words)
+    return (quote_before_speech_hits(beats, words, fail_closed=fail_closed)
+            + stale_card_hits(beats, words, script, fail_closed=fail_closed)
+            + sentence_too_long_hits(beats, words, sources, fail_closed=fail_closed)
+            + card_exits_early_hits(beats, words, fail_closed=fail_closed)
+            + card_enters_early_hits(beats, words, fail_closed=fail_closed)
             + card_time_overlap_hits(beats)
             + cta_after_video_end_hits(beats, duration)
             + code_read_too_short_hits(beats))
 
 
+MISSING_WORDS_CHECK = "missing_word_timings"
+UNSPOKEN_CARD_CHECK = "unspoken_card"
+
+
+def _missing_words_hit() -> dict:
+    return {"i": None, "check": MISSING_WORDS_CHECK,
+            "detail": "no word timings — fail closed (cannot score card timing)"}
+
+
+def _unspoken_card_hit(i: int, typ: str, text) -> dict:
+    shown = str(text or "")[:60]
+    return {"i": i, "check": UNSPOKEN_CARD_CHECK,
+            "detail": f"card {i} type={typ} {shown!r} has no spoken span "
+                      "(fail closed — every mid card must map to word timings)"}
+
+
 def card_timing_marker(beats, words, script: str | None = None,
                        content_format: str | None = "short",
-                       duration=None, sources=None) -> dict | None:
-    if (content_format or "short") == "long" or not words:
+                       duration=None, sources=None, *,
+                       fail_closed: bool = True) -> dict | None:
+    if (content_format or "short") == "long":
+        return None
+    if not words:
+        if fail_closed:
+            return {"version": CARD_TIMING_V1, "hits": [_missing_words_hit()]}
         return None
     return {"version": CARD_TIMING_V1,
-            "hits": card_timing_hits(beats, words, script, sources, duration)}
+            "hits": card_timing_hits(beats, words, script, sources, duration,
+                                     fail_closed=fail_closed)}
 
 
 def card_timing_check_hits(card_timing: dict | None) -> list[str]:
@@ -3188,7 +3252,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      script: str | None = None,
                      words=None,
                      sources=None,
-                     description=None) -> dict:
+                     description=None,
+                     description_required: bool = False) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -3245,10 +3310,10 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
-        # CMO: a literal quote holds its whole spoken span (even past mid cap).
-        # cap_extended_spoken: last resort for a plain VO card whose spoken
-        # span exceeds the cap (hold last word + QUOTE_HOLD_TAIL_S).
-        if is_spoken_span_hold(b, words, sources):
+        # OS: every mid card, quotes included, visual hold + fade ≤ 3.0s.
+        # is_spoken_span_hold is a generator helper — it does not exempt
+        # an OS quote. RR keeps the spoken-span exemption (RR unchanged).
+        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources):
             continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
@@ -3376,10 +3441,14 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                 "verbatim on_screen_allow line."
             )
     timing_hits = card_timing_check_hits(card_timing)
+    _os_closed = (brand or "") == "os"
     if not timing_hits and words:
         timing_hits = [f"{h.get('check')}: {h.get('detail')}"
                        for h in card_timing_hits(board, words, script, sources,
-                                                 duration)]
+                                                 duration, fail_closed=_os_closed)]
+    elif not timing_hits and not words and _os_closed:
+        timing_hits = [f"{h.get('check')}: {h.get('detail')}"
+                       for h in [_missing_words_hit()]]
     named_timing = {
         "sentence_too_long": [],
         "card_exits_early": [],
@@ -3399,7 +3468,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     timing_hits = leftover_timing
     if not long_hits and words:
         long_hits = [f"{h.get('check')}: {h.get('detail')}"
-                     for h in sentence_too_long_hits(board, words, sources)]
+                     for h in sentence_too_long_hits(board, words, sources,
+                                                     fail_closed=_os_closed)]
     if timing_hits:
         checks["B"] = "FAIL"
         reasons.append(
@@ -3468,7 +3538,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". A comma list is not a clause split; rewrite the VO."
         )
     src_hits = [f"{h.get('check')}: {h.get('detail')}"
-                for h in description_missing_source_hits(description)]
+                for h in description_missing_source_hits(
+                    description, required=bool(description_required))]
     if src_hits:
         checks["B"] = "FAIL"
         reasons.append(
@@ -3671,12 +3742,14 @@ def gate_measurement_kinds(gate: dict | None) -> list[dict]:
 
 
 # PR #122 Gate B rules (blank_gap, 3.0s spoken cap, card_exits_early, …).
-# Written onto creation_config at compose/render. Recompute from a stored
-# snapshot (publish / approve / sweep / digest) only applies these rules
-# when the marker is present — pre-deploy boards keep their stored
-# craft_gate so an already-approved OS short is not rejected on deploy.
+# Written onto creation_config at compose/render (gate_version marker).
+# OS publish grandfather is a CLOSED ID list (app/data/gate_grandfather.json),
+# not "missing marker = old gate". RR pre-deploy snapshots still trust the
+# stored craft_gate so RR publish/approve behaviour is unchanged.
 GATE_B_RULES = "122"
 GATE_B_RULES_KEY = "gate_b_rules"
+GATE_CONTEXT_PUBLISH = "publish"
+GATE_CONTEXT_APPROVE = "approve"
 
 
 def applies_new_gate_b(creation_config) -> bool:
@@ -3695,19 +3768,116 @@ def is_pre_deploy_snapshot(creation_config) -> bool:
     return "composition_version" in cc or "beat_count" in cc
 
 
+def trust_stored_gate(creation_config, *, video_id=None, video=None,
+                      gate_context: str = GATE_CONTEXT_PUBLISH,
+                      brand: str | None = None) -> bool:
+    """Whether publish/approve should reuse the stored craft_gate.
+
+    OS: never on approve. On publish, only a closed-list grandfathered
+    id with a vm_pass that matches the current master. RR / other: a
+    pre-deploy HyperFrames snapshot (no gate_b_rules) keeps the stored
+    gate so RR behaviour does not change.
+    """
+    cc = _as_dict(creation_config)
+    brand = brand or cc.get("brand")
+    if (brand or "") == "os":
+        if gate_context == GATE_CONTEXT_APPROVE:
+            return False
+        from app.services.gate_grandfather import is_grandfathered
+        return is_grandfathered(video_id, video=video, creation_config=cc)
+    return is_pre_deploy_snapshot(cc)
+
+
 def _stored_craft_gate(creation_config) -> dict | None:
     stored = _as_dict(creation_config).get("craft_gate")
     return stored if isinstance(stored, dict) else None
 
 
+def gate_snapshot_kwargs(creation_config, *,
+                         description=None,
+                         description_required: bool = False,
+                         brand: str | None = None) -> dict:
+    """script / words / description / brand / sources persisted at compose."""
+    cc = _as_dict(creation_config)
+    words = cc.get("narration_words")
+    if not isinstance(words, list):
+        words = cc.get("words") if isinstance(cc.get("words"), list) else None
+    desc = description if description is not None else cc.get("description")
+    return {
+        "script": cc.get("script"),
+        "words": words,
+        "description": desc,
+        "description_required": bool(description_required),
+        "brand": brand or cc.get("brand"),
+        "sources": cc.get("on_screen_allow"),
+    }
+
+
+def _recompute_video_maker_gate(cc, content_format, *,
+                                description=None,
+                                description_required: bool = False,
+                                brand: str | None = None) -> dict:
+    beats = cc.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+    used_fallback = bool(cc.get("used_fallback"))
+    bt = cc.get("beat_timing")
+    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
+    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
+    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
+    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
+    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
+    cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
+    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
+    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
+    extra = gate_snapshot_kwargs(cc, description=description,
+                                 description_required=description_required,
+                                 brand=brand)
+    return video_maker_gate(
+        beats, content_format=content_format,
+        used_fallback=used_fallback, legacy_timing=legacy,
+        hook_pace=pace, beat_timing=bt, card_sync=sync,
+        cli_check=cli, card_text=ctext, card_vo=cvo,
+        duration=_as_duration(cc.get("duration")),
+        card_timing=ctime, allowlist_check=al, **extra)
+
+
+def stamp_description_on_config(creation_config, description, *,
+                                brand: str | None = None,
+                                content_format: str | None = "short"):
+    """Persist the post-render description and refresh craft_gate (OS source)."""
+    cc = dict(_as_dict(creation_config))
+    cc["description"] = description
+    if brand:
+        cc["brand"] = brand
+    required = (cc.get("brand") or brand or "") == "os"
+    if "beats" in cc or cc.get("used_fallback"):
+        gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
+        gate = attach_generator_slips(
+            _recompute_video_maker_gate(cc, content_format,
+                                        description=description,
+                                        description_required=required,
+                                        brand=brand),
+            gs.get("slips") if gs else None)
+        cc["craft_gate"] = gate
+    return json.dumps(cc)
+
+
 def video_maker_gate_of(creation_config=None,
-                        content_format: str | None = "short") -> dict | None:
+                        content_format: str | None = "short",
+                        *,
+                        gate_context: str = GATE_CONTEXT_PUBLISH,
+                        description=None,
+                        description_required: bool = False,
+                        video_id=None, video=None,
+                        brand: str | None = None) -> dict | None:
     """The Video Maker gate for a render snapshot (same inputs as
     video_maker_gate_reason), or None when exempt (long) / no snapshot."""
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
-    if is_pre_deploy_snapshot(cc):
+    if trust_stored_gate(cc, video_id=video_id, video=video,
+                         gate_context=gate_context, brand=brand):
         return _stored_craft_gate(cc)
     beats = cc.get("beats")
     if not isinstance(beats, list):
@@ -3716,22 +3886,12 @@ def video_maker_gate_of(creation_config=None,
     if not beats and not used_fallback:
         stored = cc.get("craft_gate")
         return stored if isinstance(stored, dict) else None
-    bt = cc.get("beat_timing")
-    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
-    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
-    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
-    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
-    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
-    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
-    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
     gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
     return attach_generator_slips(
-        video_maker_gate(beats, content_format=content_format,
-                         used_fallback=used_fallback, legacy_timing=legacy,
-                         hook_pace=pace, beat_timing=bt, card_sync=sync,
-                         cli_check=cli, card_text=ctext,
-                         duration=_as_duration(cc.get("duration")),
-                         card_timing=ctime, allowlist_check=al),
+        _recompute_video_maker_gate(cc, content_format,
+                                    description=description,
+                                    description_required=description_required,
+                                    brand=brand),
         gs.get("slips") if gs else None)
 
 
@@ -3782,19 +3942,38 @@ def measurement_cap_reason(creation_config=None,
 
 
 def video_maker_gate_reason(creation_config=None,
-                            content_format: str | None = "short") -> str | None:
+                            content_format: str | None = "short",
+                            *,
+                            gate_context: str = GATE_CONTEXT_PUBLISH,
+                            description=None,
+                            description_required: bool = False,
+                            video_id=None, video=None,
+                            brand: str | None = None) -> str | None:
     """None = allowed to leave review toward publish. Longs are exempt.
     A real gate FAIL wins; else the measurement cap (never a silent PASS)."""
-    return (_video_maker_gate_reason_core(creation_config, content_format)
+    return (_video_maker_gate_reason_core(
+                creation_config, content_format, gate_context=gate_context,
+                description=description,
+                description_required=description_required,
+                video_id=video_id, video=video, brand=brand)
             or measurement_cap_reason(creation_config, content_format))
 
 
 def _video_maker_gate_reason_core(creation_config=None,
-                                  content_format: str | None = "short") -> str | None:
+                                  content_format: str | None = "short",
+                                  *,
+                                  gate_context: str = GATE_CONTEXT_PUBLISH,
+                                  description=None,
+                                  description_required: bool = False,
+                                  video_id=None, video=None,
+                                  brand: str | None = None) -> str | None:
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
-    if is_pre_deploy_snapshot(cc):
+    # OS publish: closed-list grandfather only. OS approve: always recompute.
+    # RR pre-deploy: stored gate (RR behaviour unchanged).
+    if trust_stored_gate(cc, video_id=video_id, video=video,
+                         gate_context=gate_context, brand=brand):
         stored = _stored_craft_gate(cc)
         if stored and stored.get("result") == "FAIL":
             return format_craft_gate_reason(stored)
@@ -3808,30 +3987,28 @@ def _video_maker_gate_reason_core(creation_config=None,
         if isinstance(stored, dict) and stored.get("result") == "FAIL":
             return format_craft_gate_reason(stored)
         return None  # no snapshot (pré-gate inventory) — fail-open
-    bt = cc.get("beat_timing")
-    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
-    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
-    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
-    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
-    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
-    cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
-    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
-    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
-    gate = video_maker_gate(beats, content_format=content_format,
-                            used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace, beat_timing=bt, card_sync=sync,
-                            cli_check=cli, card_text=ctext, card_vo=cvo,
-                            duration=_as_duration(cc.get("duration")),
-                            card_timing=ctime, allowlist_check=al)
+    gate = _recompute_video_maker_gate(
+        cc, content_format, description=description,
+        description_required=description_required, brand=brand)
     return format_craft_gate_reason(gate)
 
 
 def review_gate_reason(title: str | None,
                        content_format: str | None = "short",
-                       creation_config=None) -> str | None:
+                       creation_config=None,
+                       *,
+                       gate_context: str = GATE_CONTEXT_PUBLISH,
+                       description=None,
+                       description_required: bool = False,
+                       video_id=None, video=None,
+                       brand: str | None = None) -> str | None:
     """Title pattern then Video Maker A+B+C. First failure wins (operator-readable)."""
     return (title_gate_reason(title, content_format)
-            or video_maker_gate_reason(creation_config, content_format))
+            or video_maker_gate_reason(
+                creation_config, content_format, gate_context=gate_context,
+                description=description,
+                description_required=description_required,
+                video_id=video_id, video=video, brand=brand))
 
 
 # ---------------------------------------------------------------------------
@@ -4349,6 +4526,11 @@ def publish_craft_block_reason(
     video_path: str | None = None,
     require_vo_beats: bool = True,
     check_audio: bool = True,
+    gate_context: str = GATE_CONTEXT_PUBLISH,
+    description=None,
+    description_required: bool = False,
+    video_id=None, video=None,
+    brand: str | None = None,
 ) -> str | None:
     """First publish-blocking craft reason, or None when eligible.
 
@@ -4364,7 +4546,11 @@ def publish_craft_block_reason(
     blocked = nonsense_title_reason(title)
     if blocked:
         return blocked
-    blocked = review_gate_reason(title, content_format, creation_config)
+    blocked = review_gate_reason(
+        title, content_format, creation_config,
+        gate_context=gate_context, description=description,
+        description_required=description_required,
+        video_id=video_id, video=video, brand=brand)
     if blocked:
         return blocked
     if not script_nonempty(script):
@@ -4392,6 +4578,11 @@ def evaluate_craft_review(
     video_path: str | None = None,
     require_vo_beats: bool = True,
     check_audio: bool = True,
+    gate_context: str = GATE_CONTEXT_PUBLISH,
+    description=None,
+    description_required: bool = False,
+    video_id=None, video=None,
+    brand: str | None = None,
 ) -> tuple[str, str | None]:
     """Return (pass|fail, reason). Does not mutate the video row."""
     reason = publish_craft_block_reason(
@@ -4402,6 +4593,10 @@ def evaluate_craft_review(
         video_path=video_path,
         require_vo_beats=require_vo_beats,
         check_audio=check_audio,
+        gate_context=gate_context,
+        description=description,
+        description_required=description_required,
+        video_id=video_id, video=video, brand=brand,
     )
     if reason:
         return CRAFT_REVIEW_FAIL, reason
@@ -4410,7 +4605,10 @@ def evaluate_craft_review(
 
 def apply_craft_review_to_video(video, *, content_format: str | None = "short",
                                 require_vo_beats: bool = True,
-                                check_audio: bool = True) -> tuple[str, str | None]:
+                                check_audio: bool = True,
+                                gate_context: str = GATE_CONTEXT_PUBLISH,
+                                description_required: bool = False,
+                                brand: str | None = None) -> tuple[str, str | None]:
     """Evaluate and write video.craft_review. Returns (status, reason)."""
     status, reason = evaluate_craft_review(
         title=video.title,
@@ -4420,6 +4618,10 @@ def apply_craft_review_to_video(video, *, content_format: str | None = "short",
         video_path=video.video_path,
         require_vo_beats=require_vo_beats,
         check_audio=check_audio,
+        gate_context=gate_context,
+        description=getattr(video, "description", None),
+        description_required=description_required,
+        video_id=getattr(video, "id", None), video=video, brand=brand,
     )
     video.craft_review = status
     return status, reason
@@ -5111,7 +5313,7 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                                   f"({card_overlap(board[prev_mid], b):.0%} shared words)"})
         prev_mid = i
     if os:
-        out.extend(os_card_hits(board, script, sources))
+        out.extend(os_card_hits(board, script, sources, words=words))
     return out
 
 

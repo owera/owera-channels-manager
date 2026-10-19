@@ -288,8 +288,15 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
 
     video.render_progress = 100
     from app.services import craft
+    from app.services.craft import brand_of as _brand_of
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
+    ch_brand = _brand_of(channel.slug, channel.name, channel_id=channel.id)
+    if video.creation_config and fmt != "long":
+        video.creation_config = craft.stamp_description_on_config(
+            video.creation_config, video.description, brand=ch_brand,
+            content_format=fmt,
+        )
     # Full publish craft gate (title / A+B+C / script / VO / mute) so skip-gate
     # auto-approve writes an explicit craft_review=pass (or parks in review).
     from app.services import episode_guard
@@ -297,11 +304,15 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         title=video.title, script=video.script,
         creation_config=video.creation_config, content_format=fmt,
         video_path=video.video_path,
+        description=video.description,
+        description_required=(ch_brand == "os"),
+        video_id=video.id, video=video, brand=ch_brand,
     ) or episode_guard.duplicate_episode_reason(session, video)
     if blocked:
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_FAIL
-        video.error = blocked
+        video.error = (blocked if str(blocked).startswith("held:")
+                       else f"held: {blocked}") if ch_brand == "os" else blocked
         video.approved_at = None
     elif _effective_skip_gate(video, channel) and _vm_pass_missing(video):
         # vm_pass required (default: every topic): skip-gate never auto-approves

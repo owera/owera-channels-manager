@@ -293,8 +293,9 @@ ok(abs((ext[1]["start"] + ext[1]["dur"]) - (pw[-1]["start"] + pw[-1]["dur"] + 0.
    f"extended hold ends last word + 0.3 ({ext[1]['start'] + ext[1]['dur']:.2f})")
 gx = craft.video_maker_gate(ext, beat_timing=craft.BEAT_TIMING_CURRENT, words=pw,
                             script=SCRIPT, brand="os")
-ok(not any("mid card" in r and "beat[1]" in r for r in (gx.get("reasons") or [])),
-   f"Gate B does not FAIL cap_extended_spoken for the cap ({gx.get('reasons')})")
+ok(gx["checks"]["B"] == "FAIL"
+   and any("mid card" in r and "beat[1]" in r for r in (gx.get("reasons") or [])),
+   f"OS Gate B FAILs cap_extended_spoken visual hold >3.0s ({gx.get('reasons')})")
 ok(any(h.get("check") == "sentence_too_long"
        for h in craft.sentence_too_long_hits(ext, pw)),
    "existing ~4.45s cap_extended_spoken FAILs the 3.0s hard limit")

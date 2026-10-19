@@ -715,15 +715,28 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
     from app.services import craft
+    from app.services.craft import brand_of as _brand_of
+    ch = session.get(Channel, v.channel_id)
+    brand = _brand_of(ch.slug, ch.name, channel_id=ch.id) if ch else None
     blocked = craft.publish_craft_block_reason(
         title=v.title, script=v.script, creation_config=v.creation_config,
         content_format=fmt, video_path=v.video_path,
+        gate_context=craft.GATE_CONTEXT_APPROVE,
+        description=v.description,
+        description_required=(brand == "os"),
+        video_id=v.id, video=v, brand=brand,
     ) or episode_guard.duplicate_episode_reason(session, v)
     if blocked:
+        # OS review (no grandfather): fail-closed → held in review, never
+        # status=failed (so /health videos_failed stays clean). Leaves held
+        # only via re-render + Gate B PASS or this approve path (actor logged).
         v.craft_review = craft.CRAFT_REVIEW_FAIL
+        v.status = VideoStatus.REVIEW
+        v.approved_at = None
         session.add(v)
         session.commit()
-        raise HTTPException(409, blocked)
+        held = blocked if str(blocked).startswith("held:") else f"held: {blocked}"
+        raise HTTPException(409, held)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"approved via API: {v.status} -> approved; craft_review=pass; actor={actor}")
@@ -821,6 +834,7 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         blocked = craft.publish_craft_block_reason(
             title=v.title, script=v.script, creation_config=v.creation_config,
             content_format=fmt, video_path=v.video_path,
+            video_id=v.id, video=v,
         ) or episode_guard.duplicate_episode_reason(session, v)
         if blocked:
             v.craft_review = craft.CRAFT_REVIEW_FAIL

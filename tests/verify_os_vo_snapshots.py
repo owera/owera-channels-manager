@@ -17,11 +17,10 @@ from pathlib import Path
 
 from app.services import craft
 from app.services.engines import storyboard
-from tests.os_gate_b_real_vo import snapshot_description, whisper_words
+from tests.os_gate_b_real_vo import artifact_dir, snapshot_description, whisper_words
 
 _checks = 0
-ART = Path("/opt/cursor/artifacts")
-ART.mkdir(parents=True, exist_ok=True)
+ART = artifact_dir()
 UPLOADS = Path("/home/ubuntu/.cursor/projects/workspace/uploads")
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "os-gate-b"
 
@@ -125,7 +124,8 @@ def kinds_of(g: dict) -> list[str]:
                      "sentence_too_long", "card_exits_early", "card_enters_early",
                      "card_overlap", "cta_after_video_end", "repeated_vo_sentence",
                      "code_read_too_short", "description_missing_source",
-                     "enumeration_needs_rewrite"):
+                     "enumeration_needs_rewrite", "beat_hold",
+                     "missing_word_timings", "unspoken_card"):
             if name in r and name not in out:
                 out.append(name)
     return out

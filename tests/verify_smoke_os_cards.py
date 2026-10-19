@@ -20,6 +20,7 @@ from app.main import _health_snapshot
 from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus
 from app.services import craft
 from app.services.engines import storyboard
+from tests.os_gate_b_real_vo import whisper_words
 
 _checks = 0
 REPO = Path(__file__).resolve().parent.parent
@@ -106,12 +107,27 @@ ok("OS_VO_SENTENCE_CARDS" in inspect.getsource(storyboard._compose_board),
    "compose reads the module constant at call time")
 
 
-print("happy path on snapshot #1452 (temp sqlite)")
+print("UNVERIFIED without narration_words.json")
 with tempfile.TemporaryDirectory() as tmp:
     db = Path(tmp) / "smoke.db"
     seed_db(db)
-    before = digest(db)
     proc = run_smoke(db, 1452)
+    combo = (proc.stderr or "") + (proc.stdout or "")
+    ok(proc.returncode == 2, f"missing words exits 2 (got {proc.returncode})\n{combo}")
+    ok("UNVERIFIED" in combo, "prints UNVERIFIED (refuses synthesized timings)")
+
+print("happy path on snapshot #1452 (temp sqlite + real words file)")
+with tempfile.TemporaryDirectory() as tmp:
+    db = Path(tmp) / "smoke.db"
+    seed_db(db)
+    hf = Path(tmp) / "hf"
+    handle = json.loads(SNAP.read_text()).get("mpt_task_id") or "smoke-words"
+    (hf / handle).mkdir(parents=True)
+    (hf / handle / "narration_words.json").write_text(
+        json.dumps(whisper_words(1452)))
+    # rewrite mpt_task_id if the snapshot was empty
+    before = digest(db)
+    proc = run_smoke(db, 1452, extra_env={"MANAGER_HYPERFRAMES_STORAGE_DIR": str(hf)})
     after = digest(db)
     out = proc.stdout
     ok(proc.returncode == 0, f"exit 0 (got {proc.returncode})\n{proc.stderr}")

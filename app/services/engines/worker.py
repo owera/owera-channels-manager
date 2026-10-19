@@ -457,7 +457,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                    if not used_fallback else None)
             ctime = (craft.card_timing_marker(beats, words, script, fmt,
                                               duration=duration,
-                                              sources=_lit_src)
+                                              sources=_lit_src,
+                                              fail_closed=(brand or params.get("brand")) == "os")
                      if not used_fallback else None)
             alchk = craft.allowlist_required_marker(params.get("topic_id"),
                                                     params.get("on_screen_allow"), fmt)
@@ -510,6 +511,11 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                 "bgm": (bgm.name if bgm else None),
                 "bgm_volume": float(params.get("bgm_volume") or 0.2),
                 "script_words": len(script.split()),
+                "script": script,
+                "narration_words": words or None,
+                "brand": brand or params.get("brand"),
+                "on_screen_allow": params.get("on_screen_allow"),
+                "description": params.get("description"),
                 "duration": duration,
                 "used_fallback": used_fallback,
             }

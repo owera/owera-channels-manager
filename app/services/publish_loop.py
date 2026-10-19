@@ -347,18 +347,31 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     # Defense in depth: selection already requires craft_review=pass, but
     # re-check the full publish craft gate (title / A+B+C / script / VO /
     # mute) so a stale pass cannot upload nonsense.
+    # Slug/name only — channel_id 1/2 is a live-fleet fallback and would
+    # treat an in-memory test channel id=1 as OS.
+    brand = craft.brand_of(channel.slug, channel.name)
     blocked = craft.publish_craft_block_reason(
         title=video.title,
         script=video.script,
         creation_config=video.creation_config,
         content_format=fmt,
         video_path=video.video_path,
+        description=video.description,
+        description_required=(brand == "os"),
+        video_id=video.id, video=video, brand=brand,
     )
     if blocked:
         video.craft_review = craft.CRAFT_REVIEW_FAIL
-        video.status = VideoStatus.REJECTED
-        video.rejected_reason = blocked[:500]
-        video.error = blocked
+        # OS: park held in review — never status=failed (health videos_failed)
+        # and never auto-promote back to approved. RR keeps REJECTED.
+        if brand == "os":
+            video.status = VideoStatus.REVIEW
+            video.approved_at = None
+            video.error = blocked if str(blocked).startswith("held:") else f"held: {blocked}"
+        else:
+            video.status = VideoStatus.REJECTED
+            video.rejected_reason = blocked[:500]
+            video.error = blocked
         session.add(video)
         quota.log(session, kind="publish", status="error", video_id=video.id,
                   channel_id=channel.id, detail=f"publish craft gate: {blocked}")

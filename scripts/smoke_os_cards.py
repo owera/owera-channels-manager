@@ -11,8 +11,8 @@ script error.
 
 SQLite is opened mode=ro. The session never commits. The LLM callable raises
 if the kill switch is off (so a rollback cannot spend). Word timings come
-from the stored HyperFrames narration_words.json when present, otherwise
-from the video's creation_config duration / card_sync (no TTS).
+from the stored HyperFrames narration_words.json. Missing that file
+prints UNVERIFIED and exits 2 (no synthesized timings).
 """
 from __future__ import annotations
 
@@ -219,7 +219,9 @@ def run(video_id: int, db_path: Path) -> int:
         if stored:
             words, words_src = stored, f"hyperframes/{video.mpt_task_id}/narration_words.json"
         else:
-            words, words_src = _words_from_cc(script, cc), "creation_config duration/card_sync"
+            print("UNVERIFIED: no narration_words.json — refusing synthesized timings "
+                  "(would be a false PASS).", file=sys.stderr)
+            die("UNVERIFIED: missing narration_words.json", 2)
         duration = float(cc.get("duration") or 0)
         if duration <= 0:
             last = max((float(w.get("start") or 0) + float(w.get("dur") or 0))

@@ -305,7 +305,7 @@ ok(stale.status == VideoStatus.REJECTED and stale.craft_review == CraftReview.FA
    "stale pass + empty script → rejected at publish")
 
 
-print("_publish_one does not reject pre-deploy PASS on new Gate B")
+print("_publish_one: OS pre-deploy without closed-list grandfather is held")
 s = fresh_session()
 ch = make_channel(s, slug="owera", name="Owera Software")
 t = make_topic(s, ch)
@@ -342,9 +342,10 @@ ok(pre.status == VideoStatus.APPROVED and pre.craft_review == CraftReview.PASS,
 publish_loop._publish_one(s, ch, pre)
 s.commit()
 s.refresh(pre)
-ok(pre.status == VideoStatus.PUBLISHED and pre.craft_review == CraftReview.PASS,
-   "publish does not reject a pre-deploy OS PASS (not FAILED, not REJECTED)")
-ok(uploaded_pre, "upload still called")
+ok(pre.status == VideoStatus.REVIEW and pre.craft_review == CraftReview.FAIL,
+   "OS not on the closed grandfather list: new gate, fail-closed → held in review")
+ok((pre.error or "").startswith("held:"), "error is held: … (never status=failed)")
+ok(not uploaded_pre, "upload is not called")
 ok(pre.status != VideoStatus.FAILED, "Gate B recompute does not write status=failed")
 
 

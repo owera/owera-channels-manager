@@ -610,10 +610,12 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v)
 ok(_uploads == [], "bad title never opens upload_video")
-ok(v.status == VideoStatus.REJECTED, "blocked publish auto-rejects (anti-nonsense)")
+ok(v.status == VideoStatus.REVIEW and v.approved_at is None,
+   "OS publish craft FAIL parks review/held (never failed/rejected)")
 ok(v.craft_review == "fail", "blocked publish sets craft_review=fail")
-ok(v.error and "spoken series pattern" in v.error,
-   "blocked publish records the gate reason")
+ok(v.error and "spoken series pattern" in v.error
+   and str(v.error).startswith("held:"),
+   "blocked publish records held: + the gate reason")
 ok(v.yt_video_id is None, "no YouTube id on a blocked publish")
 
 v2 = Video(channel_id=ch.id, topic_id=t.id, subject="ok",
@@ -967,7 +969,8 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v3)
 ok(_uploads == [], "craft-gate FAIL never opens upload_video")
-ok(v3.status == VideoStatus.REJECTED, "blocked craft publish auto-rejects")
+ok(v3.status == VideoStatus.REVIEW and (v3.error or "").startswith("held:"),
+   "OS craft-gate FAIL parks review/held (never failed/rejected)")
 ok(v3.craft_review == "fail", "blocked craft publish sets craft_review=fail")
 ok(v3.error and "craft gate FAIL" in v3.error and "[A]" in v3.error,
    "blocked craft publish records the letter-tagged reason")
@@ -1766,14 +1769,18 @@ _pre = {
 ok(craft.is_pre_deploy_snapshot(_pre) and not craft.applies_new_gate_b(_pre),
    "pre-deploy HyperFrames snapshot (no gate_b_rules)")
 ok(craft.video_maker_gate_reason(_pre, "short") is None,
-   "publish/approve recompute trusts stored craft_gate PASS on pre-deploy")
+   "RR / unmarked pre-deploy publish trusts stored craft_gate PASS")
 ok((craft.video_maker_gate_of(_pre, "short") or {}).get("result") == "PASS",
-   "video_maker_gate_of returns stored PASS, does not recompute new checks")
+   "video_maker_gate_of returns stored PASS for RR pre-deploy")
 ok(craft.publish_craft_block_reason(
        title="Hook claim · Agent traps 1", script="Hook claim. Subscribe — next agent trap.",
        creation_config=_pre, content_format="short", video_path=None)
    is None,
-   "publish_craft_block_reason does not reject a pre-deploy PASS snapshot")
+   "publish_craft_block_reason does not reject an RR pre-deploy PASS snapshot")
+ok("Blank gap" in (craft.video_maker_gate_reason(_pre, "short", brand="os") or ""),
+   "OS pre-deploy without closed-list grandfather recomputes fail-closed")
+ok(craft.trust_stored_gate(_pre, video_id=1452, brand="os") is False,
+   "OS id 1452 is not on the empty grandfather list")
 _new = dict(_pre)
 _new[craft.GATE_B_RULES_KEY] = craft.GATE_B_RULES
 ok(not craft.is_pre_deploy_snapshot(_new) and craft.applies_new_gate_b(_new),

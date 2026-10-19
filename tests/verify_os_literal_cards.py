@@ -8,14 +8,16 @@ VM_FAIL_21fe.md (#1452), VM_FAIL_c638.md (#1453), VM_FAIL_0465.md (#1465).
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from app.services import craft, topic_flags
 from app.services.engines import storyboard
 from tests.os_gate_b_real_vo import (
-    snapshot_description, snapshot_duration, snapshot_script, whisper_words,
-    words_from_pins,
+    PinMatchError, artifact_dir, snapshot_description, snapshot_duration,
+    snapshot_script, whisper_words, words_from_pins,
 )
 
 _checks = 0
@@ -272,6 +274,77 @@ ok(any(h.get("check") == "description_missing_source"
    "#1465 description has no public source link")
 
 
+print("fail-closed + hook skip + whisper pins")
+ok(craft.card_timing_marker([], None, fail_closed=True)["hits"][0]["check"]
+   == craft.MISSING_WORDS_CHECK,
+   "missing word timings → missing_word_timings (fail closed)")
+ok(craft.card_timing_marker([], None, fail_closed=False) is None,
+   "RR fail-open: no words → no marker")
+bare = [
+    _beat("hook", 0.0, 1.5, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 2.0, 3.5, text="this card is not in the VO at all", plain=True),
+    _beat("cta", 4.0, 6.5, text="Subscribe · Agent traps"),
+]
+ok(any(h["check"] == craft.UNSPOKEN_CARD_CHECK
+       for h in craft.stale_card_hits(bare, w1452, S1452, fail_closed=True)),
+   "card with no spoken span → unspoken_card (fail closed)")
+ok(not craft.stale_card_hits(bare, w1452, S1452, fail_closed=False),
+   "RR fail-open: unspoken card is skipped")
+hook_two = [
+    _beat("hook", 0.0, 3.5,
+          text="The crew failed the handoff. tasks.yaml was empty.",
+          object="terminal"),
+    _beat("quote", 3.66, 5.0, text="CrewAI will not invent the work for you.",
+          plain=True),
+    _beat("cta", 7.0, 9.5, text="Subscribe · CrewAI"),
+]
+ok("card_text_not_literal" not in checks_of(
+    craft.os_card_hits(hook_two, S1465, None, words=w1465)),
+   "two-sentence hook is not an OS mid-card literal FAIL")
+span8 = craft.spoken_span(
+    "and Anthropic subagents keep working with extra directories.", w1452)
+ok(span8 and (span8[1] - span8[0]) > 3.0,
+   f"#1452 card 8 spoken {span8} > 3.0s")
+frozen8 = [
+    _beat("hook", 0.0, 2.3, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 19.82, 22.26,
+          text="and Anthropic subagents keep working with extra directories.",
+          plain=True),
+    _beat("cta", 24.0, 26.5, text="Subscribe · Agent traps"),
+]
+ok(any(h["check"] == "sentence_too_long" and h["i"] == 1
+       for h in craft.sentence_too_long_hits(frozen8, w1452)),
+   "#1452 card 8 spoken 18.36–22.08 → sentence_too_long")
+span6 = craft.spoken_span("Write each task in tasks.yaml before you run.", w1465)
+ok(span6 and abs(span6[1] - 25.28) < 0.02,
+   f"#1465 'run.' ends at {span6}")
+frozen6 = [
+    _beat("hook", 0.0, 3.5,
+          text="The crew failed the handoff. tasks.yaml was empty.",
+          object="terminal"),
+    _beat("quote", 22.46, 24.76,
+          text="Write each task in tasks.yaml before you run.", plain=True),
+    _beat("cta", 27.0, 30.0, text="Subscribe · CrewAI"),
+]
+ok(any(h["check"] == "card_exits_early" and h["i"] == 1
+       for h in craft.card_exits_early_hits(frozen6, w1465)),
+   "#1465 card 6 ends 24.76, last word run. at 25.28 → card_exits_early")
+try:
+    words_from_pins(S1452, {"this phrase is not spoken": (0.0, 1.0)})
+    raise AssertionError("unmatched pin must raise")
+except PinMatchError:
+    pass
+ok(True, "unmatched pin raises PinMatchError (no interpolation fallback)")
+with tempfile.TemporaryDirectory() as tmp:
+    os.environ["GATE_B_ARTIFACT_DIR"] = tmp
+    try:
+        p = artifact_dir()
+        ok(p.resolve() == Path(tmp).resolve(),
+           f"GATE_B_ARTIFACT_DIR overrides /opt/cursor/artifacts ({p})")
+    finally:
+        os.environ.pop("GATE_B_ARTIFACT_DIR", None)
+
+
 print("per-field literal (positive + negative)")
 ok(craft.card_is_literal(
     {"type": "quote", "text": "The parent agent got an empty answer.", "plain": True},
@@ -335,9 +408,15 @@ ok(abs((qb[1]["start"] + qb[1]["dur"]) - 11.4) < 0.05,
    f"#1452 CAPIError holds ~8.04–11.4 (end {qb[1]['start'] + qb[1]['dur']:.2f})")
 ok(qb[1]["dur"] > craft.MID_BEAT_MAX_S, "literal quote exceeds the mid cap")
 ok(not craft.quote_before_speech_hits(qb, qt), "timed quote is not before speech")
-gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT, sources=ALLOW1452)
-ok(not any("mid card" in r and "beat[1]" in r for r in (gg.get("reasons") or [])),
-   f"Gate B does not FAIL the literal quote for the cap ({gg.get('reasons')})")
+gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT,
+                            sources=ALLOW1452, brand="os")
+ok(gg["checks"]["B"] == "FAIL"
+   and any("mid card" in r and "beat[1]" in r for r in (gg.get("reasons") or [])),
+   f"OS quote visible >3.0s incl fade → beat_hold FAIL ({gg.get('reasons')})")
+gg_rr = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT,
+                               sources=ALLOW1452, brand="rr", words=qt)
+ok(not any("mid card" in r and "beat[1]" in r for r in (gg_rr.get("reasons") or [])),
+   "RR keeps the spoken-span quote hold exemption")
 
 
 print("generator post-filter (kill switch off) converts #1452 templates")
@@ -428,7 +507,11 @@ hole = [
     _beat("cta", 7.7, 10.5, text="Subscribe · Agent traps"),
 ]
 slips = []
-storyboard._fill_blank_gaps(hole, S1452, w1452, slips)
+w_fill, t = [], 0.1
+for tok in S1452.split():
+    w_fill.append({"text": tok.strip(".,!?:;"), "start": round(t, 3), "dur": 0.22})
+    t += 0.26
+storyboard._fill_blank_gaps(hole, S1452, w_fill, slips)
 ok(len(hole) >= 4, f"fill inserted a card ({[b.get('type') for b in hole]})")
 ok(any(s.get("kind") == "blank_gap_filled" for s in slips) or not craft.blank_gap_hits(hole),
    f"hole closed ({slips})")
@@ -526,7 +609,8 @@ def _kinds(g: dict) -> list[str]:
                      "sentence_too_long", "card_exits_early", "card_enters_early",
                      "card_overlap", "cta_after_video_end", "repeated_vo_sentence",
                      "code_read_too_short", "description_missing_source",
-                     "enumeration_needs_rewrite"):
+                     "enumeration_needs_rewrite", "beat_hold",
+                     "missing_word_timings", "unspoken_card"):
             if name in r and name not in out:
                 out.append(name)
     return out
@@ -568,8 +652,7 @@ CASES = [
 ]
 
 DOCS = Path("docs")
-ART = Path("/opt/cursor/artifacts")
-ART.mkdir(parents=True, exist_ok=True)
+ART = artifact_dir()
 summaries = []
 per_md = []
 for c in CASES:
@@ -621,12 +704,13 @@ q = next((b for b in s1452["after"]
           if "maximum of 4 blocks" in (b.get("text") or "")), None)
 ok(q is not None, "#1452 AFTER has the CAPIError quote")
 ok(abs(float(q["start"]) - 8.04) < 0.05, f"#1452 quote start {q['start']}")
-ok(abs(float(q["start"]) + float(q["dur"]) - 11.4) < 0.15,
-   f"#1452 CAPIError ~8.04–11.4 (end {float(q['start']) + float(q['dur']):.2f})")
+ok(float(q["start"]) + float(q["dur"]) >= 11.4,
+   f"#1452 CAPIError holds through last whisper word "
+   f"(end {float(q['start']) + float(q['dur']):.2f})")
 ok(float(q["dur"]) > craft.MID_BEAT_MAX_S, "literal quote exceeds mid cap")
-ok("stale_card" not in s1452["after_kinds"] or not any(
-    "beat[2]" in r and "mid card" in r for r in (s1452["ga"].get("reasons") or [])),
-   "Gate B does not FAIL the CAPIError quote for the cap")
+ok("beat_hold" in s1452["after_kinds"]
+   or any("mid card" in r for r in (s1452["ga"].get("reasons") or [])),
+   f"#1452 AFTER OS quote >3.0s incl fade → beat_hold ({s1452['after_kinds']})")
 ok(s1452["ga"]["checks"]["C"] == "PASS",
    f"#1452 AFTER Gate C PASS ({s1452['ga'].get('reasons')})")
 ok("blank_gap" not in s1452["after_kinds"] and "slide_spam" not in s1452["after_kinds"],
@@ -653,6 +737,14 @@ ok("enumeration_needs_rewrite" in s1465["after_kinds"],
    f"#1465 AFTER enumeration_needs_rewrite ({s1465['after_kinds']})")
 ok("slide_spam" not in s1465["after_kinds"],
    f"#1465 AFTER no slide_spam ({s1465['after_kinds']})")
+ok("card_text_not_literal" not in s1465["after_kinds"],
+   f"#1465 AFTER two-sentence hook is not card_text_not_literal ({s1465['after_kinds']})")
+ok(any(h.get("i") == 8 or "Anthropic" in (h.get("detail") or "")
+       for h in craft.sentence_too_long_hits(s1452["after"], w1452, ALLOW1452)),
+   "#1452 AFTER card 8 Anthropic clause spoken >3.0s")
+ok("beat_hold" in s1465["after_kinds"]
+   or any("mid card" in r for r in (s1465["ga"].get("reasons") or [])),
+   f"#1465 AFTER card 4 5.87s quote → beat_hold ({s1465['after_kinds']})")
 ok("allowlist_required" in s1453["before_kinds"] or s1453["before_B"] == "FAIL",
    "#1453 topic 47 without allowlist is a Gate B FAIL")
 ok(s1453["ga"]["checks"]["B"] == "FAIL"
@@ -687,9 +779,9 @@ index = [
     "",
     "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`).",
     "",
-    "Âncoras: frases do VM_FAIL (whisper small+medium) + "
-    "`card_sync.speech_start` do snapshot. Palavras entre âncoras "
-    "interpolam só o vão adjacente.",
+    "Âncoras: timestamps whisper reais em "
+    "`tests/fixtures/os-gate-b/whisper-2026-10-19.json` (sem interpolação; "
+    "pin que não casa uma palavra falha).",
     "",
     "| vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |",
     "|------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|",
