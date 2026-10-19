@@ -1606,8 +1606,103 @@ def blank_gap_hits(beats, duration=None) -> list[str]:
     return hits
 
 
+def _card_spoken_text(b, sources=None) -> str:
+    """TTS text that maps a card onto word timings.
+
+    Allowlisted source cards (on-screen text byte-identical to an
+    on_screen_allow error/log/command/code entry) are not spoken by design.
+    Their spoken span is the cue. A CLI card that is not on that list maps
+    via its on-screen copy (so a 1-char drift still FAILs unspoken). Empty
+    or unspoken cue on an allowlisted card also FAILs.
+    """
+    typ = (b.get("type") or "") if isinstance(b, dict) else ""
+    if typ in CLI_BEAT_TYPES:
+        screen = source_card_screen_text(b)
+        if screen:
+            if is_allowlisted_source_card(b, sources):
+                cue = str(b.get("cue") or "").strip()
+                return cue or screen
+            return screen
+    return (b.get("text") or b.get("cue") or beat_screen_text(b)) if isinstance(b, dict) else ""
+
+
+# spoken_span anchors on the first _find_run. A cue shorter than this
+# many word tokens that occurs more than once in the VO is an ambiguous
+# first-match (VM #124 follow-up). Four tokens is a short distinctive
+# clause ("test registration there"); 1–3 token cues ("subscribe",
+# "found 5") are legal only when they occur exactly once.
+CUE_ANCHOR_MIN_WORDS = 4
+AMBIGUOUS_CUE_CHECK = "ambiguous_cue"
+
+
+def cue_run_count(text, words) -> int:
+    """How many times ``text`` occurs as a contiguous token run in ``words``."""
+    ct = _sync_toks(text)
+    toks, _ = _speech_stream(words)
+    if not ct or not toks:
+        return 0
+    n, p = 0, 0
+    while True:
+        p = _find_run(toks, ct, p)
+        if p < 0:
+            return n
+        n += 1
+        p += 1
+
+
+def is_stable_cue(text, words) -> bool:
+    """True when ``spoken_span``'s first-run is a safe timing anchor.
+
+    A cue of ``CUE_ANCHOR_MIN_WORDS`` or more is treated as distinctive
+    even if it is repeated. Shorter cues must occur exactly once.
+    """
+    n = len(_sync_toks(text))
+    if n >= CUE_ANCHOR_MIN_WORDS:
+        return True
+    return cue_run_count(text, words) == 1
+
+
+def ambiguous_cue_hits(beats, words, sources=None) -> list[dict]:
+    """FAIL a short card cue / spoken key that occurs more than once.
+
+    ``spoken_span`` takes the first match. A 1–3 word cue that appears
+    twice times the card to the wrong occurrence.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not words:
+        return out
+    for i, b in enumerate(board):
+        if i == 0 and (b.get("type") or "") == "hook":
+            continue
+        cue = str(b.get("cue") or "").strip()
+        spoken = _card_spoken_text(b, sources)
+        key = cue if cue else spoken
+        if not key:
+            continue
+        if is_stable_cue(key, words):
+            continue
+        n_tok = len(_sync_toks(key))
+        n_run = cue_run_count(key, words)
+        if n_run > 1:
+            out.append({
+                "i": i, "check": AMBIGUOUS_CUE_CHECK,
+                "detail": (f"card {i} cue {key!r} is {n_tok} word(s) and "
+                           f"occurs {n_run} times in the VO — spoken_span "
+                           f"anchors on the first (need "
+                           f">={CUE_ANCHOR_MIN_WORDS} words or exactly one "
+                           f"occurrence)"),
+            })
+    return out
+
+
 def spoken_span(text, words) -> tuple[float, float] | None:
-    """(first_word_start, last_word_end) of ``text`` in TTS words, or None."""
+    """(first_word_start, last_word_end) of ``text`` in TTS words, or None.
+
+    Anchors on the first ``_find_run`` of the folded tokens. Callers that
+    pass a card cue must use ``is_stable_cue`` / ``ambiguous_cue`` so a
+    short repeated phrase is not silently timed to the first hit.
+    """
     ct = _sync_toks(text)
     toks, starts = _speech_stream(words)
     if not ct or not toks:
@@ -1853,12 +1948,13 @@ def quote_like_text(beat: dict | None) -> str | None:
     return None
 
 
-def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def quote_before_speech_hits(beats, words, sources=None, *,
+                             fail_closed: bool = True) -> list[dict]:
     """Quote / quote-like log card that appears before its first spoken word.
 
     FAIL when start < first-word start − SYNC_TOL_S (0.05s). No lead.
     ``fail_closed`` (OS): missing words / no spoken span FAIL. RR stays
-    fail-open (empty / continue).
+    fail-open (empty / continue). Allowlisted source cards map via the cue.
     """
     out: list[dict] = []
     board = [b for b in (beats or []) if isinstance(b, dict)]
@@ -1870,10 +1966,11 @@ def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[
             continue
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        span = spoken_span(text, words)
+        spoken = _card_spoken_text(b, sources)
+        span = spoken_span(spoken, words)
         if not span:
             if fail_closed:
-                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
+                out.append(_unspoken_card_hit(i, b.get("type") or "", spoken or text))
             continue
         start = _cue_start(b)
         if start < span[0] - SYNC_TOL_S - 1e-6:
@@ -1883,12 +1980,13 @@ def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[
     return out
 
 
-def stale_card_hits(beats, words, script: str | None = None, *,
+def stale_card_hits(beats, words, script: str | None = None, sources=None, *,
                     fail_closed: bool = True) -> list[dict]:
     """Card (including hook) still up > STALE_CARD_MAX_S after its last word.
 
     Maps the card to the spoken span of its on-screen / cue text (hook: the
-    claim). CTA/endcard is exempt (it holds the closer through video end).
+    claim). Allowlisted source cards map via the cue. CTA/endcard is exempt
+    (it holds the closer through video end).
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1900,7 +1998,7 @@ def stale_card_hits(beats, words, script: str | None = None, *,
         typ = b.get("type") or ""
         if typ in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if span is None and script and i == 0 and typ == "hook":
             # two-sentence title head: last word of the shown claim
@@ -1942,7 +2040,7 @@ def sentence_too_long_hits(beats, words, sources=None, *,
         typ = b.get("type") or ""
         if typ == "hook" or typ in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -1960,7 +2058,8 @@ def sentence_too_long_hits(beats, words, sources=None, *,
     return out
 
 
-def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def card_exits_early_hits(beats, words, sources=None, *,
+                          fail_closed: bool = True) -> list[dict]:
     """Card ends before its last spoken word (timing defect)."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1971,7 +2070,7 @@ def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dic
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -1987,7 +2086,8 @@ def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dic
     return out
 
 
-def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+def card_enters_early_hits(beats, words, sources=None, *,
+                           fail_closed: bool = True) -> list[dict]:
     """Card appears more than CARD_ENTER_LEAD_MAX_S before its speech."""
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
@@ -1998,7 +2098,7 @@ def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[di
     for i, b in enumerate(board):
         if (b.get("type") or "") in CTA_TYPES:
             continue
-        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        text = _card_spoken_text(b, sources)
         span = spoken_span(text, words)
         if not span:
             if fail_closed:
@@ -2133,14 +2233,15 @@ def card_timing_hits(beats, words, script: str | None = None,
                      sources=None, duration=None, *,
                      fail_closed: bool = True) -> list[dict]:
     """stale_card + quote_before_speech + sentence_too_long + timing defects."""
-    return (quote_before_speech_hits(beats, words, fail_closed=fail_closed)
-            + stale_card_hits(beats, words, script, fail_closed=fail_closed)
+    return (quote_before_speech_hits(beats, words, sources, fail_closed=fail_closed)
+            + stale_card_hits(beats, words, script, sources, fail_closed=fail_closed)
             + sentence_too_long_hits(beats, words, sources, fail_closed=fail_closed)
-            + card_exits_early_hits(beats, words, fail_closed=fail_closed)
-            + card_enters_early_hits(beats, words, fail_closed=fail_closed)
+            + card_exits_early_hits(beats, words, sources, fail_closed=fail_closed)
+            + card_enters_early_hits(beats, words, sources, fail_closed=fail_closed)
             + card_time_overlap_hits(beats)
             + cta_after_video_end_hits(beats, duration)
-            + code_read_too_short_hits(beats))
+            + code_read_too_short_hits(beats)
+            + ambiguous_cue_hits(beats, words, sources))
 
 
 MISSING_WORDS_CHECK = "missing_word_timings"
@@ -2988,6 +3089,10 @@ def fabricated_cli(beats, script: str | None) -> list[dict]:
 LITERAL_V1 = "lit_v1"
 ON_SCREEN_KINDS = ("log", "error", "command", "quote", "stat")
 CLI_ALLOW_KINDS = frozenset({"log", "error", "command"})
+# Source-card unspoken exemption: on-screen text must be byte-identical to
+# an on_screen_allow entry of one of these kinds. "code" is accepted as a
+# kind alias (beat type code; on_screen_allow otherwise drops unknown kinds).
+SOURCE_CARD_ALLOW_KINDS = frozenset({"error", "log", "command", "code"})
 _SRC_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
                            "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u00ab": '"',
                            "\u00bb": '"', "\u2010": "-", "\u2011": "-", "\u2012": "-",
@@ -3104,6 +3209,51 @@ def _allow_lines(allow, kinds=None):
         if kinds and e["kind"] not in kinds:
             continue
         yield e, [e["text"]] + [x for x in e["text"].splitlines() if x.strip()]
+
+
+def source_card_allow_texts(allow) -> tuple[str, ...]:
+    """Exact on_screen_allow texts for source-card kinds (error/log/command/code).
+
+    Byte-identical match only — no fold, no ellipsis cut. Kind ``code`` is
+    read from the raw list because ``on_screen_allow`` drops unknown kinds.
+    """
+    out, seen = [], set()
+
+    def _add(text):
+        if isinstance(text, str) and text not in seen:
+            seen.add(text)
+            out.append(text)
+
+    for e in on_screen_allow(allow):
+        if e["kind"] in SOURCE_CARD_ALLOW_KINDS:
+            _add(e["text"])
+    raw = parse_allowlist_md(allow) if isinstance(allow, str) else allow
+    if isinstance(raw, list):
+        for x in raw:
+            if not isinstance(x, dict):
+                continue
+            if str(x.get("kind") or "").strip().lower() == "code":
+                _add(x.get("text"))
+    return tuple(out)
+
+
+def source_card_screen_text(beat: dict | None) -> str | None:
+    """On-screen CLI copy used for the source-card allowlist match."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") not in CLI_BEAT_TYPES:
+        return None
+    lines = cli_lines(beat)
+    if lines:
+        return lines[0] if len(lines) == 1 else " ".join(lines)
+    t = beat.get("text")
+    return str(t) if t else None
+
+
+def is_allowlisted_source_card(beat: dict | None, sources) -> bool:
+    """True when the card's on-screen text is byte-identical to a source entry."""
+    screen = source_card_screen_text(beat)
+    if screen is None or sources is None:
+        return False
+    return any(screen == t for t in source_card_allow_texts(sources))
 
 
 def source_literal(text, allow, kinds=None) -> bool:
@@ -3458,6 +3608,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         "card_overlap": [],
         "cta_after_video_end": [],
         "code_read_too_short": [],
+        "ambiguous_cue": [],
     }
     leftover_timing = []
     for h in timing_hits:
@@ -3522,6 +3673,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         reasons.append(
             "[B] Code read time: FAIL — " + "; ".join(read_hits) +
             f". Code/command cards need ≥{CODE_READ_MIN_S:.1f}s on screen."
+        )
+    cue_hits = named_timing["ambiguous_cue"]
+    if not cue_hits and words:
+        cue_hits = [f"{h.get('check')}: {h.get('detail')}"
+                    for h in ambiguous_cue_hits(board, words, sources)]
+    if cue_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Ambiguous cue: FAIL — " + "; ".join(cue_hits) +
+            f". A cue shorter than {CUE_ANCHOR_MIN_WORDS} words must occur "
+            "exactly once in the VO; spoken_span anchors on the first match."
         )
     repeat_hits = [f"{h.get('check')}: {h.get('detail')}"
                    for h in repeated_vo_sentence_hits(script)]
@@ -3636,6 +3798,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                     "card_overlap": overlap_hits,
                     "cta_after_video_end": cta_end_hits,
                     "code_read_too_short": read_hits,
+                    "ambiguous_cue": cue_hits,
                     "repeated_vo_sentence": repeat_hits,
                     "enumeration_needs_rewrite": enum_hits,
                     "description_missing_source": src_hits,
