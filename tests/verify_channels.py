@@ -106,8 +106,14 @@ _create_req_p = _ch_src.find('_require_int(fields, "daily_publish_budget"', _cre
 _create_add = _ch_src.find("session.add(ch)", _create_def)
 ok(0 <= _create_def < _create_req_r < _create_req_p < _create_add < _create_end,
    "create_channel floors both budgets before session.add")
+_create_name = _ch_src.find('_require_str(fields, "name"', _create_def)
+ok(0 <= _create_def < _create_name < _create_add < _create_end,
+   "create_channel floors name before session.add")
 ok(_create_end < _update_def,
    "create_channel is defined before update_channel (create pin end bound)")
+_update_name = _ch_src.find('_require_str(fields, "name"', _update_def)
+ok(0 <= _update_def < _update_name < _setattr,
+   "update_channel floors name before setattr")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
@@ -448,6 +454,87 @@ try:
     ok(slugs() == before_slugs, "invalid POSTs added no extra slugs")
     ok(snapshot(1) == before_a, "ch-a still untouched after every POST probe")
     ok(snapshot(2) == before_b, "ch-b still at seeded 7/7 after every POST probe")
+
+    print("POST/PATCH name: blank/null is 400; surrounding whitespace is stripped")
+    # Channel.name is NOT NULL. PATCH setattr of null raises on commit;
+    # "" / "   " persist and wipe the label the channel list renders.
+    # Create used to store body.name as-is, and _slugify("   ") is ""
+    # because the spaces are truthy, so a whitespace create inserted slug="".
+    n_before = n_channels()
+    before_a = snapshot(1)
+    before_b = snapshot(2)
+
+    r = post(name="", slug="blank-name")
+    ok(r.status_code == 400, "POST name='' is 400")
+    ok("non-empty" in r.text, "POST blank name names the floor")
+    ok("blank-name" not in slugs(), "POST name='' creates no row")
+    ok(n_channels() == n_before, "POST name='' adds no row")
+
+    r = post(name="   ", slug="   ")
+    ok(r.status_code == 400, "POST whitespace name is 400")
+    ok("non-empty" in r.text, "POST whitespace name names the floor")
+    ok("" not in slugs(), "POST whitespace name does not insert slug=''")
+    ok(n_channels() == n_before, "POST whitespace name adds no row")
+
+    r = post(name=None, slug="null-name")
+    ok(r.status_code == 422, "POST name=null stays 422 (required str)")
+    ok("non-empty" not in r.text, "POST null name is not the blank-string floor")
+    ok("null-name" not in slugs(), "POST name=null creates no row")
+
+    r = post(name="!!!", slug="!!!")
+    ok(r.status_code == 400, "POST punctuation-only name is 400 (slug would be empty)")
+    ok("letter or digit" in r.text, "empty-slug 400 names the slug floor")
+    ok(n_channels() == n_before, "POST punctuation-only name adds no row")
+
+    r = post(name="Good Name", slug="!!!")
+    ok(r.status_code == 400, "POST punctuation slug is 400 even when the name is usable")
+    ok("letter or digit" in r.text, "punctuation slug 400 names the slug floor")
+    ok(n_channels() == n_before, "POST punctuation slug does not fall back to the name")
+
+    r = post(name="  Padded Name  ", slug="kept-slug")
+    ok(r.status_code == 201, "POST padded name is 201")
+    ok(r.json().get("name") == "Padded Name", "POST strips surrounding whitespace on name")
+    ok(r.json().get("slug") == "kept-slug", "POST keeps an explicit slug")
+    ok(snapshot(r.json()["id"])["name"] == "Padded Name", "stripped POST name persisted")
+
+    r = post(name="Fallback Name", slug="   ")
+    ok(r.status_code == 201, "POST whitespace slug falls back to the name")
+    ok(r.json().get("slug") == "fallback-name", "whitespace slug slugifies the stripped name")
+    ok(r.json().get("name") == "Fallback Name", "fallback POST kept the name")
+
+    r = patch(name=None, paused=True)
+    ok(r.status_code == 400, "PATCH name=null is 400")
+    ok("non-empty" in r.text, "PATCH null name names the floor")
+    ok(snapshot(1) == before_a, "PATCH name=null writes nothing (paused not smuggled)")
+
+    r = patch(name="")
+    ok(r.status_code == 400, "PATCH name='' is 400")
+    ok(snapshot(1)["name"] == "A", "PATCH name='' leaves the label")
+
+    r = patch(name="   ")
+    ok(r.status_code == 400, "PATCH whitespace name is 400")
+    ok(snapshot(1)["name"] == "A", "PATCH whitespace name leaves the label")
+
+    r = patch(name="  Kept Name  ")
+    ok(r.status_code == 200, "PATCH padded name is 200")
+    ok(r.json().get("name") == "Kept Name", "PATCH strips surrounding whitespace")
+    ok(snapshot(1)["name"] == "Kept Name", "stripped PATCH name persisted")
+    ok(snapshot(1)["paused"] == before_a["paused"], "name PATCH left paused")
+    ok(snapshot(1)["daily_publish_budget"] == before_a["daily_publish_budget"],
+       "name PATCH left the publish budget")
+
+    r = patch(paused=True)
+    ok(r.status_code == 200, "PATCH without name is 200")
+    ok(snapshot(1)["name"] == "Kept Name", "omitted name left the stripped label")
+    ok(snapshot(1)["paused"] is True, "omitted-name PATCH still applies paused")
+
+    r = patch(name="A")
+    ok(r.status_code == 200, "restore ch-a name")
+    r = patch(paused=False)
+    ok(r.status_code == 200, "restore ch-a paused")
+    ok(snapshot(1) == before_a, "ch-a restored after name probes")
+    ok(snapshot(2) == before_b, "ch-b untouched by name probes")
+    ok("" not in slugs(), "name probes never inserted an empty slug")
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw

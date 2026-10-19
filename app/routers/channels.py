@@ -104,6 +104,24 @@ def _slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:60]
 
 
+def _require_str(fields: dict, key: str, hint: str) -> None:
+    """Reject JSON null / blank / non-str before they hit the DB.
+
+    ``Channel.name`` is NOT NULL. PATCH ``setattr``s ``ChannelUpdate.name``
+    (Optional[str]) straight onto it, so JSON null raises on commit and
+    ``""`` / ``"   "`` persist and wipe the label the channel list renders.
+    Create used to store ``body.name`` as-is, and ``_slugify("   ")`` is
+    ``""`` because the spaces are truthy — a whitespace create inserted
+    ``slug=""``.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, str) or not v.strip():
+        raise HTTPException(400, hint)
+    fields[key] = v.strip()
+
+
 def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
     """Reject JSON null / bool / below-floor ints before they hit the DB.
 
@@ -128,10 +146,18 @@ def list_channels(session: Session = Depends(get_session)):
 
 @router.post("", status_code=201)
 def create_channel(body: ChannelCreate, session: Session = Depends(get_session)):
-    slug = _slugify(body.slug or body.name)
+    fields = body.model_dump()
+    # Blank name is a wiped label. Whitespace is truthy, so the old
+    # ``_slugify(body.slug or body.name)`` turned ``"   "`` into slug "".
+    _require_str(fields, "name",
+                 "name must be a non-empty string "
+                 "(null/blank wipes the channel label the dashboard uses)")
+    slug_src = body.slug.strip() if isinstance(body.slug, str) and body.slug.strip() else fields["name"]
+    slug = _slugify(slug_src)
+    if not slug:
+        raise HTTPException(400, "slug must contain a letter or digit")
     if session.exec(select(Channel).where(Channel.slug == slug)).first():
         raise HTTPException(409, f"channel slug '{slug}' already exists")
-    fields = body.model_dump()
     # 0 is a legal stall (#27/#28). Negative is the same skip as 0 but a
     # typo — 400 rather than a silent park from day one. Null is already
     # 422 (ChannelCreate budgets are required ints). JSON bool is rejected
@@ -147,7 +173,7 @@ def create_channel(body: ChannelCreate, session: Session = Depends(get_session))
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
     ch = Channel(
-        slug=slug, name=body.name, default_privacy=body.default_privacy,
+        slug=slug, name=fields["name"], default_privacy=body.default_privacy,
         default_skip_gate=body.default_skip_gate,
         daily_render_budget=body.daily_render_budget,
         daily_publish_budget=body.daily_publish_budget,
@@ -184,6 +210,9 @@ def update_channel(channel_id: int, body: ChannelUpdate, session: Session = Depe
                  "daily_publish_budget must be >= 0 "
                  "(null TypeErrors the publish tick: "
                  "published_today >= budget)")
+    _require_str(fields, "name",
+                 "name must be a non-empty string "
+                 "(null/blank wipes the channel label the dashboard uses)")
     # Refuse malformed publish windows here: the loop fails open on a bad stored
     # spec (mistimed publishes beat a silently-stalled channel), so the API must
     # be the place a typo actually surfaces. Empty strings clear the field.

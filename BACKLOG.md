@@ -1962,3 +1962,26 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 74. ✅ DONE (PR autoimprove/2026-10-19-channel-name-floor) POST/PATCH /api/channels reject blank channel name — normal
+- **resolution (2026-10-19):** `_require_str` floors create and PATCH
+  `name` before `session.add` / `setattr`. JSON null, `""`, and whitespace
+  are 400 and write nothing; a padded name is stored stripped. A slug that
+  slugifies to empty (punctuation only) is 400 — including when the name
+  itself is usable, so the handler does not fall back and insert `slug=""`.
+  A whitespace slug falls back to the stripped name. Null on create stays
+  422 (required str), not the blank-string message. Suite:
+  `tests/verify_channels.py` 135 → 181. Not bundled: the Add-channel modal
+  still enables Create for `"   "` (that click is now a 400).
+- **why:** `Channel.name` is NOT NULL. PATCH `setattr`s `ChannelUpdate.name`
+  (`Optional[str]`) straight onto it, so JSON null raises on commit and
+  `""` / `"   "` persist and wipe the label the channel list renders.
+  Create stored `body.name` as-is, and `_slugify("   ")` is `""` because
+  the spaces are truthy — a whitespace create inserted `slug=""`. The
+  Add-channel modal's `disabled={!name}` is truthy for `"   "`, so that
+  click reaches this path.
+- **caution:** normal (`app/routers/channels.py` only). Isolated commit.
+- **acceptance:** POST/PATCH `name` null/blank/whitespace is 4xx and writes
+  nothing; a padded name is stored stripped; an explicit slug is kept;
+  a punctuation slug does not insert a row; omitted PATCH name still
+  updates other fields.
