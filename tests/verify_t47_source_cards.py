@@ -211,9 +211,22 @@ ok(not any("cta" in h and "AFTER" in h for h in cta_hits),
 sub = craft.spoken_span(beats[-1].get("cue") or "", WORDS)
 ok(sub and abs(float(beats[-1]["start"]) - float(sub[0])) <= craft.SYNC_TOL_S + 1e-9,
    f"#1453 PATCH CTA start {beats[-1]['start']} sits on Subscribe {sub}")
+ok("Subscribe" in (beats[-1].get("cue") or beats[-1].get("text") or ""),
+   f"#1453 PATCH CTA stays on the Subscribe line ({beats[-1].get('cue')})")
+for i, b in enumerate(beats):
+    if (b.get("type") or "") in craft.CTA_TYPES:
+        continue
+    sp = craft.spoken_span(craft._card_spoken_text(b, PATCH["on_screen_allow"]), WORDS)
+    if not sp:
+        continue
+    end = float(b["start"]) + float(b["dur"])
+    ok(end + 1e-6 >= float(sp[1]) - craft.SYNC_TOL_S,
+       f"#1453 PATCH card {i} exit {end:.3f} >= last word {sp[1]:.3f}")
 kinds = [k.get("check") for k in (g1453.get("kinds") or []) if isinstance(k, dict)]
 ok("unspoken_card" not in kinds,
    f"#1453 PATCH remaining kinds {kinds} (no unspoken_card)")
+ok("ambiguous_cue" not in kinds,
+   f"#1453 PATCH has no ambiguous_cue ({kinds})")
 ok(g1453.get("result") == "PASS" and g1453.get("checks") == {"A": "PASS", "B": "PASS", "C": "PASS"},
    f"#1453 PATCH Gate B is PASS ({g1453.get('result')} {g1453.get('checks')} {g1453.get('reasons')})")
 reg = [b for b in beats
@@ -224,6 +237,13 @@ ok(len(reg) == 1 and (reg[0].get("text") or "") ==
 ok(any((b.get("text") or "") == "Optional keys are left out." for b in beats)
    and any((b.get("text") or "") == "They are not sent as null." for b in beats),
    "#1453 PATCH splits optional-keys into two cards")
+
+
+def last_mid(board):
+    for b in reversed(board):
+        if (b.get("type") or "") not in craft.CTA_TYPES:
+            return b
+    return None
 
 
 def after_cta(vid, topic, subject, name, sources=None):
@@ -242,12 +262,86 @@ def after_cta(vid, topic, subject, name, sources=None):
     cta = board[-1]
     note = next(n for n in (sync or {}).get("notes") or [] if n.get("i") == len(board) - 1)
     sub = craft.spoken_span(cta.get("cue") or "", words)
-    ok(not any("cta" in h and "AFTER" in h for h in hits),
-       f"#{vid} AFTER CTA is not late ({hits})")
-    ok(sub and abs(float(cta["start"]) - float(sub[0])) <= craft.SYNC_TOL_S + 1e-9,
-       f"#{vid} AFTER CTA {cta['start']} sits on Subscribe {sub[0] if sub else None} "
-       f"(note {note})")
+    mid = last_mid(board)
+    ok(mid is not None, f"#{vid} AFTER has a mid card before CTA")
+    mid_sp = craft.spoken_span(craft._card_spoken_text(mid, sources), words)
+    mid_end = float(mid["start"]) + float(mid["dur"])
+    ok(mid_sp and mid_end + 1e-6 >= float(mid_sp[1]) - craft.SYNC_TOL_S,
+       f"#{vid} AFTER last mid exit {mid_end:.3f} >= last word "
+       f"{mid_sp[1] if mid_sp else None}")
+    if mid_sp:
+        tail_end = float(mid_sp[1]) + craft.QUOTE_HOLD_TAIL_S
+        ok(mid_end + 1e-6 >= tail_end - 1e-6,
+           f"#{vid} AFTER last mid exit {mid_end:.3f} >= last word + tail "
+           f"{tail_end:.3f}")
+    ok("Subscribe" in (cta.get("cue") or cta.get("text") or ""),
+       f"#{vid} AFTER CTA stays on the Subscribe line ({cta.get('cue')})")
+    want = float(sub[0]) if sub else None
+    seat = max(want, mid_end + storyboard._GAP) if want is not None else None
+    ok(sub and abs(float(cta["start"]) - seat) <= craft.SYNC_TOL_S + 1e-9,
+       f"#{vid} AFTER CTA {cta['start']} = max(Subscribe {want}, "
+       f"prev+gap {mid_end + storyboard._GAP:.3f}) → {seat}")
+    late = bool(sub and float(cta["start"]) - float(sub[0]) > craft.SYNC_TOL_S + 1e-9)
+    if late:
+        ok(any("cta" in h and "AFTER" in h for h in hits),
+           f"#{vid} AFTER late CTA is an honest card_sync FAIL ({hits})")
+    else:
+        ok(not any("cta" in h and "AFTER" in h for h in hits),
+           f"#{vid} AFTER CTA is on Subscribe ({hits} note {note})")
     return board, sync
+
+
+print("ambiguous_cue: short cue must be unique or ≥ "
+      f"{craft.CUE_ANCHOR_MIN_WORDS} words")
+ok(craft.CUE_ANCHOR_MIN_WORDS == 4, "CUE_ANCHOR_MIN_WORDS is 4")
+dup = [
+    {"text": "Read", "start": 0.0, "dur": 0.2},
+    {"text": "its", "start": 0.2, "dur": 0.2},
+    {"text": "error", "start": 0.4, "dur": 0.2},
+    {"text": "Read", "start": 1.0, "dur": 0.2},
+    {"text": "its", "start": 1.2, "dur": 0.2},
+    {"text": "error", "start": 1.4, "dur": 0.2},
+    {"text": "and", "start": 1.6, "dur": 0.2},
+    {"text": "every", "start": 1.8, "dur": 0.2},
+    {"text": "Claude", "start": 2.0, "dur": 0.2},
+    {"text": "subagent", "start": 2.2, "dur": 0.2},
+]
+ok(craft.cue_run_count("Read its error", dup) == 2, "short phrase occurs twice")
+ok(not craft.is_stable_cue("Read its error", dup),
+   "3-word cue with two runs is not a stable first-match")
+ok(craft.ambiguous_cue_hits(
+    [{"type": "hook", "text": "Read its error."},
+     {"type": "quote", "cue": "Read its error", "text": "Read its error."},
+     {"type": "cta", "cue": "Subscribe", "text": "Subscribe"}],
+    dup), "short repeated cue → ambiguous_cue")
+ok(craft.is_stable_cue("and every Claude subagent", dup),
+   "4-word cue is distinctive even if we only say it once")
+long_dup = dup + [
+    {"text": "and", "start": 3.0, "dur": 0.2},
+    {"text": "every", "start": 3.2, "dur": 0.2},
+    {"text": "Claude", "start": 3.4, "dur": 0.2},
+    {"text": "subagent", "start": 3.6, "dur": 0.2},
+]
+ok(craft.cue_run_count("and every Claude subagent", long_dup) == 2
+   and craft.is_stable_cue("and every Claude subagent", long_dup),
+   "≥4-word cue may repeat — first-match is accepted")
+ok(not craft.ambiguous_cue_hits(
+    [{"type": "hook", "text": "and every Claude subagent"},
+     {"type": "quote", "cue": "and every Claude subagent",
+      "text": "and every Claude subagent"},
+     {"type": "cta", "cue": "Subscribe", "text": "Subscribe"}],
+    long_dup),
+   "long repeated cue is not ambiguous_cue")
+once = [{"text": "Found", "start": 0.0, "dur": 0.2},
+        {"text": "5", "start": 0.2, "dur": 0.2},
+        {"text": "Subscribe", "start": 1.0, "dur": 0.3}]
+ok(craft.is_stable_cue("Found 5", once) and craft.is_stable_cue("Subscribe", once),
+   "short unique cue (Found 5 / Subscribe) is a stable anchor")
+ok(not craft.ambiguous_cue_hits(
+    [{"type": "code", "cue": "Found 5.", "lines": ["Found 5."]},
+     {"type": "cta", "cue": "Subscribe", "text": "Subscribe"}],
+    once),
+   "unique short cue is not ambiguous_cue")
 
 
 after_cta(1452, 47, "One folder broke Copilot CLI. · Agent traps 12",

@@ -688,10 +688,11 @@ def _gate(beats, *, duration, script, words, topic_id, sources, description=None
     ctime = craft.card_timing_marker(beats, words, script, duration=duration,
                                     sources=sources)
     al = craft.allowlist_required_marker(topic_id, sources)
+    sync = craft.card_sync_marker(beats, words, "short", script=script)
     return craft.video_maker_gate(
         beats, content_format="short", beat_timing=craft.BEAT_TIMING_CURRENT,
         card_text=ctext, card_vo=cvo, duration=duration, card_timing=ctime,
-        allowlist_check=al, brand="os", script=script, words=words,
+        card_sync=sync, allowlist_check=al, brand="os", script=script, words=words,
         sources=sources, description=description)
 
 

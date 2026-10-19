@@ -523,6 +523,35 @@ tight = [
      "text": "Hello world this is speech"},
     {"type": "cta", "start": 14.22, "dur": 3.78, "text": "Subscribe · Agent traps"},
 ]
+# Last mid speech ends after the spoken closer: do not trim the mid to
+# seat the chip. CTA starts at max(speech, prev exit + gap).
+collide_words = [
+    {"text": "Read", "start": 26.0, "dur": 0.3},
+    {"text": "its", "start": 26.4, "dur": 0.3},
+    {"text": "error", "start": 26.8, "dur": 0.32},  # last word ends 27.12
+    {"text": "Subscribe", "start": 26.9, "dur": 0.4},  # closer starts 26.9
+]
+collide = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "Hook line here.",
+     "object": "terminal"},
+    {"type": "quote", "start": 26.0, "dur": 2.0,
+     "text": "Read its error", "cue": "Read its error"},
+    {"type": "cta", "start": 26.9, "dur": 2.5,
+     "text": "Subscribe · Agent traps", "cue": "Subscribe"},
+]
+ok(storyboard._snap_os_cards_to_speech(collide, collide_words, duration=30.0) is True,
+   "snap keeps last-word + tail when CTA speech overlaps")
+mid_end = float(collide[1]["start"]) + float(collide[1]["dur"])
+word_end = 27.12
+ok(mid_end + 1e-6 >= word_end + craft.QUOTE_HOLD_TAIL_S,
+   f"last mid exit {mid_end:.3f} >= last word {word_end} + tail")
+sub0 = 26.9
+seat = max(sub0, mid_end + storyboard._GAP)
+ok(abs(float(collide[-1]["start"]) - seat) <= 1e-6,
+   f"CTA start {collide[-1]['start']} is max(speech, prev+gap)={seat:.3f}")
+ok(float(collide[-1]["start"]) - sub0 > craft.SYNC_TOL_S,
+   "CTA is honestly late vs Subscribe (gate will FAIL card_sync)")
+
 ok(storyboard._snap_os_cards_to_speech(tight, gen_words, duration=16.8) is False,
    "CTA that cannot keep min visibility FAILs closed")
 # Fail-closed: compose returns None. Do not ship start+dur past duration.

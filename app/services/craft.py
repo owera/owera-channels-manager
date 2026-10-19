@@ -1626,8 +1626,83 @@ def _card_spoken_text(b, sources=None) -> str:
     return (b.get("text") or b.get("cue") or beat_screen_text(b)) if isinstance(b, dict) else ""
 
 
+# spoken_span anchors on the first _find_run. A cue shorter than this
+# many word tokens that occurs more than once in the VO is an ambiguous
+# first-match (VM #124 follow-up). Four tokens is a short distinctive
+# clause ("test registration there"); 1–3 token cues ("subscribe",
+# "found 5") are legal only when they occur exactly once.
+CUE_ANCHOR_MIN_WORDS = 4
+AMBIGUOUS_CUE_CHECK = "ambiguous_cue"
+
+
+def cue_run_count(text, words) -> int:
+    """How many times ``text`` occurs as a contiguous token run in ``words``."""
+    ct = _sync_toks(text)
+    toks, _ = _speech_stream(words)
+    if not ct or not toks:
+        return 0
+    n, p = 0, 0
+    while True:
+        p = _find_run(toks, ct, p)
+        if p < 0:
+            return n
+        n += 1
+        p += 1
+
+
+def is_stable_cue(text, words) -> bool:
+    """True when ``spoken_span``'s first-run is a safe timing anchor.
+
+    A cue of ``CUE_ANCHOR_MIN_WORDS`` or more is treated as distinctive
+    even if it is repeated. Shorter cues must occur exactly once.
+    """
+    n = len(_sync_toks(text))
+    if n >= CUE_ANCHOR_MIN_WORDS:
+        return True
+    return cue_run_count(text, words) == 1
+
+
+def ambiguous_cue_hits(beats, words, sources=None) -> list[dict]:
+    """FAIL a short card cue / spoken key that occurs more than once.
+
+    ``spoken_span`` takes the first match. A 1–3 word cue that appears
+    twice times the card to the wrong occurrence.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not words:
+        return out
+    for i, b in enumerate(board):
+        if i == 0 and (b.get("type") or "") == "hook":
+            continue
+        cue = str(b.get("cue") or "").strip()
+        spoken = _card_spoken_text(b, sources)
+        key = cue if cue else spoken
+        if not key:
+            continue
+        if is_stable_cue(key, words):
+            continue
+        n_tok = len(_sync_toks(key))
+        n_run = cue_run_count(key, words)
+        if n_run > 1:
+            out.append({
+                "i": i, "check": AMBIGUOUS_CUE_CHECK,
+                "detail": (f"card {i} cue {key!r} is {n_tok} word(s) and "
+                           f"occurs {n_run} times in the VO — spoken_span "
+                           f"anchors on the first (need "
+                           f">={CUE_ANCHOR_MIN_WORDS} words or exactly one "
+                           f"occurrence)"),
+            })
+    return out
+
+
 def spoken_span(text, words) -> tuple[float, float] | None:
-    """(first_word_start, last_word_end) of ``text`` in TTS words, or None."""
+    """(first_word_start, last_word_end) of ``text`` in TTS words, or None.
+
+    Anchors on the first ``_find_run`` of the folded tokens. Callers that
+    pass a card cue must use ``is_stable_cue`` / ``ambiguous_cue`` so a
+    short repeated phrase is not silently timed to the first hit.
+    """
     ct = _sync_toks(text)
     toks, starts = _speech_stream(words)
     if not ct or not toks:
@@ -2165,7 +2240,8 @@ def card_timing_hits(beats, words, script: str | None = None,
             + card_enters_early_hits(beats, words, sources, fail_closed=fail_closed)
             + card_time_overlap_hits(beats)
             + cta_after_video_end_hits(beats, duration)
-            + code_read_too_short_hits(beats))
+            + code_read_too_short_hits(beats)
+            + ambiguous_cue_hits(beats, words, sources))
 
 
 MISSING_WORDS_CHECK = "missing_word_timings"
@@ -3532,6 +3608,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         "card_overlap": [],
         "cta_after_video_end": [],
         "code_read_too_short": [],
+        "ambiguous_cue": [],
     }
     leftover_timing = []
     for h in timing_hits:
@@ -3596,6 +3673,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         reasons.append(
             "[B] Code read time: FAIL — " + "; ".join(read_hits) +
             f". Code/command cards need ≥{CODE_READ_MIN_S:.1f}s on screen."
+        )
+    cue_hits = named_timing["ambiguous_cue"]
+    if not cue_hits and words:
+        cue_hits = [f"{h.get('check')}: {h.get('detail')}"
+                    for h in ambiguous_cue_hits(board, words, sources)]
+    if cue_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Ambiguous cue: FAIL — " + "; ".join(cue_hits) +
+            f". A cue shorter than {CUE_ANCHOR_MIN_WORDS} words must occur "
+            "exactly once in the VO; spoken_span anchors on the first match."
         )
     repeat_hits = [f"{h.get('check')}: {h.get('detail')}"
                    for h in repeated_vo_sentence_hits(script)]
@@ -3710,6 +3798,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                     "card_overlap": overlap_hits,
                     "cta_after_video_end": cta_end_hits,
                     "code_read_too_short": read_hits,
+                    "ambiguous_cue": cue_hits,
                     "repeated_vo_sentence": repeat_hits,
                     "enumeration_needs_rewrite": enum_hits,
                     "description_missing_source": src_hits,
