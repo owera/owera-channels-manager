@@ -291,7 +291,10 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     from app.services.craft import brand_of as _brand_of
     topic = session.get(Topic, video.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
-    ch_brand = _brand_of(channel.slug, channel.name, channel_id=channel.id)
+    # Slug/name only — channel_id 1/2 is a live-fleet fallback and would
+    # treat an in-memory test channel id=1 as OS (RR provided-script finalize
+    # then parks and prefixes held: over the hook reason).
+    ch_brand = _brand_of(channel.slug, channel.name)
     if video.creation_config and fmt != "long":
         video.creation_config = craft.stamp_description_on_config(
             video.creation_config, video.description, brand=ch_brand,
@@ -310,7 +313,11 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     ) or episode_guard.duplicate_episode_reason(session, video)
     if blocked:
         video.craft_review = craft.CRAFT_REVIEW_FAIL
-        if ch_brand == "os":
+        # Measurement cap is not a Gate B craft FAIL: it already parks in
+        # review and a later fully-measured render must still skip-gate
+        # auto-approve (pre-park_os_held). Real OS Gate B FAIL still parks.
+        cap_block = craft.measurement_cap_reason(video.creation_config, fmt)
+        if ch_brand == "os" and blocked != cap_block:
             from app.services.gate_grandfather import park_os_held
             park_os_held(video, blocked)
         else:

@@ -197,7 +197,9 @@ try:
     ok(craft.stale_render_of(v.creation_config) is None, "re-render dropped stale_render")
     ok(v.status == VideoStatus.REVIEW and v.craft_review == craft.CRAFT_REVIEW_PENDING,
        f"re-rendered video back in review, pending ({v.status}, {v.craft_review})")
-    ok(json.loads(v.creation_config) == CC, "rest of creation_config kept")
+    cc_after = json.loads(v.creation_config)
+    ok(cc_after.get("beats") == CC["beats"],
+       "beats kept after re-render (OS stamp may add description/brand/craft_gate)")
     r = client.post("/api/videos/1/approve", auth=auth)
     ok(r.status_code == 200 and r.json()["status"] == VideoStatus.APPROVED,
        f"approve works again after the re-render ({r.status_code} {r.text[:120]})")

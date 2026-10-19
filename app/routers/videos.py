@@ -728,7 +728,9 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     ) or episode_guard.duplicate_episode_reason(session, v)
     if blocked:
         v.craft_review = craft.CRAFT_REVIEW_FAIL
-        if brand == "os":
+        # Stale mp4 is not a Gate B craft FAIL — 409 without Video.held so a
+        # later re-render can return to review/pending (pre-park_os_held).
+        if brand == "os" and blocked != craft.STALE_RENDER_REASON:
             # OS review (no grandfather): fail-closed → held in review, never
             # status=failed. Leaves held only via this approve path (actor
             # logged) or unhold. RR keeps the pre-PR 409 + craft_review=fail.

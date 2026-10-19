@@ -373,9 +373,14 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     )
     if blocked:
         video.craft_review = craft.CRAFT_REVIEW_FAIL
-        # OS: park held in review — never status=failed (health videos_failed)
-        # and never auto-promote back to approved. RR keeps REJECTED.
-        if brand == "os":
+        # Stale mp4 is not a Gate B craft FAIL: keep REJECTED (re-render)
+        # for OS and RR. Real OS Gate B FAIL parks held in review — never
+        # status=failed (health videos_failed) and never auto-promote.
+        if blocked == craft.STALE_RENDER_REASON:
+            video.status = VideoStatus.REJECTED
+            video.rejected_reason = blocked[:500]
+            video.error = blocked
+        elif brand == "os":
             from app.services.gate_grandfather import park_os_held
             park_os_held(video, blocked)
         else:
