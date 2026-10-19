@@ -481,6 +481,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                             "; ".join(f"{x.get('kind')}@{x.get('cue')!r}" for x in slips[:10]))
             return {
                 "composition_version": settings.composition_version,
+                craft.GATE_B_RULES_KEY: craft.GATE_B_RULES,
                 "content_format": fmt,
                 "resolution": resolution,
                 "voice": _voice(params),

@@ -926,6 +926,8 @@ try:
        "longs are exempt — craft_gate is PASS even on used_fallback")
     ok(cc["composition_version"] == "sentinel-ver",
        "composition_version comes from settings (not a hardcoded 'storyboard')")
+    ok(cc[craft.GATE_B_RULES_KEY] == craft.GATE_B_RULES,
+       "new renders stamp gate_b_rules=122 so publish recomputes new Gate B")
 finally:
     settings.composition_version = _orig_cc_ver
 

@@ -1744,4 +1744,45 @@ ok(craft.sentence_pace_marker(_ct_script, None, "os") is None
 ok("sentence_pace" not in craft.video_maker_gate.__code__.co_varnames,
    "sentence pace is not a gate input (never a hard fail)")
 
+print("PR #122: new Gate B rules only on newly composed snapshots")
+ok(craft.GATE_B_RULES == "122" and craft.GATE_B_RULES_KEY == "gate_b_rules",
+   "gate_b_rules marker is 122")
+_gap_board = [
+    {"type": "hook", "start": 0.0, "dur": 1.5, "text": "Hook", "object": "bill"},
+    {"type": "stat", "start": 1.62, "dur": 2.0, "value": "1"},
+    {"type": "cta", "start": 10.0, "dur": 2.0, "text": "Subscribe · Agent traps"},
+]
+ok(craft.video_maker_gate(_gap_board, duration=13.0)["checks"]["B"] == "FAIL",
+   "live gate still FAILs a trailing/mid blank on a new board")
+_pre = {
+    "composition_version": "storyboard",
+    "beat_count": 3,
+    "beats": _gap_board,
+    "duration": 13.0,
+    "beat_timing": craft.BEAT_TIMING_CURRENT,
+    "craft_gate": {"result": "PASS", "checks": {"A": "PASS", "B": "PASS", "C": "PASS"},
+                   "reasons": []},
+}
+ok(craft.is_pre_deploy_snapshot(_pre) and not craft.applies_new_gate_b(_pre),
+   "pre-deploy HyperFrames snapshot (no gate_b_rules)")
+ok(craft.video_maker_gate_reason(_pre, "short") is None,
+   "publish/approve recompute trusts stored craft_gate PASS on pre-deploy")
+ok((craft.video_maker_gate_of(_pre, "short") or {}).get("result") == "PASS",
+   "video_maker_gate_of returns stored PASS, does not recompute new checks")
+ok(craft.publish_craft_block_reason(
+       title="Hook claim · Agent traps 1", script="Hook claim. Subscribe — next agent trap.",
+       creation_config=_pre, content_format="short", video_path=None)
+   is None,
+   "publish_craft_block_reason does not reject a pre-deploy PASS snapshot")
+_new = dict(_pre)
+_new[craft.GATE_B_RULES_KEY] = craft.GATE_B_RULES
+ok(not craft.is_pre_deploy_snapshot(_new) and craft.applies_new_gate_b(_new),
+   "same board with gate_b_rules=122 is a new snapshot")
+ok("Blank gap" in (craft.video_maker_gate_reason(_new, "short") or ""),
+   "new snapshot recomputes and FAILs blank_gap")
+_unit = {"beats": _gap_board, "beat_timing": craft.BEAT_TIMING_CURRENT, "duration": 13.0}
+ok(not craft.is_pre_deploy_snapshot(_unit)
+   and "Blank gap" in (craft.video_maker_gate_reason(_unit, "short") or ""),
+   "unit-test boards without composition_version still recompute")
+
 print(f"\nALL {_checks} CHECKS PASSED")

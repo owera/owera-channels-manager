@@ -305,6 +305,49 @@ ok(stale.status == VideoStatus.REJECTED and stale.craft_review == CraftReview.FA
    "stale pass + empty script → rejected at publish")
 
 
+print("_publish_one does not reject pre-deploy PASS on new Gate B")
+s = fresh_session()
+ch = make_channel(s, slug="owera", name="Owera Software")
+t = make_topic(s, ch)
+_gap = [
+    {"type": "hook", "start": 0.0, "dur": 1.5, "text": "Hook", "object": "bill"},
+    {"type": "stat", "start": 1.62, "dur": 2.0, "value": "1"},
+    {"type": "cta", "start": 10.0, "dur": 2.0, "text": "Subscribe · Copilot Credits"},
+]
+_pre_cc = json.dumps({
+    "composition_version": "storyboard",
+    "beat_count": 3,
+    "beats": _gap,
+    "duration": 13.0,
+    "beat_timing": craft.BEAT_TIMING_CURRENT,
+    "craft_gate": {"result": "PASS", "checks": {"A": "PASS", "B": "PASS", "C": "PASS"},
+                   "reasons": []},
+})
+ok(craft.video_maker_gate(_gap, duration=13.0)["checks"]["B"] == "FAIL",
+   "the stored board would FAIL today's Gate B if recomputed")
+pre = make_video(
+    s, ch, t, subject="pre-deploy os", craft_review=CraftReview.PASS,
+    title=_OK_TITLE, script=_OK_SCRIPT, creation_config=_pre_cc,
+)
+uploaded_pre = []
+youtube.get_service = lambda slug: object()
+youtube.upload_video = lambda *a, **k: uploaded_pre.append(a) or "ytPRE"
+youtube.set_thumbnail = lambda *a, **k: None
+youtube.insert_comment = lambda *a, **k: None
+youtube.add_to_playlist = lambda *a, **k: None
+publish_loop._sweep_craft_reviews(s, ch.id)
+s.refresh(pre)
+ok(pre.status == VideoStatus.APPROVED and pre.craft_review == CraftReview.PASS,
+   "sweep does not touch already-pass pre-deploy rows")
+publish_loop._publish_one(s, ch, pre)
+s.commit()
+s.refresh(pre)
+ok(pre.status == VideoStatus.PUBLISHED and pre.craft_review == CraftReview.PASS,
+   "publish does not reject a pre-deploy OS PASS (not FAILED, not REJECTED)")
+ok(uploaded_pre, "upload still called")
+ok(pre.status != VideoStatus.FAILED, "Gate B recompute does not write status=failed")
+
+
 # --- configurable nonsense patterns ----------------------------------------
 print("configurable nonsense patterns")
 craft.set_nonsense_title_patterns([r"^spam-token\b"])

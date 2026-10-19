@@ -3670,6 +3670,36 @@ def gate_measurement_kinds(gate: dict | None) -> list[dict]:
             if isinstance(k, dict) and k.get("kind") == "measurement"]
 
 
+# PR #122 Gate B rules (blank_gap, 3.0s spoken cap, card_exits_early, …).
+# Written onto creation_config at compose/render. Recompute from a stored
+# snapshot (publish / approve / sweep / digest) only applies these rules
+# when the marker is present — pre-deploy boards keep their stored
+# craft_gate so an already-approved OS short is not rejected on deploy.
+GATE_B_RULES = "122"
+GATE_B_RULES_KEY = "gate_b_rules"
+
+
+def applies_new_gate_b(creation_config) -> bool:
+    return _as_dict(creation_config).get(GATE_B_RULES_KEY) == GATE_B_RULES
+
+
+def is_pre_deploy_snapshot(creation_config) -> bool:
+    """A HyperFrames render written before GATE_B_RULES existed.
+
+    Worker snapshots always carry composition_version / beat_count. Unit-test
+    boards that only pass beats still recompute under the current rules.
+    """
+    cc = _as_dict(creation_config)
+    if not cc or applies_new_gate_b(cc):
+        return False
+    return "composition_version" in cc or "beat_count" in cc
+
+
+def _stored_craft_gate(creation_config) -> dict | None:
+    stored = _as_dict(creation_config).get("craft_gate")
+    return stored if isinstance(stored, dict) else None
+
+
 def video_maker_gate_of(creation_config=None,
                         content_format: str | None = "short") -> dict | None:
     """The Video Maker gate for a render snapshot (same inputs as
@@ -3677,6 +3707,8 @@ def video_maker_gate_of(creation_config=None,
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
+    if is_pre_deploy_snapshot(cc):
+        return _stored_craft_gate(cc)
     beats = cc.get("beats")
     if not isinstance(beats, list):
         beats = []
@@ -3762,6 +3794,11 @@ def _video_maker_gate_reason_core(creation_config=None,
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
+    if is_pre_deploy_snapshot(cc):
+        stored = _stored_craft_gate(cc)
+        if stored and stored.get("result") == "FAIL":
+            return format_craft_gate_reason(stored)
+        return None
     beats = cc.get("beats")
     if not isinstance(beats, list):
         beats = []
