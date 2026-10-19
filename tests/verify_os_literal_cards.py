@@ -16,8 +16,9 @@ from pathlib import Path
 from app.services import craft, topic_flags
 from app.services.engines import storyboard
 from tests.os_gate_b_real_vo import (
-    PinMatchError, artifact_dir, snapshot_description, snapshot_duration,
-    snapshot_script, whisper_words, words_from_pins,
+    PinMatchError, artifact_dir, card_visibility, load_whisper_fixture,
+    snapshot_description, snapshot_duration, snapshot_script, whisper_triples,
+    whisper_words, words_from_pins,
 )
 
 _checks = 0
@@ -68,7 +69,21 @@ def _beat(typ, start, end, **kw):
     return b
 
 
-# Visible cards from VM_FAIL.md (interval = start–end).
+def _apply_visibility(beats, vis):
+    """Pin board start/end to BEFORE-mp4 visibility (30fps)."""
+    if len(beats) != len(vis):
+        raise AssertionError(f"visibility {len(vis)} vs board {len(beats)}")
+    out = []
+    for b, (a, c) in zip(beats, vis):
+        nb = dict(b)
+        nb["start"] = float(a)
+        nb["dur"] = round(float(c) - float(a), 3)
+        out.append(nb)
+    return out
+
+
+# Visible cards from VM_FAIL.md; start/end overwritten from the BEFORE mp4
+# visibility list in whisper-2026-10-19.json.
 B1452 = [
     _beat("hook", 0.00, 2.33, text="One folder broke Copilot CLI.", object="terminal"),
     _beat("term_define", 2.53, 4.93, term="add-dir",
@@ -152,6 +167,9 @@ B1465 = [
     _beat("quote", 24.77, 27.03, text="Empty file, empty crew.", plain=True),
     _beat("cta", 27.27, 30.13, text="Subscribe · CrewAI"),
 ]
+B1452 = _apply_visibility(B1452, card_visibility(1452))
+B1453 = _apply_visibility(B1453, card_visibility(1453))
+B1465 = _apply_visibility(B1465, card_visibility(1465))
 
 
 def _norm_toks(words) -> list[str]:
@@ -343,6 +361,83 @@ with tempfile.TemporaryDirectory() as tmp:
            f"GATE_B_ARTIFACT_DIR overrides /opt/cursor/artifacts ({p})")
     finally:
         os.environ.pop("GATE_B_ARTIFACT_DIR", None)
+
+
+print("whisper fixture + BEFORE mp4 visibility × visual hold")
+fx = load_whisper_fixture()
+ok(fx["models"]["1452"] == "whisper-medium"
+   and fx["models"]["1453"] == "whisper-medium"
+   and fx["models"]["1465"] == "whisper-small",
+   "1452/1453=medium, 1465=small")
+ok(fx["ignore_last_word"].get("1453") is True, "1453 last whisper word ignored")
+ok(fx["words"]["1452"][0] == [0.0, 0.34, "One"]
+   and fx["words"]["1452"][47] == [18.36, 18.78, "and"]
+   and abs(fx["words"]["1465"][-10][1] - 25.28) < 1e-9
+   and fx["words"]["1465"][-10][2] == "run.",
+   "fixture words are the 2026-10-19 whisper triples")
+ok(len(whisper_triples(1453)) == len(fx["words"]["1453"]) - 1,
+   "1453 artifact last word dropped from the stream")
+ok(fx["visibility"]["1452"][3] == [7.07, 7.83]
+   and fx["visibility"]["1453"][7] == [17.37, 18.53]
+   and fx["visibility"]["1465"][4] == [15.47, 16.77],
+   "BEFORE mp4 visibility matches the 30fps list")
+
+
+def _hold_reasons(board):
+    g = craft.video_maker_gate(board, beat_timing=craft.BEAT_TIMING_CURRENT,
+                               brand="os")
+    return g, [r for r in (g.get("reasons") or []) if "mid card" in r]
+
+
+for vid, board in ((1452, B1452), (1453, B1453), (1465, B1465)):
+    vis = card_visibility(vid)
+    ok(len(vis) == len(board), f"#{vid} visibility cards = BEFORE board")
+    long_mids = []
+    for i, b in enumerate(board):
+        a, c = vis[i]
+        ok(abs(float(b["start"]) - a) < 1e-9
+           and abs(float(b["start"]) + float(b["dur"]) - c) < 1e-9,
+           f"#{vid} card {i} start/end = visibility {a}–{c}")
+        if (b.get("type") or "") in ("hook", "cta", "endcard"):
+            continue
+        nxt = vis[i + 1][0] if i + 1 < len(vis) else c
+        visible = c - a
+        incl_fade = nxt - a
+        if visible > 3.0 + 1e-6 or incl_fade > 3.0 + 1e-6:
+            long_mids.append((i, visible, incl_fade))
+    g, mid = _hold_reasons(board)
+    if long_mids:
+        ok(g["checks"]["B"] == "FAIL" and mid,
+           f"#{vid} BEFORE mid visible >3.0s incl fade → beat_hold "
+           f"({long_mids} {g.get('reasons')})")
+    else:
+        ok(not mid,
+           f"#{vid} BEFORE mp4 mids are ≤3.0s incl fade (no beat_hold) "
+           f"({[round(vis[i+1][0]-vis[i][0], 2) if i+1 < len(vis) else round(vis[i][1]-vis[i][0], 2) for i, b in enumerate(board) if b.get('type') not in ('hook', 'cta', 'endcard')]})")
+
+# VM examples that passed on 56dc5e9 (quote hold exemption): must FAIL on OS.
+for vid, hold, text in (
+    (1452, 3.31, "A maximum of 4 blocks with cache_control may be provided."),
+    (1453, 3.71, "Registration works, and optional keys are left out instead of sent as null."),
+    (1465, 5.87, "A task needs a description, an expected output, and an agent, or the handoff never starts."),
+):
+    board = [
+        {"type": "hook", "start": 0.0, "dur": 1.5,
+         "text": "One folder broke Copilot CLI.", "object": "terminal"},
+        {"type": "quote", "start": 2.0, "dur": hold, "text": text,
+         "literal_quote": True},
+        {"type": "cta", "start": round(2.0 + hold + 0.12, 3), "dur": 2.0,
+         "text": "Subscribe · Agent traps"},
+    ]
+    g, mid = _hold_reasons(board)
+    ok(g["checks"]["B"] == "FAIL" and any("beat[1]" in r for r in mid),
+       f"#{vid} mid visible {hold:.2f}s (quote) → OS beat_hold FAIL "
+       f"({g.get('reasons')})")
+    g_rr = craft.video_maker_gate(board, beat_timing=craft.BEAT_TIMING_CURRENT,
+                                  brand="rr", sources=ALLOW1452)
+    ok(not any("beat[1]" in r and "mid card" in r
+               for r in (g_rr.get("reasons") or [])),
+       f"#{vid} RR keeps the quote hold exemption")
 
 
 print("per-field literal (positive + negative)")
@@ -779,9 +874,9 @@ index = [
     "",
     "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`).",
     "",
-    "Âncoras: timestamps whisper reais em "
+    "Âncoras: timestamps whisper reais + visibilidade BEFORE (mp4, 30fps) em "
     "`tests/fixtures/os-gate-b/whisper-2026-10-19.json` (sem interpolação; "
-    "pin que não casa uma palavra falha).",
+    "pin que não casa uma palavra falha). Hold visual cruza com essa lista.",
     "",
     "| vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |",
     "|------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|",

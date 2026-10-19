@@ -1,5 +1,11 @@
 {
-  "source": "whisper-2026-10-19 (1452/1453=medium, 1465=small; 1453 last word is a whisper artifact \u2014 ignored)",
+  "source": "whisper-2026-10-19 (1452/1453=medium, 1465=small because medium is broken for 1465; 1453 last word is a whisper artifact — ignored)",
+  "models": {
+    "1452": "whisper-medium",
+    "1453": "whisper-medium",
+    "1465": "whisper-small"
+  },
+  "fps": 30,
   "ignore_last_word": {
     "1453": true
   },
