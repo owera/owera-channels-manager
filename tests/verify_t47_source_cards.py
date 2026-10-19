@@ -168,8 +168,8 @@ PATCH = {
          "source": "https://github.com/modelcontextprotocol/python-sdk/issues/3227"},
         {"kind": "quote", "text": "Python three eleven and up were fine.", "source": "vo"},
         {"kind": "quote", "text": "Registration works.", "source": "vo"},
-        {"kind": "quote", "text": "Optional keys are left out instead of sent as null.",
-         "source": "vo"},
+        {"kind": "quote", "text": "Optional keys are left out.", "source": "vo"},
+        {"kind": "quote", "text": "They are not sent as null.", "source": "vo"},
         {"kind": "quote", "text": "Exact version in the description.", "source": "vo"},
     ],
     "on_screen": [
@@ -214,6 +214,16 @@ ok(sub and abs(float(beats[-1]["start"]) - float(sub[0])) <= craft.SYNC_TOL_S + 
 kinds = [k.get("check") for k in (g1453.get("kinds") or []) if isinstance(k, dict)]
 ok("unspoken_card" not in kinds,
    f"#1453 PATCH remaining kinds {kinds} (no unspoken_card)")
+ok(g1453.get("result") == "PASS" and g1453.get("checks") == {"A": "PASS", "B": "PASS", "C": "PASS"},
+   f"#1453 PATCH Gate B is PASS ({g1453.get('result')} {g1453.get('checks')} {g1453.get('reasons')})")
+reg = [b for b in beats
+       if "failed at registration" in ((b.get("text") or "") + (b.get("cue") or ""))]
+ok(len(reg) == 1 and (reg[0].get("text") or "") ==
+   "It failed at registration, before it ever ran.",
+   f"#1453 PATCH keeps registration as one card ({[b.get('text') for b in reg]})")
+ok(any((b.get("text") or "") == "Optional keys are left out." for b in beats)
+   and any((b.get("text") or "") == "They are not sent as null." for b in beats),
+   "#1453 PATCH splits optional-keys into two cards")
 
 
 def after_cta(vid, topic, subject, name, sources=None):
