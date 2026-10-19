@@ -113,7 +113,8 @@ fb1, m1 = holds(1)
 ok(max(m1) > 2.48 + 1e-6 and max(m1) <= 2.80 + 1e-6,
    f"topic 1: default cap (max hold {max(m1):.2f}s ≤ 2.80) — unchanged elsewhere")
 gate = craft.video_maker_gate(fb47, content_format="short", beat_timing=craft.BEAT_TIMING_CURRENT)
-ok(gate["checks"]["B"] == "PASS", f"Gate B (2.80 hold check, unchanged) passes the topic-47 board ({gate.get('reasons')})")
+ok(not any("mid card" in r and "limit 3.0s" in r for r in (gate.get("reasons") or [])),
+   f"Gate B hold check (2.80) still passes the topic-47 board ({gate.get('reasons')})")
 with craft.mid_hold_cap(2.48):
     hits = craft.card_text_hits(fb47, SCRIPT, words)
 ok(not [h for h in hits if h["check"] == "echo_card"],

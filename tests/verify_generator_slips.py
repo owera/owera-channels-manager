@@ -120,10 +120,13 @@ html1 = storyboard.compose(topic_id=1, **kw)
 # repairs as slips too — but never a literal_cards slip off topic 47.
 _LIT_KINDS = {"cli_not_in_allowlist", "stat_not_in_allowlist", "quote_not_in_allowlist",
               "stat_not_in_script", "attribution_dropped", "repeated_version_dropped"}
+_OS_KINDS = {"vs_card_not_allowed", "single_term_card", "card_text_not_literal",
+             "echo_card", "blank_gap_filled", "blank_gap_stretched"}
 gs1 = craft.generator_slips_from_html(html1) or []
 ok(not any(s["kind"] in _LIT_KINDS for s in gs1), "other topics: no literal_cards slip")
-ok(all(s["kind"].startswith(("fragment_", "whole_cards_")) for s in gs1),
-   f"other OS topics: only whole-card repair slips ({[s['kind'] for s in gs1]})")
+ok(all(s["kind"].startswith(("fragment_", "whole_cards_")) or s["kind"] in _OS_KINDS
+       for s in gs1),
+   f"other OS topics: whole-card or OS-literal slips ({[s['kind'] for s in gs1]})")
 html2 = storyboard.compose(topic_id=1, **dict(kw, brand="owera"))
 ok(craft.generator_slips_from_html(html2) is None, "brand outside rr/os, other topic: no slip record")
 ok(craft.generator_slips_from_html("<html>") is None
@@ -153,9 +156,9 @@ rg = craft.video_maker_gate_of(cc, "short")
 ok(rg.get("generator_slips") == len(gs), "video_maker_gate_of (recompute) keeps generator_slips")
 cc1 = worker._creation_config(kw["subject"], dict(params, topic_id=1), html1, SCRIPT, kw["duration"],
                               "portrait", None, False, words=words, brand="os")
-ok(all(s["kind"].startswith(("fragment_", "whole_cards_"))
+ok(all(s["kind"].startswith(("fragment_", "whole_cards_")) or s["kind"] in _OS_KINDS
        for s in (cc1.get("generator_slips") or {}).get("slips") or []),
-   "other OS topics: generator_slips only ever carry whole-card repairs")
+   "other OS topics: generator_slips are whole-card or OS-literal repairs")
 cc2 = worker._creation_config(kw["subject"], dict(params, topic_id=1), html2, SCRIPT, kw["duration"],
                               "portrait", None, False, words=words, brand="owera")
 ok("generator_slips" not in cc2 and "generator_slips" not in cc2["craft_gate"],

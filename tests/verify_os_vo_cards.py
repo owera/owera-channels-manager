@@ -3,11 +3,11 @@
 Run: PYTHONPATH=. .venv/bin/python tests/verify_os_vo_cards.py
 
 OS-brand shorts: mid cards are one whole VO sentence (or #96 strong-clause
-units) as a plain quote. No compare / term_define / list / isolated-term
-templates. Kill switch craft.OS_VO_SENTENCE_CARDS = False restores the LLM
-path. RR unchanged. Literal allowlist cards stay verbatim. Quotes enter at
-the first spoken word, hold the whole span (mid-cap exception), exit last
-word + QUOTE_HOLD_TAIL_S.
+units) as a plain quote. No compare / term_define / list. Isolated-term
+only when that exact term is in on_screen_allow. Kill switch
+craft.OS_VO_SENTENCE_CARDS = False restores the LLM path (post-filter still
+converts banned/non-literal cards). RR unchanged. Quotes enter at the
+first spoken word and hold the spoken span up to the mid-card cap.
 """
 import inspect
 import json
@@ -233,7 +233,7 @@ ok(review_guard.allowlist_required_reason(
    "topic 7 → not held")
 
 
-print("literal quote timing (first word → last word + 0.3; mid-cap exception)")
+print("literal quote timing (first word → min(span+0.3, mid cap); CMO open if span>cap)")
 qtext = "A maximum of 4 blocks with cache_control may be provided."
 # 4.2s spoken span > 2.80 mid cap
 qt, t0 = [], 3.0
@@ -250,13 +250,41 @@ qb = [
 storyboard._time_literal_quotes(qb, qt, ALLOW)
 ok(abs(qb[1]["start"] - 3.0) < 1e-6, f"quote enters at first word ({qb[1]['start']})")
 span_end = qt[len(qtext.split()) - 1]["start"] + qt[len(qtext.split()) - 1]["dur"]
-expect = round(span_end + craft.QUOTE_HOLD_TAIL_S - 3.0, 3)
-ok(abs(qb[1]["dur"] - expect) < 0.02, f"hold = spoken span + 0.3 ({qb[1]['dur']} vs {expect})")
-ok(qb[1]["dur"] > craft.MID_BEAT_MAX_S, "literal quote may exceed the mid cap")
+spoken = span_end - 3.0
+expect = round(min(spoken + craft.QUOTE_HOLD_TAIL_S, craft.mid_beat_max()), 3)
+ok(abs(qb[1]["dur"] - expect) < 0.02, f"hold = min(span+0.3, cap) ({qb[1]['dur']} vs {expect})")
+ok(qb[1]["dur"] <= craft.mid_beat_max() + 1e-6, "literal quote does not exceed the mid cap")
+ok(spoken > craft.mid_beat_max(), "fixture spoken span exceeds cap (CMO open)")
 ok(qb[1].get("literal_quote") is True, "literal_quote flag stays on")
+ok(qb[1].get("quote_capped") is True, "quote_capped when spoken span > cap")
 gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT, sources=ALLOW)
-ok(gg["checks"]["B"] != "FAIL" or not any("mid card" in r and "beat[1]" in r for r in gg["reasons"]),
-   f"Gate B hold check exempts the literal quote ({gg.get('reasons')})")
+ok(not any("mid card" in r and "beat[1]" in r for r in (gg.get("reasons") or [])),
+   f"capped quote passes the mid hold check ({gg.get('reasons')})")
+
+print("allowlisted isolated term is allowed; echo of it is not")
+term_allow = [{"kind": "quote", "text": "cache_control", "source": "https://example.test"}]
+ok_term = [
+    {"type": "hook", "start": 0.0, "dur": 2.0, "text": "One folder broke Copilot CLI.",
+     "object": "terminal"},
+    {"type": "quote", "start": 2.12, "dur": 2.0, "text": "cache_control", "isolated": True,
+     "plain": True},
+    {"type": "cta", "start": 4.24, "dur": 3.0, "text": "Subscribe · Agent traps"},
+]
+ok(not any(h["check"] == "single_term_card"
+           for h in craft.os_card_hits(ok_term, SCRIPT, term_allow)),
+   "exact allowlisted term → no single_term_card")
+echo_term = [
+    ok_term[0],
+    {"type": "quote", "start": 2.12, "dur": 2.0,
+     "text": "A maximum of 4 blocks with cache_control may be provided.",
+     "literal_quote": True},
+    {"type": "quote", "start": 4.24, "dur": 2.0, "text": "cache_control", "isolated": True,
+     "plain": True},
+    ok_term[2],
+]
+ok(any(h["check"] == "echo_card"
+       for h in craft.os_card_hits(echo_term, SCRIPT, term_allow)),
+   "allowlisted term after a card that already showed it → echo_card")
 
 
 print("worker persists card_timing + allowlist_check")

@@ -1086,7 +1086,10 @@ BLANK_GAP_MAX_S = 0.5
 # card. Kill switch: False restores the LLM compare/term_define/list/isolated
 # template path on OS. RR is unchanged either way.
 OS_VO_SENTENCE_CARDS = True
-# Literal quote hold tail (CMO): card exits last spoken word + this.
+# Literal quote hold tail: card exits last spoken word + this, then the
+# hold is capped at the mid-card max. If the spoken span itself exceeds
+# the cap, we still start at the first word and hold only to the cap
+# (CMO open: do we keep the leftover off-screen?).
 QUOTE_HOLD_TAIL_S = 0.3
 # stale_card: leftover hold after the card's last spoken word (same budget
 # as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
@@ -1390,39 +1393,49 @@ def _visible_copy(beat: dict) -> str:
     return " ".join(parts)
 
 
-def beat_screen_text(beat: dict | None) -> str:
-    """Every piece of on-screen copy a beat renders (not the cue, not emoji)."""
+def card_visible_parts(beat: dict | None) -> list[tuple[str, str]]:
+    """Each on-screen string a beat renders, as ``(field, text)``.
+
+    Covers statement/quote ``text``, compare title + side titles/items,
+    term_define term+definition, stat value/unit/label, list items,
+    object labels, CLI lines — not the cue, not emoji.
+    """
     if not isinstance(beat, dict):
-        return ""
-    parts: list[str] = []
+        return []
+    parts: list[tuple[str, str]] = []
     for k in ("value", "unit", "text", "title", "label", "sub", "term",
               "definition", "command", "attribution"):
         v = beat.get(k)
         if isinstance(v, (str, int, float)) and not isinstance(v, bool):
             if str(v).strip():
-                parts.append(str(v))
+                parts.append((k, str(v)))
     for k in ("lines", "output"):
         for x in beat.get(k) or [] if isinstance(beat.get(k), list) else []:
             if str(x).strip():
-                parts.append(str(x))
+                parts.append((k.rstrip("s") if k == "lines" else k, str(x)))
     for it in _list_items(beat):
         if isinstance(it, dict):
             if it.get("text"):
-                parts.append(str(it["text"]))
+                parts.append(("item", str(it["text"])))
         elif it:
-            parts.append(str(it))
+            parts.append(("item", str(it)))
     for side in ("left", "right"):
         col = beat.get(side)
         if not isinstance(col, dict):
             continue
         if col.get("title"):
-            parts.append(str(col["title"]))
+            parts.append((f"{side}.title", str(col["title"])))
         for x in col.get("items") or []:
-            parts.append(str(x))
+            parts.append((f"{side}.item", str(x)))
     for n in beat.get("nodes") or [] if isinstance(beat.get("nodes"), list) else []:
         if isinstance(n, dict) and n.get("label"):
-            parts.append(str(n["label"]))
-    return " ".join(parts)
+            parts.append(("label", str(n["label"])))
+    return parts
+
+
+def beat_screen_text(beat: dict | None) -> str:
+    """Every piece of on-screen copy a beat renders (not the cue, not emoji)."""
+    return " ".join(t for _, t in card_visible_parts(beat))
 
 
 def screen_text_key(beat: dict | None) -> str:
@@ -1617,66 +1630,151 @@ def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
     return False
 
 
-def card_is_literal(beat: dict, script: str | None, sources=None) -> bool:
-    """True when on-screen copy is VO-literal or allowlist-literal."""
-    shown = beat_screen_text(beat)
-    if not shown.strip():
-        return True
-    if text_in_script(shown, script) or text_in_script(beat.get("text"), script):
+_BODY_FIELDS = frozenset({"text"})
+
+
+def _part_is_literal(field: str, text: str, script: str | None, sources=None, *,
+                     typ: str = "") -> bool:
+    """One visible field: VO-literal (whole unit / contiguous span) or allowlist."""
+    raw = str(text or "").strip()
+    if not raw:
         return True
     if sources is not None:
-        if source_literal(beat.get("text"), sources) or source_literal(shown, sources):
+        kinds = CLI_ALLOW_KINDS if field in ("line", "command", "output") else None
+        if source_literal(raw, sources, kinds):
             return True
-        for ln in cli_lines(beat):
-            if source_literal(ln, sources, CLI_ALLOW_KINDS):
-                return True
-        val = str(beat.get("value") or "")
-        if val and stat_allowed(val, sources):
+        if field == "value" and stat_allowed(raw, sources):
             return True
-    return False
+    if typ in ("quote", "statement") and field in _BODY_FIELDS:
+        if is_whole_unit(raw, script):
+            return True
+        # Soft product chip ("Still building · Coming soon"): two VO
+        # sentences joined by the middot, not one whole unit.
+        if " · " in raw:
+            return all(is_whole_unit(p, script) or text_in_script(p, script)
+                       for p in raw.split(" · ") if p.strip())
+        return False
+    return text_in_script(raw, script)
+
+
+def card_is_literal(beat: dict, script: str | None, sources=None) -> bool:
+    """True when every visible field is VO-literal or allowlist-literal.
+
+    statement/quote ``text``: a whole VO sentence or strong clause (#96).
+    compare/list titles and items: a literal contiguous VO span.
+    Everything else (term, definition, stat, labels, CLI): contiguous VO
+    span or a verbatim on_screen_allow line.
+    """
+    parts = card_visible_parts(beat)
+    if not parts:
+        return True
+    typ = (beat.get("type") or "") if isinstance(beat, dict) else ""
+    return all(_part_is_literal(f, t, script, sources, typ=typ) for f, t in parts)
+
+
+def literal_field_hits(beats, script: str | None, sources=None) -> list[dict]:
+    """literal_cards: any mid-card field that is neither VO nor allowlist."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not script:
+        return out
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES or (i == 0 and typ == "hook"):
+            continue
+        if card_is_literal(b, script, sources):
+            continue
+        shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
+        out.append({"i": i, "check": "card_text_not_literal",
+                    "detail": f"card {i} type={typ} {shown!r} has a field that is "
+                              "not VO-literal or allowlist-literal"})
+    return out
+
+
+def os_term_allowlisted(beat: dict | None, sources=None) -> bool:
+    """Exact isolated/term_define term is a whole on_screen_allow entry."""
+    if not isinstance(beat, dict) or sources is None:
+        return False
+    term = str(beat.get("term") or beat.get("text") or "").strip()
+    return bool(term) and source_literal(term, sources)
 
 
 def os_card_hits(beats, script: str | None, sources=None) -> list[dict]:
     """OS-only Gate B hits: banned templates + non-literal card text.
 
-    compare → vs_card_not_allowed; term_define / isolated quote →
-    single_term_card; list → vs_card_not_allowed (same ban as VS templates);
-    any other mid/hook copy that is neither VO-literal nor allowlist-literal
+    compare/list → vs_card_not_allowed; term_define / isolated quote →
+    single_term_card unless that exact term is in on_screen_allow; an
+    allowlisted term shown again on the very next card → echo_card; any
+    other mid/hook copy that is neither VO-literal nor allowlist-literal
     → card_text_not_literal. CTA/endcard is the series chip (exempt).
     """
     board = [b for b in (beats or []) if isinstance(b, dict)]
     out: list[dict] = []
     if not board:
         return out
+    prev = None
     for i, b in enumerate(board):
         typ = b.get("type") or ""
         if typ in CTA_TYPES:
+            prev = None
             continue
         shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
         if typ in OS_BANNED_COMPARE or typ in OS_BANNED_LIST:
             out.append({"i": i, "check": "vs_card_not_allowed",
                         "detail": f"card {i} type={typ} {shown!r} is a VS/list template "
                                   "(OS mid cards are whole VO sentences)"})
+            prev = i
             continue
         if typ in OS_BANNED_TERM or is_term_card(b):
-            out.append({"i": i, "check": "single_term_card",
-                        "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
-                                  "term_define card (OS mid cards are whole VO sentences)"})
-            continue
+            term = str(b.get("term") or b.get("text") or "").strip()
+            allowed_term = os_term_allowlisted(b, sources)
+            if not allowed_term:
+                out.append({"i": i, "check": "single_term_card",
+                            "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
+                                      "term_define card (OS: only if that exact term is "
+                                      "in on_screen_allow)"})
+            if prev is not None and term and text_in_script(term, beat_screen_text(board[prev])):
+                out.append({"i": i, "check": "echo_card",
+                            "detail": f"card {i} repeats term {term!r} right after "
+                                      f"card {prev} already showed it"})
+            if not allowed_term:
+                prev = i
+                continue
         if script and not card_is_literal(b, script, sources):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
                                   "or allowlist-literal"})
+        prev = i
     return out
 
 
+def quote_like_text(beat: dict | None) -> str | None:
+    """Text a quote (or quote-like literal log/error) card shows."""
+    if not isinstance(beat, dict):
+        return None
+    typ = beat.get("type") or ""
+    if typ == "quote":
+        t = str(beat.get("text") or beat.get("cue") or "").strip()
+        return t or None
+    if typ in CLI_BEAT_TYPES:
+        lines = cli_lines(beat)
+        if lines:
+            return lines[0] if len(lines) == 1 else " ".join(lines)
+    return None
+
+
 def quote_before_speech_hits(beats, words) -> list[dict]:
-    """Quote card that appears before its first spoken word."""
+    """Quote / quote-like log card that appears before its first spoken word.
+
+    FAIL when start < first-word start − SYNC_TOL_S (0.05s). No lead.
+    """
     out: list[dict] = []
-    for i, b in enumerate(b for b in (beats or []) if isinstance(b, dict)):
-        if (b.get("type") or "") != "quote":
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    for i, b in enumerate(board):
+        text = quote_like_text(b)
+        if not text:
             continue
-        span = spoken_span(b.get("text") or b.get("cue"), words)
+        span = spoken_span(text, words)
         if not span:
             continue
         start = _cue_start(b)
@@ -2848,9 +2946,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
-        # CMO: a literal quote holds its whole spoken span (even past mid cap).
-        if is_literal_quote_beat(b, sources):
-            continue
+        # Quotes hold the spoken span up to the mid cap (start = first word).
+        # A span longer than the cap is an open CMO call — generator caps it.
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
         hold_cap = cta_hold if is_cta else mid_hold
@@ -2956,13 +3053,25 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         os_live = [f"{h.get('check')}: {h.get('detail')}"
                    for h in os_card_hits(board, script, sources)]
         if os_live and not any("vs_card_not_allowed" in x or "single_term_card" in x
-                               or "card_text_not_literal" in x for x in text_hits):
+                               or "card_text_not_literal" in x or "echo_card" in x
+                               for x in text_hits):
             checks["B"] = "FAIL"
             reasons.append(
                 "[B] OS cards: FAIL — " + "; ".join(os_live) +
                 ". OS mid cards are one whole VO sentence (or its strong-clause "
-                "units); no compare/VS, term_define, list, or isolated term; "
-                "copy is VO-literal or allowlist-literal."
+                "units); no compare/VS; no isolated term unless that exact term "
+                "is in on_screen_allow; copy is VO-literal or allowlist-literal."
+            )
+    elif script and (sources is not None or (cli_check or {}).get("literal")):
+        lit_live = [f"{h.get('check')}: {h.get('detail')}"
+                    for h in literal_field_hits(board, script, sources)]
+        if lit_live and not any("card_text_not_literal" in x for x in text_hits):
+            checks["B"] = "FAIL"
+            reasons.append(
+                "[B] Literal cards: FAIL — " + "; ".join(lit_live) +
+                ". Every visible mid-card field is a whole VO sentence / "
+                "clause (compare/list items: a contiguous VO span) or a "
+                "verbatim on_screen_allow line."
             )
     timing_hits = card_timing_check_hits(card_timing)
     if not timing_hits and words:
