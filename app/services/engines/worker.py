@@ -455,7 +455,9 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             cvo = (craft.card_vo_marker(beats, script, content_format=fmt,
                                         brand=brand or params.get("brand"))
                    if not used_fallback else None)
-            ctime = (craft.card_timing_marker(beats, words, script, fmt)
+            ctime = (craft.card_timing_marker(beats, words, script, fmt,
+                                              duration=duration,
+                                              sources=_lit_src)
                      if not used_fallback else None)
             alchk = craft.allowlist_required_marker(params.get("topic_id"),
                                                     params.get("on_screen_allow"), fmt)
@@ -467,7 +469,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                                           card_timing=ctime, allowlist_check=alchk,
                                           brand=brand or params.get("brand"),
                                           script=script, words=words,
-                                          sources=params.get("on_screen_allow"))
+                                          sources=params.get("on_screen_allow"),
+                                          description=params.get("description"))
             # literal_cards topics: generator slips compose repaired (generated
             # evidence card → plain, attribution / stat removed, repeated version
             # dropped) — informational in the VM's craft report, never a verdict.

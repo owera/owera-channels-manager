@@ -1720,8 +1720,15 @@ ok("Card text" in (craft.video_maker_gate_reason(_ct_cc) or ""),
 
 print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft); Gate B 3.0s")
 ok(craft.SENTENCE_SPOKEN_MAX_S == 3.0 and craft.SENTENCE_SPOKEN_SOFT_S == 3.9
-   and craft.SENTENCE_MAX_WORDS == 12,
-   "Gate B sentence_too_long = 3.0s; soft rewrite stays 3.9s / 12 words")
+   and craft.SENTENCE_MAX_WORDS == 12
+   and craft.CODE_READ_MIN_S == 1.2
+   and craft.CARD_ENTER_LEAD_MAX_S == 0.3,
+   "Gate B sentence_too_long = 3.0s (every mid card); "
+   "code-read floor 1.2s; enter-lead 0.3s; soft rewrite stays 3.9s / 12 words")
+ok(craft.text_in_script("Found 5.", "Found 5. One block over the limit.")
+   and not craft.text_in_script(
+       "Found 5. One block over the limit.", "Found 5."),
+   "text_in_script is card ⊂ script, not inverted")
 _sp_over = craft.long_spoken_sentences(_ct_script)
 ok([h["text"][:22] for h in _sp_over] == ["E eu pergunto um valor"] and _sp_over[0]["how"] == "estimate",
    "#1423: the 16-word 'E eu pergunto…' sentence is over (estimate); the endcard VO is skipped")

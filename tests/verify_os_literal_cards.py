@@ -13,6 +13,10 @@ from pathlib import Path
 
 from app.services import craft, topic_flags
 from app.services.engines import storyboard
+from tests.os_gate_b_real_vo import (
+    snapshot_description, snapshot_duration, snapshot_script, whisper_words,
+    words_from_pins,
+)
 
 _checks = 0
 UPLOADS = Path("/home/ubuntu/.cursor/projects/workspace/uploads")
@@ -39,31 +43,13 @@ def checks_of(hits) -> set[str]:
     return {h.get("check") for h in (hits or []) if isinstance(h, dict)}
 
 
-# --- scripts (VO as reviewed) ---------------------------------------------
-S1452 = (
-    "One folder broke Copilot CLI. Add a directory with the add-dir flag, and every "
-    "Claude subagent failed on the spot. A maximum of 4 blocks with cache_control may "
-    "be provided. Found 5. One block over the limit. The parent agent got an empty "
-    "answer. Update Copilot CLI, and Anthropic subagents keep working with extra "
-    "directories. Exact version in the description. Subagent came back empty? Read "
-    "its error, not the parent's. Subscribe — next agent trap."
-)
-S1453 = (
-    "One type hint broke MCP tools. On Python three ten the tool failed. NotRequired "
-    "is the optional key on the TypedDict. Clean registration. Pydantic called the "
-    "annotation invalid. Python three eleven and up were fine. Update the MCP Python "
-    "SDK and registration works. Registration works, and optional keys are left out "
-    "instead of sent as null. Exact version in the description. Old Python in prod? "
-    "Test registration there. Subscribe — next agent trap."
-)
-S1465 = (
-    "The crew failed the handoff. tasks.yaml was empty. So the next agent received "
-    "nothing to do. CrewAI will not invent the work for you. The crew runner only "
-    "moves what that file declares. A task needs a description, an expected output, "
-    "and an agent. The handoff never starts. The crew logs will not fill a blank file. "
-    "Before you run, write each task in tasks.yaml. Empty file, empty crew. "
-    "Subscribe — next CrewAI trap."
-)
+# --- scripts = snapshot VO (the recorded audio), not rewritten copies ------
+S1452 = snapshot_script(1452)
+S1453 = snapshot_script(1453)
+S1465 = snapshot_script(1465)
+D1452 = snapshot_description(1452)
+D1453 = snapshot_description(1453)
+D1465 = snapshot_description(1465)
 
 ALLOW1452 = [
     {"kind": "quote",
@@ -231,12 +217,8 @@ ok(topic_flags.has(topic_flags.LITERAL_CARDS, 47)
 
 
 print("#1452 BEFORE (VM_FAIL_21fe) — Gate B FAILs")
-w1452 = words_anchor(S1452, {
-    "A maximum of 4 blocks with cache_control may be provided.": (8.04, 11.1),
-    "Found 5.": (11.94, 12.40),
-    "One folder broke Copilot CLI.": (0.10, 2.00),
-}, duration=30.60)
-h1452 = craft.os_card_hits(B1452, S1452, ALLOW1452)
+w1452 = whisper_words(1452)
+h1452 = craft.os_card_hits(B1452, S1452, ALLOW1452, words=w1452)
 c1452 = checks_of(h1452)
 ok("vs_card_not_allowed" in c1452, f"#1452 vs_card_not_allowed ({c1452})")
 ok("single_term_card" in c1452, f"#1452 single_term_card ({c1452})")
@@ -249,16 +231,14 @@ qh1452 = craft.quote_before_speech_hits(B1452, w1452)
 ok(qh1452 and qh1452[0]["check"] == "quote_before_speech" and qh1452[0]["i"] == 3,
    f"#1452 quote at 7.07 before speech 8.04 → quote_before_speech ({qh1452})")
 g1452 = craft.video_maker_gate(B1452, brand="os", script=S1452, words=w1452,
-                              sources=ALLOW1452, duration=30.60)
+                              sources=ALLOW1452, duration=snapshot_duration(1452),
+                              description=D1452)
 ok(g1452["checks"]["B"] == "FAIL", f"#1452 Gate B FAIL ({g1452['reasons'][:2]})")
 
 
 print("#1453 BEFORE (VM_FAIL_c638) — Gate B FAILs")
-w1453 = words_anchor(S1453, {
-    "Registration works, and optional keys are left out instead of sent as null.": (18.42, 22.5),
-    "One type hint broke MCP tools.": (0.10, 2.10),
-}, duration=30.77)
-h1453 = craft.os_card_hits(B1453, S1453, None)
+w1453 = whisper_words(1453)
+h1453 = craft.os_card_hits(B1453, S1453, None, words=w1453)
 c1453 = checks_of(h1453)
 ok("single_term_card" in c1453, f"#1453 isolated registration/prod → single_term_card ({c1453})")
 ok("vs_card_not_allowed" in c1453, f"#1453 VS templates ({c1453})")
@@ -268,23 +248,28 @@ ok(any("null on the wire" in (h.get("detail") or "") or h.get("check") == "vs_ca
 qh1453 = craft.quote_before_speech_hits(B1453, w1453)
 ok(qh1453 and any(h.get("i") == 7 for h in qh1453),
    f"#1453 quote at 17.37 before speech 18.42 → quote_before_speech ({qh1453})")
-g1453 = craft.video_maker_gate(B1453, brand="os", script=S1453, words=w1453, duration=30.77)
+g1453 = craft.video_maker_gate(B1453, brand="os", script=S1453, words=w1453,
+                              duration=snapshot_duration(1453), description=D1453)
 ok(g1453["checks"]["B"] == "FAIL", "#1453 Gate B FAIL")
 
 
 print("#1465 BEFORE (VM_FAIL_0465) — Gate B FAILs")
-w1465 = words_anchor(S1465, {
-    "The crew failed the handoff.": (0.10, 1.80),
-    "tasks.yaml was empty.": (1.88, 3.20),
-}, duration=30.13)
-h1465 = craft.os_card_hits(B1465, S1465, None)
+w1465 = whisper_words(1465)
+h1465 = craft.os_card_hits(B1465, S1465, None, words=w1465)
 c1465 = checks_of(h1465)
 ok("single_term_card" in c1465, f"#1465 isolated handoff / tasks yaml ({c1465})")
 ok("vs_card_not_allowed" in c1465, f"#1465 jumble VS ({c1465})")
 sh1465 = craft.stale_card_hits(B1465, w1465, S1465)
 ok(sh1465 and sh1465[0]["i"] == 0, f"#1465 frozen hook 7.43s → stale_card ({sh1465})")
-g1465 = craft.video_maker_gate(B1465, brand="os", script=S1465, words=w1465, duration=30.13)
+g1465 = craft.video_maker_gate(B1465, brand="os", script=S1465, words=w1465,
+                              duration=snapshot_duration(1465), description=D1465)
 ok(g1465["checks"]["B"] == "FAIL", "#1465 Gate B FAIL")
+ok(any(h.get("check") == "repeated_vo_sentence"
+       for h in craft.repeated_vo_sentence_hits(S1465)),
+   "#1465 snapshot VO repeats 'tasks.yaml was empty'")
+ok(any(h.get("check") == "description_missing_source"
+       for h in craft.description_missing_source_hits(D1465)),
+   "#1465 description has no public source link")
 
 
 print("per-field literal (positive + negative)")
@@ -450,18 +435,82 @@ ok(any(s.get("kind") == "blank_gap_filled" for s in slips) or not craft.blank_ga
 ok(not craft.blank_gap_hits(hole), "filled board has no blank_gap")
 
 
+print("new Gate B FAILs (isolated)")
+tiny = [
+    _beat("hook", 0.0, 1.5, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("code", 1.6, 2.1, lines=["Found 5."], lang="log"),
+    _beat("quote", 2.2, 3.0, text="The parent agent got an empty answer.", plain=True),
+    _beat("cta", 4.0, 8.0, text="Subscribe · Agent traps"),
+]
+ok(any(h["check"] == "code_read_too_short"
+       for h in craft.code_read_too_short_hits(tiny)),
+   "Found 5. at 0.50s → code_read_too_short (floor 1.2s)")
+ok(craft.CODE_READ_MIN_S == 1.2, "CODE_READ_MIN_S = 1.2s")
+ok(any(h["check"] == "card_overlap" for h in craft.card_time_overlap_hits([
+    _beat("hook", 0.0, 2.0, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 1.5, 3.5, text="Found 5.", plain=True),
+    _beat("cta", 3.6, 6.0, text="Subscribe"),
+])), "overlapping visual holds → card_overlap")
+early = [
+    _beat("hook", 0.0, 1.0, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 1.0, 2.5, text="Found 5.", plain=True),
+    _beat("cta", 2.6, 5.0, text="Subscribe"),
+]
+w_early = words_from_pins(S1452, {"Found 5.": (2.0, 2.5),
+                                  "One folder broke Copilot CLI.": (0.10, 1.00)})
+ok(any(h["check"] == "card_enters_early" and h["i"] == 1
+       for h in craft.card_enters_early_hits(early, w_early)),
+   "card enters 1.0s before speech 2.0s → card_enters_early")
+exit_b = [
+    _beat("hook", 0.0, 1.0, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 8.04, 9.00, text="A maximum of 4 blocks with cache_control may be provided.",
+          literal_quote=True),
+    _beat("cta", 11.5, 14.0, text="Subscribe"),
+]
+ok(any(h["check"] == "card_exits_early"
+       for h in craft.card_exits_early_hits(exit_b, w1452)),
+   "CAPIError card ending 9.00 before last word 11.1 → card_exits_early")
+ok(any(h["check"] == "cta_after_video_end"
+       for h in craft.cta_after_video_end_hits(tiny, duration=6.0)),
+   "CTA ending 8.0s on a 6.0s video → cta_after_video_end")
+ok(not craft.description_missing_source_hits(D1452)
+   and not craft.description_missing_source_hits(D1453),
+   "#1452/#1453 descriptions have public source links")
+ok(not craft.text_in_script(S1452, "Found 5."),
+   "text_in_script rejects inverted containment (script ⊂ card)")
+ok(not craft.text_in_script(S1452, S1452),
+   "whole-script echo is not text_in_script of itself")
+ok(craft.text_in_script("Found 5.", S1452),
+   "contiguous card ⊂ script still passes")
+enum = "A task needs a description, an expected output, and an agent."
+ok(craft.is_enumeration_clause_split(enum),
+   "enumeration is detected")
+ok(not craft.is_enumeration_clause_split(
+    "Add a directory with the add-dir flag, and every Claude subagent failed on the spot."),
+   "coordinated clauses with a verb are not an enumeration")
+ok(storyboard._os_sentence_units(enum, force=True) == [enum],
+   "generator does not fragment an enumeration")
+ok(any(h["check"] == "enumeration_needs_rewrite"
+       for h in craft.enumeration_hits(
+           [{"type": "quote", "text": "an expected output", "plain": True}],
+           enum + " Subscribe — next CrewAI trap.")),
+   "enumeration fragment on screen → enumeration_needs_rewrite")
+
+
 print("AFTER compose (deterministic, no LLM) + committed before/after tables")
 
 
-def _gate(beats, *, duration, script, words, topic_id, sources):
+def _gate(beats, *, duration, script, words, topic_id, sources, description=None):
     ctext = craft.card_text_marker(beats, script, words, brand="os", sources=sources)
     cvo = craft.card_vo_marker(beats, script, brand="os")
-    ctime = craft.card_timing_marker(beats, words, script)
+    ctime = craft.card_timing_marker(beats, words, script, duration=duration,
+                                    sources=sources)
     al = craft.allowlist_required_marker(topic_id, sources)
     return craft.video_maker_gate(
         beats, content_format="short", beat_timing=craft.BEAT_TIMING_CURRENT,
         card_text=ctext, card_vo=cvo, duration=duration, card_timing=ctime,
-        allowlist_check=al, brand="os", script=script, words=words, sources=sources)
+        allowlist_check=al, brand="os", script=script, words=words,
+        sources=sources, description=description)
 
 
 def _kinds(g: dict) -> list[str]:
@@ -474,7 +523,10 @@ def _kinds(g: dict) -> list[str]:
         for name in ("blank_gap", "stale_card", "quote_before_speech",
                      "vs_card_not_allowed", "single_term_card",
                      "card_text_not_literal", "echo_card", "allowlist_required",
-                     "sentence_too_long"):
+                     "sentence_too_long", "card_exits_early", "card_enters_early",
+                     "card_overlap", "cta_after_video_end", "repeated_vo_sentence",
+                     "code_read_too_short", "description_missing_source",
+                     "enumeration_needs_rewrite"):
             if name in r and name not in out:
                 out.append(name)
     return out
@@ -501,14 +553,17 @@ def _md_board(beats, g, label):
 
 
 CASES = [
-    dict(vid=1452, topic=47, dur=30.60, script=S1452, before=B1452, words=w1452,
-         sources=ALLOW1452, subject="One folder broke Copilot CLI. · Agent traps 12",
+    dict(vid=1452, topic=47, dur=snapshot_duration(1452), script=S1452, before=B1452,
+         words=w1452, sources=ALLOW1452, description=D1452,
+         subject="One folder broke Copilot CLI. · Agent traps 12",
          name="Agent traps", fail_file="VM_FAIL_21fe.md"),
-    dict(vid=1453, topic=47, dur=30.77, script=S1453, before=B1453, words=w1453,
-         sources=None, subject="One type hint broke MCP tools. · Agent traps 14",
+    dict(vid=1453, topic=47, dur=snapshot_duration(1453), script=S1453, before=B1453,
+         words=w1453, sources=None, description=D1453,
+         subject="One type hint broke MCP tools. · Agent traps 14",
          name="Agent traps", fail_file="VM_FAIL_c638.md"),
-    dict(vid=1465, topic=7, dur=30.13, script=S1465, before=B1465, words=w1465,
-         sources=None, subject="The crew failed the handoff. tasks.yaml was empty. · CrewAI 21",
+    dict(vid=1465, topic=7, dur=snapshot_duration(1465), script=S1465, before=B1465,
+         words=w1465, sources=None, description=D1465,
+         subject="The crew failed the handoff. tasks.yaml was empty. · CrewAI 21",
          name="CrewAI", fail_file="VM_FAIL_0465.md"),
 ]
 
@@ -519,7 +574,7 @@ summaries = []
 per_md = []
 for c in CASES:
     gb = _gate(c["before"], duration=c["dur"], script=c["script"], words=c["words"],
-               topic_id=c["topic"], sources=c["sources"])
+               topic_id=c["topic"], sources=c["sources"], description=c.get("description"))
     html = storyboard.compose(
         subject=c["subject"], script=c["script"], words=c["words"], duration=c["dur"],
         resolution="portrait", width=1080, height=1920, topic_id=c["topic"],
@@ -534,14 +589,15 @@ for c in CASES:
     ok(not any(craft.is_term_card(b) for b in after),
        f"#{c['vid']} AFTER has no isolated-term card")
     ga = _gate(after, duration=c["dur"], script=c["script"], words=c["words"],
-               topic_id=c["topic"], sources=c["sources"])
+               topic_id=c["topic"], sources=c["sources"],
+               description=c.get("description"))
     ok("vs_card_not_allowed" not in _kinds(ga)
        and "single_term_card" not in _kinds(ga),
        f"#{c['vid']} AFTER Gate B dropped VS/term ({_kinds(ga)})")
     note = (f"BEFORE = board visível do `{c['fail_file']}` (main `c35e110`). "
-            "AFTER = `storyboard.compose` determinístico neste branch "
-            "(sem LLM; âncoras de fala do VM_FAIL; resto das palavras "
-            "preenche o vão entre âncoras).")
+            "AFTER = `storyboard.compose` no script do snapshot + âncoras "
+            "whisper/card_sync do áudio gravado (sem S1453/S1465 reescrito, "
+            "sem timing sintético uniforme).")
     body = [f"# #{c['vid']} (topic {c['topic']}, duration {c['dur']:.2f}s)", "",
             note, ""]
     body += _md_board(c["before"], gb, "BEFORE (main c35e110 / VM_FAIL)")
@@ -587,15 +643,16 @@ ok(s1465["hook_before"] > 5, f"#1465 BEFORE hook frozen ({s1465['hook_before']}s
 ok(s1465["hook_after"] <= 4.1, f"#1465 AFTER hook ≤ ~4s ({s1465['hook_after']})")
 ok("stale_card" not in s1465["after_kinds"] or s1465["hook_after"] <= 4.1,
    "#1465 AFTER hook is not the stale hit")
-ok(s1465["ga"]["checks"]["B"] == "FAIL"
-   and "sentence_too_long" in s1465["after_kinds"],
-   f"#1465 AFTER Gate B FAIL sentence_too_long "
-   f"({s1465['after_kinds']} {s1465['ga'].get('reasons')})")
-ok("blank_gap" not in s1465["after_kinds"] and "slide_spam" not in s1465["after_kinds"],
-   f"#1465 AFTER no blank_gap/slide_spam ({s1465['after_kinds']})")
-ok(any("crew runner" in (h.get("detail") or "")
-       for h in craft.sentence_too_long_hits(s1465["after"], w1465)),
-   "#1465 'The crew runner…' spoken ~3.52s is sentence_too_long")
+ok(s1465["ga"]["checks"]["B"] == "FAIL",
+   f"#1465 AFTER Gate B FAIL on real VO ({s1465['after_kinds']})")
+ok("repeated_vo_sentence" in s1465["after_kinds"],
+   f"#1465 AFTER repeated_vo_sentence ({s1465['after_kinds']})")
+ok("description_missing_source" in s1465["after_kinds"],
+   f"#1465 AFTER description_missing_source ({s1465['after_kinds']})")
+ok("enumeration_needs_rewrite" in s1465["after_kinds"],
+   f"#1465 AFTER enumeration_needs_rewrite ({s1465['after_kinds']})")
+ok("slide_spam" not in s1465["after_kinds"],
+   f"#1465 AFTER no slide_spam ({s1465['after_kinds']})")
 ok("allowlist_required" in s1453["before_kinds"] or s1453["before_B"] == "FAIL",
    "#1453 topic 47 without allowlist is a Gate B FAIL")
 ok(s1453["ga"]["checks"]["B"] == "FAIL"
@@ -604,38 +661,35 @@ ok(s1453["ga"]["checks"]["B"] == "FAIL"
    f"#1453 AFTER allowlist_required + sentence_too_long "
    f"({s1453['after_kinds']} {s1453['ga'].get('reasons')})")
 ok(s1453["ga"]["checks"]["C"] == "PASS", "#1453 AFTER Gate C PASS")
-q1453 = next((b for b in s1453["after"]
-              if "optional keys are left out" in (b.get("text") or "")), None)
-ok(q1453 is not None, "#1453 AFTER has the long registration sentence")
 ok(any(h.get("check") == "sentence_too_long"
-       and "optional keys" in (h.get("detail") or "")
        for h in craft.sentence_too_long_hits(s1453["after"], w1453)),
-   f"#1453 ~{float(q1453['dur']):.2f}s hold (18.42–22.38) FAILs 3.0s "
-   f"sentence_too_long")
+   f"#1453 AFTER sentence_too_long on snapshot VO "
+   f"({craft.sentence_too_long_hits(s1453['after'], w1453)})")
 
 index = [
     "# Gate B before/after — OS #1452, #1453, #1465",
     "",
     "BEFORE = board visível dos `VM_FAIL_*.md` (main `c35e110`).",
-    "AFTER = gerador determinístico deste branch (1 frase da VO; quote literal "
-    "segura o span inteiro + 0,3s; sem compare/term/list/termo isolado).",
+    "AFTER = gerador determinístico deste branch no **script do snapshot** "
+    "(VO gravada) + âncoras whisper/`card_sync` do áudio real. Sem script "
+    "S1453/S1465 reescrito e sem timing sintético uniforme. O check literal "
+    "compara o card com as palavras faladas/renderizadas.",
     "",
-    "Quando o span falado de uma frase passa do cap mid e deixaria um buraco "
-    "> 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); "
-    "(2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO "
-    "sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o "
-    "card plain segura até a última palavra falada + 0,3s (nunca na frase "
-    "seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem "
-    "`blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` "
-    "(3,0s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.",
+    "`SENTENCE_SPOKEN_MAX_S = 3.0` vale para **todo** mid card, quote "
+    "literal incluída (sem isenção de span). Se nenhum split de cláusula "
+    "cabe em ≤3,0s — ou o split de vírgula quebraria uma enumeração — "
+    "Gate B FALLA e o script é que se parte.",
     "",
-    "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): "
-    "statement/list que só reexibe a narração sem tipo rico "
-    "(code/command/diagram/compare/stat). O gerador OS não emite statement "
-    "(allowlist log fica `code`) e junta peças curtas demais da mesma frase.",
+    "Checks novos: `card_exits_early`, `card_enters_early` (lead > 0,3s), "
+    "`card_overlap`, `cta_after_video_end`, `repeated_vo_sentence`, "
+    "`code_read_too_short` (piso 1,2s em code/command), "
+    "`description_missing_source`, `enumeration_needs_rewrite`.",
     "",
-    "Âncoras de fala dos VM_FAIL (whisper). Resto das palavras preenche o vão "
-    "entre âncoras até `duration − END_TAIL_S`. Sem render/TTS novo.",
+    "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`).",
+    "",
+    "Âncoras: frases do VM_FAIL (whisper small+medium) + "
+    "`card_sync.speech_start` do snapshot. Palavras entre âncoras "
+    "interpolam só o vão adjacente.",
     "",
     "| vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |",
     "|------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|",

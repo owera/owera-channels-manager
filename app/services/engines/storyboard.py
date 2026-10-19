@@ -3526,8 +3526,10 @@ def _os_sentence_units(sent: str, *, force: bool = False, neighbors=None) -> lis
     with no echo of a neighbouring card; if any piece would echo, keep
     the whole sentence (caller then ``cap_extended_spoken``). ``force``
     skips the short-sentence early return so a long spoken span can still
-    split.
+    split. A comma enumeration is kept whole (Gate B then asks for a VO
+    rewrite — never ``description / an expected output / and an agent``).
     """
+    from app.services import craft
     sent = (sent or "").strip()
     if not sent:
         return []
@@ -3536,6 +3538,8 @@ def _os_sentence_units(sent: str, *, force: bool = False, neighbors=None) -> lis
     parts = _os_strong_parts(sent)
     if len(parts) <= 1:
         parts = _os_weak_parts(sent)
+        if len(parts) > 1 and craft.is_enumeration_clause_split(sent, parts):
+            return [sent]
     if len(parts) <= 1:
         return [sent]
     units = _pack_clause_parts(parts) or [sent]
@@ -3612,12 +3616,16 @@ def _snap_os_cards_to_speech(beats, words, script=None) -> None:
             continue
         b["start"] = round(float(span[0]), 3)
         hold = float(b.get("dur") or 0) or _mid_max()
-        hold = min(max(_MIN_DUR, hold), _mid_max())
-        # do not outlive the next spoken word by more than STALE_CARD_MAX_S
-        leftover = float(span[1]) + craft.STALE_CARD_MAX_S - float(b["start"])
+        floor = (craft.CODE_READ_MIN_S if typ in craft.CLI_BEAT_TYPES else _MIN_DUR)
+        hold = min(max(floor, hold), _mid_max())
+        spoken = float(span[1]) - float(span[0])
+        stale_budget = craft.STALE_CARD_MAX_S
+        if typ in craft.CLI_BEAT_TYPES:
+            stale_budget = max(stale_budget, floor - spoken)
+        leftover = float(span[1]) + stale_budget - float(b["start"])
         if leftover > 0:
-            hold = min(hold, leftover)
-        b["dur"] = round(max(_MIN_DUR, hold), 3)
+            hold = min(hold, max(floor, leftover))
+        b["dur"] = round(max(floor, hold), 3)
     for i in range(1, len(beats)):
         prev, cur = beats[i - 1], beats[i]
         try:
@@ -3827,8 +3835,7 @@ def _os_cover_spoken_holes(beats, script, words, slips=None) -> None:
             out.append(cur)
             continue
         typ = prev.get("type") or ""
-        if (typ == "hook" or typ in craft.CTA_TYPES
-                or craft.is_literal_quote_beat(prev) or prev.get("_lit")):
+        if typ == "hook" or typ in craft.CTA_TYPES:
             out.append(cur)
             continue
         text = (craft.beat_screen_text(prev) or prev.get("text") or "").strip()
@@ -3837,6 +3844,8 @@ def _os_cover_spoken_holes(beats, script, words, slips=None) -> None:
         if text and spoken > cap + 1e-6:
             neighbors = list(out[:-1]) + [cur]
             units = _os_sentence_units(text, force=True, neighbors=neighbors)
+            if craft.is_enumeration_clause_split(text):
+                units = [text]
             cur_txt = cur.get("text") or ""
             clean = []
             for u in units:
@@ -3995,7 +4004,10 @@ def _time_literal_quotes(beats, words, sources=None) -> None:
             continue
         t0, t1 = span
         b["start"] = round(float(t0), 3)
-        b["dur"] = round(max(_MIN_DUR, float(t1) + craft.QUOTE_HOLD_TAIL_S - float(t0)), 3)
+        hold = max(_MIN_DUR, float(t1) + craft.QUOTE_HOLD_TAIL_S - float(t0))
+        if typ in craft.CLI_BEAT_TYPES:
+            hold = max(hold, craft.CODE_READ_MIN_S)
+        b["dur"] = round(hold, 3)
         if typ == "quote":
             b["literal_quote"] = True
     for i in range(1, len(beats)):

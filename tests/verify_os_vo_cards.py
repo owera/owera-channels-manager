@@ -335,7 +335,8 @@ def _span_board(text, words, *, literal=False, cap_ext=False):
 
 SENT_HOLD = "Exact version in the description."
 for kind, kw in (("plain cap_extended_spoken", {"cap_ext": True}),
-                 ("literal quote", {"literal": True})):
+                 ("literal quote", {"literal": True}),
+                 ("plain mid card (no exemption)", {})):
     w30 = _spoken_words(SENT_HOLD, 1.0, 3.0)
     b30 = _span_board(SENT_HOLD, w30, **kw)
     span30 = craft.spoken_span(SENT_HOLD, w30)
@@ -440,6 +441,20 @@ ok(cc.get("allowlist_check", {}).get("version") == craft.ALLOWLIST_REQ_V1
 ok(cc.get("card_timing", {}).get("version") == craft.CARD_TIMING_V1,
    "card_timing marker is stored when words exist")
 ok(cc["card_text"].get("os") is True, "card_text marker carries os=True")
+
+
+print("text_in_script rejects inverted containment; enumeration stays whole")
+ok(craft.text_in_script("Found 5.", SCRIPT)
+   and not craft.text_in_script(SCRIPT, "Found 5."),
+   "card ⊂ script yes; script ⊂ card no")
+ok(not craft.text_in_script(SCRIPT, SCRIPT),
+   "whole-script echo is not literal")
+enum = "A task needs a description, an expected output, and an agent."
+ok(craft.is_enumeration_clause_split(enum)
+   and storyboard._os_sentence_units(enum, force=True) == [enum],
+   "enumeration is not comma-split into fragments")
+ok(craft.CODE_READ_MIN_S == 1.2 and craft.CARD_ENTER_LEAD_MAX_S == 0.3,
+   "code-read floor 1.2s; enter-lead max 0.3s")
 
 
 print()

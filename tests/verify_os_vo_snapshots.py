@@ -2,14 +2,12 @@
 
 Run: PYTHONPATH=. .venv/bin/python tests/verify_os_vo_snapshots.py
 
-The attached snapshots have script + timed beats + card_sync speech_start
-but no TTS word timings. Words are synthesized from the script (uniform
-over duration − END_TAIL_S), then nudged so each card_sync cue lands near
-its speech_start. No real render/TTS.
+AFTER boards use the snapshot script plus whisper/`card_sync` pins of
+the recorded audio (``tests/os_gate_b_real_vo.py``). No rewritten
+S1453/S1465, no uniform synthetic track.
 
 Canonical before/after (VM_FAIL live boards + whisper anchors) is
 ``docs/gate-b-os-before-after.md`` (written by verify_os_literal_cards).
-This file keeps a snapshot-only replay as a second proof.
 """
 from __future__ import annotations
 
@@ -19,6 +17,7 @@ from pathlib import Path
 
 from app.services import craft
 from app.services.engines import storyboard
+from tests.os_gate_b_real_vo import snapshot_description, whisper_words
 
 _checks = 0
 ART = Path("/opt/cursor/artifacts")
@@ -100,15 +99,18 @@ def synth_words(script: str, duration: float, card_sync=None) -> list[dict]:
     return words
 
 
-def gate_of(beats, *, duration, script, words, brand, topic_id, sources=None):
+def gate_of(beats, *, duration, script, words, brand, topic_id, sources=None,
+            description=None):
     ctext = craft.card_text_marker(beats, script, words, brand=brand, sources=sources)
     cvo = craft.card_vo_marker(beats, script, brand=brand)
-    ctime = craft.card_timing_marker(beats, words, script)
+    ctime = craft.card_timing_marker(beats, words, script, duration=duration,
+                                    sources=sources)
     al = craft.allowlist_required_marker(topic_id, sources)
     return craft.video_maker_gate(
         beats, content_format="short", beat_timing=craft.BEAT_TIMING_CURRENT,
         card_text=ctext, card_vo=cvo, duration=duration, card_timing=ctime,
-        allowlist_check=al, brand=brand, script=script, words=words, sources=sources)
+        allowlist_check=al, brand=brand, script=script, words=words,
+        sources=sources, description=description)
 
 
 def kinds_of(g: dict) -> list[str]:
@@ -119,7 +121,11 @@ def kinds_of(g: dict) -> list[str]:
     for r in g.get("reasons") or []:
         for name in ("blank_gap", "stale_card", "quote_before_speech",
                      "vs_card_not_allowed", "single_term_card", "card_text_not_literal",
-                     "echo_card", "allowlist_required", "card_vo", "OS cards"):
+                     "echo_card", "allowlist_required", "card_vo", "OS cards",
+                     "sentence_too_long", "card_exits_early", "card_enters_early",
+                     "card_overlap", "cta_after_video_end", "repeated_vo_sentence",
+                     "code_read_too_short", "description_missing_source",
+                     "enumeration_needs_rewrite"):
             if name in r and name not in out:
                 out.append(name)
     return out
@@ -166,17 +172,17 @@ for vid, path in SNAPS.items():
     topic_id = raw["topic_id"]
     duration = float(cc["duration"])
     before = cc["beats"]
-    words = synth_words(script, duration, cc.get("card_sync"))
+    words = whisper_words(vid)
     has_wb = any(isinstance(w, dict) and "start" in w
                  for w in (cc.get("words") or []))
     ok(not has_wb, f"#{vid}: snapshot creation_config has no TTS words")
-    note = ("Word timings were **not** in the snapshot (no `words` / WordBoundary "
-            "list, no VM_FAIL.md). Synthesized uniformly from the script over "
-            f"`duration − END_TAIL_S` ({duration:.2f} − {craft.END_TAIL_S:.2f}s), "
-            "nudged toward `card_sync.speech_start` when a cue matched.")
+    note = ("Word timings from VM_FAIL whisper phrase spans + snapshot "
+            "`card_sync.speech_start` of the recorded audio. Script is the "
+            "snapshot VO (not a rewritten copy).")
 
     g_before = gate_of(before, duration=duration, script=script, words=words,
-                       brand="os", topic_id=topic_id, sources=None)
+                       brand="os", topic_id=topic_id, sources=None,
+                       description=snapshot_description(vid))
 
     html = storyboard.compose(
         subject=subject, script=script, words=words, duration=duration,
@@ -190,7 +196,8 @@ for vid, path in SNAPS.items():
     ok(not ({"compare", "term_define", "list"} & set(types)),
        f"#{vid} AFTER has no banned templates ({types})")
     g_after = gate_of(after, duration=duration, script=script, words=words,
-                      brand="os", topic_id=topic_id, sources=None)
+                      brand="os", topic_id=topic_id, sources=None,
+                      description=snapshot_description(vid))
 
     md = md_table(vid, topic_id, duration, before, after, g_before, g_after, note)
     out = ART / f"gate-b-{vid}-before-after.md"
@@ -227,8 +234,8 @@ ok((s1465["hook_after"] or 99) <= 4.1,
 index = ART / "gate-b-before-after.md"
 index.write_text(
     "# Gate B before/after — #1452, #1453, #1465\n\n"
-    "Word timings were **not** in the snapshots and there is no `VM_FAIL.md`. "
-    "Words were synthesized from each script (see per-video notes).\n\n"
+    "AFTER uses the snapshot script + whisper/`card_sync` pins of the "
+    "recorded audio (no rewritten S1453/S1465, no uniform synthetic track).\n\n"
     "| video | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |\n"
     "|------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|\n"
     + "\n".join(
