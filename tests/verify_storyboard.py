@@ -2618,8 +2618,8 @@ _st_sb = [w["start"] for w in _w1385 if w["text"] == "Still"][0]
 ok(abs(float(_soft[0]["start"]) - _st_sb) <= craft.SYNC_LEAD_MAX_S + 1e-6 and float(_soft[0]["start"]) <= _st_sb + 1e-6,
    "soft card sits on the 'Still building' speech (lead ≤1.1s, never after)")
 _nq = sum(1 for b in _tz if b.get("type") == "quote")
-ok(_nq >= 3 and _tz_html.count('<div class="qmark">') == _nq - 1,
-   "soft card renders plain (no quote mark); other quotes keep theirs")
+ok(_nq >= 3 and _tz_html.count('<div class="qmark">') <= _nq - 1,
+   "soft card renders plain (no quote mark); OS-converted VO cards may also be plain")
 _tz_sync = craft.card_sync_marker(_tz, _w1385, script=_s1385)
 _c_end = craft.endcard_vo_content_end(_w1385, _s1385)
 ok(float(_tz[-1]["start"]) >= _c_end - craft.SYNC_TOL_S and _tz_sync["notes"][-1]["status"] in ("ok", "late_capped"),
@@ -2631,10 +2631,15 @@ ok(_tz_cli["hits"] == [] and not craft.card_sync_hits(_tz_sync) and _tz_gate["re
 ok(storyboard.validate_storyboard(_tz, _d1385) and craft.repeated_card_hits(_tz) == [],
    "#1385 re-composed: board valid, no repeated card")
 
-# explainers keep their command stills (scope: product teasers only)
-_rr_cmd = _compose(_tz_llm, subject="Your thumbnail, not a template · Agent memory 40", script=_s1385,
-                   words=_w1385, duration=_d1385, brand="os", topic_id=12, topic_name="Agent memory",
-                   allowed_types=_tp_all)
+# explainers keep their command stills (scope: product teasers only).
+# Kill switch off: this pin is the teaser CLI filter, not OS VO-sentence cards.
+craft.OS_VO_SENTENCE_CARDS = False
+try:
+    _rr_cmd = _compose(_tz_llm, subject="Your thumbnail, not a template · Agent memory 40", script=_s1385,
+                       words=_w1385, duration=_d1385, brand="os", topic_id=12, topic_name="Agent memory",
+                       allowed_types=_tp_all)
+finally:
+    craft.OS_VO_SENTENCE_CARDS = True
 ok("channels thumb cover.png" in _rr_cmd,
    "non-teaser board: command card untouched (RR/OS explainers unchanged)")
 
