@@ -58,10 +58,14 @@ with tempfile.TemporaryDirectory() as tmp:
         ok(not gate_grandfather.is_grandfathered(
             1452, creation_config=vp, video_path="/x/other.mp4"),
            "listed id + vm_pass for another master is excluded")
+        from types import SimpleNamespace
+        # Video.creation_config is a JSON string; vm_pass_of/_cc parse that.
+        listed = SimpleNamespace(id=1452, video_path="/x/video.mp4",
+                                 creation_config=json.dumps({**vp}))
         ok(craft.trust_stored_gate(
             {"composition_version": "storyboard", "beat_count": 1,
              "brand": "os", **vp, "craft_gate": {"result": "PASS"}},
-            video_id=1452, brand="os",
+            video_id=1452, video=listed, brand="os",
             gate_context=craft.GATE_CONTEXT_PUBLISH),
            "publish + listed + vm_pass on the snapshot → stored gate")
         ok(not craft.trust_stored_gate(
@@ -70,6 +74,11 @@ with tempfile.TemporaryDirectory() as tmp:
             video_id=1452, brand="os",
             gate_context=craft.GATE_CONTEXT_APPROVE),
            "OS approve never uses the stored gate")
+        ok(not gate_grandfather.is_grandfathered(1452, creation_config=vp),
+           "listed id + vm_pass without current video_path is not grandfathered")
+        ok(not gate_grandfather.is_grandfathered(
+            1328, creation_config=vp, video_path="/x/video.mp4"),
+           "#1328 excluded even with a matching vm_pass")
     finally:
         os.environ.pop("GATE_GRANDFATHER_PATH", None)
 
@@ -118,6 +127,11 @@ ok("held, v.held_at = False, None" in inspect.getsource(videos_router.approve),
    "held leaves only via explicit approve (actor logged)")
 ok("held, v.held_at = False, None" in inspect.getsource(videos_router.unhold),
    "or via the audited unhold API")
+ok("park_os_held" in inspect.getsource(videos_router.approve),
+   "approve fail-closed parks Video.held")
+ok("park_os_held" in pl_src, "publish OS FAIL parks Video.held")
+ok("elif video.held" in rl_src and "skip_gate" in rl_src,
+   "finalize skip_gate does not auto-approve Video.held")
 ok('fmt != "long"' in rl_src and "stamp_description_on_config" in rl_src,
    "post-render description stamp is shorts-only")
 
@@ -170,10 +184,119 @@ print("snapshot script")
 src = (REPO / "scripts" / "gate_grandfather_snapshot.py").read_text()
 ok("--exclude" in src and "1328" in src and "vm_pass_matches_master" in src,
    "snapshot script supports --exclude and drops vm_pass mismatches")
+ok("APPROVED" in src and "PUBLISHING" in src,
+   "snapshot selects approved + publishing (no separate scheduled status)")
 ok((REPO / "docs" / "deploy-os-cards.md").is_file(),
    "deploy/rollback doc is committed under docs/")
 ok((REPO / "app" / "data" / "gate_grandfather.json").is_file(),
    "closed list file exists")
+doc = (REPO / "docs" / "deploy-os-cards.md").read_text()
+ok("artifact_fingerprint" in doc or "size:mtime" in doc,
+   "docs say vm_pass is bound to the current render file, not a git SHA")
+ok("closed list" in doc.lower() and "missing" in doc.lower(),
+   "docs say grandfather is a closed list, not missing-marker")
+
+
+print("behavioral: held never auto-promotes; snapshot drops vm_pass mismatch")
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.models import Channel, CraftReview, OAuthStatus, Topic, Video, VideoStatus, utcnow
+
+engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                       poolclass=StaticPool)
+SQLModel.metadata.create_all(engine)
+s = Session(engine)
+ch = Channel(slug="owera", name="Owera Software", oauth_status=OAuthStatus.CONNECTED)
+s.add(ch)
+s.commit()
+s.refresh(ch)
+t = Topic(channel_id=ch.id, name="Agent traps", theme_prompt="x")
+s.add(t)
+s.commit()
+s.refresh(t)
+held_v = Video(
+    channel_id=ch.id, topic_id=t.id, subject="held drip",
+    status=VideoStatus.APPROVED, craft_review=CraftReview.PASS,
+    title="Cache miss re-bills the whole receipt · Copilot Credits 1",
+    script="Cache miss costs $79. Subscribe — next Copilot Credits trap.",
+    held=True, held_at=utcnow(),
+    creation_config=json.dumps({"composition_version": "storyboard", "beat_count": 1,
+                                "craft_gate": {"result": "PASS"}}),
+)
+s.add(held_v)
+s.commit()
+s.refresh(held_v)
+ok(publish_loop._next_approved(s, ch.id) is None,
+   "_next_approved skips Video.held")
+uploaded = []
+from app.services import youtube
+youtube.get_service = lambda slug: object()
+youtube.upload_video = lambda *a, **k: uploaded.append(a) or "ytX"
+publish_loop._publish_one(s, ch, held_v)
+s.commit()
+s.refresh(held_v)
+ok(not uploaded, "_publish_one does not upload a held video")
+ok(held_v.held is True and held_v.status == VideoStatus.REVIEW,
+   "held publish attempt stays held/review, never approved/published")
+
+v1328 = Video(
+    id=1328, channel_id=ch.id, topic_id=t.id, subject="old master",
+    status=VideoStatus.APPROVED, craft_review=CraftReview.PASS,
+    title="Old master · Agent traps 1",
+    script="One folder broke Copilot CLI. Subscribe — next agent trap.",
+    video_path="/tmp/old-master.mp4",
+    creation_config=json.dumps({
+        "vm_pass": {"result": "PASS", "video_path": "/tmp/other.mp4"},
+        "craft_gate": {"result": "PASS"},
+    }),
+)
+ok(not gate_grandfather.vm_pass_matches_master(v1328),
+   "#1328-style vm_pass for another path is not the current master")
+park = Video(channel_id=ch.id, topic_id=t.id, subject="park",
+             status=VideoStatus.APPROVED)
+gate_grandfather.park_os_held(park, "Video Maker craft gate FAIL: mid card")
+ok(park.held is True and park.status == VideoStatus.REVIEW
+   and str(park.error).startswith("held:"),
+   "park_os_held sets held + review, never failed")
+
+# Snapshot: OS approved without current-master vm_pass is skipped.
+db = Path(tempfile.mkdtemp()) / "gf.db"
+eng2 = create_engine(f"sqlite:///{db}")
+SQLModel.metadata.create_all(eng2)
+s2 = Session(eng2)
+ch2 = Channel(slug="owera", name="Owera Software", oauth_status=OAuthStatus.CONNECTED)
+s2.add(ch2)
+s2.commit()
+s2.refresh(ch2)
+t2 = Topic(channel_id=ch2.id, name="Agent traps", theme_prompt="x")
+s2.add(t2)
+s2.commit()
+s2.refresh(t2)
+s2.add(Video(
+    id=1328, channel_id=ch2.id, topic_id=t2.id, subject="1328",
+    status=VideoStatus.APPROVED, craft_review=CraftReview.PASS,
+    video_path="/tmp/1328.mp4",
+    creation_config=json.dumps({"vm_pass": {"result": "PASS", "video_path": "/tmp/1328.mp4"}}),
+))
+s2.add(Video(
+    id=1452, channel_id=ch2.id, topic_id=t2.id, subject="no vp",
+    status=VideoStatus.APPROVED, craft_review=CraftReview.PASS,
+    creation_config=json.dumps({"craft_gate": {"result": "PASS"}}),
+))
+s2.commit()
+s2.close()
+import subprocess
+proc = subprocess.run(
+    [sys.executable, str(REPO / "scripts" / "gate_grandfather_snapshot.py"),
+     "--db", str(db), "--dry-run"],
+    cwd=str(REPO), capture_output=True, text=True,
+    env={**os.environ, "PYTHONPATH": str(REPO)},
+)
+combo = (proc.stdout or "") + (proc.stderr or "")
+ok(proc.returncode == 0, f"snapshot --dry-run exits 0 ({combo})")
+ok("grandfather ids (0): []" in proc.stdout,
+   f"snapshot drops #1328 and the row without current-master vm_pass ({proc.stdout})")
 
 
 print(f"\nverify_gate_grandfather: {_checks}/{_checks} passed")

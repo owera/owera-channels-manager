@@ -309,10 +309,18 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video_id=video.id, video=video, brand=ch_brand,
     ) or episode_guard.duplicate_episode_reason(session, video)
     if blocked:
-        video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_FAIL
-        video.error = (blocked if str(blocked).startswith("held:")
-                       else f"held: {blocked}") if ch_brand == "os" else blocked
+        if ch_brand == "os":
+            from app.services.gate_grandfather import park_os_held
+            park_os_held(video, blocked)
+        else:
+            video.status = VideoStatus.REVIEW
+            video.error = blocked
+            video.approved_at = None
+    elif video.held:
+        # held never auto-promotes — skip_gate + Gate B PASS stays review.
+        video.status = VideoStatus.REVIEW
+        video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = None
     elif _effective_skip_gate(video, channel) and _vm_pass_missing(video):
         # vm_pass required (default: every topic): skip-gate never auto-approves

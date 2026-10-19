@@ -345,6 +345,7 @@ s.refresh(pre)
 ok(pre.status == VideoStatus.REVIEW and pre.craft_review == CraftReview.FAIL,
    "OS not on the closed grandfather list: new gate, fail-closed → held in review")
 ok((pre.error or "").startswith("held:"), "error is held: … (never status=failed)")
+ok(pre.held is True, "OS fail-closed sets Video.held (no auto-promote)")
 ok(not uploaded_pre, "upload is not called")
 ok(pre.status != VideoStatus.FAILED, "Gate B recompute does not write status=failed")
 

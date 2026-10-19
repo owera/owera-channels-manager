@@ -729,14 +729,13 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     if blocked:
         # OS review (no grandfather): fail-closed → held in review, never
         # status=failed (so /health videos_failed stays clean). Leaves held
-        # only via re-render + Gate B PASS or this approve path (actor logged).
+        # only via this approve path (actor logged) or unhold — never a loop.
+        from app.services.gate_grandfather import park_os_held
         v.craft_review = craft.CRAFT_REVIEW_FAIL
-        v.status = VideoStatus.REVIEW
-        v.approved_at = None
+        park_os_held(v, blocked)
         session.add(v)
         session.commit()
-        held = blocked if str(blocked).startswith("held:") else f"held: {blocked}"
-        raise HTTPException(409, held)
+        raise HTTPException(409, v.error or f"held: {blocked}")
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"approved via API: {v.status} -> approved; craft_review=pass; actor={actor}")

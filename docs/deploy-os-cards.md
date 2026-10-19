@@ -25,12 +25,14 @@ PYTHONPATH=. .venv/bin/python scripts/smoke_os_cards.py 1452
 
 ## Grandfather rule (closed list)
 
-- New boards carry `creation_config.gate_b_rules = "122"`. Full fail-closed Gate B applies to those.
-- OS publish of an already-approved row uses the **old** stored gate **only** if its id is on `app/data/gate_grandfather.json` **and** `vm_pass` matches the current master (`review_guard.vm_pass_of`). Missing marker is not enough.
-- `#1328` is never on the list (held; re-render with the new generator).
-- OS videos still in review (no marker / not on the list): new gate on approve, fail-closed → `409 held: …`, `status=review`, `craft_review=fail`. Never `status=failed`.
-- `held` leaves only via re-render with the new generator + Gate B PASS, or an explicit audited approve (`X-Actor` on `POST /api/videos/{id}/approve`). No worker / render loop / publish loop auto-promotes held.
-- RR: pre-deploy snapshots (no `gate_b_rules`) still trust the stored gate at publish and approve. New OS-only checks (description source, fail-closed missing words / unspoken card, no quote hold exemption, hook skip, grandfather/held) do not apply to RR. `blank_gap` stays OS+RR on boards that already run the live gate.
+Not “missing `gate_b_rules` = old gate”. Only IDs on the closed list may use the stored gate at publish.
+
+1. At deploy, CTO runs `scripts/gate_grandfather_snapshot.py` (read-only select of OS `approved` / `publishing` — there is no separate `scheduled` status; `approved` is the publish queue). It writes `app/data/gate_grandfather.json` and prints `ids` + `count`. Paste that list into the PR **Deploy effect** section after deploy.
+2. The script **drops** any row whose `vm_pass` does not match the **current render artifact**. `vm_pass` is not a git SHA: `review_guard.set_vm_pass` stores `video_path` + `artifact` = `size:mtime_ns` (`review_guard.artifact_fingerprint`). `vm_pass_of` returns None when the path or fingerprint does not match this file (a PASS for an older master does not count). `#1328` (approved, old master `adcdc31f…`, VM_FAIL) is always excluded even if pasted.
+3. At publish, `craft.trust_stored_gate` → `gate_grandfather.is_grandfathered`: id on the list **and** `vm_pass_of` for the current file. Grandfather does **not** skip the #108 `vm_pass_required_reason` lock — `_publish_one` still parks `held: needs vm_pass` when the current master has no PASS.
+4. Any OS video **not** on the list (with or without `gate_b_rules`) → new gate, fail-closed → `park_os_held`: `status=review`, `Video.held=True`, `error=held: …`. Never `status=failed`.
+5. `held` never becomes `approved` or `published` automatically. It leaves only via explicit audited `POST /api/videos/{id}/approve` (`X-Actor`) after a re-render with the new generator + Gate B PASS, or `POST /api/videos/{id}/unhold`. Worker / render_loop / publish_loop never set `held=False` and skip-gate will not auto-approve a held row.
+6. RR: pre-deploy snapshots (no `gate_b_rules`) still trust the stored gate at publish and approve. New OS-only checks do not apply to RR. `blank_gap` stays OS+RR on boards that already run the live gate.
 
 ## Rollback
 

@@ -44,7 +44,14 @@ def grandfather_ids(path: Path | None = None) -> set[int]:
 
 def vm_pass_matches_master(video=None, *, creation_config=None,
                            video_path: str | None = None) -> bool:
-    """True when vm_pass is a PASS bound to the current render artifact."""
+    """True when vm_pass is a PASS bound to the **current render artifact**.
+
+    ``vm_pass`` is not a git SHA. ``review_guard.vm_pass_of`` / ``set_vm_pass``
+    bind it to ``video_path`` plus ``artifact`` = ``size:mtime_ns`` of that
+    file (#108). A PASS recorded for another master (e.g. #1328 on sha
+    ``adcdc31f…`` with a VM_FAIL) does not match and must not publish via
+    the old gate. No path / no fingerprint proof → not grandfathered.
+    """
     if video is not None:
         from app.services.review_guard import vm_pass_of
         return vm_pass_of(video) is not None
@@ -52,13 +59,27 @@ def vm_pass_matches_master(video=None, *, creation_config=None,
     rec = cc.get("vm_pass")
     if not isinstance(rec, dict) or rec.get("result") != "PASS":
         return False
-    if video_path and rec.get("video_path") and rec.get("video_path") != video_path:
+    path_now = video_path
+    if not path_now or rec.get("video_path") != path_now:
         return False
-    if video_path and "artifact" in rec:
+    if "artifact" in rec:
         from app.services.review_guard import artifact_fingerprint
-        if rec.get("artifact") != artifact_fingerprint(video_path):
+        if rec.get("artifact") != artifact_fingerprint(path_now):
             return False
     return True
+
+
+def park_os_held(video, reason) -> None:
+    """Fail-closed OS: ``status=review`` + ``Video.held``. Never ``failed``."""
+    from app.models import VideoStatus, utcnow
+
+    video.status = VideoStatus.REVIEW
+    video.approved_at = None
+    video.held = True
+    if getattr(video, "held_at", None) is None:
+        video.held_at = utcnow()
+    msg = str(reason or "held")
+    video.error = msg if msg.startswith("held:") else f"held: {msg}"
 
 
 def is_grandfathered(video_id, *, video=None, creation_config=None,

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Generate the closed OS publish-grandfather list (CTO runs once at deploy).
 
-Selects OS videos with status approved (queued-for-publish; there is no
-separate scheduled status) whose vm_pass matches the current master.
+Selects OS videos with status approved (queued-for-publish / scheduled
+drip; there is no separate scheduled status) or publishing, whose
+``vm_pass`` matches the **current render artifact** (path + size:mtime
+fingerprint — not a git SHA). #1328 is always excluded.
 Always excludes #1328. Prints ids + count. Writes a versioned JSON file
 (default: app/data/gate_grandfather.json). The CTO pastes the printed
 list into the PR after deploy.

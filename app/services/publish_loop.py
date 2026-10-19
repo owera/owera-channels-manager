@@ -350,6 +350,14 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     # Slug/name only — channel_id 1/2 is a live-fleet fallback and would
     # treat an in-memory test channel id=1 as OS.
     brand = craft.brand_of(channel.slug, channel.name)
+    if video.held:
+        from app.services.gate_grandfather import park_os_held
+        park_os_held(video, video.error or "held: operator hold — not auto-published")
+        session.add(video)
+        quota.log(session, kind="publish", status="error", video_id=video.id,
+                  channel_id=channel.id, detail="publish skipped: Video.held")
+        session.commit()
+        return
     blocked = craft.publish_craft_block_reason(
         title=video.title,
         script=video.script,
@@ -365,9 +373,8 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         # OS: park held in review — never status=failed (health videos_failed)
         # and never auto-promote back to approved. RR keeps REJECTED.
         if brand == "os":
-            video.status = VideoStatus.REVIEW
-            video.approved_at = None
-            video.error = blocked if str(blocked).startswith("held:") else f"held: {blocked}"
+            from app.services.gate_grandfather import park_os_held
+            park_os_held(video, blocked)
         else:
             video.status = VideoStatus.REJECTED
             video.rejected_reason = blocked[:500]
