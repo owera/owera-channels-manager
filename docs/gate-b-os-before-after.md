@@ -13,8 +13,8 @@ Checks novos: `card_exits_early`, `card_enters_early` (lead > 0,3s), `card_overl
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
-| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, code_read_too_short, card_sync | 2.33s | 2.38s |
-| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, allowlist_required, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required, card_sync | 2.33s | 2.56s |
+| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, code_read_too_short | 2.33s | 2.38s |
+| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, allowlist_required, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required | 2.33s | 2.56s |
 | #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, card_exits_early, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source | 7.43s | 3.62s |
 
 Tabelas por vídeo abaixo.
@@ -61,30 +61,29 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 | # | type | start | dur | end | text |
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 2.38 | 2.38 | One folder broke Copilot CLI. |
-| 1 | quote | 2.66 | 2.50 | 5.16 | Add a directory with the add-dir flag |
-| 2 | quote | 5.28 | 2.48 | 7.76 | and every Claude subagent failed on the spot. |
-| 3 | quote | 8.04 | 3.84 | 11.88 | A maximum of 4 blocks with cache_control may be provided. |
-| 4 | code | 12.00 | 0.94 | 12.94 | Found 5. |
-| 5 | quote | 13.06 | 1.54 | 14.60 | One block over the limit. |
+| 1 | quote | 2.66 | 2.36 | 5.02 | Add a directory with the add-dir flag |
+| 2 | quote | 5.14 | 2.48 | 7.62 | and every Claude subagent failed on the spot. |
+| 3 | quote | 8.04 | 3.78 | 11.82 | A maximum of 4 blocks with cache_control may be provided. |
+| 4 | code | 11.94 | 0.84 | 12.78 | Found 5. |
+| 5 | quote | 12.90 | 1.70 | 14.60 | One block over the limit. |
 | 6 | quote | 14.72 | 2.04 | 16.76 | The parent agent got an empty answer. |
 | 7 | quote | 16.88 | 1.36 | 18.24 | Update Copilot CLI |
 | 8 | quote | 18.36 | 3.84 | 22.20 | and Anthropic subagents keep working with extra directories. |
 | 9 | quote | 22.32 | 2.16 | 24.48 | Exact version in the description. |
-| 10 | quote | 24.60 | 1.48 | 26.08 | Subagent came back empty? |
-| 11 | quote | 26.20 | 2.22 | 28.42 | Read its error, not the parent's. |
-| 12 | cta | 28.54 | 2.05 | 30.59 | Subscribe · Agent traps same series |
+| 10 | quote | 24.60 | 1.46 | 26.06 | Subagent came back empty? |
+| 11 | quote | 26.18 | 1.94 | 28.12 | Read its error, not the parent's. |
+| 12 | cta | 28.12 | 2.47 | 30.59 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, sentence_too_long, card_exits_early, code_read_too_short, card_sync
+**kinds:** beat_hold, sentence_too_long, card_exits_early, code_read_too_short
 
 **reasons:**
 
-- [B] Beats ≤3.0s incl. fade: FAIL — beat[3] type=quote mid card 4.04s incl. fade (hold 3.84s + 0.20s fade; limit 3.0s); beat[8] type=quote mid card 4.04s incl. fade (hold 3.84s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Card sync: FAIL — card 2 (quote) at 5.28s appears 0.14s AFTER its speech (5.14s); card 4 (code) at 12.00s appears 0.06s AFTER its speech (11.94s); card 5 (quote) at 13.06s appears 0.16s AFTER its speech (12.90s); card 12 (cta) at 28.54s appears 0.42s AFTER its speech (28.12s). A card never appears after its own words; it may lead them by ≤1.1s.
+- [B] Beats ≤3.0s incl. fade: FAIL — beat[3] type=quote mid card 3.98s incl. fade (hold 3.78s + 0.20s fade; limit 3.0s); beat[8] type=quote mid card 4.04s incl. fade (hold 3.84s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
 - [B] Sentence too long: FAIL — sentence_too_long: card 3 'A maximum of 4 blocks with cache_control may be provided.' spoken 3.54s (first word 8.04s–last word 11.58s; max 3.0s) — split the sentence; sentence_too_long: card 8 'and Anthropic subagents keep working with extra directories.' spoken 3.72s (first word 18.36s–last word 22.08s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
-- [B] Card exits early: FAIL — card_exits_early: card 2 ends at 7.76s, last spoken word at 7.96s (must hold through the last word); card_exits_early: card 7 ends at 18.24s, last spoken word at 18.36s (must hold through the last word). A card must hold through its last spoken word.
-- [B] Code read time: FAIL — code_read_too_short: card 4 'Found 5.' held 0.94s (min 1.2s to read a code/command line). Code/command cards need ≥1.2s on screen.
+- [B] Card exits early: FAIL — card_exits_early: card 2 ends at 7.62s, last spoken word at 7.96s (must hold through the last word); card_exits_early: card 7 ends at 18.24s, last spoken word at 18.36s (must hold through the last word). A card must hold through its last spoken word.
+- [B] Code read time: FAIL — code_read_too_short: card 4 'Found 5.' held 0.84s (min 1.2s to read a code/command line). Code/command cards need ≥1.2s on screen.
 
 ---
 
@@ -131,27 +130,26 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 | # | type | start | dur | end | text |
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 2.56 | 2.56 | One type hint broke MCP tools. |
-| 1 | quote | 2.68 | 1.54 | 4.22 | On Python three ten |
-| 2 | quote | 4.34 | 4.16 | 8.50 | a tool that returns a TypedDict with a NotRequired key failed at registration |
+| 1 | quote | 2.68 | 1.48 | 4.16 | On Python three ten |
+| 2 | quote | 4.28 | 4.22 | 8.50 | a tool that returns a TypedDict with a NotRequired key failed at registration |
 | 3 | quote | 8.62 | 1.68 | 10.30 | before it ever ran. |
 | 4 | quote | 10.42 | 2.44 | 12.86 | Pydantic called the annotation invalid. |
-| 5 | quote | 12.98 | 2.44 | 15.42 | Python three eleven and up were fine. |
-| 6 | quote | 15.54 | 2.70 | 18.24 | Update the MCP Python SDK. |
-| 7 | quote | 19.84 | 3.26 | 23.10 | and optional keys are left out instead of sent as null. |
+| 5 | quote | 12.98 | 2.40 | 15.38 | Python three eleven and up were fine. |
+| 6 | quote | 15.50 | 2.74 | 18.24 | Update the MCP Python SDK. |
+| 7 | quote | 19.72 | 3.38 | 23.10 | and optional keys are left out instead of sent as null. |
 | 8 | quote | 23.24 | 1.68 | 24.92 | Exact version in the description. |
 | 9 | quote | 25.04 | 1.68 | 26.72 | Old Python in prod? |
-| 10 | quote | 27.12 | 1.00 | 28.12 | Test registration there. |
-| 11 | cta | 28.24 | 2.52 | 30.76 | Subscribe · Agent traps same series |
+| 10 | quote | 27.12 | 0.70 | 27.82 | Test registration there. |
+| 11 | cta | 27.82 | 2.94 | 30.76 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required, card_sync
+**kinds:** beat_hold, blank_gap, sentence_too_long, card_exits_early, allowlist_required
 
 **reasons:**
 
-- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 4.36s incl. fade (hold 4.16s + 0.20s fade; limit 3.0s); beat[7] type=quote mid card 3.46s incl. fade (hold 3.26s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Blank gap: FAIL — beat[6]→beat[7] hole at 18.24s of 1.60s (1.48s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
-- [B] Card sync: FAIL — card 2 (quote) at 4.34s appears 0.06s AFTER its speech (4.28s); card 7 (quote) at 19.84s appears 0.12s AFTER its speech (19.72s); card 11 (cta) at 28.24s appears 0.42s AFTER its speech (27.82s). A card never appears after its own words; it may lead them by ≤1.1s.
+- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 4.42s incl. fade (hold 4.22s + 0.20s fade; limit 3.0s); beat[7] type=quote mid card 3.58s incl. fade (hold 3.38s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
+- [B] Blank gap: FAIL — beat[6]→beat[7] hole at 18.24s of 1.48s (1.36s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).
 - [B] Sentence too long: FAIL — sentence_too_long: card 2 'a tool that returns a TypedDict with a NotRequired key failed at registration' spoken 4.34s (first word 4.28s–last word 8.62s; max 3.0s) — split the sentence; sentence_too_long: card 7 'and optional keys are left out instead of sent as null.' spoken 3.08s (first word 19.72s–last word 22.80s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
 - [B] Card exits early: FAIL — card_exits_early: card 2 ends at 8.50s, last spoken word at 8.62s (must hold through the last word); card_exits_early: card 8 ends at 24.92s, last spoken word at 25.04s (must hold through the last word). A card must hold through its last spoken word.
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
@@ -205,7 +203,7 @@ BEFORE = board visível do `VM_FAIL_0465.md` (main `c35e110`). AFTER = `storyboa
 | 4 | quote | 13.30 | 5.60 | 18.90 | A task needs a description, an expected output, and an agent, or the handoff never starts. |
 | 5 | quote | 19.32 | 2.80 | 22.12 | Staring at the crew logs will not fill a blank file. |
 | 6 | quote | 22.50 | 2.80 | 25.30 | Write each task in tasks.yaml before you run. |
-| 7 | quote | 25.72 | 1.70 | 27.42 | Empty file, empty crew. |
+| 7 | quote | 25.72 | 1.82 | 27.54 | Empty file, empty crew. |
 | 8 | cta | 27.54 | 2.58 | 30.12 | Subscribe · CrewAI same series |
 
 **Gate B:** `FAIL` / result `FAIL`

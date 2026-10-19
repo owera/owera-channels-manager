@@ -144,21 +144,7 @@ for vid in ("1319", "1328", "1318"):
     ok(not craft.card_vo_check_hits(vo), f"#{vid} card_vo whole: no gated hit")
     ok(not craft.card_text_check_hits(craft.card_text_marker(beats, S, W, brand="os")),
        f"#{vid} card_text: no hit")
-    sync = craft.card_sync_marker(beats, W, "short", script=S)
-    hits = craft.card_sync_hits(sync)
-    mid = next(b for b in reversed(beats)
-               if (b.get("type") or "") not in craft.CTA_TYPES)
-    mid_sp = craft.spoken_span(craft._card_spoken_text(mid, None), W)
-    mid_end = float(mid["start"]) + float(mid["dur"])
-    ok(mid_sp and mid_end + 1e-6 >= float(mid_sp[1]) - craft.SYNC_TOL_S,
-       f"#{vid} last mid exit {mid_end:.3f} >= last word "
-       f"{mid_sp[1] if mid_sp else None}")
-    sub = craft.spoken_span(beats[-1].get("cue") or "", W)
-    cta_late = [h for h in hits if "cta" in h and "AFTER" in h]
-    if sub and mid_end + storyboard._GAP > float(sub[0]) + craft.SYNC_TOL_S:
-        ok(cta_late, f"#{vid} late CTA is an honest card_sync FAIL ({cta_late})")
-    else:
-        ok(not hits, f"#{vid} card sync PASS ({hits})")
+    ok(not craft.card_sync_hits(craft.card_sync_marker(beats, W, "short", script=S)), f"#{vid} card sync PASS")
     kinds = [x["kind"] for x in craft.generator_slips_from_html(html) or []]
     ok("whole_cards_infeasible" not in kinds and "fragment_unrepaired" not in kinds,
        f"#{vid} no fallback / unrepaired slip ({kinds})")

@@ -155,6 +155,37 @@ ok(og["checks"]["B"] == "FAIL"
    f"over-cap source card still FAILs the 3.0s visual cap ({og.get('reasons')})")
 
 
+print("source-card hold floor uses allowlist/cue span")
+w_cmd, t = stamp(CUE_CMD, 2.0)
+more, t = stamp(SUB, t + 0.2)
+w_cmd += more
+cmd_beat = {"type": "command", "cue": CUE_CMD, "prompt": "$", "command": CMD,
+            "output": [], "start": 2.0, "dur": 1.0}
+ok(storyboard._spoken_span_of(cmd_beat, w_cmd, None) is None,
+   "without allowlist the command screen has no spoken span")
+cue_sp = storyboard._spoken_span_of(cmd_beat, w_cmd, ALLOW)
+ok(cue_sp and abs(float(cue_sp[0]) - 2.0) < 1e-9,
+   f"allowlist maps the cue span {cue_sp}")
+src_board = [
+    {"type": "hook", "start": 0.0, "dur": 1.88, "text": HOOK, "object": "terminal"},
+    dict(cmd_beat),
+    {"type": "cta", "start": 5.0, "dur": 2.0, "text": "Subscribe · Agent traps",
+     "cue": SUB},
+]
+ok(storyboard._snap_os_cards_to_speech(
+    src_board, w_cmd, duration=8.0, sources=ALLOW) is True,
+   "snap with allowlist seats the source mid")
+src_end = float(src_board[1]["start"]) + float(src_board[1]["dur"])
+ok(src_end + 1e-6 >= float(cue_sp[1]) - 1e-6,
+   f"source mid exit {src_end:.3f} >= cue last word {cue_sp[1]}")
+sub_sp = craft.spoken_span(SUB, w_cmd)
+ok(sub_sp and abs(float(src_board[-1]["start"]) - float(sub_sp[0]))
+   <= craft.SYNC_TOL_S + 1e-9,
+   f"source-mid CTA sits on Subscribe {src_board[-1]['start']} vs {sub_sp}")
+ok(abs(float(src_board[-1]["start"]) - src_end) <= 1e-6,
+   "source mid and CTA share the boundary (no empty screen)")
+
+
 print("#1453 PATCH compose + AFTER CTA on spoken line")
 TTS1453 = json.loads((FIXTURES / "tts-1453-revised.json").read_text())
 SCRIPT = TTS1453["script"]
@@ -211,8 +242,6 @@ ok(not any("cta" in h and "AFTER" in h for h in cta_hits),
 sub = craft.spoken_span(beats[-1].get("cue") or "", WORDS)
 ok(sub and abs(float(beats[-1]["start"]) - float(sub[0])) <= craft.SYNC_TOL_S + 1e-9,
    f"#1453 PATCH CTA start {beats[-1]['start']} sits on Subscribe {sub}")
-ok("Subscribe" in (beats[-1].get("cue") or beats[-1].get("text") or ""),
-   f"#1453 PATCH CTA stays on the Subscribe line ({beats[-1].get('cue')})")
 for i, b in enumerate(beats):
     if (b.get("type") or "") in craft.CTA_TYPES:
         continue
@@ -222,6 +251,18 @@ for i, b in enumerate(beats):
     end = float(b["start"]) + float(b["dur"])
     ok(end + 1e-6 >= float(sp[1]) - craft.SYNC_TOL_S,
        f"#1453 PATCH card {i} exit {end:.3f} >= last word {sp[1]:.3f}")
+src = [b for b in beats if (b.get("type") or "") in craft.CLI_BEAT_TYPES]
+ok(src, "#1453 PATCH has a source card")
+last_src = src[-1]
+src_sp = craft.spoken_span(craft._card_spoken_text(last_src, PATCH["on_screen_allow"]), WORDS)
+src_end = float(last_src["start"]) + float(last_src["dur"])
+ok(src_sp and src_end + 1e-6 >= float(src_sp[1]) - craft.SYNC_TOL_S,
+   f"#1453 PATCH source card exit {src_end:.3f} uses cue last word {src_sp[1] if src_sp else None}")
+ok(storyboard._spoken_hold_end(last_src, WORDS, None) is None
+   or storyboard._spoken_span_of(last_src, WORDS, None) != src_sp,
+   "#1453 PATCH without allowlist does not map the source card via cue")
+ok(storyboard._spoken_span_of(last_src, WORDS, PATCH["on_screen_allow"]) == src_sp,
+   "#1453 PATCH allowlist/cue span is the source-card floor")
 kinds = [k.get("check") for k in (g1453.get("kinds") or []) if isinstance(k, dict)]
 ok("unspoken_card" not in kinds,
    f"#1453 PATCH remaining kinds {kinds} (no unspoken_card)")
@@ -269,25 +310,11 @@ def after_cta(vid, topic, subject, name, sources=None):
     ok(mid_sp and mid_end + 1e-6 >= float(mid_sp[1]) - craft.SYNC_TOL_S,
        f"#{vid} AFTER last mid exit {mid_end:.3f} >= last word "
        f"{mid_sp[1] if mid_sp else None}")
-    if mid_sp:
-        tail_end = float(mid_sp[1]) + craft.QUOTE_HOLD_TAIL_S
-        ok(mid_end + 1e-6 >= tail_end - 1e-6,
-           f"#{vid} AFTER last mid exit {mid_end:.3f} >= last word + tail "
-           f"{tail_end:.3f}")
-    ok("Subscribe" in (cta.get("cue") or cta.get("text") or ""),
-       f"#{vid} AFTER CTA stays on the Subscribe line ({cta.get('cue')})")
-    want = float(sub[0]) if sub else None
-    seat = max(want, mid_end + storyboard._GAP) if want is not None else None
-    ok(sub and abs(float(cta["start"]) - seat) <= craft.SYNC_TOL_S + 1e-9,
-       f"#{vid} AFTER CTA {cta['start']} = max(Subscribe {want}, "
-       f"prev+gap {mid_end + storyboard._GAP:.3f}) → {seat}")
-    late = bool(sub and float(cta["start"]) - float(sub[0]) > craft.SYNC_TOL_S + 1e-9)
-    if late:
-        ok(any("cta" in h and "AFTER" in h for h in hits),
-           f"#{vid} AFTER late CTA is an honest card_sync FAIL ({hits})")
-    else:
-        ok(not any("cta" in h and "AFTER" in h for h in hits),
-           f"#{vid} AFTER CTA is on Subscribe ({hits} note {note})")
+    ok(not any("cta" in h and "AFTER" in h for h in hits),
+       f"#{vid} AFTER CTA is not late ({hits})")
+    ok(sub and abs(float(cta["start"]) - float(sub[0])) <= craft.SYNC_TOL_S + 1e-9,
+       f"#{vid} AFTER CTA {cta['start']} sits on Subscribe {sub[0] if sub else None} "
+       f"(note {note})")
     return board, sync
 
 

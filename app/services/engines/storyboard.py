@@ -3640,36 +3640,41 @@ def _clamp_os_cta_to_duration(beats, duration) -> bool:
     return True
 
 
-def _spoken_hold_end(beat, words) -> float | None:
-    """Earliest a mid may exit: last spoken word end + QUOTE_HOLD_TAIL_S.
-
-    ``spoken_span`` is the card's spoken text (cue on an allowlisted
-    source card). None when the card has no word match — caller keeps
-    the existing hold / ``_MIN_DUR`` floor.
-    """
+def _spoken_span_of(beat, words, sources=None) -> tuple[float, float] | None:
+    """Spoken span of a card, using the cue on an allowlisted source card."""
     from app.services import craft
     if not isinstance(beat, dict) or not words:
         return None
-    text = craft._card_spoken_text(beat, None)
-    span = craft.spoken_span(text, words)
+    return craft.spoken_span(craft._card_spoken_text(beat, sources), words)
+
+
+def _spoken_hold_end(beat, words, sources=None, *, with_tail: bool = True) -> float | None:
+    """Exit target: last spoken word, plus QUOTE_HOLD_TAIL_S when ``with_tail``.
+
+    Pass ``sources`` so an allowlisted source card maps via its cue, not
+    the unspoken on-screen blob. None when there is no word match.
+    """
+    from app.services import craft
+    span = _spoken_span_of(beat, words, sources)
     if not span:
         return None
-    return float(span[1]) + craft.QUOTE_HOLD_TAIL_S
+    extra = craft.QUOTE_HOLD_TAIL_S if with_tail else 0.0
+    return float(span[1]) + extra
 
 
-def _shrink_prev_to(prev, desired_end, words) -> float:
-    """Shrink ``prev`` toward ``desired_end``; never before last-word + tail.
+def _shrink_prev_to(prev, desired_end, words, sources=None, *, with_tail: bool = True) -> float:
+    """Shrink ``prev`` toward ``desired_end``; never before last word.
 
-    Returns the resulting exit time. Surplus stale hold may be trimmed.
-    A hold that is already short of last-word + ``QUOTE_HOLD_TAIL_S`` is
-    restored up to that floor.
+    ``with_tail`` keeps last-word + QUOTE_HOLD_TAIL_S when that still
+    fits (mid→mid target). Drop it when the next card must stay on its
+    first spoken word. Last word is always the floor.
     """
     try:
         start = float(prev.get("start") or 0)
         cur_end = start + float(prev.get("dur") or 0)
     except (TypeError, ValueError):
         return 0.0
-    spoken_end = _spoken_hold_end(prev, words)
+    spoken_end = _spoken_hold_end(prev, words, sources, with_tail=with_tail)
     min_end = max(spoken_end if spoken_end is not None else start + _MIN_DUR,
                   start + _MIN_DUR)
     new_end = max(min_end, min(cur_end, float(desired_end)))
@@ -3677,16 +3682,56 @@ def _shrink_prev_to(prev, desired_end, words) -> float:
     return start + float(prev["dur"])
 
 
-def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
+def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
+    """When the next beat is the CTA: joint at max(last word, spoken closer).
+
+    The 0.3s tail is a target for other mids, not a floor here. The mid
+    never exits before its last word. CTA enters at that same instant
+    (0.12s fade is the chip's own fade — no empty screen). If last word
+    is after the closer, CTA is late and Gate B card_sync FAILs honestly.
+    """
+    from app.services import craft
+    try:
+        last_st = float(last.get("start") or 0)
+        last_end = last_st + float(last.get("dur") or 0)
+        cta_st = float(cta.get("start") or 0)
+    except (TypeError, ValueError):
+        return True
+    span = _spoken_span_of(last, words, sources)
+    last_word = float(span[1]) if span else None
+    cta_sp = craft.spoken_span(cta.get("cue") or "", words)
+    want = float(cta_sp[0]) if cta_sp else None
+    if want is not None:
+        if duration is not None and want + _MIN_DUR > float(duration) + 1e-9:
+            return False
+        exit_at = want if last_word is None else max(last_word, want)
+        last["dur"] = round(max(_MIN_DUR, exit_at - last_st), 3)
+        cta["start"] = round(float(last["start"]) + float(last["dur"]), 3)
+        return True
+    if last_word is not None and last_end < last_word - 1e-6:
+        last["dur"] = round(max(_MIN_DUR, last_word - last_st), 3)
+        last_end = last_st + float(last["dur"])
+    if cta_st < last_end - 1e-6:
+        if duration is not None and last_end + _MIN_DUR > float(duration) + 1e-9:
+            return False
+        cta["start"] = round(last_end, 3)
+    return True
+
+
+def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
+                            sources=None) -> bool:
     """OS VO-sentence cards: each mid card starts on its first spoken word.
 
     Align / sync can leave a sentence card several seconds late (the hook
     ate the window). Snap mids to ``spoken_span`` then pack overlaps so
     card sync and stale_card stay clean. Literal quotes are timed separately.
-    The CTA sits at max(spoken closer start, prev exit + gap). A mid is
-    never trimmed before last spoken word + QUOTE_HOLD_TAIL_S to seat the
-    chip — if that pushes the CTA off its line, Gate B card_sync FAILs
-    honestly. Then clamp end to ``duration`` (do not overrun).
+    Other mids keep last-word + QUOTE_HOLD_TAIL_S when the next mid still
+    starts on its first word. The tail is a target, not a packing floor:
+    drop it before pushing a later mid past its speech. A mid never exits
+    before its last word. When the next beat is the CTA, the mid exits at
+    max(last word, spoken closer) and the chip enters there (0.12s fade
+    is the chip's own fade — no empty screen). Then clamp end to
+    ``duration``.
     """
     from app.services import craft
     if not beats or not words:
@@ -3695,7 +3740,8 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
         typ = b.get("type") or ""
         if typ == "hook" or typ in craft.CTA_TYPES or b.get("literal_quote"):
             continue
-        span = craft.spoken_span(b.get("text") or b.get("cue"), words)
+        span = _spoken_span_of(b, words, sources) or craft.spoken_span(
+            b.get("text") or b.get("cue"), words)
         if not span:
             continue
         b["start"] = round(float(span[0]), 3)
@@ -3712,53 +3758,41 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None) -> bool:
         b["dur"] = round(max(floor, hold), 3)
     for i in range(1, len(beats)):
         prev, cur = beats[i - 1], beats[i]
+        if (cur.get("type") or "") in craft.CTA_TYPES:
+            continue
         try:
-            floor = float(prev.get("start") or 0) + float(prev.get("dur") or 0) + _GAP
             st = float(cur.get("start") or 0)
         except (TypeError, ValueError):
             continue
-        if st < floor - 1e-6:
-            try:
-                _shrink_prev_to(prev, st - _GAP, words)
-                floor = float(prev["start"]) + float(prev["dur"]) + _GAP
-            except (TypeError, ValueError, KeyError):
-                pass
-            if st < floor - 1e-6:
-                if (cur.get("type") or "") in craft.CTA_TYPES:
-                    continue
-                cur["start"] = round(floor, 3)
-    if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
-        last, cta = beats[-2], beats[-1]
+        spoken = _spoken_span_of(cur, words, sources)
+        if spoken:
+            want = round(float(spoken[0]), 3)
+            if st > want + 1e-6:
+                cur["start"] = want
+                st = want
         try:
-            last_st = float(last.get("start") or 0)
-            last_end = last_st + float(last.get("dur") or 0)
-            cta_st = float(cta.get("start") or 0)
+            floor = float(prev.get("start") or 0) + float(prev.get("dur") or 0) + _GAP
         except (TypeError, ValueError):
-            last_st, last_end, cta_st = 0.0, 0.0, 0.0
-        hold_end = _spoken_hold_end(last, words)
-        if hold_end is not None and last_end < hold_end - 1e-6:
-            last["dur"] = round(max(_MIN_DUR, hold_end - last_st), 3)
-            last_end = last_st + float(last["dur"])
-        # Sit the chip on the spoken CTA line when the last mid has
-        # already exited + gap. Never cut that mid before last-word +
-        # tail to manufacture a seat — late CTA is a real card_sync FAIL.
-        cta_sp = craft.spoken_span(cta.get("cue") or "", words)
-        if cta_sp:
-            want = float(cta_sp[0])
-            if duration is not None and want + _MIN_DUR > float(duration) + 1e-9:
-                return False
-            if last_end > want - _GAP + 1e-6:
-                last_end = _shrink_prev_to(last, want - _GAP, words)
-            cta["start"] = round(max(want, last_end + _GAP), 3)
-        else:
-            span = craft.spoken_span(last.get("text") or last.get("cue"), words)
-            need = last_end + _GAP
-            if span:
-                need = max(need, float(span[1]) + craft.QUOTE_HOLD_TAIL_S + _GAP)
-            if cta_st < need - 1e-6:
-                if duration is not None and need + _MIN_DUR > float(duration) + 1e-9:
-                    return False
-                cta["start"] = round(need, 3)
+            continue
+        if st >= floor - 1e-6:
+            continue
+        # Tail is a target: keep it only when the next card still starts
+        # on its first word. Otherwise last word is the floor.
+        tail_end = _spoken_hold_end(prev, words, sources, with_tail=True)
+        use_tail = tail_end is not None and tail_end <= st - _GAP + 1e-6
+        try:
+            _shrink_prev_to(prev, st - _GAP, words, sources, with_tail=use_tail)
+            floor = float(prev["start"]) + float(prev["dur"]) + _GAP
+        except (TypeError, ValueError, KeyError):
+            pass
+        if st >= floor - 1e-6:
+            continue
+        if spoken:
+            continue
+        cur["start"] = round(floor, 3)
+    if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
+        if not _seat_os_cta(beats[-2], beats[-1], words, duration, sources):
+            return False
     return _clamp_os_cta_to_duration(beats, duration)
 
 
@@ -4130,10 +4164,7 @@ def _time_literal_quotes(beats, words, sources=None) -> None:
             continue
         if st < floor - 1e-6:
             if (cur.get("type") or "") in craft.CTA_TYPES:
-                # Do not cut the last mid before last-word + tail to
-                # manufacture a CTA seat. Snap owns the chip: start at
-                # max(spoken closer, prev exit + gap).
-                _shrink_prev_to(prev, st - _GAP, words)
+                # Snap seats the chip at max(last word, spoken closer).
                 continue
             cur["start"] = round(floor, 3)
 
@@ -4349,7 +4380,8 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         _time_literal_quotes(beats, words, sources if literal else None)
         if os_vo:
             _cap_os_hook(beats, words, script)
-            if not _snap_os_cards_to_speech(beats, words, script, duration):
+            if not _snap_os_cards_to_speech(beats, words, script, duration,
+                                           sources=sources):
                 logger.info("storyboard: OS CTA cannot fit in %.2fs after snap — fail closed",
                             float(duration or 0))
                 return None
@@ -4359,7 +4391,8 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
             _plain_os_literal_mids(beats, script, sources, os=os_brand,
                                    literal=literal, slips=slips)
             if os_brand and not os_vo:
-                if not _snap_os_cards_to_speech(beats, words, script, duration):
+                if not _snap_os_cards_to_speech(beats, words, script, duration,
+                                               sources=sources):
                     logger.info("storyboard: OS CTA cannot fit in %.2fs after snap — fail closed",
                                 float(duration or 0))
                     return None
