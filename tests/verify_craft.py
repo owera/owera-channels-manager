@@ -1718,9 +1718,10 @@ _ct_cc = {"beats": _ct_board, "beat_timing": craft.BEAT_TIMING_CURRENT, "card_te
 ok("Card text" in (craft.video_maker_gate_reason(_ct_cc) or ""),
    "review gate re-reads creation_config.card_text")
 
-print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft)")
-ok(craft.SENTENCE_SPOKEN_MAX_S == 3.9 and craft.SENTENCE_MAX_WORDS == 12,
-   "target = 2.8s card hold + 1.1s lead = 3.9s ≈ 12 words at 3.2 w/s")
+print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft); Gate B 4.5s")
+ok(craft.SENTENCE_SPOKEN_MAX_S == 4.5 and craft.SENTENCE_SPOKEN_SOFT_S == 3.9
+   and craft.SENTENCE_MAX_WORDS == 12,
+   "Gate B sentence_too_long = 4.5s; soft rewrite stays 3.9s / 12 words")
 _sp_over = craft.long_spoken_sentences(_ct_script)
 ok([h["text"][:22] for h in _sp_over] == ["E eu pergunto um valor"] and _sp_over[0]["how"] == "estimate",
    "#1423: the 16-word 'E eu pergunto…' sentence is over (estimate); the endcard VO is skipped")

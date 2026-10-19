@@ -756,7 +756,7 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         # RR sentence pace (soft): one card per sentence fits when a sentence
         # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
         prompt += (f" Keep EVERY spoken sentence short: at most about {craft.SENTENCE_MAX_WORDS} "
-                   f"words (~{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken) — split a long sentence "
+                   f"words (~{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken) — split a long sentence "
                    "into two instead of chaining clauses.")
         prompt += (" Endcard as the LAST spoken lines, exactly: "
                    "'Se inscreve. Próxima armadilha de IA.' "
@@ -792,10 +792,10 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         if long_:
             # one soft rewrite ask; kept only when it has fewer long sentences
             logger.info("script: %d sentence(s) over ~%.1fs for %r — asking once for a rewrite",
-                        len(long_), craft.SENTENCE_SPOKEN_MAX_S, subject)
+                        len(long_), craft.SENTENCE_SPOKEN_SOFT_S, subject)
             redo = ask(
                 prompt + "\n\nThese sentences run longer than ~" +
-                f"{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken (> {craft.SENTENCE_MAX_WORDS} words); "
+                f"{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken (> {craft.SENTENCE_MAX_WORDS} words); "
                 "split each into shorter sentences, keep everything else:\n" +
                 "\n".join(f"- {h['text']}" for h in long_) +
                 "\nReturn ONLY the spoken voiceover.",

@@ -3,7 +3,7 @@
 BEFORE = board visível dos `VM_FAIL_*.md` (main `c35e110`).
 AFTER = gerador determinístico deste branch (1 frase da VO; quote literal segura o span inteiro + 0,3s; sem compare/term/list/termo isolado).
 
-Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); (2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o card plain segura até a última palavra falada + 0,3s (nunca na frase seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem `blank_gap`).
+Quando o span falado de uma frase passa do cap mid e deixaria um buraco > 0,5s além do fade, a ordem é: (1) cláusulas fortes #96 (`; : — –`); (2) vírgula / conjunção coordenativa, cada peça um span contíguo da VO sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o card plain segura até a última palavra falada + 0,3s (nunca na frase seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem `blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` (4,5s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.
 
 `slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): statement/list que só reexibe a narração sem tipo rico (code/command/diagram/compare/stat). O gerador OS não emite statement (allowlist log fica `code`) e junta peças curtas demais da mesma frase.
 

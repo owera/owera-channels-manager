@@ -295,6 +295,69 @@ gx = craft.video_maker_gate(ext, beat_timing=craft.BEAT_TIMING_CURRENT, words=pw
                             script=SCRIPT, brand="os")
 ok(not any("mid card" in r and "beat[1]" in r for r in (gx.get("reasons") or [])),
    f"Gate B does not FAIL cap_extended_spoken for the cap ({gx.get('reasons')})")
+ok(not any(h.get("check") == "sentence_too_long"
+           for h in craft.sentence_too_long_hits(ext, pw)),
+   "existing ~4.45s cap_extended_spoken is under the 4.5s hard limit")
+
+print("sentence_too_long: 4.5s passes, 4.51s fails (plain + quote)")
+ok(craft.SENTENCE_SPOKEN_MAX_S == 4.5, "SENTENCE_SPOKEN_MAX_S = 4.5")
+
+
+def _spoken_words(text, t0, spoken):
+    toks = [w.strip(".,!?:;") for w in text.split()]
+    step = spoken / max(len(toks), 1)
+    out = []
+    for i, w in enumerate(toks):
+        st = t0 + i * step
+        du = (t0 + spoken - st) if i == len(toks) - 1 else step * 0.85
+        out.append({"text": w, "start": round(st, 4), "dur": round(du, 4)})
+    return out
+
+
+def _span_board(text, words, *, literal=False, cap_ext=False):
+    span = craft.spoken_span(text, words)
+    st, en = span
+    b = {"type": "quote", "text": text, "cue": text, "start": st,
+         "dur": round(en + craft.QUOTE_HOLD_TAIL_S - st, 3)}
+    if literal:
+        b["literal_quote"] = True
+    if cap_ext:
+        b["plain"] = True
+        b["cap_extended_spoken"] = True
+    return [
+        {"type": "hook", "text": "One folder broke Copilot CLI.", "start": 0.0,
+         "dur": 0.8, "object": "terminal"},
+        b,
+        {"type": "cta", "text": "Subscribe · Agent traps",
+         "start": round(st + float(b["dur"]) + 0.12, 3), "dur": 2.0},
+    ]
+
+
+SENT_HOLD = "Exact version in the description."
+for kind, kw in (("plain cap_extended_spoken", {"cap_ext": True}),
+                 ("literal quote", {"literal": True})):
+    w45 = _spoken_words(SENT_HOLD, 1.0, 4.5)
+    b45 = _span_board(SENT_HOLD, w45, **kw)
+    span45 = craft.spoken_span(SENT_HOLD, w45)
+    ok(abs((span45[1] - span45[0]) - 4.5) < 1e-3, f"{kind} 4.5s span measured")
+    h45 = craft.sentence_too_long_hits(b45, w45)
+    g45 = craft.video_maker_gate(b45, beat_timing=craft.BEAT_TIMING_CURRENT,
+                                 words=w45, script=SCRIPT, brand="os")
+    ok(not h45 and not any("sentence_too_long" in r for r in (g45.get("reasons") or [])),
+       f"{kind} 4.50s spoken span PASSES sentence_too_long")
+    w451 = _spoken_words(SENT_HOLD, 1.0, 4.51)
+    b451 = _span_board(SENT_HOLD, w451, **kw)
+    h451 = craft.sentence_too_long_hits(b451, w451)
+    g451 = craft.video_maker_gate(b451, beat_timing=craft.BEAT_TIMING_CURRENT,
+                                  words=w451, script=SCRIPT, brand="os")
+    ok(h451 and h451[0]["check"] == "sentence_too_long"
+       and "Exact version in the description." in h451[0]["detail"]
+       and "4.51" in h451[0]["detail"],
+       f"{kind} 4.51s names the sentence and duration ({h451})")
+    ok(g451["checks"]["B"] == "FAIL"
+       and any("sentence_too_long" in r for r in (g451.get("reasons") or []))
+       and any(k.get("check") == "sentence_too_long" for k in (g451.get("kinds") or [])),
+       f"{kind} 4.51s Gate B FAIL sentence_too_long")
 
 # Weak-clause piece that echoes the previous sentence is not its own card
 # (#1453: "Registration works" after "…and registration works.").

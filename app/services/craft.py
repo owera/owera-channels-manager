@@ -1089,6 +1089,10 @@ OS_VO_SENTENCE_CARDS = True
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
+# CMO: a cap_extended_spoken plain VO card or a literal quote that holds
+# its whole spoken span FAILs Gate B (sentence_too_long) when first word
+# → last word exceeds this. The generator is unchanged; the script splits.
+SENTENCE_SPOKEN_MAX_S = 4.5
 # stale_card: leftover hold after the card's last spoken word (same budget
 # as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
 STALE_CARD_MAX_S = BLANK_GAP_MAX_S
@@ -1840,9 +1844,46 @@ def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
     return out
 
 
-def card_timing_hits(beats, words, script: str | None = None) -> list[dict]:
-    """stale_card + quote_before_speech (need TTS words)."""
-    return quote_before_speech_hits(beats, words) + stale_card_hits(beats, words, script)
+def sentence_too_long_hits(beats, words, sources=None) -> list[dict]:
+    """cap_extended_spoken / literal-quote card whose spoken span > 4.5s.
+
+    Spoken span = first word → last word (not the visual hold). A 4.50s
+    span passes; 4.51s FAILs. Hook / CTA are exempt. Regular mid cards
+    that do not hold the whole span are not this check.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not words:
+        return out
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ == "hook" or typ in CTA_TYPES:
+            continue
+        if not (is_literal_quote_beat(b, sources) or b.get("cap_extended_spoken")
+                or is_spoken_span_hold(b, words, sources)):
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if not span:
+            continue
+        secs = float(span[1]) - float(span[0])
+        if secs > SENTENCE_SPOKEN_MAX_S + 1e-6:
+            shown = str(text or "").strip()
+            out.append({
+                "i": i, "check": "sentence_too_long",
+                "detail": f"card {i} {shown!r} spoken {secs:.2f}s "
+                          f"(first word {span[0]:.2f}s–last word {span[1]:.2f}s; "
+                          f"max {SENTENCE_SPOKEN_MAX_S:.1f}s) — split the sentence",
+            })
+    return out
+
+
+def card_timing_hits(beats, words, script: str | None = None,
+                     sources=None) -> list[dict]:
+    """stale_card + quote_before_speech + sentence_too_long (need TTS words)."""
+    return (quote_before_speech_hits(beats, words)
+            + stale_card_hits(beats, words, script)
+            + sentence_too_long_hits(beats, words, sources))
 
 
 def card_timing_marker(beats, words, script: str | None = None,
@@ -3103,7 +3144,12 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     timing_hits = card_timing_check_hits(card_timing)
     if not timing_hits and words:
         timing_hits = [f"{h.get('check')}: {h.get('detail')}"
-                       for h in card_timing_hits(board, words, script)]
+                       for h in card_timing_hits(board, words, script, sources)]
+    long_hits = [h for h in timing_hits if "sentence_too_long" in h]
+    timing_hits = [h for h in timing_hits if "sentence_too_long" not in h]
+    if not long_hits and words:
+        long_hits = [f"{h.get('check')}: {h.get('detail')}"
+                     for h in sentence_too_long_hits(board, words, sources)]
     if timing_hits:
         checks["B"] = "FAIL"
         reasons.append(
@@ -3111,6 +3157,14 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             f". A quote enters at its first spoken word; a card (including the "
             f"hook) may not stay up more than {STALE_CARD_MAX_S:.1f}s after its "
             "last spoken word (stale_card / quote_before_speech)."
+        )
+    if long_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Sentence too long: FAIL — " + "; ".join(long_hits) +
+            f". A cap_extended_spoken or literal-quote card may not cover more "
+            f"than {SENTENCE_SPOKEN_MAX_S:.1f}s of speech (first word to last "
+            "word) — split the sentence."
         )
     al_hits = allowlist_check_hits(allowlist_check)
     if al_hits:
@@ -3193,7 +3247,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                     "blank_gap": gap_hits,
                     "fabricated_cli": cli_hits, "card_text": text_hits,
                     "card_vo": vo_hits, "os_cards": os_live,
-                    "card_timing": timing_hits, "allowlist_required": al_hits,
+                    "card_timing": timing_hits, "sentence_too_long": long_hits,
+                    "allowlist_required": al_hits,
                     "slide_spam": c_hits})
     out = {"result": result, "checks": checks, "reasons": reasons}
     if kinds:
@@ -5293,15 +5348,15 @@ def card_vo_check_hits(card_vo: dict | None) -> list[str]:
 # RR sentence pace (CoS 2026-10-03): one card per spoken sentence holds when a
 # sentence is spoken within one card hold + its lead (2.8s + 1.1s ≈ 3.9s);
 # continuation cards stay the exception. Soft target only — the script
-# generator asks once for a rewrite and the render logs/records the measure;
-# it is never a gate check.
-SENTENCE_SPOKEN_MAX_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
+# generator asks once for a rewrite and the render logs/records the measure.
+# Gate B hard fail for a whole-span hold is SENTENCE_SPOKEN_MAX_S (4.5s).
+SENTENCE_SPOKEN_SOFT_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
 SPOKEN_WORDS_PER_S = 3.2  # edge-tts pt-BR/en ~3.1–3.5 w/s (#1423); low = conservative
-SENTENCE_MAX_WORDS = int(SENTENCE_SPOKEN_MAX_S * SPOKEN_WORDS_PER_S)  # 12
+SENTENCE_MAX_WORDS = 12  # pinned to the 3.9s soft rewrite (not 4.5)
 
 
 def long_spoken_sentences(script: str | None, words=None,
-                          max_s: float = SENTENCE_SPOKEN_MAX_S) -> list[dict]:
+                          max_s: float = SENTENCE_SPOKEN_SOFT_S) -> list[dict]:
     """Script sentences spoken longer than ``max_s``: [{"i","text","secs","how"}].
     ``secs`` is measured from TTS word timings when given (how="tts"), else
     estimated at SPOKEN_WORDS_PER_S (how="estimate"). The endcard VO is skipped."""
@@ -5326,4 +5381,4 @@ def sentence_pace_marker(script: str | None, words, brand: str | None,
     if (content_format or "short") == "long" or (brand or "") not in HOOK_PACE_BRANDS:
         return None
     over = long_spoken_sentences(script, words)
-    return {"max_s": SENTENCE_SPOKEN_MAX_S, "over": [{k: h[k] for k in ("i", "secs", "how")} for h in over]}
+    return {"max_s": SENTENCE_SPOKEN_SOFT_S, "over": [{k: h[k] for k in ("i", "secs", "how")} for h in over]}

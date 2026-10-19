@@ -473,7 +473,8 @@ def _kinds(g: dict) -> list[str]:
     for r in g.get("reasons") or []:
         for name in ("blank_gap", "stale_card", "quote_before_speech",
                      "vs_card_not_allowed", "single_term_card",
-                     "card_text_not_literal", "echo_card", "allowlist_required"):
+                     "card_text_not_literal", "echo_card", "allowlist_required",
+                     "sentence_too_long"):
             if name in r and name not in out:
                 out.append(name)
     return out
@@ -589,6 +590,13 @@ ok(s1453["ga"]["checks"]["B"] == "FAIL"
    and s1453["after_kinds"] == ["allowlist_required"],
    f"#1453 AFTER only allowlist_required ({s1453['after_kinds']} {s1453['ga'].get('reasons')})")
 ok(s1453["ga"]["checks"]["C"] == "PASS", "#1453 AFTER Gate C PASS")
+q1453 = next((b for b in s1453["after"]
+              if "optional keys are left out" in (b.get("text") or "")), None)
+ok(q1453 is not None, "#1453 AFTER has the long registration sentence")
+ok(float(q1453["dur"]) < 4.5
+   and not any(h.get("check") == "sentence_too_long"
+               for h in craft.sentence_too_long_hits(s1453["after"], w1453)),
+   f"#1453 ~{float(q1453['dur']):.2f}s hold (18.42–22.38) is under 4.5s")
 
 index = [
     "# Gate B before/after — OS #1452, #1453, #1465",
@@ -603,7 +611,8 @@ index = [
     "sem eco do card vizinho; (3) último recurso `cap_extended_spoken` — o "
     "card plain segura até a última palavra falada + 0,3s (nunca na frase "
     "seguinte). Gate B isenta esse hold do cap mid (não é `stale_card` nem "
-    "`blank_gap`).",
+    "`blank_gap`). Span falado (1ª→última palavra) > `SENTENCE_SPOKEN_MAX_S` "
+    "(4,5s) no `cap_extended_spoken` ou quote literal = `sentence_too_long`.",
     "",
     "`slide_spam` é o check Gate C existente (`STATEMENT_MAX_SHORTS = 1`): "
     "statement/list que só reexibe a narração sem tipo rico "
