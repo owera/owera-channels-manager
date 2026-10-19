@@ -65,13 +65,27 @@ class PinMatchError(ValueError):
     """A declared pin is not a script run or has no whisper word."""
 
 
+_FALLBACK_ART: Path | None = None
+
+
 def artifact_dir() -> Path:
+    """Write Gate B proof under ``GATE_B_ARTIFACT_DIR`` (or a process tempdir).
+
+    Never a hardcoded ``/opt/cursor/artifacts`` — the VM suite must run
+    when that path does not exist.
+    """
     raw = (os.environ.get("GATE_B_ARTIFACT_DIR")
            or os.environ.get("OS_GATE_B_ARTIFACT_DIR")
-           or "/opt/cursor/artifacts")
-    p = Path(raw)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+           or "").strip()
+    if raw:
+        p = Path(raw)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    global _FALLBACK_ART
+    if _FALLBACK_ART is None:
+        import tempfile
+        _FALLBACK_ART = Path(tempfile.mkdtemp(prefix="gate-b-art-"))
+    return _FALLBACK_ART
 
 
 def snap_path(vid: int) -> Path:

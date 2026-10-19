@@ -353,14 +353,18 @@ try:
 except PinMatchError:
     pass
 ok(True, "unmatched pin raises PinMatchError (no interpolation fallback)")
+_prev_art = os.environ.get("GATE_B_ARTIFACT_DIR")
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GATE_B_ARTIFACT_DIR"] = tmp
     try:
         p = artifact_dir()
         ok(p.resolve() == Path(tmp).resolve(),
-           f"GATE_B_ARTIFACT_DIR overrides /opt/cursor/artifacts ({p})")
+           f"GATE_B_ARTIFACT_DIR wins ({p})")
     finally:
-        os.environ.pop("GATE_B_ARTIFACT_DIR", None)
+        if _prev_art is None:
+            os.environ.pop("GATE_B_ARTIFACT_DIR", None)
+        else:
+            os.environ["GATE_B_ARTIFACT_DIR"] = _prev_art
 
 
 print("whisper fixture + BEFORE mp4 visibility × visual hold")
