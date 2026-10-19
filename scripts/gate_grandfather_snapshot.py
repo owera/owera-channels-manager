@@ -95,6 +95,7 @@ def main(argv=None) -> int:
         "note": "Closed list. Only these OS ids use the old gate at publish, and only with a valid vm_pass.",
     }
     print(f"grandfather ids ({len(kept)}): {kept}")
+    print(f"count: {len(kept)}")
     print(f"excluded/skipped: {skipped}")
     if args.dry_run:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

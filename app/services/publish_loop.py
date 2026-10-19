@@ -351,9 +351,12 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
     # treat an in-memory test channel id=1 as OS.
     brand = craft.brand_of(channel.slug, channel.name)
     if video.held:
-        from app.services.gate_grandfather import park_os_held
-        park_os_held(video, video.error or "held: operator hold — not auto-published")
-        session.add(video)
+        # Never upload a held row. OS fail-closed parks review/held; RR
+        # operator-hold stays as-is (selection already skips it).
+        if brand == "os":
+            from app.services.gate_grandfather import park_os_held
+            park_os_held(video, video.error or "held: operator hold — not auto-published")
+            session.add(video)
         quota.log(session, kind="publish", status="error", video_id=video.id,
                   channel_id=channel.id, detail="publish skipped: Video.held")
         session.commit()

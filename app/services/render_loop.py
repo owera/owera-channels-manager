@@ -317,8 +317,10 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
             video.status = VideoStatus.REVIEW
             video.error = blocked
             video.approved_at = None
-    elif video.held:
-        # held never auto-promotes — skip_gate + Gate B PASS stays review.
+    elif video.held and ch_brand == "os":
+        # OS held never auto-promotes — skip_gate + Gate B PASS stays review.
+        # RR operator-hold keeps the pre-PR skip_gate path (held stays True
+        # so _next_approved still will not publish).
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = None

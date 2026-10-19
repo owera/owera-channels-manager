@@ -288,7 +288,7 @@ ok(any(h.get("check") == "repeated_vo_sentence"
        for h in craft.repeated_vo_sentence_hits(S1465)),
    "#1465 snapshot VO repeats 'tasks.yaml was empty'")
 ok(any(h.get("check") == "description_missing_source"
-       for h in craft.description_missing_source_hits(D1465)),
+       for h in craft.description_missing_source_hits(D1465, brand="os")),
    "#1465 description has no public source link")
 
 
@@ -651,8 +651,8 @@ ok(any(h["check"] == "card_exits_early"
 ok(any(h["check"] == "cta_after_video_end"
        for h in craft.cta_after_video_end_hits(tiny, duration=6.0)),
    "CTA ending 8.0s on a 6.0s video → cta_after_video_end")
-ok(not craft.description_missing_source_hits(D1452)
-   and not craft.description_missing_source_hits(D1453),
+ok(not craft.description_missing_source_hits(D1452, brand="os")
+   and not craft.description_missing_source_hits(D1453, brand="os"),
    "#1452/#1453 descriptions have public source links")
 ok(not craft.text_in_script(S1452, "Found 5."),
    "text_in_script rejects inverted containment (script ⊂ card)")

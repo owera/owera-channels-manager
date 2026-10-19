@@ -103,6 +103,28 @@ ok(not any("mid card" in r and "beat[1]" in r for r in (g_rr.get("reasons") or [
    "RR quote hold exemption still applies")
 ok(craft.card_timing_marker(rr_quote, None, fail_closed=False) is None,
    "RR missing words stay fail-open")
+ok(not craft.description_missing_source_hits("no public source", brand="rr"),
+   "RR description without URL is not description_missing_source")
+ok(not any("description_missing_source" in r or "Description source" in r
+           for r in (craft.video_maker_gate(
+               rr_quote, brand="rr", words=words, description="no public source",
+               beat_timing=craft.BEAT_TIMING_CURRENT).get("reasons") or [])),
+   "RR live gate does not score description source")
+rr_pre = {"composition_version": "storyboard", "beat_count": 1,
+          "brand": "rr", "craft_gate": {"result": "PASS"}}
+ok(craft.trust_stored_gate(rr_pre, brand="rr",
+                           gate_context=craft.GATE_CONTEXT_PUBLISH)
+   and craft.trust_stored_gate(rr_pre, brand="rr",
+                               gate_context=craft.GATE_CONTEXT_APPROVE),
+   "RR pre-deploy snapshot trusts stored gate at publish and approve")
+ok(any("Blank gap" in r or "blank" in r.lower()
+       for r in (craft.video_maker_gate(
+           [{"type": "hook", "start": 0.0, "dur": 1.0, "text": "H",
+             "object": "bill"},
+            {"type": "cta", "start": 8.0, "dur": 2.0, "text": "Subscribe · IA"}],
+           brand="rr", duration=12.0,
+           beat_timing=craft.BEAT_TIMING_CURRENT).get("reasons") or [])),
+   "blank_gap still applies to RR on a live board")
 g_os = craft.video_maker_gate(rr_quote, brand="os", words=words,
                               beat_timing=craft.BEAT_TIMING_CURRENT)
 ok(g_os["checks"]["B"] == "FAIL"
@@ -127,11 +149,13 @@ ok("held, v.held_at = False, None" in inspect.getsource(videos_router.approve),
    "held leaves only via explicit approve (actor logged)")
 ok("held, v.held_at = False, None" in inspect.getsource(videos_router.unhold),
    "or via the audited unhold API")
-ok("park_os_held" in inspect.getsource(videos_router.approve),
-   "approve fail-closed parks Video.held")
-ok("park_os_held" in pl_src, "publish OS FAIL parks Video.held")
-ok("elif video.held" in rl_src and "skip_gate" in rl_src,
-   "finalize skip_gate does not auto-approve Video.held")
+ok("park_os_held" in inspect.getsource(videos_router.approve)
+   and 'if brand == "os"' in inspect.getsource(videos_router.approve),
+   "approve fail-closed parks Video.held for OS only")
+ok("park_os_held" in pl_src and 'if brand == "os"' in pl_src,
+   "publish OS FAIL parks Video.held; RR stays REJECTED")
+ok("elif video.held and ch_brand == \"os\"" in rl_src and "skip_gate" in rl_src,
+   "finalize skip_gate does not auto-approve OS Video.held")
 ok('fmt != "long"' in rl_src and "stamp_description_on_config" in rl_src,
    "post-render description stamp is shorts-only")
 
@@ -184,6 +208,8 @@ print("snapshot script")
 src = (REPO / "scripts" / "gate_grandfather_snapshot.py").read_text()
 ok("--exclude" in src and "1328" in src and "vm_pass_matches_master" in src,
    "snapshot script supports --exclude and drops vm_pass mismatches")
+ok('print(f"count: {len(kept)}")' in src or 'print(f"count:' in src,
+   "snapshot prints count")
 ok("APPROVED" in src and "PUBLISHING" in src,
    "snapshot selects approved + publishing (no separate scheduled status)")
 ok((REPO / "docs" / "deploy-os-cards.md").is_file(),
@@ -195,6 +221,14 @@ ok("artifact_fingerprint" in doc or "size:mtime" in doc,
    "docs say vm_pass is bound to the current render file, not a git SHA")
 ok("closed list" in doc.lower() and "missing" in doc.lower(),
    "docs say grandfather is a closed list, not missing-marker")
+ok("expected grandfather" in doc.lower() or "expected list" in doc.lower(),
+   "docs say expected grandfather is empty")
+ok("#1328" in doc and "held" in doc.lower(),
+   "docs say #1328 is held / excluded")
+ok("review" in doc.lower() and "approve" in doc.lower(),
+   "docs say OS review goes through the new gate on approve")
+ok("blank_gap" in doc and ("OS+RR" in doc or "OS and RR" in doc),
+   "docs say blank_gap stays OS+RR")
 
 
 print("behavioral: held never auto-promotes; snapshot drops vm_pass mismatch")
@@ -239,6 +273,35 @@ s.refresh(held_v)
 ok(not uploaded, "_publish_one does not upload a held video")
 ok(held_v.held is True and held_v.status == VideoStatus.REVIEW,
    "held publish attempt stays held/review, never approved/published")
+
+rr_ch = Channel(slug="recio", name="Rodrigo Recio", oauth_status=OAuthStatus.CONNECTED)
+s.add(rr_ch)
+s.commit()
+s.refresh(rr_ch)
+rr_t = Topic(channel_id=rr_ch.id, name="IA", theme_prompt="x")
+s.add(rr_t)
+s.commit()
+s.refresh(rr_t)
+rr_held = Video(
+    channel_id=rr_ch.id, topic_id=rr_t.id, subject="rr held",
+    status=VideoStatus.APPROVED, craft_review=CraftReview.PASS,
+    title="Cache miss re-bills the whole receipt · Copilot Credits 1",
+    script="Cache miss costs $79. Subscribe — next Copilot Credits trap.",
+    held=True, held_at=utcnow(),
+    creation_config=json.dumps({"composition_version": "storyboard", "beat_count": 1,
+                                "craft_gate": {"result": "PASS"}}),
+)
+s.add(rr_held)
+s.commit()
+s.refresh(rr_held)
+uploaded_rr = []
+youtube.upload_video = lambda *a, **k: uploaded_rr.append(a) or "ytRR"
+publish_loop._publish_one(s, rr_ch, rr_held)
+s.commit()
+s.refresh(rr_held)
+ok(not uploaded_rr, "RR held video is not uploaded")
+ok(rr_held.held is True and rr_held.status == VideoStatus.APPROVED,
+   "RR operator-hold is not park_os_held (status stays approved)")
 
 v1328 = Video(
     id=1328, channel_id=ch.id, topic_id=t.id, subject="old master",
@@ -295,8 +358,17 @@ proc = subprocess.run(
 )
 combo = (proc.stdout or "") + (proc.stderr or "")
 ok(proc.returncode == 0, f"snapshot --dry-run exits 0 ({combo})")
-ok("grandfather ids (0): []" in proc.stdout,
+ok("grandfather ids (0): []" in proc.stdout and "count: 0" in proc.stdout,
    f"snapshot drops #1328 and the row without current-master vm_pass ({proc.stdout})")
+exc = subprocess.run(
+    [sys.executable, str(REPO / "scripts" / "gate_grandfather_snapshot.py"),
+     "--db", str(db), "--dry-run", "--exclude", "1328,1452"],
+    cwd=str(REPO), capture_output=True, text=True,
+    env={**os.environ, "PYTHONPATH": str(REPO)},
+)
+ok(exc.returncode == 0 and "grandfather ids (0): []" in exc.stdout
+   and "count: 0" in exc.stdout,
+   f"snapshot --exclude 1328,1452 prints empty ids + count ({exc.stdout})")
 
 
 print(f"\nverify_gate_grandfather: {_checks}/{_checks} passed")

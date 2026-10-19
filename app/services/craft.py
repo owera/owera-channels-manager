@@ -2110,14 +2110,16 @@ def code_read_too_short_hits(beats) -> list[dict]:
     return out
 
 
-def description_missing_source_hits(description, *, required: bool = False) -> list[dict]:
-    """Description with no public http(s) source link.
+def description_missing_source_hits(description, *, required: bool = False,
+                                    brand: str | None = None) -> list[dict]:
+    """OS-only: description must cite a public http(s) source.
 
-    ``description is None`` and ``required=False`` is a no-op (compose time,
-    before metadata exists). After the description exists — post-render
-    craft_review / approve, or ``required=True`` for OS — missing text or
-    a missing public URL is a FAIL.
+    RR is never scored here. ``required=True`` is the OS approve/publish
+    path. ``description is None`` and not required is compose-time (metadata
+    not written yet) even on OS.
     """
+    if (brand or "") != "os" and not required:
+        return []
     if description is None and not required:
         return []
     text = str(description or "")
@@ -3539,7 +3541,8 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         )
     src_hits = [f"{h.get('check')}: {h.get('detail')}"
                 for h in description_missing_source_hits(
-                    description, required=bool(description_required))]
+                    description, required=bool(description_required),
+                    brand=brand)]
     if src_hits:
         checks["B"] = "FAIL"
         reasons.append(

@@ -727,15 +727,19 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
         video_id=v.id, video=v, brand=brand,
     ) or episode_guard.duplicate_episode_reason(session, v)
     if blocked:
-        # OS review (no grandfather): fail-closed → held in review, never
-        # status=failed (so /health videos_failed stays clean). Leaves held
-        # only via this approve path (actor logged) or unhold — never a loop.
-        from app.services.gate_grandfather import park_os_held
         v.craft_review = craft.CRAFT_REVIEW_FAIL
-        park_os_held(v, blocked)
+        if brand == "os":
+            # OS review (no grandfather): fail-closed → held in review, never
+            # status=failed. Leaves held only via this approve path (actor
+            # logged) or unhold. RR keeps the pre-PR 409 + craft_review=fail.
+            from app.services.gate_grandfather import park_os_held
+            park_os_held(v, blocked)
+            session.add(v)
+            session.commit()
+            raise HTTPException(409, v.error or f"held: {blocked}")
         session.add(v)
         session.commit()
-        raise HTTPException(409, v.error or f"held: {blocked}")
+        raise HTTPException(409, blocked)
     quota.log(session, kind="approve", status="success", video_id=v.id,
               channel_id=v.channel_id,
               detail=f"approved via API: {v.status} -> approved; craft_review=pass; actor={actor}")
