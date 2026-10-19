@@ -48,6 +48,10 @@ from app.services import craft
 from app.services.engines import storyboard, theme, worker
 from app.services.thumbnail import _THUMB_PALETTE
 
+# These pins cover the LLM compose path. OS VO-sentence cards skip the LLM;
+# that generator is tested in verify_os_vo_cards.py (kill switch on).
+craft.OS_VO_SENTENCE_CARDS = False
+
 PHASE_A = ["hook", "statement", "stat", "compare", "list", "term_define", "quote", "cta"]
 _checks = 0
 

@@ -92,6 +92,8 @@ DUR = round(t + 0.6, 2)
 
 
 def holds(topic_id):
+    # This pin is the mid-hold cap, not the OS VO-sentence generator.
+    craft.OS_VO_SENTENCE_CARDS = False
     html = storyboard.compose(subject="Cursor timed out on French Windows. · Agent traps 9",
                               script=SCRIPT, words=words, duration=DUR, resolution="portrait",
                               width=1080, height=1920, topic_id=topic_id, content_format="short",

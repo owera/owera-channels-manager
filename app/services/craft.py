@@ -1072,6 +1072,30 @@ MID_CARD_MAX_S = 3.0
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
+# Blank screen (CMO): a hole longer than BLANK_GAP_MAX_S beyond the fixed
+# inter-beat fade is a blank frame — OS and RR. A card owns its visual hold
+# (`dur`) plus BEAT_GAP_S (the fade it plays out on); align_storyboard writes
+# next.start = prev.start + prev.dur + BEAT_GAP_S, so a normal board has
+# extra = 0. Same extra budget for leading dead air (first beat after t=0)
+# and a trailing hole after the endcard vs the rendered video length
+# (creation_config["duration"], the figure video_duration / END_TAIL_S wrote).
+# END_TAIL_S is the composer tail after the last spoken word — the endcard
+# is stretched to that video end; this check is leftover after the card.
+BLANK_GAP_MAX_S = 0.5
+# OS mid cards: one whole VO sentence (or its strong-clause units) as a text
+# card. Kill switch: False restores the LLM compare/term_define/list/isolated
+# template path on OS. RR is unchanged either way.
+OS_VO_SENTENCE_CARDS = True
+# Literal quote hold tail (CMO): card exits last spoken word + this.
+QUOTE_HOLD_TAIL_S = 0.3
+# stale_card: leftover hold after the card's last spoken word (same budget
+# as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
+STALE_CARD_MAX_S = BLANK_GAP_MAX_S
+OS_BANNED_COMPARE = frozenset({"compare"})
+OS_BANNED_TERM = frozenset({"term_define"})
+OS_BANNED_LIST = frozenset({"list"})
+CARD_TIMING_V1 = "card_timing_v1"
+ALLOWLIST_REQ_V1 = "allowlist_req_v1"
 # RR publish check 2026-09-30: with the real fade a 2.88s hold still measured
 # 3.05–3.08s card-to-card (blank midpoint to blank midpoint). Content hold is
 # now ≤2.80s so hold + fade ≤ 3.0s. MUST equal storyboard._MID_MAX.
@@ -1165,6 +1189,8 @@ _BEAT_SNAP_KEYS = (
     "plain",
     # RR isolated-term card ("mensagem 30" after its sentence card, #1443 F1)
     "isolated",
+    # OS literal quote: hold the whole spoken span (mid-cap exception)
+    "literal_quote",
     # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
     "unit_first",
 )
@@ -1492,6 +1518,244 @@ def repeated_card_hits(beats) -> list[str]:
         if r:
             hits.append(r)
     return hits
+
+
+def _as_duration(raw) -> float | None:
+    try:
+        d = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if d != d or d <= 0:
+        return None
+    return d
+
+
+def blank_gap_hits(beats, duration=None) -> list[str]:
+    """Gate B blank-screen findings on a timed board.
+
+    For consecutive beats, gap = next.start − (prev.start + prev.dur).
+    FAIL when gap − BEAT_GAP_S > BLANK_GAP_MAX_S. Also FAIL when the
+    first beat starts > BLANK_GAP_MAX_S after t=0, or the last card
+    ends > BLANK_GAP_MAX_S before ``duration`` (the rendered video
+    length; same figure ``video_duration`` / END_TAIL_S wrote into
+    creation_config). Hold is ``_cue_span`` so a card still owns its
+    0.12s fade when ``dur`` is missing — untimed snapshots produce no
+    hits. Detail names the time and size of each hole.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    hits: list[str] = []
+    if not board:
+        return hits
+    first = _cue_start(board[0])
+    if first > BLANK_GAP_MAX_S + 1e-6:
+        hits.append(
+            f"leading hole: first beat starts at {first:.2f}s "
+            f"(max {BLANK_GAP_MAX_S:.2f}s)"
+        )
+    for i in range(len(board) - 1):
+        gap = _cue_start(board[i + 1]) - (_cue_start(board[i]) + _cue_span(board, i))
+        extra = gap - BEAT_GAP_S
+        if extra > BLANK_GAP_MAX_S + 1e-6:
+            t = _cue_start(board[i]) + _cue_span(board, i)
+            hits.append(
+                f"beat[{i}]→beat[{i + 1}] hole at {t:.2f}s of {gap:.2f}s "
+                f"({extra:.2f}s beyond {BEAT_GAP_S:.2f}s fade; "
+                f"max {BLANK_GAP_MAX_S:.2f}s extra)"
+            )
+    dur = _as_duration(duration)
+    last = board[-1]
+    last_hold = _cue_span(board, len(board) - 1)
+    if dur is not None and last_hold > 0:
+        last_end = _cue_start(last) + last_hold
+        tail = dur - last_end
+        if tail > BLANK_GAP_MAX_S + 1e-6:
+            label = "endcard" if (last.get("type") or "") in CTA_TYPES else "last card"
+            hits.append(
+                f"trailing hole: {label} ends at {last_end:.2f}s, video {dur:.2f}s "
+                f"({tail:.2f}s blank; max {BLANK_GAP_MAX_S:.2f}s)"
+            )
+    return hits
+
+
+def spoken_span(text, words) -> tuple[float, float] | None:
+    """(first_word_start, last_word_end) of ``text`` in TTS words, or None."""
+    ct = _sync_toks(text)
+    toks, starts = _speech_stream(words)
+    if not ct or not toks:
+        return None
+    pos = _find_run(toks, ct, 0)
+    if pos < 0:
+        return None
+    end_i = pos + len(ct) - 1
+    t0 = starts[pos]
+    # _speech_stream only keeps starts; recover end from the matching word.
+    ends: list[float] = []
+    cursor = 0
+    for w in words or []:
+        if not isinstance(w, dict):
+            continue
+        n = len(_sync_toks(w.get("text") or w.get("word")))
+        if n and cursor <= end_i < cursor + n:
+            e = _word_end(w)
+            if e is not None:
+                ends.append(float(e))
+        cursor += n
+    t1 = max(ends) if ends else t0
+    return (float(t0), float(t1))
+
+
+def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
+    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception)."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") != "quote":
+        return False
+    if beat.get("literal_quote") or beat.get("_lit"):
+        return True
+    if beat.get("plain"):
+        return False
+    if sources is not None:
+        return bool(source_literal(beat.get("text"), sources, {"quote"}))
+    return False
+
+
+def card_is_literal(beat: dict, script: str | None, sources=None) -> bool:
+    """True when on-screen copy is VO-literal or allowlist-literal."""
+    shown = beat_screen_text(beat)
+    if not shown.strip():
+        return True
+    if text_in_script(shown, script) or text_in_script(beat.get("text"), script):
+        return True
+    if sources is not None:
+        if source_literal(beat.get("text"), sources) or source_literal(shown, sources):
+            return True
+        for ln in cli_lines(beat):
+            if source_literal(ln, sources, CLI_ALLOW_KINDS):
+                return True
+        val = str(beat.get("value") or "")
+        if val and stat_allowed(val, sources):
+            return True
+    return False
+
+
+def os_card_hits(beats, script: str | None, sources=None) -> list[dict]:
+    """OS-only Gate B hits: banned templates + non-literal card text.
+
+    compare → vs_card_not_allowed; term_define / isolated quote →
+    single_term_card; list → vs_card_not_allowed (same ban as VS templates);
+    any other mid/hook copy that is neither VO-literal nor allowlist-literal
+    → card_text_not_literal. CTA/endcard is the series chip (exempt).
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES:
+            continue
+        shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
+        if typ in OS_BANNED_COMPARE or typ in OS_BANNED_LIST:
+            out.append({"i": i, "check": "vs_card_not_allowed",
+                        "detail": f"card {i} type={typ} {shown!r} is a VS/list template "
+                                  "(OS mid cards are whole VO sentences)"})
+            continue
+        if typ in OS_BANNED_TERM or is_term_card(b):
+            out.append({"i": i, "check": "single_term_card",
+                        "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
+                                  "term_define card (OS mid cards are whole VO sentences)"})
+            continue
+        if script and not card_is_literal(b, script, sources):
+            out.append({"i": i, "check": "card_text_not_literal",
+                        "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
+                                  "or allowlist-literal"})
+    return out
+
+
+def quote_before_speech_hits(beats, words) -> list[dict]:
+    """Quote card that appears before its first spoken word."""
+    out: list[dict] = []
+    for i, b in enumerate(b for b in (beats or []) if isinstance(b, dict)):
+        if (b.get("type") or "") != "quote":
+            continue
+        span = spoken_span(b.get("text") or b.get("cue"), words)
+        if not span:
+            continue
+        start = _cue_start(b)
+        if start < span[0] - SYNC_TOL_S - 1e-6:
+            out.append({"i": i, "check": "quote_before_speech",
+                        "detail": f"card {i} quote starts at {start:.2f}s, first spoken "
+                                  f"word at {span[0]:.2f}s (must enter at the first word)"})
+    return out
+
+
+def stale_card_hits(beats, words, script: str | None = None) -> list[dict]:
+    """Card (including hook) still up > STALE_CARD_MAX_S after its last word.
+
+    Maps the card to the spoken span of its on-screen / cue text (hook: the
+    claim). CTA/endcard is exempt (it holds the closer through video end).
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not words:
+        return out
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES:
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if span is None and script and i == 0 and typ == "hook":
+            # two-sentence title head: last word of the shown claim
+            span = spoken_span(text, words)
+        if span is None:
+            continue
+        end = _cue_start(b) + _cue_span(board, i)
+        leftover = end - span[1]
+        if leftover > STALE_CARD_MAX_S + 1e-6:
+            out.append({"i": i, "check": "stale_card",
+                        "detail": f"card {i} type={typ} ends at {end:.2f}s, last spoken "
+                                  f"word at {span[1]:.2f}s ({leftover:.2f}s leftover; "
+                                  f"max {STALE_CARD_MAX_S:.2f}s)"})
+    return out
+
+
+def card_timing_hits(beats, words, script: str | None = None) -> list[dict]:
+    """stale_card + quote_before_speech (need TTS words)."""
+    return quote_before_speech_hits(beats, words) + stale_card_hits(beats, words, script)
+
+
+def card_timing_marker(beats, words, script: str | None = None,
+                       content_format: str | None = "short") -> dict | None:
+    if (content_format or "short") == "long" or not words:
+        return None
+    return {"version": CARD_TIMING_V1, "hits": card_timing_hits(beats, words, script)}
+
+
+def card_timing_check_hits(card_timing: dict | None) -> list[str]:
+    if not isinstance(card_timing, dict) or card_timing.get("version") != CARD_TIMING_V1:
+        return []
+    return [f"{h.get('check')}: {h.get('detail')}" for h in card_timing.get("hits") or []
+            if isinstance(h, dict) and h.get("check")]
+
+
+def allowlist_required_marker(topic_id, sources, content_format: str | None = "short"
+                              ) -> dict | None:
+    """creation_config marker when the topic requires on_screen_allow."""
+    from app.services import topic_flags
+    if (content_format or "short") == "long":
+        return None
+    if not topic_flags.has(topic_flags.ALLOWLIST_REQUIRED, topic_id):
+        return None
+    n = len(on_screen_allow(sources))
+    hits = [] if n else [{"check": "allowlist_required",
+                          "detail": f"topic {topic_id} has no on_screen_allow"}]
+    return {"version": ALLOWLIST_REQ_V1, "allow": n, "hits": hits}
+
+
+def allowlist_check_hits(allowlist_check: dict | None) -> list[str]:
+    if not isinstance(allowlist_check, dict) or allowlist_check.get("version") != ALLOWLIST_REQ_V1:
+        return []
+    return [f"{h.get('check')}: {h.get('detail')}" for h in allowlist_check.get("hits") or []
+            if isinstance(h, dict) and h.get("check")]
 
 
 def _subscribe_hits(text: str) -> list[str]:
@@ -2520,7 +2784,14 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      card_sync: dict | None = None,
                      cli_check: dict | None = None,
                      card_text: dict | None = None,
-                     card_vo: dict | None = None) -> dict:
+                     card_vo: dict | None = None,
+                     duration: float | None = None,
+                     card_timing: dict | None = None,
+                     allowlist_check: dict | None = None,
+                     brand: str | None = None,
+                     script: str | None = None,
+                     words=None,
+                     sources=None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -2577,6 +2848,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
+        # CMO: a literal quote holds its whole spoken span (even past mid cap).
+        if is_literal_quote_beat(b, sources):
+            continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
         hold_cap = cta_hold if is_cta else mid_hold
@@ -2610,6 +2884,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Neighbouring beats must change the on-screen text, and a mid "
             "card must not be replayed later; a repeated spoken phrase needs "
             "a visual change (different beat type/layout/emphasis)."
+        )
+    # Blank screen: a hole longer than BLANK_GAP_MAX_S beyond the 0.12s fade
+    # (or leading / trailing dead air). OS and RR. A card owns hold + fade.
+    gap_hits = blank_gap_hits(board, duration)
+    if gap_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Blank gap: FAIL — " + "; ".join(gap_hits) +
+            f". A card owns its hold + the {BEAT_GAP_S:.2f}s inter-beat fade; "
+            f"a hole longer than {BLANK_GAP_MAX_S:.1f}s beyond that fade is a "
+            "blank screen (OS and RR)."
         )
     # RR hook pace (marked new RR renders only; see HOOK_PACE_V1).
     pace_hits = hook_pace_hits(board, hook_pace)
@@ -2663,6 +2948,40 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Every text card shows one whole sentence the VO says (a long "
             "sentence may continue on the next card only with its literal next "
             "words), and each spoken sentence gets one card."
+        )
+    # OS live board checks (when brand/script given — before/after + tests).
+    # New renders also carry them on card_text / card_timing markers.
+    os_live = []
+    if (brand or "") == "os" and script:
+        os_live = [f"{h.get('check')}: {h.get('detail')}"
+                   for h in os_card_hits(board, script, sources)]
+        if os_live and not any("vs_card_not_allowed" in x or "single_term_card" in x
+                               or "card_text_not_literal" in x for x in text_hits):
+            checks["B"] = "FAIL"
+            reasons.append(
+                "[B] OS cards: FAIL — " + "; ".join(os_live) +
+                ". OS mid cards are one whole VO sentence (or its strong-clause "
+                "units); no compare/VS, term_define, list, or isolated term; "
+                "copy is VO-literal or allowlist-literal."
+            )
+    timing_hits = card_timing_check_hits(card_timing)
+    if not timing_hits and words:
+        timing_hits = [f"{h.get('check')}: {h.get('detail')}"
+                       for h in card_timing_hits(board, words, script)]
+    if timing_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card timing: FAIL — " + "; ".join(timing_hits) +
+            f". A quote enters at its first spoken word; a card (including the "
+            f"hook) may not stay up more than {STALE_CARD_MAX_S:.1f}s after its "
+            "last spoken word (stale_card / quote_before_speech)."
+        )
+    al_hits = allowlist_check_hits(allowlist_check)
+    if al_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Allowlist required: FAIL — " + "; ".join(al_hits) +
+            ". allowlist_required topics need overrides on_screen_allow."
         )
 
     # --- C: kill spoken list/slide spam ------------------------------------
@@ -2735,8 +3054,10 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     kinds = gate_check_kinds(
         board, hook_pace=hook_pace, card_sync=card_sync,
         board_hits={"beat_hold": b_hits, "repeated_card": rep_hits,
+                    "blank_gap": gap_hits,
                     "fabricated_cli": cli_hits, "card_text": text_hits,
-                    "card_vo": vo_hits,
+                    "card_vo": vo_hits, "os_cards": os_live,
+                    "card_timing": timing_hits, "allowlist_required": al_hits,
                     "slide_spam": c_hits})
     out = {"result": result, "checks": checks, "reasons": reasons}
     if kinds:
@@ -2861,12 +3182,16 @@ def video_maker_gate_of(creation_config=None,
     sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
     cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
     ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
+    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
+    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
     gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
     return attach_generator_slips(
         video_maker_gate(beats, content_format=content_format,
                          used_fallback=used_fallback, legacy_timing=legacy,
                          hook_pace=pace, beat_timing=bt, card_sync=sync,
-                         cli_check=cli, card_text=ctext),
+                         cli_check=cli, card_text=ctext,
+                         duration=_as_duration(cc.get("duration")),
+                         card_timing=ctime, allowlist_check=al),
         gs.get("slips") if gs else None)
 
 
@@ -2945,10 +3270,14 @@ def _video_maker_gate_reason_core(creation_config=None,
     cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
     ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
     cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
+    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
+    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
     gate = video_maker_gate(beats, content_format=content_format,
                             used_fallback=used_fallback, legacy_timing=legacy,
                             hook_pace=pace, beat_timing=bt, card_sync=sync,
-                            cli_check=cli, card_text=ctext, card_vo=cvo)
+                            cli_check=cli, card_text=ctext, card_vo=cvo,
+                            duration=_as_duration(cc.get("duration")),
+                            card_timing=ctime, allowlist_check=al)
     return format_craft_gate_reason(gate)
 
 
@@ -4173,10 +4502,11 @@ def stat_ordinal_unit(beat, script: str | None) -> str:
 
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                    pt: bool | None = None, sources=None,
-                   whole: bool | None = None) -> list[dict]:
+                   whole: bool | None = None, os: bool = False) -> list[dict]:
     """Every card-text rule violation on a board: [{"i","check","detail"}].
 
     ``rr``: RR-only checks (invented output, PT counter, foreign terms).
+    ``os``: OS-only template / literal checks (os_card_hits).
     ``whole`` (default ``rr``; CARD_VO_WHOLE_BRANDS, RR and OS): the
     whole-sentence card exemptions (a rich card illustrating the whole-sentence
     card of its sentence)."""
@@ -4235,6 +4565,8 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                         "detail": f"card {i} {shown!r} repeats card {prev_mid} "
                                   f"({card_overlap(board[prev_mid], b):.0%} shared words)"})
         prev_mid = i
+    if os:
+        out.extend(os_card_hits(board, script, sources))
     return out
 
 
@@ -4245,8 +4577,9 @@ def card_text_marker(beats, script: str | None, words=None, *, brand: str | None
     if (content_format or "short") == "long":
         return None
     rr = (brand or "") in HOOK_PACE_BRANDS
-    return {"version": CARD_TEXT_V1, "rr": rr,
-            "hits": card_text_hits(beats, script, words, rr=rr, sources=sources,
+    os = (brand or "") == "os"
+    return {"version": CARD_TEXT_V1, "rr": rr, "os": os,
+            "hits": card_text_hits(beats, script, words, rr=rr, os=os, sources=sources,
                                    whole=card_vo_whole_applies(brand))}
 
 

@@ -94,6 +94,9 @@ storyboard._apply_literal_cards(board(), SCRIPT, ALLOW, None, ALLOWED)
 ok(True, "helpers still work without a slip list")
 
 print("compose embeds slips on flagged topics only")
+# Slips are LLM-repair artifacts. OS VO-sentence cards skip the LLM
+# (verify_os_vo_cards.py); kill switch off here.
+craft.OS_VO_SENTENCE_CARDS = False
 words, t = [], 0.1
 for w in SCRIPT.split():
     words.append({"text": w.strip(".,!?:"), "start": round(t, 3), "dur": 0.3})
@@ -140,7 +143,10 @@ ok(g.get("generator_slips") == len(gs) and g.get("generator_slip_list") == gs,
 plain = craft.video_maker_gate(cc["beats"], content_format="short",
                                beat_timing=craft.BEAT_TIMING_CURRENT, hook_pace=cc.get("hook_pace"),
                                card_sync=cc.get("card_sync"), cli_check=cc.get("cli_check"),
-                               card_text=cc.get("card_text"), card_vo=cc.get("card_vo"))
+                               card_text=cc.get("card_text"), card_vo=cc.get("card_vo"),
+                               duration=cc.get("duration"), card_timing=cc.get("card_timing"),
+                               allowlist_check=cc.get("allowlist_check"), brand="os",
+                               script=SCRIPT, words=words, sources=ALLOW)
 ok(g["result"] == plain["result"] and g["checks"] == plain["checks"] and g["reasons"] == plain["reasons"],
    "slips are informational: gate result / checks / reasons unchanged")
 rg = craft.video_maker_gate_of(cc, "short")

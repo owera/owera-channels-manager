@@ -455,11 +455,19 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             cvo = (craft.card_vo_marker(beats, script, content_format=fmt,
                                         brand=brand or params.get("brand"))
                    if not used_fallback else None)
+            ctime = (craft.card_timing_marker(beats, words, script, fmt)
+                     if not used_fallback else None)
+            alchk = craft.allowlist_required_marker(params.get("topic_id"),
+                                                    params.get("on_screen_allow"), fmt)
             gate = craft.video_maker_gate(beats, content_format=fmt,
                                           used_fallback=used_fallback, hook_pace=pace,
                                           beat_timing=craft.BEAT_TIMING_CURRENT,
                                           card_sync=sync, cli_check=cli, card_text=ctext,
-                                          card_vo=cvo)
+                                          card_vo=cvo, duration=duration,
+                                          card_timing=ctime, allowlist_check=alchk,
+                                          brand=brand or params.get("brand"),
+                                          script=script, words=words,
+                                          sources=params.get("on_screen_allow"))
             # literal_cards topics: generator slips compose repaired (generated
             # evidence card → plain, attribution / stat removed, repeated version
             # dropped) — informational in the VM's craft report, never a verdict.
@@ -490,6 +498,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                                         "slips": slips[:craft.GEN_SLIPS_LIST_MAX]}}
                    if slips is not None else {}),
                 **({"sentence_pace": space} if space else {}),
+                **({"card_timing": ctime} if ctime else {}),
+                **({"allowlist_check": alchk} if alchk else {}),
                 # Designer split card rendered on frame0 → the publish-time thumb
                 # uses the same card (frame0 ≡ thumb); absent on older renders.
                 **({"frame0_split": True} if 'data-split="1"' in html else {}),

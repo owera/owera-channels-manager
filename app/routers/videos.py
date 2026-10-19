@@ -702,6 +702,9 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     need_vm = review_guard.vm_pass_required_reason(v)
     if need_vm:
         raise HTTPException(409, need_vm)
+    need_al = review_guard.allowlist_required_reason(v)
+    if need_al:
+        raise HTTPException(409, need_al)
     if body:
         data = body.model_dump(exclude_unset=True)
         if "tags" in data:
@@ -809,6 +812,9 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         need_vm = review_guard.vm_pass_required_reason(v)
         if need_vm:
             raise HTTPException(409, need_vm)
+        need_al = review_guard.allowlist_required_reason(v)
+        if need_al:
+            raise HTTPException(409, need_al)
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft

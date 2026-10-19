@@ -1564,6 +1564,8 @@ _CLAUSE_RE = re.compile(r"[,;:—–]\s")
 # sentence, a whole strong clause (; : — –) or an isolated term — never a
 # comma / conjunction / preposition piece of a sentence.
 _WHOLE_CARDS = contextvars.ContextVar("storyboard_whole_cards", default=False)
+# OS VO-sentence cards (craft.OS_VO_SENTENCE_CARDS): no isolated-term fillers.
+_OS_VO_CARDS = contextvars.ContextVar("storyboard_os_vo_cards", default=False)
 # 2026-10-09: OS (EN) gets whole cards too; the RR-only card-text checks
 # (invented output, PT counter, foreign terms) stay on the RR brand.
 _RR_CARDS = contextvars.ContextVar("storyboard_rr_cards", default=False)
@@ -2016,7 +2018,7 @@ def _split_long_mids(beats, words=None) -> None:
     i = 1
     while i < len(beats) - 1:
         b = beats[i]
-        if (b.get("type") or "") in ("hook", "cta"):
+        if (b.get("type") or "") in ("hook", "cta") or b.get("literal_quote"):
             i += 1
             continue
         s0 = float(b.get("start") or 0.0)
@@ -2224,7 +2226,7 @@ def _walk_back(beats) -> None:
         cur_start = float(cur.get("start") or 0.0)
         nxt_start = float(nxt.get("start") or 0.0)
         cur["dur"] = round(max(_MIN_DUR, nxt_start - _GAP - cur_start), 3)
-        if float(cur["dur"]) <= _mid_max() + 1e-9:
+        if cur.get("literal_quote") or float(cur["dur"]) <= _mid_max() + 1e-9:
             continue
         extra = float(cur["dur"]) - _mid_max()
         new_start = min(cur_start + extra, nxt_start - _MIN_DUR)
@@ -2610,7 +2612,7 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
         levels.append(_speech_units(words, 1.5, min_side=2))
         h_t = tstart[h_end] if h_end < len(tstart) else 0.0
         whole = _WHOLE_CARDS.get() and bool(script)
-        if whole:
+        if whole and not _OS_VO_CARDS.get():
             # RR whole-sentence cards: a long sentence's second card may be an
             # isolated spoken term ("mensagem 30"), never a clause piece
             levels.append(_term_units(words, script))
@@ -3293,6 +3295,10 @@ def _merge_on_screen(beats, script, on_screen, allowed) -> None:
                         cb.get("cue"))
             continue
         cb["_lit"] = True
+        if isinstance(rb, dict) and rb.get("literal_quote"):
+            cb["literal_quote"] = True
+            if rb.get("text"):
+                cb["text"] = rb["text"]  # verbatim allowlist — never clip a literal quote
         lit.append((p, cb))
     if not lit:
         return
@@ -3423,6 +3429,230 @@ def _plain_unsourced_quotes(beats, script, sources, slips=None) -> None:
             b["attribution"] = ""
 
 
+def _hook_covers_sentence(sent: str, hook_text: str) -> bool:
+    """True when ``sent`` is the hook claim (or a sentence inside a two-part head)."""
+    st, ht = _tok(sent), _tok(hook_text)
+    if not st or not ht:
+        return False
+    if st == ht:
+        return True
+    return any(ht[k:k + len(st)] == st for k in range(len(ht) - len(st) + 1))
+
+
+def _os_sentence_units(sent: str) -> list[str]:
+    """One VO sentence, or its strong-clause units when too long for a mid card (#96)."""
+    sent = (sent or "").strip()
+    if not sent:
+        return []
+    if len(sent.split()) <= _SENT_CARD_MAX_WORDS:
+        return [sent]
+    parts = [p.strip() for p in _STRONG_CLAUSE_SPLIT_RE.split(sent) if p.strip()]
+    if len(parts) <= 1:
+        return [sent]
+    out, buf = [], ""
+    for p in parts:
+        cand = (buf + " " + p).strip() if buf else p
+        if buf and len(cand.split()) > _SENT_CARD_MAX_WORDS:
+            out.append(buf)
+            buf = p
+        else:
+            buf = cand
+    if buf:
+        out.append(buf)
+    return out or [sent]
+
+
+def _allowlist_as_on_screen(script, sources) -> list[dict]:
+    """Allowlisted log/error/command/quote/stat that the VO says, as verbatim cards."""
+    from app.services import craft
+    out = []
+    for e in craft.on_screen_allow(sources):
+        text = e.get("text") or ""
+        if not text or not craft.text_in_script(text, script):
+            continue
+        kind = e.get("kind") or ""
+        if kind in ("log", "error"):
+            out.append({"type": "code", "cue": text, "lang": "", "lines": [text],
+                        "_lit": True})
+        elif kind == "command":
+            out.append({"type": "command", "cue": text, "prompt": "$", "command": text,
+                        "output": [], "_lit": True})
+        elif kind == "quote":
+            out.append({"type": "quote", "cue": text, "text": text, "literal_quote": True,
+                        "_lit": True})
+        elif kind == "stat":
+            out.append({"type": "stat", "cue": text, "value": text, "_lit": True})
+    return out
+
+
+def _os_vo_sentence_beats(*, subject, script) -> list[dict]:
+    """Deterministic OS mid cards: one plain quote per VO sentence (or clause unit).
+
+    Hook + CTA skeleton only — ``_lock_opening_hook`` / ``_sanitize_cta`` fill
+    the copy. Sentences covered by the hook claim (incl. a two-sentence title
+    head) are not also emitted as mid cards. Literal allowlist cards are
+    merged later by ``_apply_literal_cards``.
+    """
+    from app.services import craft
+    claim_src = craft.overlay_hook_source(None, script, subject)
+    hook = (craft.overlay_claim(claim_src)
+            or craft.overlay_claim(craft.title_head(subject))
+            or (_script_sentences(script) or ["·"])[0])
+    beats = [{"type": "hook", "text": hook, "cue": claim_src or hook, "emoji": ""}]
+    for sent in _script_sentences(script):
+        if craft.is_endcard_vo_sentence(sent) or craft.contains_subscribe_cta(sent):
+            continue
+        if _hook_covers_sentence(sent, hook):
+            continue
+        for unit in _os_sentence_units(sent):
+            beats.append({"type": "quote", "text": unit, "cue": unit, "plain": True,
+                          "attribution": ""})
+    beats.append({"type": "cta", "text": "Subscribe", "cue": ""})
+    return beats
+
+
+def _snap_os_cards_to_speech(beats, words, script=None) -> None:
+    """OS VO-sentence cards: each mid card starts on its first spoken word.
+
+    Align / sync can leave a sentence card several seconds late (the hook
+    ate the window). Snap mids to ``spoken_span`` then pack overlaps so
+    card sync and stale_card stay clean. Literal quotes are timed separately.
+    """
+    from app.services import craft
+    if not beats or not words:
+        return
+    for i, b in enumerate(beats):
+        typ = b.get("type") or ""
+        if typ == "hook" or typ in craft.CTA_TYPES or b.get("literal_quote"):
+            continue
+        span = craft.spoken_span(b.get("text") or b.get("cue"), words)
+        if not span:
+            continue
+        b["start"] = round(float(span[0]), 3)
+        hold = float(b.get("dur") or 0) or _mid_max()
+        hold = min(max(_MIN_DUR, hold), _mid_max())
+        # do not outlive the next spoken word by more than STALE_CARD_MAX_S
+        leftover = float(span[1]) + craft.STALE_CARD_MAX_S - float(b["start"])
+        if leftover > 0:
+            hold = min(hold, leftover)
+        b["dur"] = round(max(_MIN_DUR, hold), 3)
+    for i in range(1, len(beats)):
+        prev, cur = beats[i - 1], beats[i]
+        try:
+            floor = float(prev.get("start") or 0) + float(prev.get("dur") or 0) + _GAP
+            st = float(cur.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        if st < floor - 1e-6:
+            try:
+                prev["dur"] = round(max(_MIN_DUR, st - _GAP - float(prev.get("start") or 0)), 3)
+                floor = float(prev["start"]) + float(prev["dur"]) + _GAP
+            except (TypeError, ValueError, KeyError):
+                pass
+            if st < floor - 1e-6:
+                cur["start"] = round(floor, 3)
+    if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
+        last, cta = beats[-2], beats[-1]
+        span = craft.spoken_span(last.get("text") or last.get("cue"), words)
+        try:
+            last_end = float(last.get("start") or 0) + float(last.get("dur") or 0)
+            cta_st = float(cta.get("start") or 0)
+        except (TypeError, ValueError):
+            last_end, cta_st = 0.0, 0.0
+        need = last_end + _GAP
+        if span:
+            need = max(need, float(span[1]) + _GAP)
+        if cta_st < need - 1e-6:
+            cta["start"] = round(need, 3)
+
+
+def _cap_os_hook(beats, words, script=None) -> None:
+    """OS: hook holds its spoken claim only (stale_card must not fire).
+
+    Content is unchanged (still the overlay claim). Surplus after the last
+    spoken word + STALE_CARD_MAX_S is given to the next card so frame0
+    cannot freeze (#1465: 7.43s on the hook).
+    """
+    from app.services import craft
+    if not beats or (beats[0].get("type") or "") != "hook" or not words:
+        return
+    span = craft.spoken_span(beats[0].get("text") or beats[0].get("cue"), words)
+    if span is None and script:
+        span = craft.spoken_span(beats[0].get("text"), words)
+    if span is None:
+        return
+    end = float(span[1]) + craft.STALE_CARD_MAX_S
+    beats[0]["start"] = 0.0
+    hold = max(_MIN_DUR, end)
+    if len(beats) >= 2:
+        try:
+            nxt_st = float(beats[1].get("start") or 0)
+        except (TypeError, ValueError):
+            nxt_st = 0.0
+        if nxt_st > 0:
+            hold = min(hold, max(_MIN_DUR, nxt_st - _GAP))
+    beats[0]["dur"] = round(hold, 3)
+
+
+def _drop_os_term_cards(beats) -> None:
+    """OS VO-sentence boards never keep an isolated-term filler."""
+    from app.services import craft
+    if not beats:
+        return
+    kept = []
+    for i, b in enumerate(beats):
+        if i and craft.is_term_card(b):
+            continue
+        kept.append(b)
+    if len(kept) == len(beats):
+        return
+    for i in range(1, len(kept)):
+        prev, cur = kept[i - 1], kept[i]
+        try:
+            floor = float(prev.get("start") or 0) + float(prev.get("dur") or 0) + _GAP
+            st = float(cur.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        if st > floor + 1e-6:
+            cur["start"] = round(floor, 3)
+    beats[:] = kept
+
+
+def _time_literal_quotes(beats, words, sources=None) -> None:
+    """CMO quote timing: enter at first spoken word, hold the whole span,
+    exit last spoken word + QUOTE_HOLD_TAIL_S. Mid-cap exception (literal
+    quotes only). Later cards shift so they do not overlap.
+    """
+    from app.services import craft
+    if not beats or not words:
+        return
+    for b in beats:
+        if (b.get("type") or "") != "quote":
+            continue
+        if b.get("plain") and not b.get("literal_quote"):
+            continue
+        text = b.get("text") or b.get("cue")
+        if not b.get("literal_quote"):
+            if sources is None or not craft.source_literal(text, sources, {"quote"}):
+                continue
+        span = craft.spoken_span(text, words)
+        if not span:
+            continue
+        t0, t1 = span
+        b["start"] = round(float(t0), 3)
+        b["dur"] = round(max(_MIN_DUR, float(t1) + craft.QUOTE_HOLD_TAIL_S - float(t0)), 3)
+        b["literal_quote"] = True
+    for i in range(1, len(beats)):
+        prev, cur = beats[i - 1], beats[i]
+        try:
+            floor = float(prev.get("start") or 0) + float(prev.get("dur") or 0) + _GAP
+            st = float(cur.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        if st < floor - 1e-6:
+            cur["start"] = round(floor, 3)
+
+
 def compose(*, topic_id=None, **kw) -> str | None:
     """Generate a composition index.html via the typed-storyboard path (see
     _compose_board). A topic flagged topic_flags.TIGHT_MID_CARDS (default 47)
@@ -3455,6 +3685,10 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     _wtok = _WHOLE_CARDS.set(_craft.card_vo_whole_applies(brand or th.get("brand"))
                              and (content_format or "short") != "long")
     _rtok = _RR_CARDS.set(rr_brand)
+    os_vo = (_craft.OS_VO_SENTENCE_CARDS
+             and (brand or th.get("brand") or "") == "os"
+             and (content_format or "short") != "long")
+    _otok = _OS_VO_CARDS.set(os_vo)
     try:
         from app.services import topic_flags
         literal = topic_flags.has(topic_flags.LITERAL_CARDS, topic_id)
@@ -3466,52 +3700,61 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         # RR whole-sentence cards: fragment repairs are generator slips too
         whole = _WHOLE_CARDS.get()
         slips: list | None = [] if (literal or whole) else None
-        system = _system_prompt(allowed, product_teaser=teaser, rr=rr_brand,
-                                pt=_craft.is_pt_text(script), literal=literal)
-        user = _user_prompt(subject, script, content_format, product_teaser=teaser,
-                            literal=literal, sources=sources)
+        # OS mid cards: one whole VO sentence (or strong-clause units) as a
+        # text card. Kill switch craft.OS_VO_SENTENCE_CARDS = False restores
+        # the LLM compare/term_define/list/isolated-term path. RR unchanged.
+        if os_vo:
+            beats = _os_vo_sentence_beats(subject=subject, script=script)
+            if not beats:
+                logger.info("storyboard: OS VO-sentence board empty for %r — falling back", subject)
+                return None
+        else:
+            system = _system_prompt(allowed, product_teaser=teaser, rr=rr_brand,
+                                    pt=_craft.is_pt_text(script), literal=literal)
+            user = _user_prompt(subject, script, content_format, product_teaser=teaser,
+                                literal=literal, sources=sources)
 
-        raw = llm(user, system=system, max_tokens=1500).strip()
-        beats = _parse_cut(raw, allowed, literal)
-        if not beats:
-            raw = llm(user + "\n\nReturn ONLY valid JSON {\"beats\":[...]} using the allowed types.",
-                      system=system, max_tokens=1500).strip()
+            raw = llm(user, system=system, max_tokens=1500).strip()
             beats = _parse_cut(raw, allowed, literal)
-        if not beats:
-            logger.info("storyboard: unparseable for %r — falling back", subject)
-            return None
+            if not beats:
+                raw = llm(user + "\n\nReturn ONLY valid JSON {\"beats\":[...]} using the allowed types.",
+                          system=system, max_tokens=1500).strip()
+                beats = _parse_cut(raw, allowed, literal)
+            if not beats:
+                logger.info("storyboard: unparseable for %r — falling back", subject)
+                return None
 
-        # Quality guard: if the model leaned on plain statements (echoing the audio), push
-        # once for the varied explanatory types and keep whichever draft is richer.
-        if not _variety_ok(beats, content_format):
-            stmt_n = "one" if content_format != "long" else "two"
-            retry = llm(
-                user + "\n\nYour draft relied on plain 'statement' beats that just repeat the spoken "
-                "words. Redo it: use AT MOST " + stmt_n + " 'statement' beat(s) and convert the rest into "
-                "stat / compare / list / term_define" +
-                ("/ code / command / diagram" if any(t in allowed for t in ("code", "command", "diagram")) else "") +
-                ". Exactly one hook first and one cta last. Hook text = first spoken sentence.",
-                system=system, max_tokens=1500).strip()
-            rb = _parse_cut(retry, allowed, literal)
-            if rb and (_variety_ok(rb, content_format) or len(_rich_types(rb)) > len(_rich_types(beats))):
-                beats = rb
+            # Quality guard: if the model leaned on plain statements (echoing the audio), push
+            # once for the varied explanatory types and keep whichever draft is richer.
+            if not _variety_ok(beats, content_format):
+                stmt_n = "one" if content_format != "long" else "two"
+                retry = llm(
+                    user + "\n\nYour draft relied on plain 'statement' beats that just repeat the spoken "
+                    "words. Redo it: use AT MOST " + stmt_n + " 'statement' beat(s) and convert the rest into "
+                    "stat / compare / list / term_define" +
+                    ("/ code / command / diagram" if any(t in allowed for t in ("code", "command", "diagram")) else "") +
+                    ". Exactly one hook first and one cta last. Hook text = first spoken sentence.",
+                    system=system, max_tokens=1500).strip()
+                rb = _parse_cut(retry, allowed, literal)
+                if rb and (_variety_ok(rb, content_format) or len(_rich_types(rb)) > len(_rich_types(beats))):
+                    beats = rb
 
-        # R2: if code/command is allowed but the draft has neither, push once for a snippet.
-        # Keep the retry only when it actually adds one (otherwise keep the varied original).
-        if not teaser and not literal and not rr_brand and not _code_ok(beats, allowed):
-            retry = llm(
-                user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
-                "cta-last, keep variety (at most " +
-                ("one" if content_format != "long" else "two") +
-                " statement beat(s)), and include EXACTLY one "
-                "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
-                "that shows the thing the narration only describes (terminal, receipt, API bill)." +
-                (" Output lines only when the narration says them — never invented output."
-                 if rr_brand else ""),
-                system=system, max_tokens=1500).strip()
-            rb = parse_storyboard(retry, allowed)
-            if rb and _code_ok(rb, allowed):
-                beats = rb
+            # R2: if code/command is allowed but the draft has neither, push once for a snippet.
+            # Keep the retry only when it actually adds one (otherwise keep the varied original).
+            if not teaser and not literal and not rr_brand and not _code_ok(beats, allowed):
+                retry = llm(
+                    user + "\n\nYour draft had no code or command beat. Redo it: keep hook-first and "
+                    "cta-last, keep variety (at most " +
+                    ("one" if content_format != "long" else "two") +
+                    " statement beat(s)), and include EXACTLY one "
+                    "`code` or `command` beat with a minimal realistic snippet (<=5 lines, <=30 chars) "
+                    "that shows the thing the narration only describes (terminal, receipt, API bill)." +
+                    (" Output lines only when the narration says them — never invented output."
+                     if rr_brand else ""),
+                    system=system, max_tokens=1500).strip()
+                rb = parse_storyboard(retry, allowed)
+                if rb and _code_ok(rb, allowed):
+                    beats = rb
 
         # Quote cards are sentence-bounded: each word knows its script sentence.
         words = annotate_sentences(words, script)
@@ -3523,21 +3766,23 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                       content_format=content_format, topic_name=topic_name)
         _strip_mid_subscribe_beats(beats)
         if literal:
+            on_screen = list(on_screen or []) + _allowlist_as_on_screen(script, sources)
             _apply_literal_cards(beats, script, sources, on_screen, allowed, slips)
         if teaser:
             _replace_fabricated_cli(beats, script)
             _soft_product_card(beats, script)
         _cap_statements(beats, content_format)
-        _fix_verbless_cards(beats, script)
-        if whole and slips is not None and _craft.is_pt_text(script):
-            # RR PT: a code snippet the VO never speaks is invented (#1443 #3) —
-            # _enforce_card_text_rules turns it into its narration sentence
-            for b in beats:
-                if (b.get("type") or "") == "code" and not _craft.code_card_spoken(b, script):
-                    _slip(slips, "unspoken_code", b,
-                          [str(x)[:160] for x in (b.get("lines") or [])[:3]] + ["→ narration sentence"])
-        _enforce_card_text_rules(beats, script, words, brand or th.get("brand"))
-        _guard_whole_cards(beats, script, words, slips)
+        if not os_vo:
+            _fix_verbless_cards(beats, script)
+            if whole and slips is not None and _craft.is_pt_text(script):
+                # RR PT: a code snippet the VO never speaks is invented (#1443 #3) —
+                # _enforce_card_text_rules turns it into its narration sentence
+                for b in beats:
+                    if (b.get("type") or "") == "code" and not _craft.code_card_spoken(b, script):
+                        _slip(slips, "unspoken_code", b,
+                              [str(x)[:160] for x in (b.get("lines") or [])[:3]] + ["→ narration sentence"])
+            _enforce_card_text_rules(beats, script, words, brand or th.get("brand"))
+            _guard_whole_cards(beats, script, words, slips)
         if literal:
             _drop_repeated_versions(beats, slips)
 
@@ -3585,7 +3830,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                                 sources=_craft.literal_sources(sources) if literal else None):
                         done = True
                         break
-                if not done and whole:
+                if not done and whole and not os_vo:
                     # RR whole cards leave no synced board (no whole sentence /
                     # term / illustration fits the holds): card sync stays
                     # guaranteed with the historical units; the timed guard
@@ -3603,12 +3848,19 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                         _WHOLE_CARDS.reset(_wt)
         # RR whole-sentence cards: last guard on the timed board (a piece of a
         # sentence the sync left → whole sentence / dropped / slip + Gate B FAIL)
-        _guard_whole_cards(beats, script, words, slips, timed=True)
+        if not os_vo:
+            _guard_whole_cards(beats, script, words, slips, timed=True)
+        _time_literal_quotes(beats, words, sources if literal else None)
+        if os_vo:
+            _cap_os_hook(beats, words, script)
+            _snap_os_cards_to_speech(beats, words, script)
+            _drop_os_term_cards(beats)
         if literal:
             # timing/sync fillers are narration words: never dressed as a quotation
             _plain_unsourced_quotes(beats, script, sources, slips)
         return build_index_html(beats, th, resolution, width, height, duration,
                                 content_format=content_format, slips=slips)
     finally:
+        _OS_VO_CARDS.reset(_otok)
         _RR_CARDS.reset(_rtok)
         _WHOLE_CARDS.reset(_wtok)

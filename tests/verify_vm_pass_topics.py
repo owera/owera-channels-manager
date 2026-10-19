@@ -103,8 +103,12 @@ with Session(engine) as s:
 
 def add(**kw):
     with Session(engine) as s:
-        v = Video(**{"channel_id": 1, "topic_id": 47, "subject": kw.get("title") or "x",
-                     "script": "x.", "metadata_generated": True, **kw})
+        defaults = {"channel_id": 1, "topic_id": 47, "subject": kw.get("title") or "x",
+                    "script": "x.", "metadata_generated": True}
+        if defaults["topic_id"] == 47 and kw.get("topic_id", 47) == 47 and "overrides_json" not in kw:
+            defaults["overrides_json"] = json.dumps(
+                {"on_screen_allow": [{"kind": "log", "text": "held-test"}]})
+        v = Video(**{**defaults, **kw})
         s.add(v)
         s.commit()
         s.refresh(v)

@@ -1330,12 +1330,18 @@ _sw = [{"text": t, "start": round(0.4 * k, 3), "dur": 0.35} for k, t in enumerat
 
 
 def _sb(q1, q2, q3, cta, cta_dur=3.0):
-    return [{"type": "hook", "start": 0.0, "dur": 1.38, "text": "Contexto come a VRAM", "cue": "Contexto",
-             "object": "GPU"},
-            {"type": "quote", "start": q1, "dur": 2.0, "text": "O peso do modelo é só parte", "cue": "O peso"},
-            {"type": "stat", "start": q2, "dur": 2.0, "value": "4", "unit": "x", "label": "cache",
-             "cue": "O cache cresce"},
-            {"type": "quote", "start": q3, "dur": 1.0, "text": "Mede a VRAM antes", "cue": "Mede a VRAM"},
+    # Holds own the 0.12s fade up to the mid cap so blank_gap is not a
+    # false FAIL on these card-sync pins (starts stay as the caller set).
+    def _hold(start, nxt, cap):
+        return round(min(cap, max(0.5, float(nxt) - float(start) - 0.12)), 3)
+    return [{"type": "hook", "start": 0.0, "dur": _hold(0.0, q1, 4.0),
+             "text": "Contexto come a VRAM", "cue": "Contexto", "object": "GPU"},
+            {"type": "quote", "start": q1, "dur": _hold(q1, q2, 2.80),
+             "text": "O peso do modelo é só parte", "cue": "O peso"},
+            {"type": "stat", "start": q2, "dur": _hold(q2, q3, 2.80), "value": "4", "unit": "x",
+             "label": "cache", "cue": "O cache cresce"},
+            {"type": "quote", "start": q3, "dur": _hold(q3, cta, 2.80),
+             "text": "Mede a VRAM antes", "cue": "Mede a VRAM"},
             {"type": "cta", "start": cta, "dur": cta_dur, "text": "Subscribe · IA", "cue": "Subscribe"}]
 
 
