@@ -143,7 +143,7 @@ def review_ready_reason(session: Session, v: Video) -> str | None:
     return _craft.publish_craft_block_reason(
         title=v.title, script=v.script, creation_config=v.creation_config,
         content_format=_fmt_of(session, v), video_path=v.video_path,
-        check_audio=False,
+        check_audio=False, video_id=v.id, video=v,
     ) or episode_guard.duplicate_episode_reason(session, v)
 
 
@@ -618,7 +618,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
             Video.status.in_([VideoStatus.APPROVED, VideoStatus.REVIEW]))).all():
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
-        reason = _craft.video_maker_gate_reason(v.creation_config, fmt)
+        reason = _craft.video_maker_gate_reason(v.creation_config, fmt,
+                                               video_id=v.id, video=v)
         if reason:
             craft_gate_blocked.append({
                 "id": v.id, "channel_id": v.channel_id, "title": v.title,

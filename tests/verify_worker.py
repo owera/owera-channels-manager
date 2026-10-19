@@ -926,6 +926,8 @@ try:
        "longs are exempt — craft_gate is PASS even on used_fallback")
     ok(cc["composition_version"] == "sentinel-ver",
        "composition_version comes from settings (not a hardcoded 'storyboard')")
+    ok(cc[craft.GATE_B_RULES_KEY] == craft.GATE_B_RULES,
+       "new renders stamp gate_b_rules=122 so publish recomputes new Gate B")
 finally:
     settings.composition_version = _orig_cc_ver
 
@@ -972,7 +974,8 @@ ok(cc_rr.get("hook_pace") == {"version": _craft_hp.HOOK_PACE_V1, "claim_words": 
 ok(cc_rr["craft_gate"]["checks"]["B"] == "FAIL"
    and any("RR hook pace" in r for r in cc_rr["craft_gate"]["reasons"]),
    "RR render-time craft_gate flags a 9-word claim spoken by 3.55s")
-ok("hook_pace" not in cc_os and cc_os["craft_gate"]["checks"]["B"] == "PASS",
+ok("hook_pace" not in cc_os
+   and not any("RR hook pace" in r for r in cc_os["craft_gate"]["reasons"]),
    "OS render: no hook_pace marker, no hook-pace check")
 ok(cc_rr.get("card_sync", {}).get("version") == _craft_hp.SYNC_V1
    and [n_["i"] for n_ in cc_rr["card_sync"]["notes"]] == [1, 2]
@@ -1046,8 +1049,11 @@ ok([h["how"] for h in cc_sp["sentence_pace"]["over"]] == ["tts"]
    and cc_sp["sentence_pace"]["over"][0]["secs"] > 3.9
    and not any("sentence" in r.lower() for r in cc_sp["craft_gate"]["reasons"]),
    "a sentence spoken over 3.9s is measured from TTS and logged — never a gate reason")
-ok(cc_os.get("card_text", {}).get("hits") == [] and cc_os.get("card_text", {}).get("rr") is False,
-   "OS render: card_text marker recorded (rules 1/2/5), no hit on a clean board")
+ok(cc_os.get("card_text", {}).get("rr") is False
+   and cc_os.get("card_text", {}).get("os") is True
+   and not any(h.get("check") in ("invented_output", "stat_word_order", "foreign_term")
+               for h in cc_os.get("card_text", {}).get("hits") or []),
+   "OS render: card_text marker recorded (os=True), no RR-only hit")
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,10 @@ Flags:
     (≈2.60s as the VM measures it, with the 0.12s gap) instead of 2.80
     (≈2.92): generator and continuation threshold only; Gate B keeps 2.80
     (craft.mid_hold_cap).
+  * ALLOWLIST_REQUIRED ("allowlist_required", default [47]) — a video on
+    such a topic with no overrides on_screen_allow is held (review_guard
+    allowlist_required_reason; 409 "held: …") and Gate B FAILs
+    (craft.allowlist_required_marker).
 """
 from __future__ import annotations
 
@@ -38,12 +42,14 @@ VM_PASS_REQUIRED = "vm_pass_required"
 VM_PASS_EXEMPT = "vm_pass_exempt"
 LITERAL_CARDS = "literal_cards"
 TIGHT_MID_CARDS = "tight_mid_cards"
+ALLOWLIST_REQUIRED = "allowlist_required"
 
 DEFAULTS: dict[str, tuple] = {
     VM_PASS_REQUIRED: (ALL,),
     VM_PASS_EXEMPT: (),
     LITERAL_CARDS: (47,),
     TIGHT_MID_CARDS: (47,),
+    ALLOWLIST_REQUIRED: (47,),
 }
 
 

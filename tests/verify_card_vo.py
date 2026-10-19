@@ -321,8 +321,7 @@ with patch.object(craft, "beats_from_html", return_value=GOOD):
 ok(cc_g["card_vo"]["hits"] == [] and not any("Card ⊂ VO" in r for r in cc_g["craft_gate"]["reasons"]),
    "clean render: empty card_vo hits, no Card ⊂ VO reason")
 ok("card_vo=cvo" in inspect.getsource(worker._creation_config)
-   and "card_vo=cvo" in inspect.getsource(getattr(craft, "_video_maker_gate_reason_core",
-                                                   craft.video_maker_gate_reason)),
+   and "card_vo" in inspect.getsource(craft._recompute_video_maker_gate),
    "render gate and stored-gate recompute both pass card_vo")
 
 print()

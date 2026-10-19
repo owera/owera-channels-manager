@@ -168,8 +168,11 @@ class Settings(BaseSettings):
     #     consecutive cards; the ≤2.5s first cut (VM FAIL P0 #1449, CMO 08/10).
     #   tight_mid_cards (default [47]): mid cards hold ≤2.48s (≈2.60s measured
     #     with the fade) instead of 2.80 (≈2.92) — generator only; Gate B keeps 2.80.
+    #   allowlist_required (default [47]): approve 409 "held: …" and Gate B FAIL
+    #     when the video has no overrides on_screen_allow.
     topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": [],
-                                               "literal_cards": [47], "tight_mid_cards": [47]}
+                                               "literal_cards": [47], "tight_mid_cards": [47],
+                                               "allowlist_required": [47]}
 
 
 settings = Settings()

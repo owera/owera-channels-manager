@@ -1,0 +1,6 @@
+{
+  "generated_at": null,
+  "ids": [],
+  "excluded": [1328],
+  "note": "Closed list. CTO runs scripts/gate_grandfather_snapshot.py at deploy and pastes the IDs here. Expected empty: no OS approved/scheduled besides #1328 (held, excluded)."
+}

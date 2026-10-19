@@ -1072,6 +1072,46 @@ MID_CARD_MAX_S = 3.0
 # Must equal storyboard._GAP. Duplicated so craft does not import storyboard
 # (storyboard already imports craft).
 BEAT_GAP_S = 0.12
+# Blank screen (CMO): a hole longer than BLANK_GAP_MAX_S beyond the fixed
+# inter-beat fade is a blank frame — OS and RR. A card owns its visual hold
+# (`dur`) plus BEAT_GAP_S (the fade it plays out on); align_storyboard writes
+# next.start = prev.start + prev.dur + BEAT_GAP_S, so a normal board has
+# extra = 0. Same extra budget for leading dead air (first beat after t=0)
+# and a trailing hole after the endcard vs the rendered video length
+# (creation_config["duration"], the figure video_duration / END_TAIL_S wrote).
+# END_TAIL_S is the composer tail after the last spoken word — the endcard
+# is stretched to that video end; this check is leftover after the card.
+BLANK_GAP_MAX_S = 0.5
+# OS mid cards: one whole VO sentence (or its strong-clause units) as a text
+# card. Kill switch: False restores the LLM compare/term_define/list/isolated
+# template path on OS. RR is unchanged either way.
+OS_VO_SENTENCE_CARDS = True
+# Literal quote hold tail (CMO): enter at first spoken word, hold the
+# whole spoken span (mid-cap exception), exit last word + this.
+QUOTE_HOLD_TAIL_S = 0.3
+# CMO + VM (final): ANY mid card — plain VO, cap_extended_spoken, or
+# literal quote — FAILs Gate B (sentence_too_long) when first word → last
+# word exceeds this. No quote-span exemption. The generator still tries
+# strong-clause then comma/conjunction first; if no clause split lands
+# ≤ 3.0s (or a comma would fragment an enumeration), FAIL and rewrite VO.
+SENTENCE_SPOKEN_MAX_S = 3.0
+# Card may lead its first spoken word by at most this. > 0.3s = card_enters_early.
+CARD_ENTER_LEAD_MAX_S = 0.3
+# Code / command cards are read, not just heard. A 0.50s flash of
+# "Found 5." is unreadable on a 9:16 short. Floor = 1.2s: ~4 words at
+# 200 wpm, the shortest hold that still registers as a CLI/log line.
+# Quotes/statements stay synced to speech; this floor is visual-only for
+# monospace / CLI cards (craft.CLI_BEAT_TYPES).
+CODE_READ_MIN_S = 1.2
+# stale_card: leftover hold after the card's last spoken word (same budget
+# as BLANK_GAP_MAX_S). Catches a frozen hook (#1465: 7.43s on frame0).
+STALE_CARD_MAX_S = BLANK_GAP_MAX_S
+_PUBLIC_SOURCE_RE = re.compile(r"https?://[^\s]+", re.I)
+OS_BANNED_COMPARE = frozenset({"compare"})
+OS_BANNED_TERM = frozenset({"term_define"})
+OS_BANNED_LIST = frozenset({"list"})
+CARD_TIMING_V1 = "card_timing_v1"
+ALLOWLIST_REQ_V1 = "allowlist_req_v1"
 # RR publish check 2026-09-30: with the real fade a 2.88s hold still measured
 # 3.05–3.08s card-to-card (blank midpoint to blank midpoint). Content hold is
 # now ≤2.80s so hold + fade ≤ 3.0s. MUST equal storyboard._MID_MAX.
@@ -1165,6 +1205,11 @@ _BEAT_SNAP_KEYS = (
     "plain",
     # RR isolated-term card ("mensagem 30" after its sentence card, #1443 F1)
     "isolated",
+    # OS literal quote: hold the whole spoken span (mid-cap exception)
+    "literal_quote",
+    # OS last-resort hold while the card's own words are still spoken
+    # (last word + QUOTE_HOLD_TAIL_S). Gate B skips the mid-cap check.
+    "cap_extended_spoken",
     # RR PT stat drawn unit-first ("mensagem 30", Gate B #1443 F4).
     "unit_first",
 )
@@ -1364,39 +1409,49 @@ def _visible_copy(beat: dict) -> str:
     return " ".join(parts)
 
 
-def beat_screen_text(beat: dict | None) -> str:
-    """Every piece of on-screen copy a beat renders (not the cue, not emoji)."""
+def card_visible_parts(beat: dict | None) -> list[tuple[str, str]]:
+    """Each on-screen string a beat renders, as ``(field, text)``.
+
+    Covers statement/quote ``text``, compare title + side titles/items,
+    term_define term+definition, stat value/unit/label, list items,
+    object labels, CLI lines — not the cue, not emoji.
+    """
     if not isinstance(beat, dict):
-        return ""
-    parts: list[str] = []
+        return []
+    parts: list[tuple[str, str]] = []
     for k in ("value", "unit", "text", "title", "label", "sub", "term",
               "definition", "command", "attribution"):
         v = beat.get(k)
         if isinstance(v, (str, int, float)) and not isinstance(v, bool):
             if str(v).strip():
-                parts.append(str(v))
+                parts.append((k, str(v)))
     for k in ("lines", "output"):
         for x in beat.get(k) or [] if isinstance(beat.get(k), list) else []:
             if str(x).strip():
-                parts.append(str(x))
+                parts.append((k.rstrip("s") if k == "lines" else k, str(x)))
     for it in _list_items(beat):
         if isinstance(it, dict):
             if it.get("text"):
-                parts.append(str(it["text"]))
+                parts.append(("item", str(it["text"])))
         elif it:
-            parts.append(str(it))
+            parts.append(("item", str(it)))
     for side in ("left", "right"):
         col = beat.get(side)
         if not isinstance(col, dict):
             continue
         if col.get("title"):
-            parts.append(str(col["title"]))
+            parts.append((f"{side}.title", str(col["title"])))
         for x in col.get("items") or []:
-            parts.append(str(x))
+            parts.append((f"{side}.item", str(x)))
     for n in beat.get("nodes") or [] if isinstance(beat.get("nodes"), list) else []:
         if isinstance(n, dict) and n.get("label"):
-            parts.append(str(n["label"]))
-    return " ".join(parts)
+            parts.append(("label", str(n["label"])))
+    return parts
+
+
+def beat_screen_text(beat: dict | None) -> str:
+    """Every piece of on-screen copy a beat renders (not the cue, not emoji)."""
+    return " ".join(t for _, t in card_visible_parts(beat))
 
 
 def screen_text_key(beat: dict | None) -> str:
@@ -1492,6 +1547,659 @@ def repeated_card_hits(beats) -> list[str]:
         if r:
             hits.append(r)
     return hits
+
+
+def _as_duration(raw) -> float | None:
+    try:
+        d = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if d != d or d <= 0:
+        return None
+    return d
+
+
+def blank_gap_hits(beats, duration=None) -> list[str]:
+    """Gate B blank-screen findings on a timed board.
+
+    For consecutive beats, gap = next.start − (prev.start + prev.dur).
+    FAIL when gap − BEAT_GAP_S > BLANK_GAP_MAX_S. Also FAIL when the
+    first beat starts > BLANK_GAP_MAX_S after t=0, or the last card
+    ends > BLANK_GAP_MAX_S before ``duration`` (the rendered video
+    length; same figure ``video_duration`` / END_TAIL_S wrote into
+    creation_config). Hold is ``_cue_span`` so a card still owns its
+    0.12s fade when ``dur`` is missing — untimed snapshots produce no
+    hits. Detail names the time and size of each hole.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    hits: list[str] = []
+    if not board:
+        return hits
+    first = _cue_start(board[0])
+    if first > BLANK_GAP_MAX_S + 1e-6:
+        hits.append(
+            f"leading hole: first beat starts at {first:.2f}s "
+            f"(max {BLANK_GAP_MAX_S:.2f}s)"
+        )
+    for i in range(len(board) - 1):
+        gap = _cue_start(board[i + 1]) - (_cue_start(board[i]) + _cue_span(board, i))
+        extra = gap - BEAT_GAP_S
+        if extra > BLANK_GAP_MAX_S + 1e-6:
+            t = _cue_start(board[i]) + _cue_span(board, i)
+            hits.append(
+                f"beat[{i}]→beat[{i + 1}] hole at {t:.2f}s of {gap:.2f}s "
+                f"({extra:.2f}s beyond {BEAT_GAP_S:.2f}s fade; "
+                f"max {BLANK_GAP_MAX_S:.2f}s extra)"
+            )
+    dur = _as_duration(duration)
+    last = board[-1]
+    last_hold = _cue_span(board, len(board) - 1)
+    if dur is not None and last_hold > 0:
+        last_end = _cue_start(last) + last_hold
+        tail = dur - last_end
+        if tail > BLANK_GAP_MAX_S + 1e-6:
+            label = "endcard" if (last.get("type") or "") in CTA_TYPES else "last card"
+            hits.append(
+                f"trailing hole: {label} ends at {last_end:.2f}s, video {dur:.2f}s "
+                f"({tail:.2f}s blank; max {BLANK_GAP_MAX_S:.2f}s)"
+            )
+    return hits
+
+
+def spoken_span(text, words) -> tuple[float, float] | None:
+    """(first_word_start, last_word_end) of ``text`` in TTS words, or None."""
+    ct = _sync_toks(text)
+    toks, starts = _speech_stream(words)
+    if not ct or not toks:
+        return None
+    pos = _find_run(toks, ct, 0)
+    if pos < 0:
+        return None
+    end_i = pos + len(ct) - 1
+    t0 = starts[pos]
+    # _speech_stream only keeps starts; recover end from the matching word.
+    ends: list[float] = []
+    cursor = 0
+    for w in words or []:
+        if not isinstance(w, dict):
+            continue
+        n = len(_sync_toks(w.get("text") or w.get("word")))
+        if n and cursor <= end_i < cursor + n:
+            e = _word_end(w)
+            if e is not None:
+                ends.append(float(e))
+        cursor += n
+    t1 = max(ends) if ends else t0
+    return (float(t0), float(t1))
+
+
+def spoken_text(words) -> str:
+    """Concatenated spoken/rendered word tokens (whisper / TTS boundaries)."""
+    bits = []
+    for w in words or []:
+        if isinstance(w, dict):
+            t = w.get("text") or w.get("word")
+        else:
+            t = w
+        if t:
+            bits.append(str(t))
+    return " ".join(bits)
+
+
+def vo_source_text(script: str | None, words=None) -> str:
+    """Prefer spoken/rendered words when present; else the VO script."""
+    spoken = spoken_text(words)
+    return spoken if _sync_toks(spoken) else (script or "")
+
+
+def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
+    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception)."""
+    if not isinstance(beat, dict) or (beat.get("type") or "") != "quote":
+        return False
+    if beat.get("literal_quote") or beat.get("_lit"):
+        return True
+    if beat.get("plain"):
+        return False
+    if sources is not None:
+        return bool(source_literal(beat.get("text"), sources, {"quote"}))
+    return False
+
+
+def is_spoken_span_hold(beat: dict | None, words=None, sources=None) -> bool:
+    """Generator timing helper: literal quote / cap_extended_spoken.
+
+    Gate B visual hold (``video_maker_gate`` mid ≤3.0s incl. fade) does
+    **not** use this — every mid card, quotes included, FAILs over the cap.
+    """
+    if is_literal_quote_beat(beat, sources):
+        return True
+    if not isinstance(beat, dict):
+        return False
+    if beat.get("cap_extended_spoken"):
+        return True
+    if not words:
+        return False
+    text = beat.get("text") or beat_screen_text(beat)
+    span = spoken_span(text, words)
+    if not span:
+        return False
+    try:
+        hold = float(beat.get("dur") or 0)
+        start = float(beat.get("start") or 0)
+    except (TypeError, ValueError):
+        return False
+    expect = float(span[1]) + QUOTE_HOLD_TAIL_S
+    return (hold > MID_BEAT_MAX_S - 1e-6
+            and abs((start + hold) - expect) < 0.06)
+
+
+_BODY_FIELDS = frozenset({"text"})
+
+
+def _part_is_literal(field: str, text: str, script: str | None, sources=None, *,
+                     typ: str = "") -> bool:
+    """One visible field: VO-literal (whole unit / contiguous span) or allowlist."""
+    raw = str(text or "").strip()
+    if not raw:
+        return True
+    if sources is not None:
+        kinds = CLI_ALLOW_KINDS if field in ("line", "command", "output") else None
+        if source_literal(raw, sources, kinds):
+            return True
+        if field == "value" and stat_allowed(raw, sources):
+            return True
+    if typ in ("quote", "statement") and field in _BODY_FIELDS:
+        if is_whole_unit(raw, script) or is_cover_unit(raw, script):
+            return True
+        # Soft product chip ("Still building · Coming soon"): two VO
+        # sentences joined by the middot, not one whole unit.
+        if " · " in raw:
+            return all(is_whole_unit(p, script) or text_in_script(p, script)
+                       for p in raw.split(" · ") if p.strip())
+        return False
+    return text_in_script(raw, script)
+
+
+def card_is_literal(beat: dict, script: str | None, sources=None,
+                    words=None) -> bool:
+    """True when every visible field is VO-literal or allowlist-literal.
+
+    Sentence / clause structure is judged against the VO script. When
+    ``words`` are given, each field must also appear as a contiguous
+    span of the spoken/rendered tokens (whisper / TTS) — not only in
+    the script text. statement/quote ``text``: a whole VO sentence or
+    strong clause (#96). compare/list titles and items: a literal
+    contiguous VO span. Everything else: contiguous VO span or a
+    verbatim on_screen_allow line.
+    """
+    parts = card_visible_parts(beat)
+    if not parts:
+        return True
+    typ = (beat.get("type") or "") if isinstance(beat, dict) else ""
+    if not all(_part_is_literal(f, t, script, sources, typ=typ) for f, t in parts):
+        return False
+    spoken = spoken_text(words)
+    if not _sync_toks(spoken):
+        return True
+    for f, t in parts:
+        raw = str(t or "").strip()
+        if not raw:
+            continue
+        if sources is not None:
+            kinds = CLI_ALLOW_KINDS if f in ("line", "command", "output") else None
+            if source_literal(raw, sources, kinds):
+                continue
+            if f == "value" and stat_allowed(raw, sources):
+                continue
+        if not text_in_script(raw, spoken):
+            return False
+    return True
+
+
+def literal_field_hits(beats, script: str | None, sources=None,
+                       words=None) -> list[dict]:
+    """literal_cards: any mid-card field that is neither VO nor allowlist."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board or not (script or words):
+        return out
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES or (i == 0 and typ == "hook"):
+            continue
+        if card_is_literal(b, script, sources, words=words):
+            continue
+        shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
+        out.append({"i": i, "check": "card_text_not_literal",
+                    "detail": f"card {i} type={typ} {shown!r} has a field that is "
+                              "not VO-literal or allowlist-literal"})
+    return out
+
+
+def os_term_allowlisted(beat: dict | None, sources=None) -> bool:
+    """Exact isolated/term_define term is a whole on_screen_allow entry."""
+    if not isinstance(beat, dict) or sources is None:
+        return False
+    term = str(beat.get("term") or beat.get("text") or "").strip()
+    return bool(term) and source_literal(term, sources)
+
+
+def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[dict]:
+    """OS-only Gate B hits: banned templates + non-literal card text.
+
+    compare/list → vs_card_not_allowed; term_define / isolated quote →
+    single_term_card (never allowed on OS, even if the term is in
+    on_screen_allow — allowlist kinds log/error/command/quote/stat stay
+    as those types, not isolated-term cards); a term shown again on the
+    very next card → echo_card; any other mid/hook copy that is neither
+    VO-literal nor allowlist-literal → card_text_not_literal.
+    Literal compare uses spoken/rendered words when ``words`` is given.
+    CTA/endcard is the series chip (exempt).
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    prev = None
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES:
+            prev = None
+            continue
+        # Hook (incl. a two-sentence title head) is Gate A / overlay claim —
+        # not an OS mid-card literal. #1465: "The crew failed the handoff.
+        # tasks.yaml was empty." must not FAIL card_text_not_literal.
+        if i == 0 and typ == "hook":
+            prev = None
+            continue
+        shown = (beat_screen_text(b) or str(b.get("text") or ""))[:60]
+        if typ in OS_BANNED_COMPARE or typ in OS_BANNED_LIST:
+            out.append({"i": i, "check": "vs_card_not_allowed",
+                        "detail": f"card {i} type={typ} {shown!r} is a VS/list template "
+                                  "(OS mid cards are whole VO sentences)"})
+            prev = i
+            continue
+        if typ in OS_BANNED_TERM or is_term_card(b):
+            term = str(b.get("term") or b.get("text") or "").strip()
+            out.append({"i": i, "check": "single_term_card",
+                        "detail": f"card {i} type={typ} {shown!r} is an isolated-term / "
+                                  "term_define card (OS mid cards are whole VO sentences)"})
+            if prev is not None and term and text_in_script(term, beat_screen_text(board[prev])):
+                out.append({"i": i, "check": "echo_card",
+                            "detail": f"card {i} repeats term {term!r} right after "
+                                      f"card {prev} already showed it"})
+            prev = i
+            continue
+        if (script or words) and not card_is_literal(b, script, sources, words=words):
+            out.append({"i": i, "check": "card_text_not_literal",
+                        "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
+                                  "or allowlist-literal"})
+        prev = i
+    return out
+
+
+def quote_like_text(beat: dict | None) -> str | None:
+    """Text a quote (or quote-like literal log/error) card shows."""
+    if not isinstance(beat, dict):
+        return None
+    typ = beat.get("type") or ""
+    if typ == "quote":
+        t = str(beat.get("text") or beat.get("cue") or "").strip()
+        return t or None
+    if typ in CLI_BEAT_TYPES:
+        lines = cli_lines(beat)
+        if lines:
+            return lines[0] if len(lines) == 1 else " ".join(lines)
+    return None
+
+
+def quote_before_speech_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+    """Quote / quote-like log card that appears before its first spoken word.
+
+    FAIL when start < first-word start − SYNC_TOL_S (0.05s). No lead.
+    ``fail_closed`` (OS): missing words / no spoken span FAIL. RR stays
+    fail-open (empty / continue).
+    """
+    out: list[dict] = []
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    if board and not words:
+        return [_missing_words_hit()] if fail_closed else []
+    for i, b in enumerate(board):
+        text = quote_like_text(b)
+        if not text:
+            continue
+        if (b.get("type") or "") in CTA_TYPES:
+            continue
+        span = spoken_span(text, words)
+        if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
+            continue
+        start = _cue_start(b)
+        if start < span[0] - SYNC_TOL_S - 1e-6:
+            out.append({"i": i, "check": "quote_before_speech",
+                        "detail": f"card {i} quote starts at {start:.2f}s, first spoken "
+                                  f"word at {span[0]:.2f}s (must enter at the first word)"})
+    return out
+
+
+def stale_card_hits(beats, words, script: str | None = None, *,
+                    fail_closed: bool = True) -> list[dict]:
+    """Card (including hook) still up > STALE_CARD_MAX_S after its last word.
+
+    Maps the card to the spoken span of its on-screen / cue text (hook: the
+    claim). CTA/endcard is exempt (it holds the closer through video end).
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ in CTA_TYPES:
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if span is None and script and i == 0 and typ == "hook":
+            # two-sentence title head: last word of the shown claim
+            span = spoken_span(text, words)
+        if span is None:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, typ, text))
+            continue
+        end = _cue_start(b) + _cue_span(board, i)
+        leftover = end - span[1]
+        budget = STALE_CARD_MAX_S
+        if typ in CLI_BEAT_TYPES:
+            spoken = float(span[1]) - float(span[0])
+            budget = max(budget, CODE_READ_MIN_S - spoken)
+        if leftover > budget + 1e-6:
+            out.append({"i": i, "check": "stale_card",
+                        "detail": f"card {i} type={typ} ends at {end:.2f}s, last spoken "
+                                  f"word at {span[1]:.2f}s ({leftover:.2f}s leftover; "
+                                  f"max {STALE_CARD_MAX_S:.2f}s)"})
+    return out
+
+
+def sentence_too_long_hits(beats, words, sources=None, *,
+                           fail_closed: bool = True) -> list[dict]:
+    """Any mid card whose spoken span > 3.0s, quotes included.
+
+    Spoken span = first word → last word (not the visual hold). A 3.00s
+    span passes; 3.01s FAILs. Hook / CTA are exempt. No quote-span or
+    cap_extended_spoken exemption — if no clause split lands ≤ 3.0s,
+    rewrite the VO.
+    """
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
+    for i, b in enumerate(board):
+        typ = b.get("type") or ""
+        if typ == "hook" or typ in CTA_TYPES:
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, typ, text))
+            continue
+        secs = float(span[1]) - float(span[0])
+        if secs > SENTENCE_SPOKEN_MAX_S + 1e-6:
+            shown = str(text or "").strip()
+            out.append({
+                "i": i, "check": "sentence_too_long",
+                "detail": f"card {i} {shown!r} spoken {secs:.2f}s "
+                          f"(first word {span[0]:.2f}s–last word {span[1]:.2f}s; "
+                          f"max {SENTENCE_SPOKEN_MAX_S:.1f}s) — split the sentence",
+            })
+    return out
+
+
+def card_exits_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+    """Card ends before its last spoken word (timing defect)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
+    for i, b in enumerate(board):
+        if (b.get("type") or "") in CTA_TYPES:
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
+            continue
+        end = _cue_start(b) + _cue_span(board, i)
+        if end < float(span[1]) - SYNC_TOL_S - 1e-6:
+            out.append({
+                "i": i, "check": "card_exits_early",
+                "detail": f"card {i} ends at {end:.2f}s, last spoken word "
+                          f"at {span[1]:.2f}s (must hold through the last word)",
+            })
+    return out
+
+
+def card_enters_early_hits(beats, words, *, fail_closed: bool = True) -> list[dict]:
+    """Card appears more than CARD_ENTER_LEAD_MAX_S before its speech."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    if not board:
+        return out
+    if not words:
+        return [_missing_words_hit()] if fail_closed else []
+    for i, b in enumerate(board):
+        if (b.get("type") or "") in CTA_TYPES:
+            continue
+        text = b.get("text") or b.get("cue") or beat_screen_text(b)
+        span = spoken_span(text, words)
+        if not span:
+            if fail_closed:
+                out.append(_unspoken_card_hit(i, b.get("type") or "", text))
+            continue
+        start = _cue_start(b)
+        lead = float(span[0]) - start
+        if lead > CARD_ENTER_LEAD_MAX_S + 1e-6:
+            out.append({
+                "i": i, "check": "card_enters_early",
+                "detail": f"card {i} starts at {start:.2f}s, first spoken word "
+                          f"at {span[0]:.2f}s (lead {lead:.2f}s; "
+                          f"max {CARD_ENTER_LEAD_MAX_S:.1f}s)",
+            })
+    return out
+
+
+def card_time_overlap_hits(beats) -> list[dict]:
+    """Two cards whose visual holds overlap (check name: card_overlap)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    for i in range(max(0, len(board) - 1)):
+        a1 = _cue_start(board[i]) + _cue_span(board, i)
+        b0 = _cue_start(board[i + 1])
+        if b0 < a1 - SYNC_TOL_S - 1e-6:
+            out.append({
+                "i": i, "check": "card_overlap",
+                "detail": f"card {i} ends at {a1:.2f}s, card {i + 1} starts "
+                          f"at {b0:.2f}s (cards must not overlap)",
+            })
+    return out
+
+
+def cta_after_video_end_hits(beats, duration) -> list[dict]:
+    """CTA / endcard hold past the video duration."""
+    if duration is None:
+        return []
+    try:
+        dur = float(duration)
+    except (TypeError, ValueError):
+        return []
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    for i, b in enumerate(board):
+        if (b.get("type") or "") not in CTA_TYPES:
+            continue
+        try:
+            hold = float(b.get("dur") or 0)
+        except (TypeError, ValueError):
+            hold = 0.0
+        end = _cue_start(b) + hold
+        if end > dur + SYNC_TOL_S + 1e-6:
+            out.append({
+                "i": i, "check": "cta_after_video_end",
+                "detail": f"card {i} CTA ends at {end:.2f}s, video ends "
+                          f"at {dur:.2f}s",
+            })
+    return out
+
+
+def repeated_vo_sentence_hits(script: str | None) -> list[dict]:
+    """The same VO sentence (or a later sentence that repeats it as a prefix)."""
+    sents = [s.strip() for s in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())
+             if s.strip()]
+    out: list[dict] = []
+    seen: dict[str, int] = {}
+    prev_key = ""
+    for i, sent in enumerate(sents):
+        key = " ".join(_sync_toks(sent))
+        if not key:
+            continue
+        hit = None
+        if key in seen:
+            hit = seen[key]
+        elif prev_key and (key == prev_key or key.startswith(prev_key + " ")):
+            hit = i - 1
+        if hit is not None:
+            out.append({
+                "i": i, "check": "repeated_vo_sentence",
+                "detail": f"VO sentence {sent!r} repeats sentence {hit} — "
+                          "rewrite the VO",
+            })
+        if key not in seen:
+            seen[key] = i
+        prev_key = key
+    return out
+
+
+def code_read_too_short_hits(beats) -> list[dict]:
+    """Code / command card held under CODE_READ_MIN_S (unreadable flash)."""
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    for i, b in enumerate(board):
+        if (b.get("type") or "") not in CLI_BEAT_TYPES:
+            continue
+        try:
+            hold = float(b.get("dur") or 0)
+        except (TypeError, ValueError):
+            hold = 0.0
+        if hold + 1e-6 >= CODE_READ_MIN_S:
+            continue
+        lines = cli_lines(b)
+        shown = (lines[0] if lines else (beat_screen_text(b) or ""))[:40]
+        out.append({
+            "i": i, "check": "code_read_too_short",
+            "detail": f"card {i} {shown!r} held {hold:.2f}s "
+                      f"(min {CODE_READ_MIN_S:.1f}s to read a code/command line)",
+        })
+    return out
+
+
+def description_missing_source_hits(description, *, required: bool = False,
+                                    brand: str | None = None) -> list[dict]:
+    """OS-only: description must cite a public http(s) source.
+
+    RR is never scored here. ``required=True`` is the OS approve/publish
+    path. ``description is None`` and not required is compose-time (metadata
+    not written yet) even on OS.
+    """
+    if (brand or "") != "os" and not required:
+        return []
+    if description is None and not required:
+        return []
+    text = str(description or "")
+    if _PUBLIC_SOURCE_RE.search(text):
+        return []
+    return [{"i": None, "check": "description_missing_source",
+             "detail": "description has no public source link (https://…)"}]
+
+
+def card_timing_hits(beats, words, script: str | None = None,
+                     sources=None, duration=None, *,
+                     fail_closed: bool = True) -> list[dict]:
+    """stale_card + quote_before_speech + sentence_too_long + timing defects."""
+    return (quote_before_speech_hits(beats, words, fail_closed=fail_closed)
+            + stale_card_hits(beats, words, script, fail_closed=fail_closed)
+            + sentence_too_long_hits(beats, words, sources, fail_closed=fail_closed)
+            + card_exits_early_hits(beats, words, fail_closed=fail_closed)
+            + card_enters_early_hits(beats, words, fail_closed=fail_closed)
+            + card_time_overlap_hits(beats)
+            + cta_after_video_end_hits(beats, duration)
+            + code_read_too_short_hits(beats))
+
+
+MISSING_WORDS_CHECK = "missing_word_timings"
+UNSPOKEN_CARD_CHECK = "unspoken_card"
+
+
+def _missing_words_hit() -> dict:
+    return {"i": None, "check": MISSING_WORDS_CHECK,
+            "detail": "no word timings — fail closed (cannot score card timing)"}
+
+
+def _unspoken_card_hit(i: int, typ: str, text) -> dict:
+    shown = str(text or "")[:60]
+    return {"i": i, "check": UNSPOKEN_CARD_CHECK,
+            "detail": f"card {i} type={typ} {shown!r} has no spoken span "
+                      "(fail closed — every mid card must map to word timings)"}
+
+
+def card_timing_marker(beats, words, script: str | None = None,
+                       content_format: str | None = "short",
+                       duration=None, sources=None, *,
+                       fail_closed: bool = True) -> dict | None:
+    if (content_format or "short") == "long":
+        return None
+    if not words:
+        if fail_closed:
+            return {"version": CARD_TIMING_V1, "hits": [_missing_words_hit()]}
+        return None
+    return {"version": CARD_TIMING_V1,
+            "hits": card_timing_hits(beats, words, script, sources, duration,
+                                     fail_closed=fail_closed)}
+
+
+def card_timing_check_hits(card_timing: dict | None) -> list[str]:
+    if not isinstance(card_timing, dict) or card_timing.get("version") != CARD_TIMING_V1:
+        return []
+    return [f"{h.get('check')}: {h.get('detail')}" for h in card_timing.get("hits") or []
+            if isinstance(h, dict) and h.get("check")]
+
+
+def allowlist_required_marker(topic_id, sources, content_format: str | None = "short"
+                              ) -> dict | None:
+    """creation_config marker when the topic requires on_screen_allow."""
+    from app.services import topic_flags
+    if (content_format or "short") == "long":
+        return None
+    if not topic_flags.has(topic_flags.ALLOWLIST_REQUIRED, topic_id):
+        return None
+    n = len(on_screen_allow(sources))
+    hits = [] if n else [{"check": "allowlist_required",
+                          "detail": f"topic {topic_id} has no on_screen_allow"}]
+    return {"version": ALLOWLIST_REQ_V1, "allow": n, "hits": hits}
+
+
+def allowlist_check_hits(allowlist_check: dict | None) -> list[str]:
+    if not isinstance(allowlist_check, dict) or allowlist_check.get("version") != ALLOWLIST_REQ_V1:
+        return []
+    return [f"{h.get('check')}: {h.get('detail')}" for h in allowlist_check.get("hits") or []
+            if isinstance(h, dict) and h.get("check")]
 
 
 def _subscribe_hits(text: str) -> list[str]:
@@ -2219,11 +2927,29 @@ def cli_lines(beat: dict | None) -> list[str]:
 
 
 def text_in_script(text: str | None, script: str | None) -> bool:
-    """True when ``text`` (letters/digits, in order) is said in ``script``."""
+    """True when ``text`` (letters/digits, in order) is said in ``script``.
+
+    Card ⊂ script only. Inverted containment (the script, or two or more
+    of its sentences, sitting inside a larger card) is rejected so an
+    echo / oversized card cannot pass as literal.
+    """
     need = _sync_toks(text)
+    have = _sync_toks(script)
     if not need:
         return True
-    return f" {' '.join(need)} " in f" {' '.join(_sync_toks(script))} "
+    if not have or len(need) > len(have):
+        return False
+    if f" {' '.join(need)} " not in f" {' '.join(have)} ":
+        return False
+    sents = [s.strip() for s in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())
+             if s.strip()]
+    if len(sents) >= 2:
+        need_s = f" {' '.join(need)} "
+        covered = sum(1 for s in sents
+                      if _sync_toks(s) and f" {' '.join(_sync_toks(s))} " in need_s)
+        if covered >= 2:
+            return False
+    return True
 
 
 def fabricated_cli(beats, script: str | None) -> list[dict]:
@@ -2520,7 +3246,16 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      card_sync: dict | None = None,
                      cli_check: dict | None = None,
                      card_text: dict | None = None,
-                     card_vo: dict | None = None) -> dict:
+                     card_vo: dict | None = None,
+                     duration: float | None = None,
+                     card_timing: dict | None = None,
+                     allowlist_check: dict | None = None,
+                     brand: str | None = None,
+                     script: str | None = None,
+                     words=None,
+                     sources=None,
+                     description=None,
+                     description_required: bool = False) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -2577,6 +3312,11 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # Opening hook is Gate A territory (object 0–3s) — not Gate B.
         if btype == "hook":
             continue
+        # OS: every mid card, quotes included, visual hold + fade ≤ 3.0s.
+        # is_spoken_span_hold is a generator helper — it does not exempt
+        # an OS quote. RR keeps the spoken-span exemption (RR unchanged).
+        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources):
+            continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
         hold_cap = cta_hold if is_cta else mid_hold
@@ -2610,6 +3350,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Neighbouring beats must change the on-screen text, and a mid "
             "card must not be replayed later; a repeated spoken phrase needs "
             "a visual change (different beat type/layout/emphasis)."
+        )
+    # Blank screen: a hole longer than BLANK_GAP_MAX_S beyond the 0.12s fade
+    # (or leading / trailing dead air). OS and RR. A card owns hold + fade.
+    gap_hits = blank_gap_hits(board, duration)
+    if gap_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Blank gap: FAIL — " + "; ".join(gap_hits) +
+            f". A card owns its hold + the {BEAT_GAP_S:.2f}s inter-beat fade; "
+            f"a hole longer than {BLANK_GAP_MAX_S:.1f}s beyond that fade is a "
+            "blank screen (OS and RR)."
         )
     # RR hook pace (marked new RR renders only; see HOOK_PACE_V1).
     pace_hits = hook_pace_hits(board, hook_pace)
@@ -2663,6 +3414,147 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             ". Every text card shows one whole sentence the VO says (a long "
             "sentence may continue on the next card only with its literal next "
             "words), and each spoken sentence gets one card."
+        )
+    # OS live board checks (when brand/script given — before/after + tests).
+    # New renders also carry them on card_text / card_timing markers.
+    os_live = []
+    if (brand or "") == "os" and (script or words):
+        os_live = [f"{h.get('check')}: {h.get('detail')}"
+                   for h in os_card_hits(board, script, sources, words=words)]
+        if os_live and not any("vs_card_not_allowed" in x or "single_term_card" in x
+                               or "card_text_not_literal" in x or "echo_card" in x
+                               for x in text_hits):
+            checks["B"] = "FAIL"
+            reasons.append(
+                "[B] OS cards: FAIL — " + "; ".join(os_live) +
+                ". OS mid cards are one whole VO sentence (or its strong-clause "
+                "units); no compare/VS, term_define, list, or isolated term; "
+                "copy is VO-literal or allowlist-literal."
+            )
+    elif script and (sources is not None or (cli_check or {}).get("literal")):
+        lit_live = [f"{h.get('check')}: {h.get('detail')}"
+                    for h in literal_field_hits(board, script, sources, words=words)]
+        if lit_live and not any("card_text_not_literal" in x for x in text_hits):
+            checks["B"] = "FAIL"
+            reasons.append(
+                "[B] Literal cards: FAIL — " + "; ".join(lit_live) +
+                ". Every visible mid-card field is a whole VO sentence / "
+                "clause (compare/list items: a contiguous VO span) or a "
+                "verbatim on_screen_allow line."
+            )
+    timing_hits = card_timing_check_hits(card_timing)
+    _os_closed = (brand or "") == "os"
+    if not timing_hits and words:
+        timing_hits = [f"{h.get('check')}: {h.get('detail')}"
+                       for h in card_timing_hits(board, words, script, sources,
+                                                 duration, fail_closed=_os_closed)]
+    elif not timing_hits and not words and _os_closed:
+        timing_hits = [f"{h.get('check')}: {h.get('detail')}"
+                       for h in [_missing_words_hit()]]
+    named_timing = {
+        "sentence_too_long": [],
+        "card_exits_early": [],
+        "card_enters_early": [],
+        "card_overlap": [],
+        "cta_after_video_end": [],
+        "code_read_too_short": [],
+    }
+    leftover_timing = []
+    for h in timing_hits:
+        bucket = next((n for n in named_timing if n in h), None)
+        if bucket:
+            named_timing[bucket].append(h)
+        else:
+            leftover_timing.append(h)
+    long_hits = named_timing["sentence_too_long"]
+    timing_hits = leftover_timing
+    if not long_hits and words:
+        long_hits = [f"{h.get('check')}: {h.get('detail')}"
+                     for h in sentence_too_long_hits(board, words, sources,
+                                                     fail_closed=_os_closed)]
+    if timing_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card timing: FAIL — " + "; ".join(timing_hits) +
+            f". A quote enters at its first spoken word; a card (including the "
+            f"hook) may not stay up more than {STALE_CARD_MAX_S:.1f}s after its "
+            "last spoken word (stale_card / quote_before_speech)."
+        )
+    if long_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Sentence too long: FAIL — " + "; ".join(long_hits) +
+            f". Any mid card (quotes included) may not cover more than "
+            f"{SENTENCE_SPOKEN_MAX_S:.1f}s of speech (first word to last "
+            "word). If no clause split lands ≤ that cap, rewrite the VO."
+        )
+    exit_hits = named_timing["card_exits_early"]
+    if exit_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card exits early: FAIL — " + "; ".join(exit_hits) +
+            ". A card must hold through its last spoken word."
+        )
+    enter_hits = named_timing["card_enters_early"]
+    if enter_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card enters early: FAIL — " + "; ".join(enter_hits) +
+            f". A card may lead its speech by at most {CARD_ENTER_LEAD_MAX_S:.1f}s."
+        )
+    overlap_hits = named_timing["card_overlap"]
+    if overlap_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Card overlap: FAIL — " + "; ".join(overlap_hits) +
+            ". Two cards must not share the same visual interval."
+        )
+    cta_end_hits = named_timing["cta_after_video_end"]
+    if cta_end_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] CTA after video end: FAIL — " + "; ".join(cta_end_hits) +
+            ". The CTA must end at or before the video duration."
+        )
+    read_hits = named_timing["code_read_too_short"]
+    if read_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Code read time: FAIL — " + "; ".join(read_hits) +
+            f". Code/command cards need ≥{CODE_READ_MIN_S:.1f}s on screen."
+        )
+    repeat_hits = [f"{h.get('check')}: {h.get('detail')}"
+                   for h in repeated_vo_sentence_hits(script)]
+    if repeat_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Repeated VO sentence: FAIL — " + "; ".join(repeat_hits) +
+            ". The same sentence must not be spoken twice — rewrite the VO."
+        )
+    enum_hits = [f"{h.get('check')}: {h.get('detail')}"
+                 for h in enumeration_hits(board, script, words)]
+    if enum_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Enumeration split: FAIL — " + "; ".join(enum_hits) +
+            ". A comma list is not a clause split; rewrite the VO."
+        )
+    src_hits = [f"{h.get('check')}: {h.get('detail')}"
+                for h in description_missing_source_hits(
+                    description, required=bool(description_required),
+                    brand=brand)]
+    if src_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Description source: FAIL — " + "; ".join(src_hits) +
+            ". The description must cite a public source URL."
+        )
+    al_hits = allowlist_check_hits(allowlist_check)
+    if al_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Allowlist required: FAIL — " + "; ".join(al_hits) +
+            ". allowlist_required topics need overrides on_screen_allow."
         )
 
     # --- C: kill spoken list/slide spam ------------------------------------
@@ -2735,8 +3627,19 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
     kinds = gate_check_kinds(
         board, hook_pace=hook_pace, card_sync=card_sync,
         board_hits={"beat_hold": b_hits, "repeated_card": rep_hits,
+                    "blank_gap": gap_hits,
                     "fabricated_cli": cli_hits, "card_text": text_hits,
-                    "card_vo": vo_hits,
+                    "card_vo": vo_hits, "os_cards": os_live,
+                    "card_timing": timing_hits, "sentence_too_long": long_hits,
+                    "card_exits_early": exit_hits,
+                    "card_enters_early": enter_hits,
+                    "card_overlap": overlap_hits,
+                    "cta_after_video_end": cta_end_hits,
+                    "code_read_too_short": read_hits,
+                    "repeated_vo_sentence": repeat_hits,
+                    "enumeration_needs_rewrite": enum_hits,
+                    "description_missing_source": src_hits,
+                    "allowlist_required": al_hits,
                     "slide_spam": c_hits})
     out = {"result": result, "checks": checks, "reasons": reasons}
     if kinds:
@@ -2841,13 +3744,144 @@ def gate_measurement_kinds(gate: dict | None) -> list[dict]:
             if isinstance(k, dict) and k.get("kind") == "measurement"]
 
 
+# PR #122 Gate B rules (blank_gap, 3.0s spoken cap, card_exits_early, …).
+# Written onto creation_config at compose/render (gate_version marker).
+# OS publish grandfather is a CLOSED ID list (app/data/gate_grandfather.json),
+# not "missing marker = old gate". RR pre-deploy snapshots still trust the
+# stored craft_gate so RR publish/approve behaviour is unchanged.
+GATE_B_RULES = "122"
+GATE_B_RULES_KEY = "gate_b_rules"
+GATE_CONTEXT_PUBLISH = "publish"
+GATE_CONTEXT_APPROVE = "approve"
+
+
+def applies_new_gate_b(creation_config) -> bool:
+    return _as_dict(creation_config).get(GATE_B_RULES_KEY) == GATE_B_RULES
+
+
+def is_pre_deploy_snapshot(creation_config) -> bool:
+    """A HyperFrames render written before GATE_B_RULES existed.
+
+    Worker snapshots always carry composition_version / beat_count. Unit-test
+    boards that only pass beats still recompute under the current rules.
+    """
+    cc = _as_dict(creation_config)
+    if not cc or applies_new_gate_b(cc):
+        return False
+    return "composition_version" in cc or "beat_count" in cc
+
+
+def trust_stored_gate(creation_config, *, video_id=None, video=None,
+                      gate_context: str = GATE_CONTEXT_PUBLISH,
+                      brand: str | None = None) -> bool:
+    """Whether publish/approve should reuse the stored craft_gate.
+
+    OS: never on approve. On publish, only a closed-list grandfathered
+    id with a vm_pass that matches the current master. RR / other: a
+    pre-deploy HyperFrames snapshot (no gate_b_rules) keeps the stored
+    gate so RR behaviour does not change.
+    """
+    cc = _as_dict(creation_config)
+    brand = brand or cc.get("brand")
+    if (brand or "") == "os":
+        if gate_context == GATE_CONTEXT_APPROVE:
+            return False
+        from app.services.gate_grandfather import is_grandfathered
+        return is_grandfathered(video_id, video=video, creation_config=cc)
+    return is_pre_deploy_snapshot(cc)
+
+
+def _stored_craft_gate(creation_config) -> dict | None:
+    stored = _as_dict(creation_config).get("craft_gate")
+    return stored if isinstance(stored, dict) else None
+
+
+def gate_snapshot_kwargs(creation_config, *,
+                         description=None,
+                         description_required: bool = False,
+                         brand: str | None = None) -> dict:
+    """script / words / description / brand / sources persisted at compose."""
+    cc = _as_dict(creation_config)
+    words = cc.get("narration_words")
+    if not isinstance(words, list):
+        words = cc.get("words") if isinstance(cc.get("words"), list) else None
+    desc = description if description is not None else cc.get("description")
+    return {
+        "script": cc.get("script"),
+        "words": words,
+        "description": desc,
+        "description_required": bool(description_required),
+        "brand": brand or cc.get("brand"),
+        "sources": cc.get("on_screen_allow"),
+    }
+
+
+def _recompute_video_maker_gate(cc, content_format, *,
+                                description=None,
+                                description_required: bool = False,
+                                brand: str | None = None) -> dict:
+    beats = cc.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+    used_fallback = bool(cc.get("used_fallback"))
+    bt = cc.get("beat_timing")
+    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
+    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
+    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
+    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
+    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
+    cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
+    ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
+    al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
+    extra = gate_snapshot_kwargs(cc, description=description,
+                                 description_required=description_required,
+                                 brand=brand)
+    return video_maker_gate(
+        beats, content_format=content_format,
+        used_fallback=used_fallback, legacy_timing=legacy,
+        hook_pace=pace, beat_timing=bt, card_sync=sync,
+        cli_check=cli, card_text=ctext, card_vo=cvo,
+        duration=_as_duration(cc.get("duration")),
+        card_timing=ctime, allowlist_check=al, **extra)
+
+
+def stamp_description_on_config(creation_config, description, *,
+                                brand: str | None = None,
+                                content_format: str | None = "short"):
+    """Persist the post-render description and refresh craft_gate (OS source)."""
+    cc = dict(_as_dict(creation_config))
+    cc["description"] = description
+    if brand:
+        cc["brand"] = brand
+    required = (cc.get("brand") or brand or "") == "os"
+    if "beats" in cc or cc.get("used_fallback"):
+        gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
+        gate = attach_generator_slips(
+            _recompute_video_maker_gate(cc, content_format,
+                                        description=description,
+                                        description_required=required,
+                                        brand=brand),
+            gs.get("slips") if gs else None)
+        cc["craft_gate"] = gate
+    return json.dumps(cc)
+
+
 def video_maker_gate_of(creation_config=None,
-                        content_format: str | None = "short") -> dict | None:
+                        content_format: str | None = "short",
+                        *,
+                        gate_context: str = GATE_CONTEXT_PUBLISH,
+                        description=None,
+                        description_required: bool = False,
+                        video_id=None, video=None,
+                        brand: str | None = None) -> dict | None:
     """The Video Maker gate for a render snapshot (same inputs as
     video_maker_gate_reason), or None when exempt (long) / no snapshot."""
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
+    if trust_stored_gate(cc, video_id=video_id, video=video,
+                         gate_context=gate_context, brand=brand):
+        return _stored_craft_gate(cc)
     beats = cc.get("beats")
     if not isinstance(beats, list):
         beats = []
@@ -2855,18 +3889,12 @@ def video_maker_gate_of(creation_config=None,
     if not beats and not used_fallback:
         stored = cc.get("craft_gate")
         return stored if isinstance(stored, dict) else None
-    bt = cc.get("beat_timing")
-    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
-    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
-    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
-    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
-    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
     gs = cc.get("generator_slips") if isinstance(cc.get("generator_slips"), dict) else None
     return attach_generator_slips(
-        video_maker_gate(beats, content_format=content_format,
-                         used_fallback=used_fallback, legacy_timing=legacy,
-                         hook_pace=pace, beat_timing=bt, card_sync=sync,
-                         cli_check=cli, card_text=ctext),
+        _recompute_video_maker_gate(cc, content_format,
+                                    description=description,
+                                    description_required=description_required,
+                                    brand=brand),
         gs.get("slips") if gs else None)
 
 
@@ -2917,18 +3945,42 @@ def measurement_cap_reason(creation_config=None,
 
 
 def video_maker_gate_reason(creation_config=None,
-                            content_format: str | None = "short") -> str | None:
+                            content_format: str | None = "short",
+                            *,
+                            gate_context: str = GATE_CONTEXT_PUBLISH,
+                            description=None,
+                            description_required: bool = False,
+                            video_id=None, video=None,
+                            brand: str | None = None) -> str | None:
     """None = allowed to leave review toward publish. Longs are exempt.
     A real gate FAIL wins; else the measurement cap (never a silent PASS)."""
-    return (_video_maker_gate_reason_core(creation_config, content_format)
+    return (_video_maker_gate_reason_core(
+                creation_config, content_format, gate_context=gate_context,
+                description=description,
+                description_required=description_required,
+                video_id=video_id, video=video, brand=brand)
             or measurement_cap_reason(creation_config, content_format))
 
 
 def _video_maker_gate_reason_core(creation_config=None,
-                                  content_format: str | None = "short") -> str | None:
+                                  content_format: str | None = "short",
+                                  *,
+                                  gate_context: str = GATE_CONTEXT_PUBLISH,
+                                  description=None,
+                                  description_required: bool = False,
+                                  video_id=None, video=None,
+                                  brand: str | None = None) -> str | None:
     if (content_format or "short") == "long":
         return None
     cc = _as_dict(creation_config)
+    # OS publish: closed-list grandfather only. OS approve: always recompute.
+    # RR pre-deploy: stored gate (RR behaviour unchanged).
+    if trust_stored_gate(cc, video_id=video_id, video=video,
+                         gate_context=gate_context, brand=brand):
+        stored = _stored_craft_gate(cc)
+        if stored and stored.get("result") == "FAIL":
+            return format_craft_gate_reason(stored)
+        return None
     beats = cc.get("beats")
     if not isinstance(beats, list):
         beats = []
@@ -2938,26 +3990,28 @@ def _video_maker_gate_reason_core(creation_config=None,
         if isinstance(stored, dict) and stored.get("result") == "FAIL":
             return format_craft_gate_reason(stored)
         return None  # no snapshot (pré-gate inventory) — fail-open
-    bt = cc.get("beat_timing")
-    legacy = bt not in (BEAT_TIMING_INCL_FADE, BEAT_TIMING_HOLD_280)
-    pace = cc.get("hook_pace") if isinstance(cc.get("hook_pace"), dict) else None
-    sync = cc.get("card_sync") if isinstance(cc.get("card_sync"), dict) else None
-    cli = cc.get("cli_check") if isinstance(cc.get("cli_check"), dict) else None
-    ctext = cc.get("card_text") if isinstance(cc.get("card_text"), dict) else None
-    cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
-    gate = video_maker_gate(beats, content_format=content_format,
-                            used_fallback=used_fallback, legacy_timing=legacy,
-                            hook_pace=pace, beat_timing=bt, card_sync=sync,
-                            cli_check=cli, card_text=ctext, card_vo=cvo)
+    gate = _recompute_video_maker_gate(
+        cc, content_format, description=description,
+        description_required=description_required, brand=brand)
     return format_craft_gate_reason(gate)
 
 
 def review_gate_reason(title: str | None,
                        content_format: str | None = "short",
-                       creation_config=None) -> str | None:
+                       creation_config=None,
+                       *,
+                       gate_context: str = GATE_CONTEXT_PUBLISH,
+                       description=None,
+                       description_required: bool = False,
+                       video_id=None, video=None,
+                       brand: str | None = None) -> str | None:
     """Title pattern then Video Maker A+B+C. First failure wins (operator-readable)."""
     return (title_gate_reason(title, content_format)
-            or video_maker_gate_reason(creation_config, content_format))
+            or video_maker_gate_reason(
+                creation_config, content_format, gate_context=gate_context,
+                description=description,
+                description_required=description_required,
+                video_id=video_id, video=video, brand=brand))
 
 
 # ---------------------------------------------------------------------------
@@ -3475,6 +4529,11 @@ def publish_craft_block_reason(
     video_path: str | None = None,
     require_vo_beats: bool = True,
     check_audio: bool = True,
+    gate_context: str = GATE_CONTEXT_PUBLISH,
+    description=None,
+    description_required: bool = False,
+    video_id=None, video=None,
+    brand: str | None = None,
 ) -> str | None:
     """First publish-blocking craft reason, or None when eligible.
 
@@ -3490,7 +4549,11 @@ def publish_craft_block_reason(
     blocked = nonsense_title_reason(title)
     if blocked:
         return blocked
-    blocked = review_gate_reason(title, content_format, creation_config)
+    blocked = review_gate_reason(
+        title, content_format, creation_config,
+        gate_context=gate_context, description=description,
+        description_required=description_required,
+        video_id=video_id, video=video, brand=brand)
     if blocked:
         return blocked
     if not script_nonempty(script):
@@ -3518,6 +4581,11 @@ def evaluate_craft_review(
     video_path: str | None = None,
     require_vo_beats: bool = True,
     check_audio: bool = True,
+    gate_context: str = GATE_CONTEXT_PUBLISH,
+    description=None,
+    description_required: bool = False,
+    video_id=None, video=None,
+    brand: str | None = None,
 ) -> tuple[str, str | None]:
     """Return (pass|fail, reason). Does not mutate the video row."""
     reason = publish_craft_block_reason(
@@ -3528,6 +4596,10 @@ def evaluate_craft_review(
         video_path=video_path,
         require_vo_beats=require_vo_beats,
         check_audio=check_audio,
+        gate_context=gate_context,
+        description=description,
+        description_required=description_required,
+        video_id=video_id, video=video, brand=brand,
     )
     if reason:
         return CRAFT_REVIEW_FAIL, reason
@@ -3536,7 +4608,10 @@ def evaluate_craft_review(
 
 def apply_craft_review_to_video(video, *, content_format: str | None = "short",
                                 require_vo_beats: bool = True,
-                                check_audio: bool = True) -> tuple[str, str | None]:
+                                check_audio: bool = True,
+                                gate_context: str = GATE_CONTEXT_PUBLISH,
+                                description_required: bool = False,
+                                brand: str | None = None) -> tuple[str, str | None]:
     """Evaluate and write video.craft_review. Returns (status, reason)."""
     status, reason = evaluate_craft_review(
         title=video.title,
@@ -3546,6 +4621,10 @@ def apply_craft_review_to_video(video, *, content_format: str | None = "short",
         video_path=video.video_path,
         require_vo_beats=require_vo_beats,
         check_audio=check_audio,
+        gate_context=gate_context,
+        description=getattr(video, "description", None),
+        description_required=description_required,
+        video_id=getattr(video, "id", None), video=video, brand=brand,
     )
     video.craft_review = status
     return status, reason
@@ -4173,10 +5252,11 @@ def stat_ordinal_unit(beat, script: str | None) -> str:
 
 def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                    pt: bool | None = None, sources=None,
-                   whole: bool | None = None) -> list[dict]:
+                   whole: bool | None = None, os: bool = False) -> list[dict]:
     """Every card-text rule violation on a board: [{"i","check","detail"}].
 
     ``rr``: RR-only checks (invented output, PT counter, foreign terms).
+    ``os``: OS-only template / literal checks (os_card_hits).
     ``whole`` (default ``rr``; CARD_VO_WHOLE_BRANDS, RR and OS): the
     whole-sentence card exemptions (a rich card illustrating the whole-sentence
     card of its sentence)."""
@@ -4235,6 +5315,8 @@ def card_text_hits(beats, script: str | None, words=None, *, rr: bool = False,
                         "detail": f"card {i} {shown!r} repeats card {prev_mid} "
                                   f"({card_overlap(board[prev_mid], b):.0%} shared words)"})
         prev_mid = i
+    if os:
+        out.extend(os_card_hits(board, script, sources, words=words))
     return out
 
 
@@ -4245,8 +5327,9 @@ def card_text_marker(beats, script: str | None, words=None, *, brand: str | None
     if (content_format or "short") == "long":
         return None
     rr = (brand or "") in HOOK_PACE_BRANDS
-    return {"version": CARD_TEXT_V1, "rr": rr,
-            "hits": card_text_hits(beats, script, words, rr=rr, sources=sources,
+    os = (brand or "") == "os"
+    return {"version": CARD_TEXT_V1, "rr": rr, "os": os,
+            "hits": card_text_hits(beats, script, words, rr=rr, os=os, sources=sources,
                                    whole=card_vo_whole_applies(brand))}
 
 
@@ -4308,6 +5391,15 @@ CARD_VO_GATED = frozenset({"card_not_in_vo", "card_fragment", "card_spans_senten
 CARD_VO_WHOLE_BRANDS = HOOK_PACE_BRANDS | frozenset({"os"})
 CARD_TERM_MAX_WORDS = 3
 _STRONG_CLAUSE_RE = re.compile(r"\s*[;:—–]\s*|\s+-\s+")
+# Next-weakest OS seam when a sentence exceeds the mid cap and has no #96
+# strong clause: comma, or a coordinating conjunction.
+_WEAK_CLAUSE_SPLIT_RE = re.compile(
+    r"(,\s+(?:and|but|or|so|nor)\s+|,\s+|\s+(?:and|but|or|so|nor)\s+)",
+    re.I,
+)
+_WEAK_CONJ_DELIM_RE = re.compile(
+    r"^(?:,\s+)?(?:and|but|or|so|nor)\s+$", re.I)
+_WEAK_COMMA_DELIM_RE = re.compile(r"^,\s+$")
 _TERM_EDGE_STOP = _FUNC_FOLD | frozenset(theme.fold(w) for w in """
 quando enquanto porque pois entao logo depois antes ate como onde pra para pro
 assim tambem ainda so ja nem e ou mas se que and or but so then when because
@@ -4442,6 +5534,162 @@ def is_whole_unit(text: str | None, script: str | None) -> bool:
     return bool(ct) and any(ct == r for r in whole_unit_texts(script))
 
 
+_ENUM_AND_OR_RE = re.compile(r"^(and|or)\b", re.I)
+_ENUM_VERB_RE = re.compile(
+    r"\b(is|are|was|were|be|been|being|has|have|had|do|does|did|will|would|"
+    r"can|could|may|might|must|need|needs|needed|get|gets|got|fail|fails|"
+    r"failed|work|works|worked|return|returns|returned|call|calls|called|"
+    r"update|updates|updated|keep|keeps|kept|invent|invents|move|moves|"
+    r"start|starts|started|fill|fills|write|writes|read|reads|test|tests|"
+    r"broke|break|receive|receives|received|provide|provides|provided|"
+    r"says|said|comes|came|ran|run|runs|left|sent|send|sends)\b",
+    re.I,
+)
+
+
+def is_enumeration_clause_split(sent: str, parts: list[str] | None = None) -> bool:
+    """True when a comma split would break a noun-phrase enumeration.
+
+    ``A task needs a description, an expected output, and an agent.`` is
+    one list, not three clause cards. Coordinated clauses with a finite
+    verb on the right (``…flag, and every Claude subagent failed…``) are
+    not enumerations.
+    """
+    parts = list(parts) if parts is not None else weak_clause_parts(sent)
+    if len(parts) < 2:
+        return False
+    np_tails = 0
+    has_and_or = bool(re.search(r"\b(?:and|or)\b", sent or "", re.I))
+    for p in parts[1:]:
+        raw = (p or "").strip()
+        if _ENUM_AND_OR_RE.match(raw):
+            has_and_or = True
+        body = _ENUM_AND_OR_RE.sub("", raw).strip()
+        if body and not _ENUM_VERB_RE.search(body):
+            np_tails += 1
+    return np_tails >= 1 and has_and_or and ("," in (sent or ""))
+
+
+def enumeration_hits(beats, script: str | None, words=None) -> list[dict]:
+    """FAIL when a comma enumeration is fragmented or cannot fit ≤ 3.0s."""
+    sents = [s.strip() for s in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())
+             if s.strip()]
+    board = [b for b in (beats or []) if isinstance(b, dict)]
+    out: list[dict] = []
+    for sent in sents:
+        parts = weak_clause_parts(sent)
+        if not is_enumeration_clause_split(sent, parts):
+            continue
+        span = spoken_span(sent, words) if words else None
+        too_long = bool(span and (float(span[1]) - float(span[0])
+                                  > SENTENCE_SPOKEN_MAX_S + 1e-6))
+        frags = []
+        for i, b in enumerate(board):
+            shown = (beat_screen_text(b) or b.get("text") or "").strip()
+            if not shown:
+                continue
+            st = _sync_toks(shown)
+            if not st or st == _sync_toks(sent):
+                continue
+            if any(st == _sync_toks(p) for p in parts):
+                frags.append(i)
+        if not (too_long or frags):
+            continue
+        shown_parts = " / ".join(parts)
+        extra = ""
+        if span:
+            extra = f"; spoken {float(span[1]) - float(span[0]):.2f}s"
+        out.append({
+            "i": frags[0] if frags else None,
+            "check": "enumeration_needs_rewrite",
+            "detail": f"comma split would fragment the enumeration {sent!r} "
+                      f"into {shown_parts!r}{extra} — rewrite the VO",
+        })
+    return out
+
+
+def weak_clause_parts(sent: str) -> list[str]:
+    """Split one sentence on comma / coordinating conjunction. Conjunction
+    stays on the right-hand piece so each part is a contiguous VO span."""
+    sent = (sent or "").strip()
+    if not sent:
+        return []
+    bits = _WEAK_CLAUSE_SPLIT_RE.split(sent)
+    parts, buf = [], ""
+    for bit in bits:
+        if not bit or not str(bit).strip():
+            continue
+        if _WEAK_COMMA_DELIM_RE.match(bit):
+            if buf:
+                parts.append(buf.strip())
+                buf = ""
+            continue
+        if _WEAK_CONJ_DELIM_RE.match(bit):
+            if buf:
+                parts.append(buf.strip())
+            buf = re.sub(r"^,\s+", "", bit).strip()
+            continue
+        buf = (buf + " " + bit).strip() if buf else bit.strip()
+    if buf:
+        parts.append(buf.strip())
+    return [p for p in parts if p]
+
+
+def pack_clause_parts(parts: list[str], max_words: int = 12,
+                      min_words: int = 3) -> list[str]:
+    """Join short pieces; split a run that exceeds ``max_words``.
+
+    Same packing the OS generator uses so Gate B cover units match the
+    cards it emits (not mid-list fragments like ``sends, and deploys.``).
+    """
+    out, buf = [], ""
+    for p in parts:
+        p = (p or "").strip()
+        if not p:
+            continue
+        cand = (buf + " " + p).strip() if buf else p
+        if buf and len(cand.split()) > max_words:
+            out.append(buf)
+            buf = p
+        elif len(p.split()) < min_words:
+            buf = cand
+        else:
+            if buf and len(buf.split()) < min_words:
+                buf = cand
+            else:
+                if buf:
+                    out.append(buf)
+                buf = p
+    if buf:
+        if out and len(buf.split()) < min_words:
+            out[-1] = (out[-1] + " " + buf).strip()
+        else:
+            out.append(buf)
+    return out or [p for p in parts if (p or "").strip()]
+
+
+def weak_unit_texts(script: str | None) -> list[list[str]]:
+    """Token runs of packed weak-clause pieces (comma / coordinating
+    conjunction). Mid-list concatenations (``sends, and deploys.``) are
+    not cover units — only a packed clause from the seam."""
+    runs = []
+    for sent in (x.strip() for x in _OVERLAY_SENT_SPLIT_RE.split((script or "").strip())
+                 if x.strip()):
+        for p in pack_clause_parts(weak_clause_parts(sent)):
+            toks = _sync_toks(p)
+            if len(toks) >= 3:
+                runs.append(toks)
+    return runs
+
+
+def is_cover_unit(text: str | None, script: str | None) -> bool:
+    """Whole sentence / strong clause, or a weak-clause piece (OS cover)."""
+    if is_whole_unit(text, script):
+        return True
+    ct = _sync_toks(text)
+    return bool(ct) and any(ct == r for r in weak_unit_texts(script))
+
+
 def isolated_term_reason(text: str | None, script: str | None) -> str | None:
     """None when the card text is an isolated term the VO speaks (1–3 words,
     noun phrase or number, not a piece of a sentence); else why not."""
@@ -4490,10 +5738,15 @@ def isolated_term_reason(text: str | None, script: str | None) -> str | None:
     return why
 
 
-def card_piece_reason(text: str | None, script: str | None) -> str | None:
+def card_piece_reason(text: str | None, script: str | None, *,
+                      cover: bool = False) -> str | None:
     """None when a text card is a whole sentence / clause unit or an isolated
-    term (RR whole-sentence rule); else a short reason."""
-    if is_whole_unit(text, script):
+    term (RR whole-sentence rule); else a short reason.
+
+    ``cover`` (OS VO-sentence path): a weak-clause piece (comma / coordinating
+    conjunction) also counts as a whole unit.
+    """
+    if is_whole_unit(text, script) or (cover and is_cover_unit(text, script)):
         return None
     why = isolated_term_reason(text, script)
     if why is None:
@@ -4508,7 +5761,8 @@ def _spoken_sentence_ids(sents: list[str]) -> list[int]:
 
 def card_vo_hits(beats, script: str | None, *,
                  allow_continuation: bool | None = None,
-                 whole: bool = False) -> list[dict]:
+                 whole: bool = False,
+                 cover: bool = False) -> list[dict]:
     """Card ⊂ VO violations: [{"i","check","detail"}] (i=None for a sentence).
 
     Text cards (statement/quote) are matched in the VO after normalising
@@ -4668,11 +5922,12 @@ def card_vo_hits(beats, script: str | None, *,
                     f"card {e['i']} stops before the sentence {sents[k][:80]!r} ends "
                     "(no card shows its next words)")
     if whole_rule:
-        out = _whole_card_hits(board, script, out, sents, sid, toks)
+        out = _whole_card_hits(board, script, out, sents, sid, toks, cover=cover)
     return out
 
 
-def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
+def _whole_card_hits(board, script, out, sents, sid, toks, *,
+                     cover: bool = False) -> list[dict]:
     """card_vo_hits(whole=True) post-pass (see card_piece_reason)."""
     piece: dict[int, str | None] = {}
     for i, b in enumerate(board):
@@ -4682,7 +5937,7 @@ def _whole_card_hits(board, script, out, sents, sid, toks) -> list[dict]:
         ct = _sync_toks(b.get("text"))
         if not ct or _find_run(toks, ct, 0) < 0:
             continue  # card_not_in_vo already
-        piece[i] = card_piece_reason(b.get("text"), script)
+        piece[i] = card_piece_reason(b.get("text"), script, cover=cover)
     res = [h for h in out if not (h["check"] in ("card_fragment", "echo_card") and h.get("i") in piece
                                   and piece[h["i"]] is None
                                   and (h["check"] == "card_fragment" or is_term_card(board[h["i"]])))]
@@ -4708,10 +5963,11 @@ def card_vo_marker(beats, script: str | None,
     if (content_format or "short") == "long":
         return None
     whole = card_vo_whole_applies(brand)
+    cover = whole and (brand or "") == "os" and OS_VO_SENTENCE_CARDS
     return {"version": CARD_VO_V1, "source": "card_source_text+vo_script",
             "continuation": CARD_VO_ALLOW_CONTINUATION,
             **({"whole_sentence": True} if whole else {}),
-            "hits": card_vo_hits(beats, script, whole=whole)}
+            "hits": card_vo_hits(beats, script, whole=whole, cover=cover)}
 
 
 def card_vo_check_hits(card_vo: dict | None) -> list[str]:
@@ -4725,15 +5981,15 @@ def card_vo_check_hits(card_vo: dict | None) -> list[str]:
 # RR sentence pace (CoS 2026-10-03): one card per spoken sentence holds when a
 # sentence is spoken within one card hold + its lead (2.8s + 1.1s ≈ 3.9s);
 # continuation cards stay the exception. Soft target only — the script
-# generator asks once for a rewrite and the render logs/records the measure;
-# it is never a gate check.
-SENTENCE_SPOKEN_MAX_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
+# generator asks once for a rewrite and the render logs/records the measure.
+# Gate B hard fail for a whole-span hold is SENTENCE_SPOKEN_MAX_S (3.0s).
+SENTENCE_SPOKEN_SOFT_S = round(MID_BEAT_MAX_S + SYNC_LEAD_MAX_S, 2)  # 3.9
 SPOKEN_WORDS_PER_S = 3.2  # edge-tts pt-BR/en ~3.1–3.5 w/s (#1423); low = conservative
-SENTENCE_MAX_WORDS = int(SENTENCE_SPOKEN_MAX_S * SPOKEN_WORDS_PER_S)  # 12
+SENTENCE_MAX_WORDS = 12  # pinned to the 3.9s soft rewrite (not the 3.0s hard fail)
 
 
 def long_spoken_sentences(script: str | None, words=None,
-                          max_s: float = SENTENCE_SPOKEN_MAX_S) -> list[dict]:
+                          max_s: float = SENTENCE_SPOKEN_SOFT_S) -> list[dict]:
     """Script sentences spoken longer than ``max_s``: [{"i","text","secs","how"}].
     ``secs`` is measured from TTS word timings when given (how="tts"), else
     estimated at SPOKEN_WORDS_PER_S (how="estimate"). The endcard VO is skipped."""
@@ -4758,4 +6014,4 @@ def sentence_pace_marker(script: str | None, words, brand: str | None,
     if (content_format or "short") == "long" or (brand or "") not in HOOK_PACE_BRANDS:
         return None
     over = long_spoken_sentences(script, words)
-    return {"max_s": SENTENCE_SPOKEN_MAX_S, "over": [{k: h[k] for k in ("i", "secs", "how")} for h in over]}
+    return {"max_s": SENTENCE_SPOKEN_SOFT_S, "over": [{k: h[k] for k in ("i", "secs", "how")} for h in over]}

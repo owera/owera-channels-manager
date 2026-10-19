@@ -455,11 +455,23 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
             cvo = (craft.card_vo_marker(beats, script, content_format=fmt,
                                         brand=brand or params.get("brand"))
                    if not used_fallback else None)
+            ctime = (craft.card_timing_marker(beats, words, script, fmt,
+                                              duration=duration,
+                                              sources=_lit_src,
+                                              fail_closed=(brand or params.get("brand")) == "os")
+                     if not used_fallback else None)
+            alchk = craft.allowlist_required_marker(params.get("topic_id"),
+                                                    params.get("on_screen_allow"), fmt)
             gate = craft.video_maker_gate(beats, content_format=fmt,
                                           used_fallback=used_fallback, hook_pace=pace,
                                           beat_timing=craft.BEAT_TIMING_CURRENT,
                                           card_sync=sync, cli_check=cli, card_text=ctext,
-                                          card_vo=cvo)
+                                          card_vo=cvo, duration=duration,
+                                          card_timing=ctime, allowlist_check=alchk,
+                                          brand=brand or params.get("brand"),
+                                          script=script, words=words,
+                                          sources=params.get("on_screen_allow"),
+                                          description=params.get("description"))
             # literal_cards topics: generator slips compose repaired (generated
             # evidence card → plain, attribution / stat removed, repeated version
             # dropped) — informational in the VM's craft report, never a verdict.
@@ -470,6 +482,7 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                             "; ".join(f"{x.get('kind')}@{x.get('cue')!r}" for x in slips[:10]))
             return {
                 "composition_version": settings.composition_version,
+                craft.GATE_B_RULES_KEY: craft.GATE_B_RULES,
                 "content_format": fmt,
                 "resolution": resolution,
                 "voice": _voice(params),
@@ -490,12 +503,19 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                                         "slips": slips[:craft.GEN_SLIPS_LIST_MAX]}}
                    if slips is not None else {}),
                 **({"sentence_pace": space} if space else {}),
+                **({"card_timing": ctime} if ctime else {}),
+                **({"allowlist_check": alchk} if alchk else {}),
                 # Designer split card rendered on frame0 → the publish-time thumb
                 # uses the same card (frame0 ≡ thumb); absent on older renders.
                 **({"frame0_split": True} if 'data-split="1"' in html else {}),
                 "bgm": (bgm.name if bgm else None),
                 "bgm_volume": float(params.get("bgm_volume") or 0.2),
                 "script_words": len(script.split()),
+                "script": script,
+                "narration_words": words or None,
+                "brand": brand or params.get("brand"),
+                "on_screen_allow": params.get("on_screen_allow"),
+                "description": params.get("description"),
                 "duration": duration,
                 "used_fallback": used_fallback,
             }
@@ -746,7 +766,7 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         # RR sentence pace (soft): one card per sentence fits when a sentence
         # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
         prompt += (f" Keep EVERY spoken sentence short: at most about {craft.SENTENCE_MAX_WORDS} "
-                   f"words (~{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken) — split a long sentence "
+                   f"words (~{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken) — split a long sentence "
                    "into two instead of chaining clauses.")
         prompt += (" Endcard as the LAST spoken lines, exactly: "
                    "'Se inscreve. Próxima armadilha de IA.' "
@@ -782,10 +802,10 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         if long_:
             # one soft rewrite ask; kept only when it has fewer long sentences
             logger.info("script: %d sentence(s) over ~%.1fs for %r — asking once for a rewrite",
-                        len(long_), craft.SENTENCE_SPOKEN_MAX_S, subject)
+                        len(long_), craft.SENTENCE_SPOKEN_SOFT_S, subject)
             redo = ask(
                 prompt + "\n\nThese sentences run longer than ~" +
-                f"{craft.SENTENCE_SPOKEN_MAX_S:.1f}s spoken (> {craft.SENTENCE_MAX_WORDS} words); "
+                f"{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken (> {craft.SENTENCE_MAX_WORDS} words); "
                 "split each into shorter sentences, keep everything else:\n" +
                 "\n".join(f"- {h['text']}" for h in long_) +
                 "\nReturn ONLY the spoken voiceover.",

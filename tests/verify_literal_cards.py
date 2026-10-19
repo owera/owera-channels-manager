@@ -311,6 +311,9 @@ ok(craft.cli_check_marker(bad, SCRIPT, title="Other · Agent memory 3", topic_id
 ok(craft.cli_check_marker(bad, SCRIPT, topic_id=47, content_format="long") is None, "longs exempt")
 
 print("compose (stubbed llm)")
+# Literal-repair pins the LLM path. OS VO-sentence cards skip the LLM
+# (verify_os_vo_cards.py); kill switch off here.
+craft.OS_VO_SENTENCE_CARDS = False
 calls = []
 
 

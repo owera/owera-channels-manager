@@ -610,10 +610,12 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v)
 ok(_uploads == [], "bad title never opens upload_video")
-ok(v.status == VideoStatus.REJECTED, "blocked publish auto-rejects (anti-nonsense)")
+ok(v.status == VideoStatus.REVIEW and v.approved_at is None,
+   "OS publish craft FAIL parks review/held (never failed/rejected)")
 ok(v.craft_review == "fail", "blocked publish sets craft_review=fail")
-ok(v.error and "spoken series pattern" in v.error,
-   "blocked publish records the gate reason")
+ok(v.error and "spoken series pattern" in v.error
+   and str(v.error).startswith("held:"),
+   "blocked publish records held: + the gate reason")
 ok(v.yt_video_id is None, "no YouTube id on a blocked publish")
 
 v2 = Video(channel_id=ch.id, topic_id=t.id, subject="ok",
@@ -967,7 +969,8 @@ youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v3)
 ok(_uploads == [], "craft-gate FAIL never opens upload_video")
-ok(v3.status == VideoStatus.REJECTED, "blocked craft publish auto-rejects")
+ok(v3.status == VideoStatus.REVIEW and (v3.error or "").startswith("held:"),
+   "OS craft-gate FAIL parks review/held (never failed/rejected)")
 ok(v3.craft_review == "fail", "blocked craft publish sets craft_review=fail")
 ok(v3.error and "craft gate FAIL" in v3.error and "[A]" in v3.error,
    "blocked craft publish records the letter-tagged reason")
@@ -1330,12 +1333,18 @@ _sw = [{"text": t, "start": round(0.4 * k, 3), "dur": 0.35} for k, t in enumerat
 
 
 def _sb(q1, q2, q3, cta, cta_dur=3.0):
-    return [{"type": "hook", "start": 0.0, "dur": 1.38, "text": "Contexto come a VRAM", "cue": "Contexto",
-             "object": "GPU"},
-            {"type": "quote", "start": q1, "dur": 2.0, "text": "O peso do modelo é só parte", "cue": "O peso"},
-            {"type": "stat", "start": q2, "dur": 2.0, "value": "4", "unit": "x", "label": "cache",
-             "cue": "O cache cresce"},
-            {"type": "quote", "start": q3, "dur": 1.0, "text": "Mede a VRAM antes", "cue": "Mede a VRAM"},
+    # Holds own the 0.12s fade up to the mid cap so blank_gap is not a
+    # false FAIL on these card-sync pins (starts stay as the caller set).
+    def _hold(start, nxt, cap):
+        return round(min(cap, max(0.5, float(nxt) - float(start) - 0.12)), 3)
+    return [{"type": "hook", "start": 0.0, "dur": _hold(0.0, q1, 4.0),
+             "text": "Contexto come a VRAM", "cue": "Contexto", "object": "GPU"},
+            {"type": "quote", "start": q1, "dur": _hold(q1, q2, 2.80),
+             "text": "O peso do modelo é só parte", "cue": "O peso"},
+            {"type": "stat", "start": q2, "dur": _hold(q2, q3, 2.80), "value": "4", "unit": "x",
+             "label": "cache", "cue": "O cache cresce"},
+            {"type": "quote", "start": q3, "dur": _hold(q3, cta, 2.80),
+             "text": "Mede a VRAM antes", "cue": "Mede a VRAM"},
             {"type": "cta", "start": cta, "dur": cta_dur, "text": "Subscribe · IA", "cue": "Subscribe"}]
 
 
@@ -1712,9 +1721,17 @@ _ct_cc = {"beats": _ct_board, "beat_timing": craft.BEAT_TIMING_CURRENT, "card_te
 ok("Card text" in (craft.video_maker_gate_reason(_ct_cc) or ""),
    "review gate re-reads creation_config.card_text")
 
-print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft)")
-ok(craft.SENTENCE_SPOKEN_MAX_S == 3.9 and craft.SENTENCE_MAX_WORDS == 12,
-   "target = 2.8s card hold + 1.1s lead = 3.9s ≈ 12 words at 3.2 w/s")
+print("RR sentence pace: ≤ ~3.9s per spoken sentence (soft); Gate B 3.0s")
+ok(craft.SENTENCE_SPOKEN_MAX_S == 3.0 and craft.SENTENCE_SPOKEN_SOFT_S == 3.9
+   and craft.SENTENCE_MAX_WORDS == 12
+   and craft.CODE_READ_MIN_S == 1.2
+   and craft.CARD_ENTER_LEAD_MAX_S == 0.3,
+   "Gate B sentence_too_long = 3.0s (every mid card); "
+   "code-read floor 1.2s; enter-lead 0.3s; soft rewrite stays 3.9s / 12 words")
+ok(craft.text_in_script("Found 5.", "Found 5. One block over the limit.")
+   and not craft.text_in_script(
+       "Found 5. One block over the limit.", "Found 5."),
+   "text_in_script is card ⊂ script, not inverted")
 _sp_over = craft.long_spoken_sentences(_ct_script)
 ok([h["text"][:22] for h in _sp_over] == ["E eu pergunto um valor"] and _sp_over[0]["how"] == "estimate",
    "#1423: the 16-word 'E eu pergunto…' sentence is over (estimate); the endcard VO is skipped")
@@ -1729,5 +1746,50 @@ ok(craft.sentence_pace_marker(_ct_script, None, "os") is None
    "marker: RR shorts only")
 ok("sentence_pace" not in craft.video_maker_gate.__code__.co_varnames,
    "sentence pace is not a gate input (never a hard fail)")
+
+print("PR #122: new Gate B rules only on newly composed snapshots")
+ok(craft.GATE_B_RULES == "122" and craft.GATE_B_RULES_KEY == "gate_b_rules",
+   "gate_b_rules marker is 122")
+_gap_board = [
+    {"type": "hook", "start": 0.0, "dur": 1.5, "text": "Hook", "object": "bill"},
+    {"type": "stat", "start": 1.62, "dur": 2.0, "value": "1"},
+    {"type": "cta", "start": 10.0, "dur": 2.0, "text": "Subscribe · Agent traps"},
+]
+ok(craft.video_maker_gate(_gap_board, duration=13.0)["checks"]["B"] == "FAIL",
+   "live gate still FAILs a trailing/mid blank on a new board")
+_pre = {
+    "composition_version": "storyboard",
+    "beat_count": 3,
+    "beats": _gap_board,
+    "duration": 13.0,
+    "beat_timing": craft.BEAT_TIMING_CURRENT,
+    "craft_gate": {"result": "PASS", "checks": {"A": "PASS", "B": "PASS", "C": "PASS"},
+                   "reasons": []},
+}
+ok(craft.is_pre_deploy_snapshot(_pre) and not craft.applies_new_gate_b(_pre),
+   "pre-deploy HyperFrames snapshot (no gate_b_rules)")
+ok(craft.video_maker_gate_reason(_pre, "short") is None,
+   "RR / unmarked pre-deploy publish trusts stored craft_gate PASS")
+ok((craft.video_maker_gate_of(_pre, "short") or {}).get("result") == "PASS",
+   "video_maker_gate_of returns stored PASS for RR pre-deploy")
+ok(craft.publish_craft_block_reason(
+       title="Hook claim · Agent traps 1", script="Hook claim. Subscribe — next agent trap.",
+       creation_config=_pre, content_format="short", video_path=None)
+   is None,
+   "publish_craft_block_reason does not reject an RR pre-deploy PASS snapshot")
+ok("Blank gap" in (craft.video_maker_gate_reason(_pre, "short", brand="os") or ""),
+   "OS pre-deploy without closed-list grandfather recomputes fail-closed")
+ok(craft.trust_stored_gate(_pre, video_id=1452, brand="os") is False,
+   "OS id 1452 is not on the empty grandfather list")
+_new = dict(_pre)
+_new[craft.GATE_B_RULES_KEY] = craft.GATE_B_RULES
+ok(not craft.is_pre_deploy_snapshot(_new) and craft.applies_new_gate_b(_new),
+   "same board with gate_b_rules=122 is a new snapshot")
+ok("Blank gap" in (craft.video_maker_gate_reason(_new, "short") or ""),
+   "new snapshot recomputes and FAILs blank_gap")
+_unit = {"beats": _gap_board, "beat_timing": craft.BEAT_TIMING_CURRENT, "duration": 13.0}
+ok(not craft.is_pre_deploy_snapshot(_unit)
+   and "Blank gap" in (craft.video_maker_gate_reason(_unit, "short") or ""),
+   "unit-test boards without composition_version still recompute")
 
 print(f"\nALL {_checks} CHECKS PASSED")

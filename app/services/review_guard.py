@@ -166,6 +166,28 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
 
 
 VM_PASS_HELD = "held: needs vm_pass"
+ALLOWLIST_HELD = "held: needs on_screen_allow"
+
+
+def allowlist_required_reason(v) -> str | None:
+    """Why this video is held for a missing on_screen_allow, else None.
+
+    Topics flagged topic_flags.ALLOWLIST_REQUIRED (default [47]) need
+    overrides on_screen_allow (or the same key on creation_config). Approve
+    returns 409 "held: …"; Gate B also FAILs (craft.allowlist_required_marker).
+    """
+    from app.services import craft, topic_flags
+
+    tid = getattr(v, "topic_id", None)
+    if not topic_flags.has(topic_flags.ALLOWLIST_REQUIRED, tid):
+        return None
+    src = _overrides(v).get("on_screen_allow")
+    if src is None:
+        src = _cc(v).get("on_screen_allow")
+    if craft.on_screen_allow(src):
+        return None
+    return (f"{ALLOWLIST_HELD} — topic {tid} is allowlist_required and this video "
+            "has no overrides on_screen_allow")
 
 
 def vm_pass_required_reason(v) -> str | None:

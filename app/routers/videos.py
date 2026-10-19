@@ -702,6 +702,9 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     need_vm = review_guard.vm_pass_required_reason(v)
     if need_vm:
         raise HTTPException(409, need_vm)
+    need_al = review_guard.allowlist_required_reason(v)
+    if need_al:
+        raise HTTPException(409, need_al)
     if body:
         data = body.model_dump(exclude_unset=True)
         if "tags" in data:
@@ -712,12 +715,30 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
     from app.services import craft
+    from app.services.craft import brand_of as _brand_of
+    ch = session.get(Channel, v.channel_id)
+    brand = _brand_of(ch.slug, ch.name, channel_id=ch.id) if ch else None
     blocked = craft.publish_craft_block_reason(
         title=v.title, script=v.script, creation_config=v.creation_config,
         content_format=fmt, video_path=v.video_path,
+        gate_context=craft.GATE_CONTEXT_APPROVE,
+        description=v.description,
+        description_required=(brand == "os"),
+        video_id=v.id, video=v, brand=brand,
     ) or episode_guard.duplicate_episode_reason(session, v)
     if blocked:
         v.craft_review = craft.CRAFT_REVIEW_FAIL
+        # Stale mp4 is not a Gate B craft FAIL — 409 without Video.held so a
+        # later re-render can return to review/pending (pre-park_os_held).
+        if brand == "os" and blocked != craft.STALE_RENDER_REASON:
+            # OS review (no grandfather): fail-closed → held in review, never
+            # status=failed. Leaves held only via this approve path (actor
+            # logged) or unhold. RR keeps the pre-PR 409 + craft_review=fail.
+            from app.services.gate_grandfather import park_os_held
+            park_os_held(v, blocked)
+            session.add(v)
+            session.commit()
+            raise HTTPException(409, v.error or f"held: {blocked}")
         session.add(v)
         session.commit()
         raise HTTPException(409, blocked)
@@ -809,12 +830,16 @@ def retry(video_id: int, session: Session = Depends(get_session)):
         need_vm = review_guard.vm_pass_required_reason(v)
         if need_vm:
             raise HTTPException(409, need_vm)
+        need_al = review_guard.allowlist_required_reason(v)
+        if need_al:
+            raise HTTPException(409, need_al)
         topic = session.get(Topic, v.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         from app.services import craft
         blocked = craft.publish_craft_block_reason(
             title=v.title, script=v.script, creation_config=v.creation_config,
             content_format=fmt, video_path=v.video_path,
+            video_id=v.id, video=v,
         ) or episode_guard.duplicate_episode_reason(session, v)
         if blocked:
             v.craft_review = craft.CRAFT_REVIEW_FAIL
