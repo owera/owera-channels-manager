@@ -623,6 +623,8 @@ def _submit_new(session: Session) -> None:
         params["topic_id"] = video.topic_id   # lets the composition theme match the thumbnail
         params["topic_name"] = topic.name if topic else ""  # endcard series chip (P1 e)
         params["brand"] = brand
+        # Same title-first claim the pre-check uses (provided_script_hook_reason).
+        params["title"] = video.title
         if provided_script:
             # Spoken verbatim: HyperFrames worker skips _generate_script on
             # provided_script; MPT uses its native video_script field.

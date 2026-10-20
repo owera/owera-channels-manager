@@ -99,6 +99,11 @@ ok(craft.overlay_hook_source(None, "Your agent forgets. Here is why.", "Agent me
    == "Your agent forgets.",
    "narration not opening on the head → first spoken sentence (unchanged rule)")
 ok(craft.overlay_hook_source(None, "", MAYA_TITLE) == MAYA, "empty script → subject head")
+ok(craft.hook_claim_source(MAYA_TITLE, "stale two. sentences. · Agent memory 1")
+   == MAYA_TITLE,
+   "hook_claim_source prefers title over a stale subject")
+ok(craft.hook_claim_source(None, MAYA_TITLE) == MAYA_TITLE,
+   "hook_claim_source falls back to subject")
 ok(craft.script_opens_with("chat ROUTED to maya.  prod paged lee. more", MAYA),
    "script_opens_with folds case/whitespace")
 ok(not craft.script_opens_with("Chat routed to Maya. Other.", MAYA),
@@ -126,10 +131,10 @@ ok(craft.overlay_preserves_claim("Reranking in 5 lines", "Reranking in 5 lines")
 print("frame0: storyboard._lock_opening_hook + render_hook")
 
 
-def lock(script, subject):
+def lock(script, subject, title=None):
     beats = [{"type": "hook", "text": "old slogan", "cue": "x", "emoji": "🔥"},
              {"type": "stat", "value": "1", "cue": "y"}]
-    storyboard._lock_opening_hook(beats, script, subject)
+    storyboard._lock_opening_hook(beats, script, subject, title)
     return beats
 
 
@@ -251,5 +256,61 @@ ok(r and r.startswith(craft.PROVIDED_SCRIPT_HOOK_REASON),
    "publish gate: misaligned provided script still blocked with the reason")
 ok(craft.claim_aligned("Chat routed to Maya", MAYA) and craft.claim_aligned(MAYA, MAYA),
    "claim_aligned unchanged for the old 1-sentence and new 2-sentence overlay")
+
+# ---------------------------------------------------------------------------
+print("#1465 stale two-sentence subject + one-sentence title: gate == compose")
+T1465 = "The crew failed the handoff. · CrewAI 21"
+S1465 = "The crew failed the handoff. tasks.yaml was empty. · CrewAI 21"
+VO1465 = (
+    "The crew failed the handoff. tasks.yaml was empty. "
+    "CrewAI will not invent the work for you. "
+    "Subscribe — next CrewAI trap."
+)
+ok(craft.hook_claim_source(T1465, S1465) == T1465,
+   "shared helper prefers the one-sentence title")
+ok(craft.overlay_hook_source(T1465, VO1465, S1465)
+   == "The crew failed the handoff.",
+   "overlay uses the title head, not the two-sentence subject")
+ok(craft.overlay_hook_source(None, VO1465, S1465)
+   == "The crew failed the handoff. tasks.yaml was empty.",
+   "title omitted → subject head stays two sentences")
+ok(craft.provided_script_hook_reason(VO1465, title=T1465, subject=S1465) is None,
+   "pre-check passes on the one-sentence title")
+ok(craft.spoken_hook_source(craft.hook_claim_source(T1465, S1465), None, None)
+   == "The crew failed the handoff.",
+   "gate spoken hook is the title head")
+b1465 = lock(VO1465, S1465, T1465)
+ok(b1465[0]["text"] == "The crew failed the handoff.",
+   "lock with title paints one sentence, not the stale subject")
+storyboard._show_whole_claim(b1465, VO1465, S1465, T1465)
+ok(b1465[0]["text"] == "The crew failed the handoff.",
+   "whole-claim does not restore the two-sentence subject")
+osb = storyboard._os_vo_sentence_beats(subject=S1465, script=VO1465, title=T1465)
+ok(osb[0]["text"] == "The crew failed the handoff.",
+   "OS VO skeleton hook is the title")
+ok(any("tasks.yaml" in (x.get("text") or "") for x in osb),
+   "second subject sentence is a mid card, not the hook")
+
+
+def _words(script, step=0.28, t0=0.1):
+    out, t = [], float(t0)
+    for w in script.split():
+        out.append({"text": w.strip(".,!?:;"), "start": round(t, 3), "dur": 0.2})
+        t += step
+    return out
+
+
+html1465 = storyboard.compose(
+    subject=S1465, title=T1465, script=VO1465, words=_words(VO1465),
+    duration=12.0, resolution="portrait", width=1080, height=1920,
+    topic_id=7, content_format="short", language="English",
+    llm=lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM")),
+    brand="os", topic_name="CrewAI")
+ok(bool(html1465), "#1465 compose with title returns HTML")
+hook1465 = craft.beats_from_html(html1465)[0]["text"]
+ok(hook1465 == "The crew failed the handoff.",
+   f"composed hook agrees with the gate ({hook1465!r})")
+ok(craft.overlay_claim(craft.overlay_hook_source(T1465, VO1465, S1465)) == hook1465,
+   "overlay_hook_source(title, script, subject) == composed hook card")
 
 print(f"\nALL {_checks} CHECKS PASSED")

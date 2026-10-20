@@ -348,6 +348,22 @@ def title_head(text: str | None) -> str:
     return ((text or "").split("·", 1)[0] or "").strip()
 
 
+def hook_claim_source(title: str | None = None, subject: str | None = None) -> str:
+    """The label gate and render share: title if it has a claim head, else subject.
+
+    ``provided_script_hook_reason`` (pre-check) and storyboard overlay /
+    lock / OS VO beats / whole-claim / split-card must read this same
+    string. A stale two-sentence subject cannot override a one-sentence
+    title (#1465). A title that is only `` · Series N`` has no head —
+    fall through to subject, matching the spoken_hook_source fallback.
+    """
+    t = (title or "").strip()
+    s = (subject or "").strip()
+    if title_head(t):
+        return t
+    return s or t
+
+
 def _overlay_norm(text: str | None) -> str:
     return " ".join(theme.fold(text or "").split())
 
@@ -363,13 +379,14 @@ def overlay_hook_source(title: str | None = None, script: str | None = None,
                         subject: str | None = None) -> str:
     """The claim frame0 / thumb show — the whole title head, not just sentence 1.
 
-    Head = title (else subject) before `` · Series N`` (the series episode
+    Head = ``hook_claim_source(title, subject)`` before `` · Series N``
+    (title if it has a claim head, else subject; the series episode
     number is intentionally not overlay copy). With a script: use the head
     when the narration opens on it (two-sentence heads like "Chat routed to
     Maya. Prod paged Lee." stay two sentences), else the first spoken sentence
     (unchanged Decolar rule for unpatterned subjects).
     """
-    head = title_head(title) or title_head(subject)
+    head = title_head(hook_claim_source(title, subject))
     if script is None:
         return head
     if head and script_opens_with(script, head):
@@ -4424,7 +4441,7 @@ def provided_script_hook_reason(script: str | None, *, title: str | None = None,
     spoken line (``preserves_dollar_numerals``). No hook available → None
     (nothing to align against; the title gate owns empty titles).
     """
-    hook = spoken_hook_source(title or subject, None, None)
+    hook = spoken_hook_source(hook_claim_source(title, subject), None, None)
     if not hook:
         hook = spoken_hook_source(subject, None, None)
     if not hook:
