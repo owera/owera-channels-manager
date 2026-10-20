@@ -1962,3 +1962,33 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 76. ✅ DONE (PR autoimprove/2026-10-20-trend-score-bool) POST/PATCH /api/trends reject JSON bool score — normal
+- **resolution (2026-10-20):** `TrendCreate` and `TrendUpdate` reject a
+  boolean `score` in a `mode="before"` validator, before lax float
+  coerces `true`→`1.0` and `false`→`0.0`. Integer `0` and `1` stay
+  legal. Suite: `tests/verify_trends.py` 223 → 267. Dropping both
+  validators fails at `upsert score=true is 4xx (must not drop 92 to 1)`.
+- **why:** upsert refreshes `score`, and `GET /api/trends` orders by
+  `score DESC`. JSON `true` dropped a real 0..100 score to 1 and
+  reordered the queue. JSON `false` stored the legal zero and sank the
+  trend. Same lax-bool class as the channel_id floor on this route.
+- **caution:** normal (`app/schemas.py` only). Not a publish/oauth path.
+- **acceptance:** create, upsert, and PATCH of `score: true` / `false`
+  are 422, the stored score stays put, and the 92-above-10 order
+  stays. Integer 0 stores 0 and sorts below 10. Integer 1 stores 1.
+  Omitting score does not clobber.
+
+### 77. POST/PATCH /api/profiles reject a blank profile name — normal
+- **why (found 2026-10-20, not bundled):** `ProfileCreate` stores
+  `name` as given, and `ProfileUpdate` assigns any non-null name.
+  `""` / `"   "` persist. The editor's `disabled={!name}` still sends
+  whitespace, so the profile picker gets a blank row. Same class as
+  the topic and channel name floors.
+- **approach:** strip and 400 an empty name before insert or setattr.
+  A non-blank name still saves. Create `null` stays 422 (required str).
+  PATCH `null` already skips the field — keep that.
+- **caution:** normal (`app/routers/profiles.py` or the schema). Not a
+  publish/oauth path.
+- **acceptance:** `""` and `"   "` do not persist on create or PATCH;
+  a real name still saves; PATCH `null` leaves the name alone.
