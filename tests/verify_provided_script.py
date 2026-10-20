@@ -380,7 +380,8 @@ def run_submit(s, eng, gen_return="generated words here"):
 # provided, endcard missing → appended once, spoken verbatim, grok not called
 tts_texts, compose_scripts = [], []
 s = fresh_session()
-ch, t, v = seed(s, script=A1_NO_ENDCARD, cc={"script_source": "provided"})
+ch, t, v = seed(s, script=A1_NO_ENDCARD, cc={"script_source": "provided"},
+               title=A1_SUBJECT)
 eng = SyncHFEngine()
 gen = run_submit(s, eng)
 v = s.get(Video, v.id)
@@ -393,6 +394,8 @@ ok(eng.params and eng.params[0].get("provided_script") == EXPECTED,
 ok(eng.params[0].get("video_script") == EXPECTED,
    "engine params carry video_script too (MPT native field)")
 ok(eng.params[0].get("video_subject") == A1_SUBJECT, "video_subject unchanged")
+ok(eng.params[0].get("title") == v.title,
+   "engine params carry title (same claim the pre-check uses)")
 ok(tts_texts == [EXPECTED], "TTS speaks the provided script verbatim (+ endcard)")
 ok(compose_scripts == [EXPECTED], "storyboard compose receives the same verbatim script")
 st = eng.status(v.mpt_task_id)

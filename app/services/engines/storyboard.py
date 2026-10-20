@@ -1376,7 +1376,7 @@ _GENERIC_NODE = re.compile(
     r"^(a|b|c|d|e|x|y|z|step\s*\d+|node\s*\d+|oar|oars)$", re.IGNORECASE)
 
 
-def _lock_opening_hook(beats, script, subject) -> None:
+def _lock_opening_hook(beats, script, subject, title=None) -> None:
     """Decolar: frame0 text = the spoken title claim (safety-clip 12w), no second hook.
 
     The claim is the title head when the narration opens on it (a two-sentence
@@ -1396,11 +1396,12 @@ def _lock_opening_hook(beats, script, subject) -> None:
     # the narration opens on (not just sentence 1), . , ? ! and every digit.
     # compress_claim (rstrip punctuation) dropped "Prod paged Lee." / "Sem, 11."
     # and the final period on #1363 / #1354.
-    claim = craft.overlay_hook_source(None, script, subject)
-    hook = craft.overlay_claim(claim) or craft.overlay_claim(craft.title_head(subject))
+    claim = craft.overlay_hook_source(title, script, subject)
+    src = craft.hook_claim_source(title, subject)
+    hook = craft.overlay_claim(claim) or craft.overlay_claim(craft.title_head(src))
     # Frame0 is the claim — never the endcard Subscribe VO or a mid-body ask.
     if hook and (craft.contains_subscribe_cta(hook) or craft.is_endcard_vo(hook)):
-        hook = craft.overlay_claim(craft.title_head(subject))
+        hook = craft.overlay_claim(craft.title_head(src))
     if not beats or not hook:
         return
     if claim and hook and not craft.preserves_dollar_numerals(claim, hook):
@@ -1424,16 +1425,16 @@ def _lock_opening_hook(beats, script, subject) -> None:
             b1["w"] = 1
 
 
-_SERIES_SUFFIX_RE = re.compile(r"\s+·\s+.*$")
 _HOOK_CLAIM_MAX_WORDS = 12
 
 
-def _title_head(subject) -> str:
-    """Title text before the ' · Series N' suffix."""
-    return _SERIES_SUFFIX_RE.sub("", str(subject or "").strip()).strip()
+def _title_head(subject, title=None) -> str:
+    """Title text before the ' · Series N' suffix (title, else subject)."""
+    from app.services import craft
+    return craft.title_head(craft.hook_claim_source(title, subject))
 
 
-def _show_whole_claim(beats, script, subject) -> None:
+def _show_whole_claim(beats, script, subject, title=None) -> None:
     """Frame0 shows the WHOLE claim — both halves of a two-part title.
 
     VM 2026-09-29: 9/17 hooks printed only sentence 1 ('Chat routed to Maya.')
@@ -1446,7 +1447,7 @@ def _show_whole_claim(beats, script, subject) -> None:
     from app.services import craft
     if not beats or (beats[0].get("type") or "") != "hook":
         return
-    head = _title_head(subject)
+    head = _title_head(subject, title)
     if not head or len(head.split()) > _HOOK_CLAIM_MAX_WORDS:
         return
     ht = _tok(head)
@@ -1462,14 +1463,15 @@ def _show_whole_claim(beats, script, subject) -> None:
     beats[0]["text"] = head
 
 
-def _apply_split_card(beats, subject, provided_thumb=False) -> None:
+def _apply_split_card(beats, subject, provided_thumb=False, title=None) -> None:
     """Designer split-card on frame0 (Agent memory / IA / Local only). Kept
     only when the card shows exactly the hook claim (whole-claim rule, #45);
     never with an operator-provided thumbnail (#39)."""
     from app.services import craft
     if not beats or (beats[0].get("type") or "") != "hook":
         return
-    spec = craft.contrast_split(subject, provided_thumb=provided_thumb)
+    spec = craft.contrast_split(craft.hook_claim_source(title, subject),
+                               provided_thumb=provided_thumb)
     if not spec:
         return
     if _tok(craft.split_card_text(spec)) != _tok(beats[0].get("text") or ""):
@@ -3571,7 +3573,7 @@ def _allowlist_as_on_screen(script, sources) -> list[dict]:
     return out
 
 
-def _os_vo_sentence_beats(*, subject, script) -> list[dict]:
+def _os_vo_sentence_beats(*, subject, script, title=None) -> list[dict]:
     """Deterministic OS mid cards: one plain quote per VO sentence (or clause unit).
 
     Hook + CTA skeleton only — ``_lock_opening_hook`` / ``_sanitize_cta`` fill
@@ -3580,9 +3582,10 @@ def _os_vo_sentence_beats(*, subject, script) -> list[dict]:
     merged later by ``_apply_literal_cards``.
     """
     from app.services import craft
-    claim_src = craft.overlay_hook_source(None, script, subject)
+    claim_src = craft.overlay_hook_source(title, script, subject)
+    src = craft.hook_claim_source(title, subject)
     hook = (craft.overlay_claim(claim_src)
-            or craft.overlay_claim(craft.title_head(subject))
+            or craft.overlay_claim(craft.title_head(src))
             or (_script_sentences(script) or ["·"])[0])
     beats = [{"type": "hook", "text": hook, "cue": claim_src or hook, "emoji": ""}]
     for sent in _script_sentences(script):
@@ -4182,7 +4185,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                    topic_id=None, content_format="short", allowed_types=None, language=None,
             llm, brand=None, channel_id=None, channel_slug=None,
             provided_thumb=False, topic_name=None, on_screen_allow=None,
-            on_screen=None) -> str | None:
+            on_screen=None, title=None) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -4228,7 +4231,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         # text card. Kill switch craft.OS_VO_SENTENCE_CARDS = False restores
         # the LLM compare/term_define/list/isolated-term path. RR unchanged.
         if os_vo:
-            beats = _os_vo_sentence_beats(subject=subject, script=script)
+            beats = _os_vo_sentence_beats(subject=subject, script=script, title=title)
             if not beats:
                 logger.info("storyboard: OS VO-sentence board empty for %r — falling back", subject)
                 return None
@@ -4285,9 +4288,9 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
 
         # Quote cards are sentence-bounded: each word knows its script sentence.
         words = annotate_sentences(words, script)
-        _lock_opening_hook(beats, script, subject)
-        _show_whole_claim(beats, script, subject)
-        _apply_split_card(beats, subject, provided_thumb=provided_thumb)
+        _lock_opening_hook(beats, script, subject, title)
+        _show_whole_claim(beats, script, subject, title)
+        _apply_split_card(beats, subject, provided_thumb=provided_thumb, title=title)
         _demote_nonsense_diagrams(beats, content_format, script)
         _sanitize_cta(beats, script, subject=subject, brand=brand or th.get("brand"),
                       content_format=content_format, topic_name=topic_name)

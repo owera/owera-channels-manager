@@ -60,8 +60,16 @@ from app.db import get_session
 from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.routers import videos as videos_router
 from app.schemas import ReorderBody, VideoCreate, VideoUpdate
-from app.services import metadata
+from app.services import craft, metadata
 from app.services import engines as engines_mod
+
+T1465 = "The crew failed the handoff. · CrewAI 21"
+S1465 = "The crew failed the handoff. tasks.yaml was empty. · CrewAI 21"
+VO1465 = (
+    "The crew failed the handoff. tasks.yaml was empty. "
+    "CrewAI will not invent the work for you. "
+    "Subscribe — next CrewAI trap."
+)
 
 _checks = 0
 
@@ -225,9 +233,38 @@ try:
 
     r = patch(title="Title only")
     ok(r.status_code == 200, "title-only PATCH is 200")
-    ok(snapshot()["subject"] == "padded subject",
-       "title-only PATCH left subject")
+    ok(snapshot()["subject"] == "Title only",
+       "title-only PATCH syncs subject to title (stale subject is #1465)")
     ok(snapshot()["title"] == "Title only", "title-only PATCH persisted title")
+
+    r = patch(title=T1465)
+    ok(r.status_code == 200, "#1465 title-only PATCH is 200")
+    ok(snapshot()["title"] == T1465 and snapshot()["subject"] == T1465,
+       "title-only PATCH copies the one-sentence title onto subject")
+
+    r = patch(title=T1465, subject=S1465)
+    ok(r.status_code == 200, "title+subject PATCH is 200")
+    ok(snapshot()["title"] == T1465 and snapshot()["subject"] == S1465,
+       "both sent: subject stays the operator value (no silent overwrite)")
+
+    with Session(engine) as s:
+        s.add(Video(
+            channel_id=1, topic_id=1, subject=S1465, title=S1465,
+            status=VideoStatus.DRAFT, script=VO1465,
+            creation_config='{"script_source": "provided"}',
+            error=craft.PROVIDED_SCRIPT_HOOK_REASON + " leftover"))
+        s.commit()
+        hook_vid = s.exec(select(Video).where(Video.script == VO1465)).first().id
+    r = patch(hook_vid, title=T1465)
+    ok(r.status_code == 200, "title-only PATCH on a provided script is 200")
+    ok(snapshot(hook_vid)["subject"] == T1465,
+       "provided-script title-only PATCH syncs subject")
+    ok(row(hook_vid).error is None,
+       "aligned title-only PATCH clears a leftover hook error")
+    r = patch(hook_vid, title="Hoje vamos falar de outra coisa. · CrewAI 21")
+    ok(r.status_code == 200, "misaligned title-only PATCH is 200 (error, not 422)")
+    ok((row(hook_vid).error or "").startswith(craft.PROVIDED_SCRIPT_HOOK_REASON),
+       "misaligned title-only PATCH surfaces provided_script_hook_reason")
 
     print("PATCH /api/videos/{id}: null/blank subject is 400, writes nothing")
     before = snapshot()
@@ -279,7 +316,7 @@ try:
     ok(snapshot()["skip_gate"] is None, "skip_gate=null persisted")
     ok(snapshot()["render_profile_id"] is None, "render_profile_id=null persisted")
 
-    r = patch(title="Existing title")
+    r = patch(title="Existing title", subject=before["subject"])
     ok(r.status_code == 200, "restore title is 200")
 
     print("PATCH /api/videos/{id}: 404 + auth")

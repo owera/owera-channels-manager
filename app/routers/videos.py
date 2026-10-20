@@ -342,6 +342,8 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
                  "subject must be a non-empty string "
                  "(null/blank TypeErrors metadata.generate: "
                  "(title or subject)[:100])")
+    title_sent = "title" in data
+    subject_sent = "subject" in data
     if "overrides" in data:
         ov = data.pop("overrides")
         v.overrides_json = json.dumps(ov) if ov else None
@@ -349,6 +351,25 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
         v.tags_json = json.dumps(data.pop("tags") or [])
     for k, val in data.items():
         setattr(v, k, val)
+    # Title is the published claim (gate already prefers it). A title-only
+    # PATCH that leaves subject stale is the #1465 bug: pre-check passed
+    # on the one-sentence title, compose painted the two-sentence subject.
+    # Sync subject → title so seed and claim stay one string. title=null
+    # does not touch subject (subject is NOT NULL). Both sent: operator
+    # owns both. Sync, not 422: Review/title-only save is a one-field
+    # intent; rejecting it would block the exact edit that fixed #1465.
+    if title_sent and not subject_sent:
+        new_title = data.get("title")
+        if isinstance(new_title, str) and new_title.strip():
+            v.subject = new_title.strip()
+    from app.services import craft
+    if craft.is_provided_script(v.creation_config) and (v.script or "").strip():
+        reason = craft.provided_script_hook_reason(
+            v.script, title=v.title, subject=v.subject)
+        if reason:
+            v.error = reason
+        elif (v.error or "").startswith(craft.PROVIDED_SCRIPT_HOOK_REASON):
+            v.error = None
     v.updated_at = utcnow()
     session.add(v)
     session.commit()
