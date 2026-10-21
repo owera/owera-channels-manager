@@ -22,6 +22,10 @@ false→0. Create/upsert/PATCH then bind the trend to channel 1 (or store
 0). Adopt ``body.channel_id or t.channel_id`` treats false as missing
 and adopts onto the trend's own channel, and true adopts onto channel 1.
 
+score bool: lax float coerces JSON true→1.0 / false→0.0. Upsert and
+PATCH then drop a real 0..100 score to 1, or sink it to the legal zero,
+and the score-desc list reorders. Integer 0 and 1 stay legal.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network,
 no LLM). ``video_gen.generate_ideas`` is stubbed. Exits non-zero on the first
 failed assertion.
@@ -804,6 +808,141 @@ try:
            "(mode=after would already have coerced true→1)")
         ok("def _reject_bool_channel" in src,
            f"{name} has _reject_bool_channel")
+
+    print("trend score rejects JSON bool (must not coerce true→1 / false→0)")
+    # Lax float coerces JSON true→1.0 / false→0.0 before the handler.
+    # POST upsert refreshes score, so true drops a real 0..100 score to 1
+    # and GET /api/trends (ORDER BY score DESC) reorders the queue.
+    # false is the legal zero and silently sinks the trend. Integer 0 and
+    # 1 stay legal — a reject-falsy or reject-1 mutant dies below.
+    with Session(engine) as s:
+        s.add(TrendSignal(term="Score Rank", term_norm="score rank",
+                          channel_id=1, status=TrendStatus.WATCHING,
+                          score=92, description="bool score pin"))
+        s.add(TrendSignal(term="Score Low", term_norm="score low",
+                          channel_id=1, status=TrendStatus.WATCHING,
+                          score=10, description="sort sibling"))
+        s.commit()
+        rank_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "score rank")).one().id
+        low_id = s.exec(select(TrendSignal).where(
+            TrendSignal.term_norm == "score low")).one().id
+
+    def _score(tid):
+        with Session(engine) as s:
+            return s.get(TrendSignal, tid).score
+
+    def _rank_before_low():
+        listed = client.get("/api/trends", auth=auth)
+        ids = [row["id"] for row in listed.json()]
+        return listed.status_code, ids.index(rank_id) < ids.index(low_id)
+
+    ok(_score(rank_id) == 92, "precondition: rank score is 92")
+    ok(_score(low_id) == 10, "precondition: low score is 10")
+    status, before = _rank_before_low()
+    ok(status == 200 and before, "precondition: score 92 sorts above 10")
+
+    trends_before = trend_count()
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Rank", "score": True})
+    ok(r.status_code in (400, 422),
+       "upsert score=true is 4xx (must not drop 92 to 1)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "upsert true names boolean and keeps input true "
+       "(mode=after would show 1)")
+    ok(_score(rank_id) == 92, "upsert true left score 92")
+    status, still = _rank_before_low()
+    ok(status == 200 and still, "upsert true left 92 above 10")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Rank", "score": False})
+    ok(r.status_code in (400, 422),
+       "upsert score=false is 4xx (must not sink 92 to the legal zero)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "upsert false names boolean and keeps input false "
+       "(mode=after would show 0)")
+    ok(_score(rank_id) == 92, "upsert false left score 92")
+
+    r = patch_trend(rank_id, score=True)
+    ok(r.status_code in (400, 422),
+       "PATCH score=true is 4xx (must not drop 92 to 1)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "PATCH true names boolean and keeps input true")
+    ok(_score(rank_id) == 92, "PATCH true left score 92")
+
+    r = patch_trend(rank_id, score=False)
+    ok(r.status_code in (400, 422),
+       "PATCH score=false is 4xx (must not store the legal zero)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "PATCH false names boolean and keeps input false")
+    ok(_score(rank_id) == 92, "PATCH false left score 92")
+    status, still = _rank_before_low()
+    ok(status == 200 and still, "PATCH false left 92 above 10")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Create True", "score": True})
+    ok(r.status_code in (400, 422),
+       "create score=true is 4xx (must not insert score 1)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "create true names boolean")
+    ok(trend_by_norm("score create true") is None, "create true writes no row")
+    ok(trend_count() == trends_before, "create true does not insert a trend")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Create False", "score": False})
+    ok(r.status_code in (400, 422),
+       "create score=false is 4xx (must not insert the legal zero)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "create false names boolean (a default-0 insert would be 201)")
+    ok(trend_by_norm("score create false") is None, "create false writes no row")
+    ok(trend_count() == trends_before, "create false does not insert a trend")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Create Zero", "score": 0})
+    ok(r.status_code == 201, "create score=0 is 201 (reject-falsy would 422)")
+    ok(r.json().get("score") == 0, "create integer 0 response score is 0")
+    ok(_score(r.json()["id"]) == 0, "create integer 0 stored 0")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Create One", "score": 1})
+    ok(r.status_code == 201, "create score=1 is 201 (reject-1 would 422)")
+    ok(r.json().get("score") == 1, "create integer 1 response score is 1")
+    ok(_score(r.json()["id"]) == 1, "create integer 1 stored 1")
+
+    r = client.post("/api/trends", auth=auth, json={
+        "term": "Score Rank", "description": "refreshed, score omitted"})
+    ok(r.status_code == 201, "upsert omitting score is 201")
+    ok(_score(rank_id) == 92,
+       "upsert omitting score left 92 (default 0 must not clobber)")
+    ok(trend_desc(rank_id) == "refreshed, score omitted",
+       "upsert omitting score still refreshed the description")
+
+    r = patch_trend(rank_id, score=0)
+    ok(r.status_code == 200 and _score(rank_id) == 0,
+       "PATCH integer 0 stores 0 (the value false would have coerced to)")
+    status, sunk = _rank_before_low()
+    ok(status == 200 and not sunk, "PATCH integer 0 sorts 0 below 10")
+
+    r = patch_trend(rank_id, score=1)
+    ok(r.status_code == 200 and _score(rank_id) == 1,
+       "PATCH integer 1 stores 1 (the value true would have coerced to)")
+
+    r = patch_trend(rank_id, score=92)
+    ok(r.status_code == 200 and _score(rank_id) == 92, "PATCH integer 92 restored")
+    status, restored = _rank_before_low()
+    ok(status == 200 and restored, "restored 92 sorts above 10 again")
+
+    r = patch_trend(rank_id, description="score untouched")
+    ok(r.status_code == 200 and _score(rank_id) == 92,
+       "PATCH omitting score left 92")
+
+    for cls, name in ((TrendCreate, "TrendCreate"), (TrendUpdate, "TrendUpdate")):
+        src = inspect.getsource(cls)
+        ok('@field_validator("score", mode="before")' in src,
+           f"{name} rejects score with mode=before "
+           "(mode=after would already have coerced true→1.0)")
+        ok("def _reject_bool_score" in src, f"{name} has _reject_bool_score")
 finally:
     trends_router.video_gen.generate_ideas = _orig_ideas
     trends_router.video_gen.channel_language = _orig_lang

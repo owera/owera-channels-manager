@@ -294,6 +294,17 @@ class TrendCreate(BaseModel):
             raise ValueError("must be an integer, not a boolean")
         return v
 
+    @field_validator("score", mode="before")
+    @classmethod
+    def _reject_bool_score(cls, v):
+        # Lax float coerces JSON false→0.0 / true→1.0 before the handler.
+        # POST upsert refreshes score, so true drops a real 0..100 score
+        # to 1 and GET /api/trends (ORDER BY score DESC) reorders the
+        # queue. false is the legal zero and silently sinks the trend.
+        if isinstance(v, bool):
+            raise ValueError("must be a number, not a boolean")
+        return v
+
 
 class TrendUpdate(BaseModel):
     description: Optional[str] = None
@@ -313,6 +324,16 @@ class TrendUpdate(BaseModel):
         # PATCH setattr would store 0 or rebind the trend to channel id=1.
         if isinstance(v, bool):
             raise ValueError("must be an integer, not a boolean")
+        return v
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _reject_bool_score(cls, v):
+        # Lax Optional[float] coerces JSON false→0.0 / true→1.0 before
+        # setattr. true rewrites a real score to 1; false stores the
+        # legal zero. Integer 0 and 1 stay valid scores.
+        if isinstance(v, bool):
+            raise ValueError("must be a number, not a boolean")
         return v
 
 
