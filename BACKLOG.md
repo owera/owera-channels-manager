@@ -1962,3 +1962,29 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 77. ✅ DONE (PR autoimprove/2026-10-21-profile-name-floor) POST/PATCH /api/profiles reject a blank profile name — normal
+- **resolution (2026-10-21):** `create_profile` and `update_profile` floor
+  `name` through `_require_str` before insert or any other field write.
+  `""` / `"   "` are 400 and persist nothing. A padded name is stored
+  stripped. Create `null` stays 422 (required str). PATCH `null` still
+  skips the label and still applies the rest of the body. A missing
+  profile stays 404. Suite: `tests/verify_profiles.py` 55 → 94.
+  Dropping the create floor fails at `POST name='' is 400`. Dropping
+  the update floor fails at `PATCH name='' is 400`. A truthy-only guard
+  fails at `POST whitespace name is 400`. An `exclude_unset` floor that
+  400s explicit null fails at `PATCH name=null still skips the field`.
+- **why (found 2026-10-20, not bundled with #76):** `ProfileCreate` stores
+  `name` as given, and `ProfileUpdate` assigns any non-null name.
+  `""` / `"   "` persist. The editor's `disabled={!name}` still sends
+  whitespace, so the profile picker gets a blank row. Same class as
+  the topic and channel name floors.
+- **approach:** strip and 400 an empty name before insert or setattr.
+  A non-blank name still saves. Create `null` stays 422 (required str).
+  PATCH `null` already skips the field — keep that.
+- **caution:** normal (`app/routers/profiles.py`). Not a publish/oauth path.
+- **acceptance:** `""` and `"   "` do not persist on create or PATCH;
+  a real name still saves; PATCH `null` leaves the name alone.
+- **not bundled:** `Profiles.tsx` `disabled={!name}` is still truthy for
+  whitespace, so Save sends it and now gets a 400. Restore the field
+  and skip the request (same class as the topic-name restore).

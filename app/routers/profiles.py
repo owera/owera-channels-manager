@@ -18,6 +18,25 @@ _VOICES_JSON = MPT_DIR / "app" / "services" / "data" / "azure_voices.json"
 _FONTS_DIR = MPT_DIR / "resource" / "fonts"
 
 
+def _require_str(fields: dict, key: str, hint: str) -> None:
+    """Reject a blank / non-str before it hits the DB.
+
+    ``RenderProfile.name`` is what the profile picker renders. Create
+    stored ``body.name`` as given, and PATCH assigned any non-null name,
+    so ``""`` / ``"   "`` persisted a blank option. The editor's
+    ``disabled={!name}`` is truthy for whitespace, so Save still sends
+    it. Create ``null`` is already 422 (required str) and never reaches
+    here. PATCH ``null`` is absent from ``fields`` (the handler skips
+    it) and stays a no-op on the label.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, str) or not v.strip():
+        raise HTTPException(400, hint)
+    fields[key] = v.strip()
+
+
 @router.get("/profiles")
 def list_profiles(channel_id: int | None = None, session: Session = Depends(get_session)):
     q = select(RenderProfile)
@@ -28,7 +47,13 @@ def list_profiles(channel_id: int | None = None, session: Session = Depends(get_
 
 @router.post("/profiles", status_code=201)
 def create_profile(body: ProfileCreate, session: Session = Depends(get_session)):
-    p = RenderProfile(name=body.name, channel_id=body.channel_id,
+    # "" / "   " used to persist (picker option goes blank). Null is
+    # already 422 (ProfileCreate.name is a required str).
+    fields = {"name": body.name}
+    _require_str(fields, "name",
+                 "name must be a non-empty string "
+                 "(blank/whitespace leaves a blank row in the profile picker)")
+    p = RenderProfile(name=fields["name"], channel_id=body.channel_id,
                       engine=body.engine or "mpt",
                       params_json=json.dumps(body.params or {}))
     session.add(p)
@@ -50,8 +75,15 @@ def update_profile(profile_id: int, body: ProfileUpdate, session: Session = Depe
     p = session.get(RenderProfile, profile_id)
     if not p:
         raise HTTPException(404, "profile not found")
+    # null skips (pre-existing). A present blank must 400 before any
+    # other field is written, so a mixed body cannot smuggle an engine
+    # or params change past the floor.
     if body.name is not None:
-        p.name = body.name
+        fields = {"name": body.name}
+        _require_str(fields, "name",
+                     "name must be a non-empty string "
+                     "(blank/whitespace leaves a blank row in the profile picker)")
+        p.name = fields["name"]
     if body.engine is not None:
         p.engine = body.engine
     if body.params is not None:
