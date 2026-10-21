@@ -215,5 +215,58 @@ patched = by_name("OnB")
 ok(patched["channel_id"] == ch_b_id and patched["engine"] == "mpt",
    "PATCH integer left channel B and still applied engine")
 
+# Profiles.tsx is the live SPA path for profile names. disabled={!name}
+# is truthy for "   ", so Save sent the raw field (a blank row on
+# current main; a 400 once the name floor is merged). Empty and
+# whitespace restore and return before mutate. A typed name is trimmed.
+# The language pack builds its own names and stays as it is.
+print("Profiles.tsx profile name: empty/whitespace restores and skips mutate")
+_px = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Profiles.tsx").read_text()
+_ed_s = _px.find("function ProfileEditor")
+_pack_s = _px.find("function LanguagePackModal")
+ok(_ed_s >= 0 and _pack_s > _ed_s, "Profiles.tsx has ProfileEditor before LanguagePackModal")
+_ed = _px[_ed_s:_pack_s]
+_save_s = _ed.find("const save = () => {")
+_save_e = _ed.find("\n  return (", _save_s)
+ok(_save_s >= 0 and _save_e > _save_s, "ProfileEditor has save before its JSX return")
+_save = _ed[_save_s:_save_e]
+_gate = (
+    "    const trimmed = name.trim();\n"
+    "    if (!trimmed) {\n"
+    '      setName(profile.name || "");\n'
+    "      return;\n"
+    "    }\n"
+)
+ok(_gate in _save,
+   "empty/whitespace save restores profile.name (or \"\") and returns (does not mutate)")
+_gate_at = _save.find(_gate)
+_after = _save[_gate_at + len(_gate):]
+ok("updateProfile.mutate" in _after and "return" not in _after.split("updateProfile.mutate")[0],
+   "update mutate is reachable after the empty gate (not an unconditional return)")
+ok("createProfile.mutate" in _after and "return" not in _after.split("createProfile.mutate")[0],
+   "create mutate is reachable after the empty gate")
+ok(_save.count("name: trimmed") == 2, "save sends the trimmed name on create and update")
+ok("body: { name," not in _save, "update does not PATCH the raw name field")
+ok("const body = { name," not in _save, "create does not POST the raw name field")
+ok("engine, params" in _save, "update still sends engine and params with the trimmed name")
+ok("channel_id: channelId ? Number(channelId) : null, params" in _save,
+   "create still sends scope and params with the trimmed name")
+ok(_ed.count("updateProfile.mutate") == 1, "ProfileEditor has one updateProfile.mutate")
+ok(_ed.count("createProfile.mutate") == 1, "ProfileEditor has one createProfile.mutate")
+ok("onClick={save}" in _ed, "the button calls save")
+ok("disabled={m.updateProfile.isPending || m.createProfile.isPending}" in _ed,
+   "save is disabled only while a mutate is pending (blank/whitespace click restores)")
+ok("disabled={!name}" not in _ed, "enable gate is not the truthy-name check")
+ok("disabled={!name.trim()" not in _ed, "save does not disable on trim (that click is the restore)")
+_trim_at = _save.find("name.trim()")
+_restore_at = _save.find('setName(profile.name || "")')
+_ret_at = _save.find("return;", _restore_at)
+_mut = _save.find("updateProfile.mutate")
+ok(0 <= _trim_at < _restore_at < _ret_at < _mut,
+   "trim then restore+return BEFORE mutate (empty never PATCHes or POSTs)")
+_pack = _px[_pack_s:]
+ok("m.createProfile.mutateAsync" in _pack, "language pack still creates through mutateAsync")
+ok("name: `${baseName}" in _pack, "language pack still names rows from the base profile")
+
 print(f"\nALL {_checks} CHECKS PASSED")
 settings.app_password = _orig_pw

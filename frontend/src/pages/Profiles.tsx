@@ -248,9 +248,20 @@ function ProfileEditor({ profile, onClose }: { profile: Partial<RenderProfile>; 
     setParams((p) => { const n = { ...p }; if (v === null || v === "") delete n[k]; else n[k] = v; return n; });
 
   const save = () => {
-    const body = { name, engine, channel_id: channelId ? Number(channelId) : null, params };
-    if (profile.id) m.updateProfile.mutate({ id: profile.id, body: { name, engine, params } }, { onSuccess: onClose });
-    else m.createProfile.mutate(body, { onSuccess: onClose });
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setName(profile.name || "");
+      return;
+    }
+    if (profile.id) {
+      m.updateProfile.mutate(
+        { id: profile.id, body: { name: trimmed, engine, params } },
+        { onSuccess: onClose });
+    } else {
+      m.createProfile.mutate(
+        { name: trimmed, engine, channel_id: channelId ? Number(channelId) : null, params },
+        { onSuccess: onClose });
+    }
   };
 
   return (
@@ -319,7 +330,9 @@ function ProfileEditor({ profile, onClose }: { profile: Partial<RenderProfile>; 
         </div>
       </div>
 
-      <button className="btn btn-signal w-full mt-4" disabled={!name} onClick={save}>
+      <button className="btn btn-signal w-full mt-4"
+        disabled={m.updateProfile.isPending || m.createProfile.isPending}
+        onClick={save}>
         {profile.id ? "save profile" : "create profile"}
       </button>
     </Modal>

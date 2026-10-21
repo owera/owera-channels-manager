@@ -1962,3 +1962,24 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 78. ✅ DONE (PR autoimprove/2026-10-21-profile-name-restore) Profile editor empty name restores instead of saving whitespace — normal
+- **resolution (2026-10-21):** `ProfileEditor.save` trims the name. An
+  empty result restores `profile.name` (or `""` on create) and returns
+  before `updateProfile` / `createProfile`. A real name is sent trimmed.
+  The button stays enabled for a blank field so that click is the
+  restore; it disables only while a mutate is pending. The language
+  pack still names rows from the base profile. Suite:
+  `tests/verify_profiles.py` 55 → 74. Dropping the gate fails at
+  `empty/whitespace save restores profile.name`. Sending the raw field
+  fails at `save sends the trimmed name`.
+- **why (found with the profile-name API floor, not bundled):**
+  `disabled={!name}` is truthy for `"   "`, so Save sent the raw field.
+  On current main that persists a blank picker row. Once the API floor
+  is merged that click is a 400.
+- **approach:** same restore as the topic-name editor. Do not disable
+  on `!name` or `!name.trim()` — that click is what snaps the field back.
+- **caution:** normal (`frontend/src/pages/Profiles.tsx` only). Not a
+  publish/oauth path.
+- **acceptance:** whitespace and empty Save do not call mutate; a padded
+  name is sent trimmed; engine, scope, and params still go with it.
