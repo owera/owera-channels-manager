@@ -526,6 +526,31 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-21 golden: unpatterned subjects locked grok meta onto frame0.
+_FLAKE_1021_CODE = (
+    "This title is a known craft fixture. "
+    "Your RAG is slow and still wrong. Cosine search already found the page."
+)
+ok(worker._strip_script_preamble(_FLAKE_1021_CODE).startswith(
+    "Your RAG is slow and still wrong."),
+   "10-21 ch1-code flake: 'known craft fixture' drops, the RAG claim stays")
+ok("craft fixture" not in worker._strip_script_preamble(_FLAKE_1021_CODE).lower(),
+   "10-21 craft-fixture CoT does not leak into the VO")
+_FLAKE_1021_CONCEPT = (
+    "The scratch folder is empty. "
+    "Why your AI agent forgets everything between chats. Nothing was saved."
+)
+ok(worker._strip_script_preamble(_FLAKE_1021_CONCEPT).startswith(
+    "Why your AI agent forgets everything between chats."),
+   "10-21 ch1-concept flake: scratch-folder cwd note drops")
+ok("scratch folder" not in worker._strip_script_preamble(_FLAKE_1021_CONCEPT).lower(),
+   "10-21 scratch-folder CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "The hook has to hit the slow-RAG pain in sentence one. "
+    "Your RAG is slow and still wrong."
+).startswith("Your RAG is slow and still wrong."),
+   "craft-brief 'The hook has to' drops; the claim stays")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
