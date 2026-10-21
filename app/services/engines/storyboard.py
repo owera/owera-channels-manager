@@ -874,15 +874,19 @@ def render_cta(b, ctx):
 # Off by default — enable per the rollout by adding the type to settings.composition_beat_types.
 
 def render_code(b, ctx):
+    from app.services import craft
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
     hl = set(b.get("highlight") or [])
     lang = ('<div class="code-lang">' + theme.esc(b["lang"]) + "</div>") if b.get("lang") else ""
-    lines = "".join('<span class="ln' + (" hl" if j in hl else "") + '">' + theme.esc(ln) + "</span>"
-                    for j, ln in enumerate(b["lines"]))
-    # Shrink the whole block to the longest line so monospace never clips (mono advance ~0.6em).
-    maxlen = max((len(ln) for ln in b["lines"]), default=1)
-    fs = int(max(24, min(ctx["width"] * 0.052, (ctx["width"] * 0.80) / (maxlen * 0.62))))
+    # Shrink the whole block to the longest line (mono advance ~0.6em); at the
+    # floor, wrap over-long lines at spaces into extra visual lines (#1453).
+    # Visual only: b["lines"] is untouched (allowlist byte match).
+    lay = craft.code_layout([str(ln) for ln in b["lines"]], ctx["width"],
+                            ctx.get("height") or 1920, "code")
+    fs = lay["fs"]
+    lines = "".join('<span class="ln' + (" hl" if j in hl else "") + '">' + theme.esc(p) + "</span>"
+                    for j, parts in enumerate(lay["rows"]) for p in parts)
     inner = lang + '<pre class="code" style="font-size:' + str(fs) + 'px">' + lines + "</pre>"
     tw = []
     if b.get("lang"):
@@ -892,16 +896,21 @@ def render_code(b, ctx):
 
 
 def render_command(b, ctx):
+    from app.services import craft
     i, s = ctx["i"], ctx["start"]
     bid = "#b" + str(i)
-    out = "".join('<span class="cmd-out">' + theme.esc(o) + "</span>" for o in b.get("output", []))
-    # Shrink to the longest line (command or any output row) so nothing clips.
-    maxlen = max([len(b.get("prompt", "$")) + 1 + len(b["command"])] +
-                 [len(o) for o in b.get("output", [])] or [1])
-    fs = int(max(22, min(ctx["width"] * 0.05, (ctx["width"] * 0.80) / (maxlen * 0.62))))
+    prompt = b.get("prompt", "$")
+    # Shrink to the longest row; at the floor wrap at spaces (visual only, #1453).
+    lay = craft.code_layout([prompt + " " + b["command"]] + [str(o) for o in b.get("output", [])],
+                            ctx["width"], ctx.get("height") or 1920, "command")
+    fs = lay["fs"]
+    cmd_rows = list(lay["rows"][0])
+    cmd_rows[0] = cmd_rows[0][len(prompt) + 1:] if cmd_rows[0].startswith(prompt + " ") else cmd_rows[0]
+    out = "".join('<span class="cmd-out">' + "<br>".join(theme.esc(p) for p in parts) + "</span>"
+                  for parts in lay["rows"][1:])
     inner = ('<div class="cmd" style="font-size:' + str(fs) + 'px"><div class="cmd-line">'
-             '<span class="cmd-prompt">' + theme.esc(b.get("prompt", "$")) + '</span> '
-             '<span class="cmd-cmd">' + theme.esc(b["command"]) + "</span></div>" + out + "</div>")
+             '<span class="cmd-prompt">' + theme.esc(prompt) + '</span> '
+             '<span class="cmd-cmd">' + "<br>".join(theme.esc(p) for p in cmd_rows) + "</span></div>" + out + "</div>")
     tw = [_from(bid + " .cmd-cmd", s, "opacity:0", "opacity:1", dur=0.2)]
     for j in range(len(b.get("output", []))):
         # children of .cmd: .cmd-line (1), then .cmd-out (2,3,...)
