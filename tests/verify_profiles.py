@@ -1,4 +1,5 @@
-"""Regression checks for POST /api/profiles channel_id bool coercion.
+"""Regression checks for POST /api/profiles channel_id bool coercion
+and the profile-name floor (backlog #77).
 
 channel_id bool (backlog #58): lax Optional[int] coerces JSON true→1 /
 false→0 before the handler. true binds the new render profile to channel
@@ -14,6 +15,7 @@ Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, lifespan/scheduler never started). Exits non-zero on the first
 failed assertion.
 """
+import inspect
 import sys
 from pathlib import Path
 
@@ -214,6 +216,105 @@ ok(r.status_code == 200, "PATCH integer channel_id is ignored")
 patched = by_name("OnB")
 ok(patched["channel_id"] == ch_b_id and patched["engine"] == "mpt",
    "PATCH integer left channel B and still applied engine")
+
+# Blank name (backlog #77). ProfileCreate/ProfileUpdate accept "" and
+# "   ". Create stored body.name as given. PATCH assigned any non-null
+# name. The editor's disabled={!name} is truthy for whitespace, so Save
+# still sends it and the profile picker gets a blank option. Create null
+# stays 422 (required str). PATCH null already skips the field.
+print("POST/PATCH name: blank is 400; create null stays 422; PATCH null skips")
+
+n_before = len(names())
+r = client.post("/api/profiles", json={"name": ""})
+ok(r.status_code == 401, "unauthenticated blank create is 401")
+ok(len(names()) == n_before, "unauthenticated blank create writes nothing")
+
+r = client.post("/api/profiles", auth=auth, json={"name": ""})
+ok(r.status_code == 400, "POST name='' is 400")
+ok("non-empty" in r.text, "POST blank name names the floor")
+ok(by_name("") is None, "POST name='' creates no row")
+ok(len(names()) == n_before, "POST name='' adds no row")
+
+r = client.post("/api/profiles", auth=auth, json={"name": "   "})
+ok(r.status_code == 400, "POST whitespace name is 400")
+ok("non-empty" in r.text, "POST whitespace name names the floor")
+ok(by_name("") is None and by_name("   ") is None,
+   "POST whitespace name creates no blank row")
+ok(len(names()) == n_before, "POST whitespace name adds no row")
+
+r = client.post("/api/profiles", auth=auth, json={"name": None})
+ok(r.status_code == 422, "POST name=null stays 422 (required str)")
+ok("non-empty" not in r.text, "POST null name is not the blank-string floor")
+ok(len(names()) == n_before, "POST name=null creates no row")
+
+r = client.post("/api/profiles", auth=auth, json={
+    "name": "  Padded Profile  ", "engine": "hyperframes"})
+ok(r.status_code == 201, "POST padded name is 201")
+ok(r.json().get("name") == "Padded Profile", "POST strips surrounding whitespace")
+ok(by_name("Padded Profile") is not None, "stripped create persisted")
+ok(by_name("  Padded Profile  ") is None, "unstripped padded name was not stored")
+ok(by_name("Padded Profile")["engine"] == "hyperframes",
+   "padded create kept the engine")
+
+onb = by_name("OnB")
+ok(onb is not None and onb["engine"] == "mpt" and onb["name"] == "OnB",
+   "precondition: OnB still named OnB on engine mpt")
+onb_id = onb["id"]
+before_params = onb["params_json"]
+
+r = client.patch(f"/api/profiles/{onb_id}", auth=auth, json={"name": ""})
+ok(r.status_code == 400, "PATCH name='' is 400")
+ok("non-empty" in r.text, "PATCH blank name names the floor")
+ok(by_name("OnB")["name"] == "OnB", "PATCH name='' leaves the label")
+
+r = client.patch(f"/api/profiles/{onb_id}", auth=auth, json={
+    "name": "   ", "engine": "hyperframes", "params": {"video_aspect": "1:1"}})
+ok(r.status_code == 400, "PATCH whitespace name is 400")
+row = by_name("OnB")
+ok(row["name"] == "OnB" and row["engine"] == "mpt"
+   and row["params_json"] == before_params,
+   "PATCH whitespace name writes nothing (engine and params not smuggled)")
+
+r = client.patch(f"/api/profiles/{onb_id}", auth=auth, json={
+    "name": None, "engine": "hyperframes"})
+ok(r.status_code == 200, "PATCH name=null still skips the field")
+row = by_name("OnB")
+ok(row["name"] == "OnB", "PATCH name=null leaves the label")
+ok(row["engine"] == "hyperframes", "PATCH name=null still applies engine")
+
+r = client.patch(f"/api/profiles/{onb_id}", auth=auth, json={"name": "  Kept Name  "})
+ok(r.status_code == 200, "PATCH padded name is 200")
+ok(r.json().get("name") == "Kept Name", "PATCH strips surrounding whitespace")
+ok(by_name("Kept Name") is not None and by_name("OnB") is None,
+   "stripped PATCH name persisted")
+ok(by_name("Kept Name")["engine"] == "hyperframes",
+   "name PATCH left the engine from the null patch")
+
+r = client.patch("/api/profiles/999999", auth=auth, json={"name": ""})
+ok(r.status_code == 404, "missing profile blank name is still 404")
+
+r = client.patch(f"/api/profiles/{onb_id}", json={"name": ""})
+ok(r.status_code == 401, "unauthenticated blank PATCH is 401")
+ok(by_name("Kept Name")["name"] == "Kept Name",
+   "unauthenticated blank PATCH writes nothing")
+
+r = client.patch(f"/api/profiles/{onb_id}", auth=auth, json={"engine": "mpt"})
+ok(r.status_code == 200, "PATCH omitting name is 200")
+ok(by_name("Kept Name")["name"] == "Kept Name"
+   and by_name("Kept Name")["engine"] == "mpt",
+   "omitted name leaves the label and still applies engine")
+
+src_c = inspect.getsource(profiles_router.create_profile)
+src_u = inspect.getsource(profiles_router.update_profile)
+ok(src_c.find("_require_str(") != -1
+   and src_c.find("_require_str(") < src_c.find("session.add"),
+   "create_profile floors name before session.add")
+ok('name=fields["name"]' in src_c,
+   "create stores the stripped name, not body.name")
+req = src_u.find("_require_str(")
+eng = src_u.find("body.engine")
+ok(req != -1 and eng != -1 and req < eng,
+   "update_profile floors name before other fields are written")
 
 print(f"\nALL {_checks} CHECKS PASSED")
 settings.app_password = _orig_pw
