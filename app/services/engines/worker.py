@@ -563,9 +563,12 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 # maps to the Agent memory series" / "The tests pin this to the Agent memory
 # series" / "Checking the workspace for the series name"; 09-22: the word-count
 # retry leaked "Conferindo a contagem para ficar na faixa de 70 a 100 palavras"
-# onto frame0/title). Frame0/title lock that garbage onto the video. Strip
-# leading assistant-planning sentences only — a real @workspace / Copilot hook
-# is not first-person planning.
+# onto frame0/title; 10-21: ch1-code locked "This title is a known craft
+# fixture." and ch1-concept locked "The scratch folder is empty." — grok
+# naming the prompt fixture and inspecting its cwd). Frame0/title lock that
+# garbage onto the video. Strip assistant-planning sentences only — a real
+# @workspace / Copilot hook, and a real "This title is the bug" claim, are
+# not this class.
 _PREAMBLE_START = re.compile(
     r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
     r"Checking the workspace|"
@@ -574,6 +577,9 @@ _PREAMBLE_START = re.compile(
     r"Conferindo a contagem|"
     r"The tests pin|The title maps|The title is a two-beat|"
     r"This title is tied|"
+    r"This title is a known craft fixture|"
+    r"The scratch folder|Scratch folder is empty|The workspace is empty|"
+    r"The hook has to|"
     r"The endcard|"
     r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
@@ -586,6 +592,9 @@ _PREAMBLE_BODY = re.compile(
     r"check(?:ing)? the workspace|craft rules|script shape|"
     r"expected script|series name|tests pin|title maps|"
     r"pin this to|endcard line|"
+    r"scratch folder is empty|"
+    r"craft fixture|"
+    r"the hook has to|"
     r"faixa de \d+ a \d+ palavras|"
     r"\d+\s*(?:to|-)\s*\d+\s*words|"
     r"word[- ]count|"
