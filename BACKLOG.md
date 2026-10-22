@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 80. ✅ DONE (PR autoimprove/2026-10-22-channel-name-restore) Add-channel modal empty name restores instead of posting whitespace — normal
+- **resolution (2026-10-22):** `Channels.addChannel` trims the name. An
+  empty result restores `""` and returns before `createChannel`. A real
+  name is sent trimmed for both `name` and `slug`. The button stays
+  enabled for a blank field so that click is the restore; it disables
+  only while the create is pending. Suite: `tests/verify_channels.py`
+  135 → 150. Dropping the gate fails at `empty/whitespace create
+  restores`. Sending the raw slug fails at `create POSTs the trimmed
+  name and the trimmed slug`.
+- **why (found with the channel-name API floor, not bundled):**
+  `disabled={!name}` is truthy for `"   "`, so Create sent the raw
+  field. `_slugify("   ")` is `""` because the spaces are truthy, so
+  that click inserts `slug=""`. Once the API floor is merged that
+  click is a 400.
+- **approach:** same restore as the topic-name and profile-name
+  editors. Do not disable on `!name` or `!name.trim()` — that click
+  is what snaps the field back.
+- **caution:** normal (`frontend/src/pages/Channels.tsx` only). Not a
+  publish/oauth path. Topic create/edit stay as they are (open PR).
+- **acceptance:** whitespace and empty Create do not POST; a padded
+  name POSTs trimmed name and slug and still closes the modal.

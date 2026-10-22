@@ -274,6 +274,19 @@ export default function Channels() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const selected = channels?.find((c) => c.id === sel) || channels?.[0];
+  // Whitespace is truthy, so the button stays enabled: an empty trim
+  // restores instead of posting a blank slug.
+  const addChannel = () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setName("");
+      return;
+    }
+    m.createChannel.mutate(
+      { name: trimmed, slug: trimmed },
+      { onSuccess: () => { setOpen(false); setName(""); } },
+    );
+  };
 
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
@@ -306,8 +319,8 @@ export default function Channels() {
         <Field label="channel name" hint="Use a separate Google Cloud project + client_secret.json per channel (independent quota).">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="AI Engineering Shorts" />
         </Field>
-        <button className="btn btn-signal w-full" disabled={!name || m.createChannel.isPending}
-          onClick={() => m.createChannel.mutate({ name, slug: name }, { onSuccess: () => { setOpen(false); setName(""); } })}>
+        <button className="btn btn-signal w-full" disabled={m.createChannel.isPending}
+          onClick={addChannel}>
           create channel
         </button>
       </Modal>
