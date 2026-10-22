@@ -453,4 +453,57 @@ finally:
     settings.app_password = _orig_pw
 
 
+# Channels.tsx is the live SPA path for a new channel name. ``disabled={!name}``
+# is truthy for ``"   "``, so Create sent the raw field. ``_slugify("   ")``
+# is ``""`` (the spaces are truthy), so that click inserts ``slug=""``.
+# Once the name floor lands, the same click is a 400. Empty and whitespace
+# restore ``""`` and return before mutate. A typed name is sent trimmed
+# for both name and slug. Topic editors are a different item.
+print("Channels.tsx add-channel: empty/whitespace restores and skips POST")
+_ch = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Channels.tsx").read_text()
+_fn_s = _ch.find("export default function Channels()")
+ok(_fn_s >= 0, "Channels.tsx has the page component")
+_fn = _ch[_fn_s:]
+_add_s = _fn.find("const addChannel = () => {")
+_add_e = _fn.find("\n  return (", _add_s)
+ok(_add_s >= 0 and _add_e > _add_s, "Channels() has addChannel before its JSX return")
+_add = _fn[_add_s:_add_e]
+_gate = (
+    "    const trimmed = name.trim();\n"
+    "    if (!trimmed) {\n"
+    '      setName("");\n'
+    "      return;\n"
+    "    }\n"
+)
+ok(_gate in _add,
+   "empty/whitespace create restores \"\" and returns (does not POST)")
+_g = _add.find(_gate)
+_after = _add[_g + len(_gate):]
+_mut = _after.find("createChannel.mutate")
+ok(_mut >= 0 and "return" not in _after[:_mut],
+   "create mutate is reachable after the empty gate (not an unconditional return)")
+ok("{ name: trimmed, slug: trimmed }" in _add,
+   "create POSTs the trimmed name and the trimmed slug")
+ok("slug: name" not in _add, "create does not POST the raw name as slug")
+ok("mutate({ name, slug: name }" not in _add,
+   "create does not POST the raw name field")
+ok(_fn.count("createChannel.mutate") == 1, "Channels() has one createChannel.mutate")
+ok("onClick={addChannel}" in _fn, "the create button calls addChannel")
+ok("disabled={m.createChannel.isPending}\n          onClick={addChannel}>" in _fn,
+   "create is disabled only while pending (blank/whitespace click restores)")
+ok("disabled={!name" not in _fn, "enable gate is not the truthy-name check")
+ok("disabled={!name.trim()" not in _fn,
+   "create does not disable on trim (that click is the restore)")
+ok("disabled={!trimmed" not in _fn,
+   "create does not disable on the trimmed value (that click is the restore)")
+_trim_at = _add.find("name.trim()")
+_restore_at = _add.find('setName("")')
+_ret_at = _add.find("return;", _restore_at)
+_mut2 = _add.find("createChannel.mutate")
+ok(0 <= _trim_at < _restore_at < _ret_at < _mut2,
+   "trim then restore+return BEFORE mutate (empty never POSTs)")
+ok('onSuccess: () => { setOpen(false); setName(""); }' in _add,
+   "a real create still closes the modal and clears the field")
+
+
 print(f"\nALL {_checks} CHECKS PASSED")
