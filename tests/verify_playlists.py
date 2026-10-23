@@ -181,6 +181,14 @@ try:
     ok(_calls["create_playlist"][-1]["privacy"] == "public",
        "omitted privacy stays the PlaylistCreate default public")
 
+    r = post(2, title="On B")
+    ok(r.status_code == 201, "create on channel B is 201")
+    ok(r.json().get("channel_id") == 2, "create on B lands on channel 2")
+    ok(_calls["get_service"][-1] == "b",
+       "create on B probes slug b (a hardcoded get_service('a') dies here)")
+    ok("On B" in titles(2) and "On B" not in titles(1),
+       "create on B wrote the row on B only")
+
     print("POST /api/channels/{id}/playlists: null/bool/omitted title stay 422")
     create_mid = list(_calls["create_playlist"])
     r = post(1)

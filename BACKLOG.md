@@ -1969,9 +1969,10 @@ flag the operator step in the commit body.
   and never call `youtube.create_playlist` (50 quota units). A padded
   title is stored stripped. Null / bool / omitted stay 422 (required
   `str`). NeedsConnect on a real title still 400s and still flips.
-  Suite: `tests/verify_playlists.py` (62 checks). Dropping the floor
+  Suite: `tests/verify_playlists.py` (66 checks). Dropping the floor
   fails at `POST title='' is 400`. A floor after `get_service` fails
-  at `empty title does not call get_service`.
+  at `empty title does not call get_service`. A hardcoded
+  `get_service("a")` fails at `create on B probes slug b`.
 - **why (found ranking remaining setattr after the name floors):**
   `PlaylistCreate.title` accepted `""` / `"   "` and the handler
   forwarded them to `playlists.insert`. Growth-agent / curl still
