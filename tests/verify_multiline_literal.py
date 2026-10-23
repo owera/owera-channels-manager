@@ -99,6 +99,52 @@ ok(fails_all(code(["pydantic.errors.PydanticForbiddenQualifier:", "The annotatio
 ok(not craft.cli_card_whole_allowlisted(code(LINES), None), "sem allowlist não há atalho")
 ok(fails_all(code(LINES + ["extra line"])), "entrada inteira + linha extra falha")
 
+print("VM PR #138: sem fold, sem corte, kinds, strip")
+ok(fails_all(code(["".join(LINES)])), "junção '' numa linha só ('…Theannotation…') falha")
+ok(fails_all(code(["pydantic.errors.PydanticForbiddenQualifier: The annotation\u2026"])),
+   "corte com '…' falha")
+ok(fails_all(code(["pydantic.errors.PydanticForbiddenQualifier: The annotation..."])),
+   "corte com '...' falha")
+ok(fails_all(code([LINES[0] + " "] + LINES[1:])), "espaço no fim de uma linha falha")
+ok(fails_all(code([" " + LINES[0]] + LINES[1:])), "espaço no começo de uma linha falha")
+ok(fails_all(code(LINES[:2] + [""] + LINES[2:])), "linha vazia inserida falha")
+ok(fails_all(code([CMD])), "card code não bate com entrada command (kinds)")
+_cmd_as_out = {"type": "command", "prompt": "$", "command": "uv run", "output": CMD.split(" ")[2:]}
+ok(craft.literal_hits([_cmd_as_out], SCRIPT, ALLOW), "command+output juntos não batem com entrada única")
+_err_cmd = {"type": "command", "prompt": "$", "command": ERR, "output": []}
+ok(craft.literal_hits([_err_cmd], SCRIPT, ALLOW), "command card não bate com entrada error (kinds)")
+_cmd_out = {"type": "command", "prompt": "$", "command": CMD, "output": LINES}
+ok(not craft.literal_hits([_cmd_out], SCRIPT, ALLOW), "command + output (erro inteiro em linhas) passa")
+ok(craft.source_literal("".join(LINES), ALLOW, craft.CLI_ALLOW_KINDS),
+   "source_literal (não-CLI) mantém o fold de sempre")
+
+print("entrada multi-linha: run contíguo e em ordem de UMA entrada")
+ML = "Traceback (most recent call last):\n  File \"repro.py\", line 3, in <module>\n    run()\nValueError: boom"
+ML2 = "line A\nline B"
+ALLOW_ML = ALLOW + [{"kind": "log", "text": ML, "source": "x"}, {"kind": "error", "text": ML2, "source": "x"}]
+_ml = ML.splitlines()
+
+
+def lit_ok(lines, allow=ALLOW_ML):
+    c = code(lines)
+    return (not craft.literal_hits([c], SCRIPT, allow) and craft.card_is_literal(c, SCRIPT, allow)
+            and not craft.fabricated_cli([c], SCRIPT, allow))
+
+
+ok(lit_ok(_ml), "todas as linhas da entrada multi-linha passam")
+ok(lit_ok(_ml[1:3]), "run contíguo (com indentação crua) passa")
+ok(lit_ok(_ml[3:]), "uma linha inteira de entrada multi-linha passa")
+ok(not lit_ok([_ml[1], _ml[0]]), "linhas fora de ordem falham")
+ok(not lit_ok([_ml[0], _ml[2]]), "linha pulada falha")
+ok(not lit_ok([_ml[3], "line A"]), "misturar entradas falha")
+ok(not lit_ok([_ml[1].strip()]), "linha sem a indentação crua falha")
+ok(not lit_ok([_ml[0], ""]), "linha vazia falha")
+ok(not lit_ok(["ValueError: bo\u2026"]), "corte com '…' de linha multi-linha falha")
+ok(not lit_ok([CMD]), "linhas de entrada command não valem para card code")
+for _k, _ln in enumerate(LINES):
+    ok(not lit_ok([_ln]), f"linha quebrada {_k + 1} do c5 sozinha falha (entrada de uma linha)")
+ok(not lit_ok([LINES[0], ERR]), "linha + entrada inteira (mistura) falha")
+
 print("command")
 _cmd = {"type": "command", "prompt": "$", "command": CMD, "output": [], "_lit": True}
 ok(passes(_cmd), "command card byte-exato passa")
