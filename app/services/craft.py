@@ -1848,6 +1848,10 @@ def card_is_literal(beat: dict, script: str | None, sources=None,
     if not parts:
         return True
     typ = (beat.get("type") or "") if isinstance(beat, dict) else ""
+    if cli_card_whole_allowlisted(beat, sources):
+        parts = [(f, t) for f, t in parts if f not in ("line", "command", "output")]
+        if not parts:
+            return True
     if not all(_part_is_literal(f, t, script, sources, typ=typ) for f, t in parts):
         return False
     spoken = spoken_text(words)
@@ -3070,10 +3074,24 @@ def text_in_script(text: str | None, script: str | None) -> bool:
     return True
 
 
-def fabricated_cli(beats, script: str | None) -> list[dict]:
-    """Command/code cards showing text the narration never says."""
+def cli_card_whole_allowlisted(beat: dict | None, sources) -> bool:
+    """Multi-line command/code/log/error card whose lines, joined with a
+    single space (as ``source_card_screen_text``), are BYTE-EXACT to one whole
+    allowlist entry. No fold, no substring, no per-line fragment (#1453 c5)."""
+    if sources is None or not isinstance(beat, dict):
+        return False
+    if (beat.get("type") or "") not in CLI_BEAT_TYPES or not cli_lines(beat):
+        return False
+    return is_allowlisted_source_card(beat, sources)
+
+
+def fabricated_cli(beats, script: str | None, sources=None) -> list[dict]:
+    """Command/code cards showing text the narration never says (a card whose
+    space-joined lines are byte-exact to a whole allowlist entry passes)."""
     out = []
     for i, b in enumerate(b for b in (beats or []) if isinstance(b, dict)):
+        if cli_card_whole_allowlisted(b, sources):
+            continue
         bad = [ln for ln in cli_lines(b) if not text_in_script(ln, script)]
         if bad:
             out.append({"i": i, "type": b.get("type"), "text": bad[:3]})
@@ -3337,7 +3355,7 @@ def literal_hits(beats, script: str | None, sources) -> list[dict]:
         prev_versions = shown_versions
         if i == 0 and typ == "hook":
             continue
-        if typ in CLI_BEAT_TYPES:
+        if typ in CLI_BEAT_TYPES and not cli_card_whole_allowlisted(b, sources):
             bad = [ln for ln in cli_lines(b) if not source_literal(ln, sources, CLI_ALLOW_KINDS)]
             if bad:
                 out.append({"i": i, "type": typ, "check": "not_in_allowlist", "text": bad[:3],
@@ -3377,7 +3395,7 @@ def cli_check_marker(beats, script: str | None, *, title: str | None = None,
                 "hits": literal_hits(beats, script, sources)}
     if not is_product_teaser(title, topic_name):
         return None
-    return {"version": CLI_V1, "hits": fabricated_cli(beats, script)}
+    return {"version": CLI_V1, "hits": fabricated_cli(beats, script, sources)}
 
 
 def cli_check_hits(cli_check: dict | None) -> list[str]:
@@ -3386,7 +3404,7 @@ def cli_check_hits(cli_check: dict | None) -> list[str]:
     hits = []
     for h in cli_check.get("hits") or []:
         if isinstance(h, dict):
-            shown = " / ".join(str(x) for x in (h.get("text") or []))
+            shown = " ".join(str(x) for x in (h.get("text") or []))
             why = h.get("why") or "which the narration never says"
             sep = ": " if h.get("why") else ", "
             hits.append(f"card {h.get('i')} ({h.get('type')}) shows {shown!r}{sep}{why}")
