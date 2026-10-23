@@ -11,6 +11,22 @@ from app.services import notify, youtube
 router = APIRouter(prefix="/api/channels/{channel_id}/playlists", tags=["playlists"])
 
 
+def _require_str(fields: dict, key: str, hint: str) -> None:
+    """Reject JSON blank / whitespace before they hit YouTube.
+
+    ``PlaylistCreate.title`` is a required str, so null/bool already 422.
+    ``""`` / ``"   "`` used to reach ``youtube.create_playlist``
+    (``playlists.insert``, 50 quota units). Floor before ``get_service``
+    so a bad title never probes the token.
+    """
+    if key not in fields:
+        return
+    v = fields[key]
+    if not isinstance(v, str) or not v.strip():
+        raise HTTPException(400, hint)
+    fields[key] = v.strip()
+
+
 def _require_channel(channel_id: int, session: Session) -> Channel:
     ch = session.get(Channel, channel_id)
     if not ch:
@@ -53,13 +69,18 @@ def sync(channel_id: int, session: Session = Depends(get_session)):
 @router.post("", status_code=201)
 def create(channel_id: int, body: PlaylistCreate, session: Session = Depends(get_session)):
     ch = _require_channel(channel_id, session)
+    fields = body.model_dump()
+    _require_str(fields, "title",
+                 "title must be a non-empty string "
+                 "(blank title would still call playlists.insert, 50 quota units)")
     try:
         service = youtube.get_service(ch.slug)
     except youtube.NeedsConnect as e:
         # A dead token must not hide behind the 400 (see youtube_admin._connected).
         notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(400, f"connect the channel first: {e}")
-    r = youtube.create_playlist(service, body.title, body.description, body.privacy)
+    r = youtube.create_playlist(
+        service, fields["title"], body.description, body.privacy)
     p = Playlist(channel_id=channel_id, last_synced_at=utcnow(), **r)
     session.add(p)
     session.commit()

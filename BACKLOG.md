@@ -1962,3 +1962,23 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 81. ✅ DONE (PR autoimprove/2026-10-23-playlist-title-floor) POST /api/channels/{id}/playlists rejects a blank title — normal
+- **resolution (2026-10-23):** `create` floors `title` through `_require_str`
+  after the channel 404 and before `get_service`. `""` / `"   "` are 400
+  and never call `youtube.create_playlist` (50 quota units). A padded
+  title is stored stripped. Null / bool / omitted stay 422 (required
+  `str`). NeedsConnect on a real title still 400s and still flips.
+  Suite: `tests/verify_playlists.py` (62 checks). Dropping the floor
+  fails at `POST title='' is 400`. A floor after `get_service` fails
+  at `empty title does not call get_service`.
+- **why (found ranking remaining setattr after the name floors):**
+  `PlaylistCreate.title` accepted `""` / `"   "` and the handler
+  forwarded them to `playlists.insert`. Growth-agent / curl still
+  reach this path; the SPA auto-creates playlists on first produce.
+- **caution:** normal (`playlists.py` create only). Isolated commit +
+  regression tests. `youtube.py` untouched. Not a publish/oauth path.
+- **acceptance:** `""` and `"   "` are 400 and write nothing; a padded
+  title creates stripped; missing channel still 404; a dead token on
+  a real title still 400s.
+- **not bundled:** empty `privacy` still forwards `""` to YouTube.
