@@ -1962,3 +1962,28 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 83. ✅ DONE (PR autoimprove/2026-10-24-playlist-privacy-floor) POST /api/channels/{id}/playlists rejects a blank or illegal privacy — normal
+- **resolution (2026-10-24):** `PlaylistCreate._reject_blank_privacy`
+  (`mode="before"`) strips `privacy` and requires `public` / `unlisted`
+  / `private`. Blank, whitespace, null, bool, and anything else is 422
+  before the route, so `get_service` is not called. A padded legal value
+  is forwarded stripped. Omitted stays the `public` default. Description
+  padding is left alone. Title is not this floor. A real privacy on a
+  dead token is still 400 and still flips. Suite:
+  `tests/verify_playlist_privacy.py` (56 checks). Before the floor,
+  POST `privacy=""` was 201 and called `create_playlist` with `""`.
+- **why (left open by the playlist title floor):** `create` forwarded
+  `body.privacy` into `playlists.insert` after probing the token.
+  `""` and `"   "` are not a YouTube `privacyStatus`. The SPA does not
+  call this route; growth-agent / curl still do. Auto-created playlists
+  use `channel.default_privacy` (separate floor).
+- **caution:** normal (`schemas.py` PlaylistCreate only). Isolated
+  commit + regression tests. `youtube.py` and `playlists.py` untouched.
+- **acceptance:** `""`, whitespace, null, bool, `secret`, and `Public`
+  are 422 and do not call YouTube; `"  private  "` is stored `private`
+  while description padding is kept; omitted privacy is `public`;
+  missing channel + public is 404 before `get_service`; a dead token
+  on a real privacy still 400s and flips.
+- **not bundled:** `VideoUpdate.privacy` whitespace is truthy and wins
+  the publish `or`. Title blank is the separate playlist-title floor.

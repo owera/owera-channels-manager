@@ -60,6 +60,20 @@ class PlaylistCreate(BaseModel):
     description: str = ""
     privacy: str = "public"
 
+    @field_validator("privacy", mode="before")
+    @classmethod
+    def _reject_blank_privacy(cls, v):
+        # "" / "   " used to reach youtube.create_playlist (playlists.insert,
+        # 50 quota units) after get_service. "   " is not a privacyStatus.
+        # Schema validation runs before the route, so a bad privacy never
+        # probes the token. Description may stay blank. Title is not this
+        # floor.
+        if isinstance(v, str):
+            v = v.strip()
+        if v not in ("public", "unlisted", "private"):
+            raise ValueError("privacy must be public, unlisted, or private")
+        return v
+
 
 class ProfileCreate(BaseModel):
     name: str
