@@ -5,6 +5,25 @@ from typing import Any, Optional
 from pydantic import BaseModel, field_validator
 
 
+# YouTube privacyStatus. publish_loop uploads
+# ``video.privacy or channel.default_privacy`` and ensure_topic_playlist
+# passes ``channel.default_privacy`` into playlists.insert with no
+# fallback, so a blank or unknown value is a failed upload / a 50-unit
+# insert. The column is NOT NULL: JSON null would IntegrityError on
+# commit (the auth middleware then reports that as 401).
+_PRIVACY_VALUES = ("public", "unlisted", "private")
+
+
+def _privacy_or_reject(v):
+    if isinstance(v, str):
+        v = v.strip()
+    if v not in _PRIVACY_VALUES:
+        raise ValueError(
+            "default_privacy must be public, unlisted, or private"
+        )
+    return v
+
+
 class ChannelCreate(BaseModel):
     name: str
     slug: str
@@ -12,6 +31,13 @@ class ChannelCreate(BaseModel):
     default_skip_gate: bool = False
     daily_render_budget: int = 6
     daily_publish_budget: int = 6
+
+    @field_validator("default_privacy", mode="before")
+    @classmethod
+    def _reject_blank_privacy(cls, v):
+        # "" / "   " used to persist and reach playlists.insert. "   " is
+        # also truthy on the publish ``or``, so it is uploaded as-is.
+        return _privacy_or_reject(v)
 
     @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
     @classmethod
@@ -35,6 +61,14 @@ class ChannelUpdate(BaseModel):
     # publish_tz (IANA name, e.g. "America/Sao_Paulo"). Null/"" clears.
     publish_windows: Optional[str] = None
     publish_tz: Optional[str] = None
+
+    @field_validator("default_privacy", mode="before")
+    @classmethod
+    def _reject_blank_privacy(cls, v):
+        # Same floor as ChannelCreate. Omitted is not validated (the
+        # default None means "leave the column alone"). Explicit null
+        # is rejected here, before setattr.
+        return _privacy_or_reject(v)
 
     @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
     @classmethod
