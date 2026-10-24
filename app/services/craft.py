@@ -792,12 +792,16 @@ def split_text_lines(text: str | None, px: float, inner_w: float) -> int:
     return lines
 
 
-def split_box(width: int, height: int) -> dict:
-    """The 9%–72% × 8%-padded box both outputs place the pair in (px)."""
-    top = height * SPLIT_BOX_TOP_FRAC
-    return {"top": top, "height": height * SPLIT_BOX_BOTTOM_FRAC - top,
-            "left": width * SPLIT_PAD_LEFT_FRAC,
-            "width": width * (1 - SPLIT_PAD_LEFT_FRAC - SPLIT_PAD_RIGHT_FRAC)}
+def split_box(width: int, height: int, safe_area: dict | None = None) -> dict:
+    """The box both outputs place the pair in (px). Per-aspect fractions come
+    from ``scene.SPLIT_BOXES`` (9:16 = the historical 9%–72% box, 8% left /
+    11% right); a profile may pass its own ``safe_area`` fractions."""
+    from app.services import scene as _scene
+    f = _scene.split_box_fracs(width, height, safe_area)
+    top = height * f["top"]
+    return {"top": top, "height": height * f["bottom"] - top,
+            "left": width * f["left"],
+            "width": width * (1 - f["left"] - f["right"])}
 
 
 def split_card_height(label: str | None, text: str | None, px: float,
@@ -1217,6 +1221,8 @@ _BEAT_SNAP_KEYS = (
     # command output / quote attribution). Older snapshots lack these keys —
     # screen_text_key then sees less copy and never over-matches (fail-open).
     "term", "definition", "left", "right", "output", "attribution",
+    # scene/v1 terminal beat: recorded .cast (path, pinned sha256, prompt)
+    "cast", "cast_sha256", "cast_prompt",
     # plain quote = no quote mark on screen (renderer); the quote-mark checks
     # (unspoken quote, literal-card source match) must see it.
     "plain",
@@ -3500,7 +3506,9 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                      words=None,
                      sources=None,
                      description=None,
-                     description_required: bool = False) -> dict:
+                     description_required: bool = False,
+                     cta_legibility: dict | None = None,
+                     terminal_check: dict | None = None) -> dict:
     """A+B+C PASS/FAIL for YouTube Shorts. Longs are exempt (all PASS, no reasons)."""
     checks = {"A": "PASS", "B": "PASS", "C": "PASS"}
     reasons: list[str] = []
@@ -3687,6 +3695,26 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                 "clause (compare/list items: a contiguous VO span) or a "
                 "verbatim on_screen_allow line."
             )
+    # CTA legibility (scene/v1, render rethink phase 1): px floor per aspect
+    # + contrast ≥7:1 main / ≥4.5:1 sub. Marked renders only; a malformed
+    # marker fails closed.
+    from app.services import scene as _scene
+    leg_hits = [f"{h['check']}: {h['detail']}"
+                for h in _scene.cta_legibility_hits(cta_legibility)]
+    if leg_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] cta_legibility: FAIL — " + "; ".join(leg_hits) +
+            ". The CTA must clear the per-aspect px floor and WCAG contrast "
+            "(main ≥7:1, sub ≥4.5:1) against the instance theme.")
+    # Terminal scenes: recorded .cast text must be strict-literal allowlisted.
+    term_hits = _scene.terminal_check_hits(terminal_check)
+    if term_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Terminal cast: FAIL — " + "; ".join(term_hits) +
+            ". A terminal scene replays only a recorded .cast whose commands and "
+            "output are byte-exact on_screen_allow entries (strict CLI rules).")
     timing_hits = card_timing_check_hits(card_timing)
     _os_closed = (brand or "") == "os"
     if not timing_hits and words:
@@ -3898,10 +3926,17 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
                     "enumeration_needs_rewrite": enum_hits,
                     "description_missing_source": src_hits,
                     "allowlist_required": al_hits,
+                    "cta_legibility": leg_hits,
+                    "terminal_cast": term_hits,
                     "slide_spam": c_hits})
     out = {"result": result, "checks": checks, "reasons": reasons}
     if kinds:
         out["kinds"] = kinds
+    if isinstance(terminal_check, dict) and terminal_check.get("casts"):
+        # The recorded .cast files this verdict was computed against.
+        out["terminal_casts"] = [{"i": c.get("i"), "cast": c.get("cast"),
+                                  "sha256": c.get("sha256")}
+                                 for c in terminal_check["casts"]]
     return out
 
 
@@ -4091,6 +4126,8 @@ def _recompute_video_maker_gate(cc, content_format, *,
     cvo = cc.get("card_vo") if isinstance(cc.get("card_vo"), dict) else None
     ctime = cc.get("card_timing") if isinstance(cc.get("card_timing"), dict) else None
     al = cc.get("allowlist_check") if isinstance(cc.get("allowlist_check"), dict) else None
+    leg = cc.get("cta_legibility") if "cta_legibility" in cc else None
+    term = cc.get("terminal_check") if "terminal_check" in cc else None
     extra = gate_snapshot_kwargs(cc, description=description,
                                  description_required=description_required,
                                  brand=brand)
@@ -4100,7 +4137,8 @@ def _recompute_video_maker_gate(cc, content_format, *,
         hook_pace=pace, beat_timing=bt, card_sync=sync,
         cli_check=cli, card_text=ctext, card_vo=cvo,
         duration=_as_duration(cc.get("duration")),
-        card_timing=ctime, allowlist_check=al, **extra)
+        card_timing=ctime, allowlist_check=al,
+        cta_legibility=leg, terminal_check=term, **extra)
 
 
 def stamp_description_on_config(creation_config, description, *,

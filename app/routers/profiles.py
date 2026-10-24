@@ -10,6 +10,7 @@ from app.config import MPT_DIR, settings
 from app.db import get_session
 from app.models import RenderProfile, utcnow
 from app.schemas import ProfileCreate, ProfileUpdate
+from app.services import scene as _scene
 from app.services.mpt_client import DEFAULT_PARAMS, mpt
 
 router = APIRouter(prefix="/api", tags=["profiles"])
@@ -107,7 +108,7 @@ def params_options():
 
     return {
         "defaults": DEFAULT_PARAMS,
-        "video_aspect": ["9:16", "16:9", "1:1"],
+        "video_aspect": list(_scene.ASPECTS),
         "video_concat_mode": ["random", "sequential"],
         "video_transition_mode": [None, "Shuffle", "FadeIn", "FadeOut", "SlideIn", "SlideOut"],
         "video_source": ["pexels", "pixabay", "coverr", "local"],

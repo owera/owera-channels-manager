@@ -34,12 +34,11 @@ _esc = theme.esc
 _ASSETS = Path(__file__).resolve().parent / "assets"
 _RENDER_TIMEOUT = 1800           # 30 min hard cap on the CLI subprocess
 
-# video_aspect -> (hyperframes --resolution preset, width, height)
-_ASPECTS = {
-    "9:16": ("portrait", 1080, 1920),
-    "16:9": ("landscape", 1920, 1080),
-    "1:1": ("square", 1080, 1080),
-}
+# video_aspect -> (hyperframes --resolution preset, width, height).
+# Single source: app.services.scene.ASPECTS (scene/v1; adds 4:5 1080x1350).
+from app.services import scene as _scene  # noqa: E402
+
+_ASPECTS = _scene.ASPECTS
 
 # Accent colors cycled per subject hash — gives each video a consistent color identity.
 _ACCENTS = ["#5b8cff", "#00c9a7", "#ff6b35", "#9b5fe0",
@@ -304,8 +303,8 @@ def _status(handle: str, **fields) -> None:
 
 def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
     try:
-        aspect = params.get("video_aspect") or "9:16"
-        resolution, width, height = _ASPECTS.get(aspect, _ASPECTS["9:16"])
+        # Unknown aspect fails closed (no silent 9:16 fallback).
+        resolution, width, height = _scene.resolve_aspect(params.get("video_aspect"))
 
         # 1. Narration script. A provided script (render_loop passes it as
         # params["provided_script"], already endcard-pinned by
@@ -361,6 +360,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
                                          brand=brand, topic_id=params.get("topic_id"))
             used_fallback = True
         (job_dir / "index.html").write_text(html)
+        # 3b. scene/v1 terminal beats: pre-render each recorded .cast with
+        # asciinema-agg. Missing agg / cast → the job FAILS (no fake typing,
+        # no silent fallback composition).
+        _prerender_terminals(html, job_dir, params, width)
         _status(handle, progress=45)
 
         # 4. Render the silent video. Retry once with the safe fallback template.
@@ -393,7 +396,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
 
         # Record the creative choices (the "treatment" signal) for later analytics joins.
         cc = _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,
-                              words=words, brand=brand)
+                              words=words, brand=brand, width=width, height=height)
         cc["script_source"] = "provided" if provided else "generated"
         if hook_join:
             cc["hook_join"] = True
@@ -402,8 +405,20 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
 
 
+def _prerender_terminals(html: str, job_dir: Path, params: dict, width: int) -> None:
+    from app.services import craft
+    beats = craft.beats_from_html(html)
+    if not any(b.get("type") == "terminal" for b in beats):
+        return
+    root = params.get("cast_root")
+    for i, b in enumerate(beats):
+        if b.get("type") == "terminal":
+            _scene.render_terminal_clip(b, Path(root) if root else None, job_dir, i,
+                                        width=width, agg_bin=params.get("agg_bin"))
+
+
 def _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,
-                     *, words=None, brand=None) -> dict:
+                     *, words=None, brand=None, width=None, height=None) -> dict:
     """Snapshot the creative choices this video was made with — the 'treatment' signal the
     growth agent joins to VideoMetric to learn what drives engagement. Best-effort: never
     raises (a bad snapshot must not fail a render)."""
@@ -463,6 +478,18 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                      if not used_fallback else None)
             alchk = craft.allowlist_required_marker(params.get("topic_id"),
                                                     params.get("on_screen_allow"), fmt)
+            if not (width and height):
+                try:
+                    _r, width, height = _scene.resolve_aspect(params.get("video_aspect"))
+                except _scene.UnknownAspectError:
+                    width = height = None
+            # scene/v1: CTA px floor + contrast, and terminal .cast literal check.
+            cleg = (_scene.cta_legibility_marker(beats, th, width, height)
+                    if (width and height and not used_fallback) else None)
+            _croot = params.get("cast_root")
+            tchk = (_scene.terminal_check_marker(beats, params.get("on_screen_allow"),
+                                                 Path(_croot) if _croot else None)
+                    if not used_fallback else None)
             gate = craft.video_maker_gate(beats, content_format=fmt,
                                           used_fallback=used_fallback, hook_pace=pace,
                                           beat_timing=craft.BEAT_TIMING_CURRENT,
@@ -472,7 +499,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                                           brand=brand or params.get("brand"),
                                           script=script, words=words,
                                           sources=params.get("on_screen_allow"),
-                                          description=params.get("description"))
+                                          description=params.get("description"),
+                                          cta_legibility=cleg, terminal_check=tchk)
             # literal_cards topics: generator slips compose repaired (generated
             # evidence card → plain, attribution / stat removed, repeated version
             # dropped) — informational in the VM's craft report, never a verdict.
@@ -506,6 +534,9 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                 **({"sentence_pace": space} if space else {}),
                 **({"card_timing": ctime} if ctime else {}),
                 **({"allowlist_check": alchk} if alchk else {}),
+                **({"cta_legibility": cleg} if cleg else {}),
+                **({"terminal_check": tchk} if tchk else {}),
+                "scene_schema": _scene.SCHEMA,
                 # Designer split card rendered on frame0 → the publish-time thumb
                 # uses the same card (frame0 ≡ thumb); absent on older renders.
                 **({"frame0_split": True} if 'data-split="1"' in html else {}),
