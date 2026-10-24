@@ -36,7 +36,7 @@ Covers, dependency-free (no network, no HyperFrames CLI, no live ffmpeg/TTS/LLM)
   - ``_render`` / ``_mux`` command contracts
   - ``_generate_composition`` version switch + generic compose-exception → ""
     (GrokCLIError re-raises so the render loop can retry)
-  - ``run_job``: happy path, unknown-aspect fallback, invalid HTML →
+  - ``run_job``: happy path, unknown-aspect fails closed, invalid HTML →
     fallback, render-raise rebuild, blank-frame rebuild, any exception →
     STATE_FAILED
 
@@ -77,8 +77,9 @@ def ok(cond, msg):
 # ---------------------------------------------------------------------------
 print("module contracts: aspects, accents, templates, esc, timeout, asset")
 
-ok(set(worker._ASPECTS) == {"9:16", "16:9", "1:1"},
-   "_ASPECTS covers the three render-profile video_aspect values")
+ok(set(worker._ASPECTS) == {"9:16", "16:9", "1:1", "4:5"},
+   "_ASPECTS covers the render-profile video_aspect values (incl. 4:5)")
+ok(worker._ASPECTS["4:5"][1:] == (1080, 1350), "4:5 → 1080x1350")
 ok(worker._ASPECTS["9:16"] == ("portrait", 1080, 1920),
    "9:16 → portrait 1080x1920 (shorts default)")
 ok(worker._ASPECTS["16:9"] == ("landscape", 1920, 1080),
@@ -1571,12 +1572,26 @@ try:
                 patch.object(worker, "_has_visible_frames", return_value=True), \
                 patch.object(worker, "_pick_bgm", return_value=None), \
                 patch.object(worker, "_mux", side_effect=lambda *a: a[-1].write_bytes(b"f")):
-            worker.run_job(handle, job_dir, "S", {"video_aspect": "4:3"})
+            worker.run_job(handle, job_dir, "S", {})
         ok(seen["resolution"] == "portrait"
            and seen["width"] == 1080 and seen["height"] == 1920,
-           "unknown aspect falls back to 9:16 portrait")
+           "no video_aspect → profile default 9:16 portrait")
         ok(seen["duration"] == 12.6,
            "probe 0.0 is falsy → narr_secs 12.0 → duration 12.6 (no word timings to trim by)")
+
+    # unknown aspect → fails closed (scene/v1: no silent 9:16 fallback)
+    with tempfile.TemporaryDirectory() as td:
+        settings.hyperframes_storage_dir = td
+        handle = "aspect43"
+        job_dir = Path(td) / handle
+        job_dir.mkdir()
+        called = []
+        with patch.object(worker, "_generate_script", side_effect=lambda *a, **k: called.append(1) or "s"):
+            worker.run_job(handle, job_dir, "S", {"video_aspect": "4:3"})
+        st = json.loads((job_dir / "status.json").read_text())
+        ok(st["state"] == STATE_FAILED and "UnknownAspectError" in (st.get("error") or ""),
+           "unknown aspect 4:3 → STATE_FAILED UnknownAspectError")
+        ok(not called, "unknown aspect fails before any script/TTS work")
 
     # short probe hits the max(4.0, …) floor
     with tempfile.TemporaryDirectory() as td:

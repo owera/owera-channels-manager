@@ -134,6 +134,9 @@ _BEAT_SPECS = {
     "code":        {"req": ["lines"]},
     "command":     {"req": ["command"]},
     "diagram":     {"req": ["nodes"]},
+    # scene/v1 terminal: replay of a recorded asciinema .cast (rendered by agg).
+    # Only offered when settings.composition_beat_types includes it.
+    "terminal":    {"req": ["cast"]},
 }
 
 
@@ -282,6 +285,17 @@ def _coerce_beat(raw: dict, allowed: set) -> dict | None:
                  for e in (raw.get("edges") or []) if isinstance(e, dict)][:6]
         layout = raw.get("layout") if raw.get("layout") in ("pipeline", "request_response", "fanout") else "pipeline"
         return {"type": "diagram", "cue": cue, "layout": layout, "nodes": nodes, "edges": edges}
+
+    if btype == "terminal":
+        cast = str(raw.get("cast") or "").strip()
+        if not cast or not cast.endswith(".cast"):
+            return None
+        out = {"type": "terminal", "cue": cue, "cast": cast}
+        if raw.get("cast_sha256"):
+            out["cast_sha256"] = str(raw["cast_sha256"]).strip().lower()
+        if raw.get("cast_prompt"):
+            out["cast_prompt"] = str(raw["cast_prompt"])
+        return out
 
     return None
 
@@ -508,8 +522,14 @@ def _brand_css(width: int, height: int, th: dict) -> str:
 
 def _base_css(width: int, height: int, th: dict) -> str:
     from app.services import craft
+    from app.services import scene as _scene
     fs = max(32, int(width * 0.065))
     body_fs = max(28, int(width * 0.045))
+    # CTA legibility (scene/v1): absolute px floor per aspect, and no
+    # --fg-dim on CTA copy unless it clears 4.5:1 on the instance theme.
+    cta_s = _scene.cta_sizes(width, height, fs, body_fs)
+    cta_l = _scene.cta_sizes(width, height, fs, body_fs, long=True)
+    cta_c = _scene.cta_colors(th)
     pad = max(60, int(width * 0.08))
     variant = th.get("bg_variant", "bloom")
     bg_motion = {
@@ -588,14 +608,15 @@ def _base_css(width: int, height: int, th: dict) -> str:
         # cta — series endcard chip (outline, no neon fill, no arrow, no 💸)
         ".cta .cta-chip{display:inline-flex;align-items:center;justify-content:center;"
         "border:1px solid var(--fg);background:transparent;color:var(--fg);"
-        "border-radius:999px;padding:.28em .75em;font-size:calc(var(--fs)*.72);"
+        "border-radius:999px;padding:.28em .75em;font-size:" + str(cta_s["main"]) + "px;"
         "font-weight:700;letter-spacing:.03em}"
-        ".cta .cta-micro{font-size:calc(var(--body-fs)*.8);color:var(--fg-dim);"
+        ".cta .cta-micro{font-size:" + str(cta_s["sub"]) + "px;color:" + cta_c["sub"] + ";"
         "margin-top:.4em;font-weight:500;letter-spacing:.02em}"
         # long-form punch box (shorts never use this — _sanitize_cta sets the chip)
         ".cta .cta-box{background:var(--fg);color:var(--bg);font-weight:900;border-radius:18px;"
-        "padding:.5em .9em;font-size:calc(var(--fs)*1.05);display:inline-flex;align-items:center;gap:.3em}"
-        ".cta .cta-sub{font-size:var(--body-fs);color:var(--fg-dim);margin-top:.5em;font-weight:600}"
+        "padding:.5em .9em;font-size:" + str(cta_l["main"]) + "px;display:inline-flex;align-items:center;gap:.3em}"
+        ".cta .cta-sub{font-size:" + str(cta_l["sub"]) + "px;color:" + cta_c["sub"] + ";margin-top:.5em;font-weight:600}"
+        ".terminal .term-clip{display:block;width:100%;height:auto;border-radius:14px}"
         # --- Phase B/C (code / command / diagram) ---
         ".code-lang{font-family:var(--mono);font-size:var(--body-fs);color:var(--accent);"
         "font-weight:700;margin-bottom:.3em;text-transform:lowercase}"
@@ -1034,6 +1055,16 @@ def render_diagram(b, ctx):
     return _shell(i, b, "diagram", svg), _wrap(i, ctx, tw)
 
 
+def render_terminal(b, ctx):
+    """Recorded terminal (scene/v1): the worker pre-renders the .cast with
+    asciinema-agg to term_<i>.mp4 in the job dir; no typed fallback."""
+    i = ctx["i"]
+    inner = ('<video class="term-clip" src="term_' + str(i) + '.mp4" muted playsinline'
+             ' data-start="' + _r(b["start"]) + '" data-duration="' + _r(b["dur"]) + '"'
+             ' data-cast="' + theme.esc(b.get("cast") or "") + '"></video>')
+    return _shell(i, b, "terminal", inner), _wrap(i, ctx, [])
+
+
 _RENDERERS = {
     "hook": render_hook,
     "statement": render_statement,
@@ -1046,6 +1077,7 @@ _RENDERERS = {
     "code": render_code,
     "command": render_command,
     "diagram": render_diagram,
+    "terminal": render_terminal,
 }
 
 
