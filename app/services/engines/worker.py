@@ -563,9 +563,11 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 # maps to the Agent memory series" / "The tests pin this to the Agent memory
 # series" / "Checking the workspace for the series name"; 09-22: the word-count
 # retry leaked "Conferindo a contagem para ficar na faixa de 70 a 100 palavras"
-# onto frame0/title). Frame0/title lock that garbage onto the video. Strip
-# leading assistant-planning sentences only — a real @workspace / Copilot hook
-# is not first-person planning.
+# onto frame0/title; 10-25: ch1-concept locked "The close has to name the right
+# series." then, after that strip, "The hook has to hit the forgetfulness pain
+# in one short sentence." — grok narrating craft rules). Frame0/title lock that
+# garbage onto the video. Strip leading assistant-planning sentences only — a
+# real @workspace / Copilot hook is not first-person planning.
 _PREAMBLE_START = re.compile(
     r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
     r"Checking the workspace|"
@@ -575,6 +577,8 @@ _PREAMBLE_START = re.compile(
     r"The tests pin|The title maps|The title is a two-beat|"
     r"This title is tied|"
     r"The endcard|"
+    r"The close has to name the right|"
+    r"The hook has to hit|"
     r"The script|O roteiro|This (?:voiceover|script)|"
     r"Here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
     r"The prompt|Vou |Deixa eu |Deixe-me )\b",
@@ -597,6 +601,8 @@ _PREAMBLE_BODY = re.compile(
     r"open on the pain|"
     r"fixed series card|"
     r"names the series|"
+    r"name the right series|"
+    r"one short sentence|"
     r"last line matches|"
     r"series notes|"
     r"named series|"
