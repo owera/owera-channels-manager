@@ -526,6 +526,36 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-25 ch1-concept golden: unpatterned subject, frame0/title locked
+# "The close has to name the right series." (CTA-planning CoT, not a claim).
+_FLAKE_1025 = (
+    "The close has to name the right series. "
+    "Your AI agent forgets everything between chats. Each new chat starts blank."
+)
+ok(worker._strip_script_preamble(_FLAKE_1025).startswith(
+    "Your AI agent forgets everything between chats."),
+   "10-25 ch1-concept flake: 'The close has to name the right series' drops")
+ok("right series" not in worker._strip_script_preamble(_FLAKE_1025).lower()
+   and "the close has to" not in worker._strip_script_preamble(_FLAKE_1025).lower(),
+   "10-25 close-series CoT does not leak into the VO")
+ok("Each new chat starts blank." in worker._strip_script_preamble(_FLAKE_1025),
+   "spoken claim after the close-series CoT is kept")
+ok(worker._strip_script_preamble(
+    "The close has to flush before the next write. The buffer was still dirty."
+).startswith("The close has to flush before the next write."),
+   "a real file-close hook is not treated as CTA-planning CoT")
+
+_FLAKE_1025_HOOK = (
+    "The hook has to hit the forgetfulness pain in one short sentence. "
+    "Your AI agent forgets everything between chats. Each new chat starts blank."
+)
+ok(worker._strip_script_preamble(_FLAKE_1025_HOOK).startswith(
+    "Your AI agent forgets everything between chats."),
+   "10-25 after-render flake: 'The hook has to hit … one short sentence' drops")
+ok("one short sentence" not in worker._strip_script_preamble(_FLAKE_1025_HOOK).lower()
+   and "the hook has to hit" not in worker._strip_script_preamble(_FLAKE_1025_HOOK).lower(),
+   "10-25 hook-planning CoT does not leak into the VO")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
