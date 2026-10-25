@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 84. ✅ DONE (PR autoimprove/2026-10-25-video-privacy-floor) PATCH/approve reject a blank or illegal video privacy — normal
+- **resolution (2026-10-25):** `VideoUpdate._reject_blank_privacy`
+  (`mode="before"`) calls `_video_privacy_or_reject`. Blank, whitespace,
+  bool, and any value other than `public` / `unlisted` / `private` are
+  422 and write nothing on PATCH and on approve. A padded legal value is
+  stored stripped. Null still clears the override (inherit
+  `channel.default_privacy`). Omitted leaves the column. `publish_loop.py`
+  and `youtube.py` are untouched. Suite: `tests/verify_video_privacy.py`
+  (83 checks). Mutants 7/7 killed (drop, no-strip, mode-after, casefold,
+  any-nonempty, reject-none, return-unstripped).
+- **why (left open by the channel and playlist privacy floors):**
+  `publish_loop` uploads `video.privacy or channel.default_privacy`.
+  `""` inherits and still sits on the row. `"   "` is truthy, so the
+  upload sends it as `privacyStatus`. The review select only offers the
+  three legal values; growth-agent / curl still send this body.
+- **caution:** normal (`schemas.py` VideoUpdate only). Not a money-path
+  file. Isolated commit + regression tests. Do not change null-inherit.
+- **acceptance:** PATCH and approve `""` / whitespace / `secret` /
+  `Public` / bool are 422 and write nothing; `"  unlisted  "` stores
+  `unlisted`; null clears; omitted does not clobber; a draft approve
+  with a legal privacy is still the status 409 and does not store it.

@@ -194,6 +194,24 @@ class VideoCreate(BaseModel):
         return v
 
 
+# Video.privacy null inherits channel.default_privacy. publish_loop uploads
+# `video.privacy or channel.default_privacy`: a whitespace override is
+# truthy and would be sent as privacyStatus; "" is falsy (inherits) but
+# would still sit on the row as an override. YouTube accepts only
+# public | unlisted | private.
+_VIDEO_PRIVACY = frozenset({"public", "unlisted", "private"})
+
+
+def _video_privacy_or_reject(v):
+    if v is None:
+        return v
+    if isinstance(v, str):
+        v = v.strip()
+    if v not in _VIDEO_PRIVACY:
+        raise ValueError("privacy must be public, unlisted, or private")
+    return v
+
+
 class VideoUpdate(BaseModel):
     subject: Optional[str] = None
     render_profile_id: Optional[int] = None
@@ -215,6 +233,14 @@ class VideoUpdate(BaseModel):
         if isinstance(v, bool):
             raise ValueError("must be an integer, not a boolean")
         return v
+
+    @field_validator("privacy", mode="before")
+    @classmethod
+    def _reject_blank_privacy(cls, v):
+        # null stays legal: it clears the override and publish inherits
+        # the channel default. Blank, whitespace, bool, and any other
+        # value are rejected before setattr / the approve body copy.
+        return _video_privacy_or_reject(v)
 
 
 class VideoCraftPersist(BaseModel):
