@@ -526,6 +526,24 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-22 ch1-concept golden: unpatterned subject, frame0 locked grok's
+# series-label lookup. The claim is the next sentence. A viewer's
+# "I'm checking how the cache misses" hook must stay.
+_FLAKE_1022 = (
+    "I\u2019m checking how agent-memory shorts are labeled. "
+    "Your AI agent forgets everything between chats. Close the tab and the context is gone."
+)
+ok(worker._strip_script_preamble(_FLAKE_1022).startswith(
+    "Your AI agent forgets everything between chats."),
+   "10-22 ch1-concept flake: 'shorts are labeled' CoT drops")
+ok("shorts are labeled" not in worker._strip_script_preamble(_FLAKE_1022).lower()
+   and "checking how" not in worker._strip_script_preamble(_FLAKE_1022).lower(),
+   "10-22 labeling CoT does not leak into the VO")
+ok(worker._strip_script_preamble(
+    "I'm checking how the cache misses on the second turn. The row is gone."
+).startswith("I'm checking how the cache misses"),
+   "a real 'I'm checking how the cache misses' hook is not labeling CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (

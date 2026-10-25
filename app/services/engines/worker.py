@@ -563,9 +563,11 @@ def _word_count_bounds(params: dict) -> tuple[int, int]:
 # maps to the Agent memory series" / "The tests pin this to the Agent memory
 # series" / "Checking the workspace for the series name"; 09-22: the word-count
 # retry leaked "Conferindo a contagem para ficar na faixa de 70 a 100 palavras"
-# onto frame0/title). Frame0/title lock that garbage onto the video. Strip
-# leading assistant-planning sentences only — a real @workspace / Copilot hook
-# is not first-person planning.
+# onto frame0/title; 10-22: ch1-concept locked "I'm checking how agent-memory
+# shorts are labeled." — grok narrating its own series-label lookup). Frame0/title
+# lock that garbage onto the video. Strip assistant-planning sentences only — a
+# real @workspace / Copilot hook, and a real "I'm checking how the cache misses"
+# claim, are not this class.
 _PREAMBLE_START = re.compile(
     r"^(I'll|I will|I am going to|Let me|Looking at|Sure[,.]|"
     r"Checking the workspace|"
@@ -601,6 +603,7 @@ _PREAMBLE_BODY = re.compile(
     r"series notes|"
     r"named series|"
     r"channel rules|"
+    r"shorts are labeled|"
     r"generic take)\b",
     re.I,
 )
