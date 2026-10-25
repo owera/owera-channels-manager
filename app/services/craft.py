@@ -3484,6 +3484,78 @@ def _timing_caps(legacy_timing: bool, beat_timing: str | None) -> tuple[float, f
     return MID_BEAT_MAX_S, CTA_BEAT_MAX_S
 
 
+# Code/command card fit (#1453 c5). The renderers shrink the monospace block to
+# the longest line but floor the type size; a line still too long at the floor
+# is wrapped at spaces into several VISUAL lines (beat["lines"] is untouched, so
+# the allowlist byte match on ' '.join(lines) still holds). Anything that still
+# cannot fit at the floor (an unbroken token, or too many lines vertically)
+# fails the gate closed as code_overflow.
+CODE_CHAR_EM = 0.62          # mono advance estimate (em)
+CODE_W_FRAC = 0.80           # usable block width (of frame width)
+CODE_H_FRAC = 0.70           # usable block height (of frame height)
+CODE_FLOOR_PX = {"code": 24, "command": 22}
+CODE_BASE_FRAC = {"code": 0.052, "command": 0.05}
+CODE_LINE_H = {"code": 1.5, "command": 1.6}
+
+
+def wrap_code_line(line: str, max_chars: int) -> list[str]:
+    """Word-wrap one line at spaces to <= max_chars; an over-long token stays whole."""
+    line = line if isinstance(line, str) else str(line)
+    if max_chars < 1 or len(line) <= max_chars:
+        return [line]
+    out, cur = [], ""
+    for w in line.split(" "):
+        if not cur:
+            cur = w
+        elif len(cur) + 1 + len(w) <= max_chars:
+            cur += " " + w
+        else:
+            out.append(cur)
+            cur = w
+    out.append(cur)
+    return out
+
+
+def code_card_rows(beat: dict) -> list[str]:
+    """Logical rows of a code/command card (command row includes the prompt)."""
+    if (beat.get("type") or "") == "command":
+        return ([(beat.get("prompt") or "$") + " " + str(beat.get("command") or "")] +
+                [str(o) for o in (beat.get("output") or [])])
+    return [str(ln) for ln in (beat.get("lines") or [])]
+
+
+def code_layout(rows, width: int = 1080, height: int = 1920, kind: str = "code") -> dict:
+    """Font size + visual (wrapped) rows for a mono card, and overflow notes."""
+    floor = CODE_FLOOR_PX.get(kind, 24)
+    avail_w = width * CODE_W_FRAC
+    maxlen = max((len(r) for r in rows), default=1) or 1
+    fs = max(floor, min(width * CODE_BASE_FRAC.get(kind, 0.052),
+                        avail_w / (maxlen * CODE_CHAR_EM)))
+    max_chars = max(1, int(avail_w / (floor * CODE_CHAR_EM)))
+    wrapped = [wrap_code_line(r, max_chars) if len(r) > max_chars else [r] for r in rows]
+    over = []
+    for j, parts in enumerate(wrapped):
+        for p in parts:
+            if len(p) > max_chars:
+                over.append(f"row {j} token of {len(p)} chars > {max_chars} at {floor}px")
+    n = sum(len(p) for p in wrapped)
+    max_lines = int((height * CODE_H_FRAC) / (int(fs) * CODE_LINE_H.get(kind, 1.5)))
+    if n > max_lines:
+        over.append(f"{n} visual lines > {max_lines} at {int(fs)}px")
+    return {"fs": int(fs), "rows": wrapped, "max_chars": max_chars, "overflow": over}
+
+
+def code_overflow_hits(beats, width: int = 1080, height: int = 1920) -> list[str]:
+    hits = []
+    for i, b in enumerate(beats or []):
+        if not isinstance(b, dict) or (b.get("type") or "") not in ("code", "command"):
+            continue
+        lay = code_layout(code_card_rows(b), width, height, b["type"])
+        for o in lay["overflow"]:
+            hits.append(f"beat[{i}] type={b['type']} {o}")
+    return hits
+
+
 def video_maker_gate(beats, *, content_format: str | None = "short",
                      used_fallback: bool = False, legacy_timing: bool = False,
                      hook_pace: dict | None = None,
@@ -3598,6 +3670,13 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         )
     # Blank screen: a hole longer than BLANK_GAP_MAX_S beyond the 0.12s fade
     # (or leading / trailing dead air). OS and RR. A card owns hold + fade.
+    ovf_hits = code_overflow_hits(board)
+    if ovf_hits:
+        checks["B"] = "FAIL"
+        reasons.append(
+            "[B] Code overflow: FAIL (code_overflow) — " + "; ".join(ovf_hits) +
+            ". A code/command line must fit the frame at the type floor after "
+            "word-wrap; it would be clipped at the edge.")
     gap_hits = blank_gap_hits(board, duration)
     if gap_hits:
         checks["B"] = "FAIL"
@@ -3885,6 +3964,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         board, hook_pace=hook_pace, card_sync=card_sync,
         board_hits={"beat_hold": b_hits, "repeated_card": rep_hits,
                     "blank_gap": gap_hits,
+                    "code_overflow": ovf_hits,
                     "fabricated_cli": cli_hits, "card_text": text_hits,
                     "card_vo": vo_hits, "os_cards": os_live,
                     "card_timing": timing_hits, "sentence_too_long": long_hits,
