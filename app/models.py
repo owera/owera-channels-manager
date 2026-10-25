@@ -67,6 +67,8 @@ class Channel(SQLModel, table=True):
     daily_render_budget: int = 6
     daily_publish_budget: int = 6
     paused: bool = False
+    # When false, _auto_produce skips this channel; manual produce/re-render still works.
+    auto_produce_enabled: bool = True
 
     # Set when a YouTube daily cap is hit; the publish loop skips this channel until
     # then. tz-aware UTC; reset model depends on which cap (see quota.cooldown_until_for).
