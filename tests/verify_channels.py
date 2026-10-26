@@ -31,6 +31,14 @@ on create (the field is a required ``int``, not ``Optional[int]``).
 The SPA omits both budgets (defaults 6/6); growth-agent / curl still
 reach this path.
 
+#85: ``_slugify`` of a truthy punctuation slug (``@@@``, ``---``,
+whitespace) is ``""``, and ``Path(credentials_dir) / ""`` is the
+credentials dir itself — the first such create would write
+``token.json`` into the credentials root. ``body.slug or body.name``
+does not fall back when the requested slug is truthy. Empty slug still
+falls back to name. The SPA sends ``{name, slug: name}``; a
+punctuation-only name is the same hole.
+
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db,
 no network, lifespan/scheduler never started). Exits non-zero on the
 first failed assertion.
@@ -51,7 +59,7 @@ from app.db import get_session
 from app.models import Channel, OAuthStatus
 from app.routers import channels as channels_router
 from app.schemas import ChannelUpdate
-from app.services import publish_loop, render_loop
+from app.services import publish_loop, render_loop, youtube
 
 _checks = 0
 
@@ -108,6 +116,27 @@ ok(0 <= _create_def < _create_req_r < _create_req_p < _create_add < _create_end,
    "create_channel floors both budgets before session.add")
 ok(_create_end < _update_def,
    "create_channel is defined before update_channel (create pin end bound)")
+
+# Empty slug after _slugify is credentials_dir itself (Path / "" drops the
+# right operand). Floor that BEFORE the duplicate-slug 409 and session.add
+# so the first punctuation-only create is 400, not a row whose next
+# credential op writes token.json into the credentials root.
+ok(youtube.channel_dir("") == Path(settings.credentials_dir),
+   "empty slug channel_dir is the credentials dir itself")
+ok(youtube.channel_dir("ch-a") != Path(settings.credentials_dir),
+   "a real slug is a subdirectory of the credentials dir")
+ok(channels_router._slugify("@@@") == "", "_slugify punctuation-only is empty")
+ok(channels_router._slugify("---") == "", "_slugify dashes-only is empty")
+ok(channels_router._slugify("   ") == "", "_slugify whitespace-only is empty")
+ok(channels_router._slugify("My Channel!") == "my-channel",
+   "_slugify keeps letters and strips punctuation")
+_create_slugify = _ch_src.find("slug = _slugify(body.slug or body.name)", _create_def)
+_create_empty = _ch_src.find("if not slug:", _create_def)
+_create_dup = _ch_src.find("already exists", _create_def)
+ok(0 <= _create_def < _create_slugify < _create_empty < _create_dup < _create_add < _create_end,
+   "create_channel rejects an empty slugify result before the duplicate 409 and session.add")
+ok("_slugify(body.name or body.slug)" not in _ch_src[_create_def:_create_end],
+   "create_channel prefers the requested slug (does not swap in name first)")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
@@ -434,6 +463,35 @@ try:
     ok("smuggle" not in slugs(), "400 mixed POST creates no row")
     ok(n_channels() == n_before, "400 mixed POST adds no row")
 
+    print("POST /api/channels: slug that slugifies to empty is 400, writes nothing")
+    # body.slug or body.name: a truthy punctuation slug must NOT fall back to
+    # name. That would mint good-channel while the caller asked for @@@, and
+    # an empty slugify writes token.json into credentials_dir itself.
+    r = post(name="Good Channel", slug="@@@")
+    ok(r.status_code == 400, "POST slug='@@@' with a usable name is 400")
+    ok("slug" in r.text.lower() and "letter or digit" in r.text.lower(),
+       "punctuation-slug 400 names the slug and the letter-or-digit rule")
+    ok("good-channel" not in slugs(),
+       "slug='@@@' did not fall back to name (good-channel)")
+    ok(n_channels() == n_before, "POST slug='@@@' creates no row")
+
+    r = post(name="Dashes", slug="---")
+    ok(r.status_code == 400, "POST slug='---' is 400")
+    ok("dashes" not in slugs(), "POST slug='---' creates no row")
+
+    r = post(name="Spaces", slug="   ")
+    ok(r.status_code == 400, "POST slug='   ' is 400 (whitespace is truthy)")
+    ok("spaces" not in slugs(), "POST slug whitespace creates no row")
+
+    r = post(name="@@@", slug="@@@")
+    ok(r.status_code == 400, "POST SPA-shaped name=slug='@@@' is 400")
+    ok(n_channels() == n_before, "POST punctuation-only name+slug creates no row")
+
+    r = post(name="Good Channel", slug="@@@", daily_publish_budget=2, paused=True)
+    ok(r.status_code == 400, "mixed POST with punctuation slug is 400")
+    ok("good-channel" not in slugs(), "400 mixed punctuation-slug POST creates no row")
+    ok(n_channels() == n_before, "400 mixed punctuation-slug POST adds no row")
+
     print("POST /api/channels: duplicate slug + auth")
     r = post(name="A", slug="ch-a")
     ok(r.status_code == 409, "POST duplicate slug is 409")
@@ -446,6 +504,22 @@ try:
     ok(slugs() == seed_slugs | {"new-ok", "zero-ok", "custom-ok"},
        "only the three valid POSTs added rows")
     ok(slugs() == before_slugs, "invalid POSTs added no extra slugs")
+
+    print("POST /api/channels: empty slug still falls back to name; punctuation strips")
+    r = post(name="Fallback Name", slug="")
+    ok(r.status_code == 201, "POST slug='' falls back to name")
+    ok(r.json().get("slug") == "fallback-name",
+       "empty slug persisted the slugified name")
+    ok("fallback-name" in slugs(), "empty-slug fallback row exists")
+
+    r = post(name="Keep Letters", slug="My Channel!")
+    ok(r.status_code == 201, "POST slug with letters + punctuation is 201")
+    ok(r.json().get("slug") == "my-channel",
+       "slugify kept letters and stripped the bang")
+    ok("my-channel" in slugs(), "punctuation-stripped slug row exists")
+
+    r = client.post("/api/channels", json={"name": "@@@", "slug": "@@@"})
+    ok(r.status_code == 401, "unauthenticated punctuation slug is still 401")
     ok(snapshot(1) == before_a, "ch-a still untouched after every POST probe")
     ok(snapshot(2) == before_b, "ch-b still at seeded 7/7 after every POST probe")
 finally:
