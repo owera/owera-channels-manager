@@ -1962,3 +1962,28 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 85. ✅ DONE (PR autoimprove/2026-10-26-channel-slug-floor) POST /api/channels rejects a slug that slugifies to empty — normal
+- **resolution (2026-10-26):** `create_channel` 400s when `_slugify(body.slug
+  or body.name)` is empty, before the duplicate-slug 409 and `session.add`.
+  `Path(credentials_dir) / ""` is the credentials dir itself, so the first
+  punctuation-only create would persist a row whose next credential op
+  writes `token.json` into the credentials root. A truthy punctuation slug (`@@@`, `---`, whitespace)
+  does not fall back to name. Empty slug still uses name. Padded letter
+  slugs still strip (`My Channel!` → `my-channel`). Suite:
+  `tests/verify_channels.py` 135 → 163. Isolated commit; oauth start/
+  callback / `publish_loop.py` / `youtube.py` untouched. SPA still sends
+  `{name, slug: name}` — a punctuation-only name is now a 400 (not bundled:
+  disable the button when slugify would be empty).
+- **why (found ranking remaining derived identity after the name/privacy
+  floors):** `_slugify` strips every non `[a-z0-9]` char. `@@@` / `---` /
+  `"   "` are truthy, so `body.slug or body.name` does not fall back, and
+  the empty result was stored. The SPA `disabled={!name}` still POSTs a
+  punctuation-only name. Growth-agent / curl can send a punctuation slug
+  with a usable name and mint an empty-slug row.
+- **caution:** normal (`channels.py` POST create only; oauth paths
+  untouched). Isolated commit + regression tests. Not a schema migration.
+- **acceptance:** POST `slug="@@@"` with name `Good Channel` is 400 and
+  does not create `good-channel`; `---` / whitespace / SPA `@@@`/`@@@`
+  are 400; `slug=""` still slugifies the name; `My Channel!` stores
+  `my-channel`.

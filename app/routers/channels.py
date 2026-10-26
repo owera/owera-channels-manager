@@ -129,6 +129,19 @@ def list_channels(session: Session = Depends(get_session)):
 @router.post("", status_code=201)
 def create_channel(body: ChannelCreate, session: Session = Depends(get_session)):
     slug = _slugify(body.slug or body.name)
+    # Path(credentials_dir) / "" is credentials_dir itself. Create only
+    # persists the row; the next credential op (upload_credentials /
+    # save_token / disconnect) would then write or unlink token.json in
+    # the credentials root. A truthy punctuation slug ("@@@") must not
+    # fall back to name — the caller asked for that slug. Empty-string
+    # slug still uses name (falsy or); omitted slug is already 422
+    # (ChannelCreate.slug is required).
+    if not slug:
+        raise HTTPException(
+            400,
+            "channel slug must contain a letter or digit "
+            "(empty slug writes credentials into the credentials dir root)",
+        )
     if session.exec(select(Channel).where(Channel.slug == slug)).first():
         raise HTTPException(409, f"channel slug '{slug}' already exists")
     fields = body.model_dump()
