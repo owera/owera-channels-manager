@@ -33,6 +33,13 @@ videos to the wrong series); ``false`` writes 0, which publish treats
 as unlinked but is not None. Create's ``if body.playlist_id`` skips
 the falsy 0 and returns 201 unbound. These checks pin both paths.
 
+#57/#58/#59 floored JSON bool ``channel_id`` / ``topic_id`` on trends,
+profiles, and videos. ``TopicCreate.channel_id`` was still a bare
+``int``: lax coercion turned ``true`` into channel 1 (a growth-agent /
+curl ``{"channel_id": true}`` landed a topic on the first channel) and
+``false`` into 0, which 404'd only because no channel 0 exists. These
+checks pin POST create bool as 4xx before any row.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -868,6 +875,125 @@ try:
     ok('_reject_bool_playlist' in tu_pl
        and '@field_validator("playlist_id", mode="before")' in tu_pl,
        "TopicUpdate._reject_bool_playlist is mode=before on playlist_id")
+
+    print("POST /api/topics: JSON bool channel_id is 422")
+    # Same class as VideoCreate.topic_id #59 and ProfileCreate.channel_id
+    # #58. Lax int coerces true→1 / false→0 before create_topic. true
+    # lands a topic on channel 1. false 404s only because no channel 0
+    # exists — that 404 must not count as the rejection.
+
+    def n_on_channel(cid: int) -> int:
+        with Session(engine) as s:
+            return s.exec(select(func.count(Topic.id)).where(
+                Topic.channel_id == cid)).one()
+
+    def _compact(resp):
+        return resp.text.replace(" ", "")
+
+    with Session(engine) as s:
+        if s.exec(select(Channel).where(Channel.slug == "b")).first() is None:
+            s.add(Channel(slug="b", name="B", oauth_status=OAuthStatus.CONNECTED,
+                          daily_render_budget=20))
+            s.commit()
+        ch_b = s.exec(select(Channel).where(Channel.slug == "b")).one()
+    ok(ch_b.id == 2, "precondition: channel B is id=2 (true coerces to 1)")
+
+    n_before_ch = n_topics()
+    names_before_ch = topic_names()
+    on_1 = n_on_channel(1)
+    on_2 = n_on_channel(2)
+    ok(on_1 >= 1 and on_2 == 0,
+       "precondition: channel 1 has topics and channel 2 is empty")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": True, "name": "BoolTrueCh"})
+    ok(r.status_code == 422,
+       "create channel_id=true is 422 (must not coerce to 1 and 201)")
+    ok("boolean" in r.text and '"input":true' in _compact(r),
+       "true-channel create names boolean and keeps input true "
+       "(mode=after would show 1)")
+    ok("BoolTrueCh" not in topic_names(),
+       "create channel_id=true writes no row")
+    ok(n_on_channel(1) == on_1, "create channel_id=true added nothing on channel 1")
+    ok(n_topics() == n_before_ch, "create channel_id=true did not add a row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": False, "name": "BoolFalseCh"})
+    ok(r.status_code == 422,
+       "create channel_id=false is 422 (a missing channel 0 would be 404)")
+    ok("boolean" in r.text and '"input":false' in _compact(r),
+       "false-channel create names boolean (channel-not-found 404 would not)")
+    ok("BoolFalseCh" not in topic_names(),
+       "create channel_id=false writes no row")
+    ok(n_topics() == n_before_ch, "create channel_id=false did not add a row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": None, "name": "NullCh"})
+    ok(r.status_code == 422, "create channel_id=null is 422")
+    ok("boolean" not in r.text,
+       "null channel_id is the required-int error, not the bool rejection")
+    ok("NullCh" not in topic_names(), "create channel_id=null writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={"name": "OmitCh"})
+    ok(r.status_code == 422, "create omitted channel_id is 422")
+    ok("boolean" not in r.text,
+       "omitted channel_id is the required-int error, not the bool rejection")
+    ok("OmitCh" not in topic_names(), "omitted channel_id writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 0, "name": "ZeroCh"})
+    ok(r.status_code == 404, "create channel_id=0 is still 404 (no channel 0)")
+    ok("channel not found" in r.text and "boolean" not in r.text,
+       "integer 0 stays the channel 404 (reject-zero would say boolean)")
+    ok("ZeroCh" not in topic_names(), "create channel_id=0 writes no row")
+
+    r = client.post("/api/topics", json={
+        "channel_id": True, "name": "UnauthCh"})
+    ok(r.status_code == 401, "unauthenticated create still 401")
+    ok("UnauthCh" not in topic_names(),
+       "unauthenticated create writes no row")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": True, "name": "SmuggledCh", "content_format": "long"})
+    ok(r.status_code == 422,
+       "mixed create with channel_id=true is 422")
+    ok("SmuggledCh" not in topic_names(),
+       "4xx mixed channel create wrote none of the fields")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 2, "name": "OnChannelB", "create_playlist": True})
+    ok(r.status_code == 201, "create integer channel_id=2 is 201")
+    got = r.json()
+    ok(got.get("channel_id") == 2,
+       "integer channel 2 binds channel B, not channel 1 (always-raise dies here)")
+    ok(got.get("name") == "OnChannelB", "integer channel 2 kept the name")
+    ok(n_on_channel(2) == on_2 + 1, "integer channel 2 added one topic on B")
+    ok(n_on_channel(1) == on_1, "integer channel 2 added nothing on channel 1")
+    listed_b = client.get("/api/topics", auth=auth, params={"channel_id": 2})
+    ok(listed_b.status_code == 200, "GET topics on channel B is 200")
+    ok(any(t.get("name") == "OnChannelB" for t in listed_b.json()),
+       "OnChannelB is listed only after create on channel 2")
+    listed_a = client.get("/api/topics", auth=auth, params={"channel_id": 1})
+    ok(all(t.get("name") != "OnChannelB" for t in listed_a.json()),
+       "OnChannelB is not listed on channel 1")
+
+    r = client.post("/api/topics", auth=auth, json={
+        "channel_id": 1, "name": "OnChannelA"})
+    ok(r.status_code == 201, "create integer channel_id=1 is 201")
+    ok(r.json().get("channel_id") == 1,
+       "integer 1 persisted (true-coercion target is a legal int)")
+
+    ok(n_topics() == n_before_ch + 2,
+       "bool-channel 4xx created no extra rows (2 legal creates)")
+    ok(names_before_ch.isdisjoint(
+        {"BoolTrueCh", "BoolFalseCh", "NullCh", "OmitCh", "ZeroCh",
+         "UnauthCh", "SmuggledCh"}),
+       "precondition held: bool-channel names were not already seeded")
+
+    tc_ch = inspect.getsource(TopicCreate)
+    ok('_reject_bool_channel' in tc_ch
+       and '@field_validator("channel_id", mode="before")' in tc_ch,
+       "TopicCreate._reject_bool_channel is mode=before on channel_id")
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()
