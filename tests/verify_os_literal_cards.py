@@ -842,7 +842,8 @@ ok("enumeration_needs_rewrite" in s1465["after_kinds"],
    f"#1465 AFTER enumeration_needs_rewrite ({s1465['after_kinds']})")
 ok("slide_spam" not in s1465["after_kinds"],
    f"#1465 AFTER no slide_spam ({s1465['after_kinds']})")
-ok("card_text_not_literal" not in s1465["after_kinds"],
+ok(not any(h.get("i") == 0 and h.get("check") == "card_text_not_literal"
+           for h in craft.os_card_hits(s1465["after"], S1465, None, w1465)),
    f"#1465 AFTER two-sentence hook is not card_text_not_literal ({s1465['after_kinds']})")
 ok(any(h.get("i") == 8 or "Anthropic" in (h.get("detail") or "")
        for h in craft.sentence_too_long_hits(s1452["after"], w1452, ALLOW1452)),

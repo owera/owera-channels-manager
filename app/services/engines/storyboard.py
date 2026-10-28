@@ -3673,12 +3673,15 @@ def _spoken_hold_end(beat, words, sources=None, *, with_tail: bool = True) -> fl
     return _spoken_exit_min_end(beat, words, sources, with_tail=with_tail)
 
 
-def _shrink_prev_to(prev, desired_end, words, sources=None, *, with_tail: bool = True) -> float:
+def _shrink_prev_to(prev, desired_end, words, sources=None, *, with_tail: bool = True,
+                    speech_sync: bool = False) -> float:
     """Shrink ``prev`` toward ``desired_end``; never before last word + pad.
 
     ``with_tail`` keeps last-word + QUOTE_HOLD_TAIL_S when that still
     fits (mid→mid target). Drop it when the next card must stay on its
-    first spoken word. Last word + CARD_PAD_FLOOR_S is always the floor.
+    first spoken word. Last word + CARD_PAD_FLOOR_S is always the floor
+    unless ``speech_sync``: the next mid is anchored on its first spoken
+    word, so pad may truncate to ``max(last word, desired_end)``.
     """
     try:
         start = float(prev.get("start") or 0)
@@ -3690,6 +3693,10 @@ def _shrink_prev_to(prev, desired_end, words, sources=None, *, with_tail: bool =
         min_end = start + _MIN_DUR
     else:
         min_end = max(min_end, start + _MIN_DUR)
+    if speech_sync and float(desired_end) + 1e-6 < min_end:
+        span = _spoken_span_of(prev, words, sources)
+        if span:
+            min_end = max(float(span[1]), float(desired_end), start + _MIN_DUR)
     new_end = max(min_end, min(cur_end, float(desired_end)))
     prev["dur"] = round(max(_MIN_DUR, new_end - start), 3)
     return start + float(prev["dur"])
@@ -3722,7 +3729,8 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
         if (bare is not None and want - bare >= craft.CARD_PAD_FLOOR_S - 1e-6):
             exit_at = max(exit_at, bare + craft.CARD_PAD_FLOOR_S)
         last["dur"] = round(max(_MIN_DUR, exit_at - last_st), 3)
-        cta["start"] = round(want, 3)
+        last_end = last_st + float(last["dur"])
+        cta["start"] = round(max(want, last_end), 3)
         return True
     if exit_floor is not None and last_end < exit_floor - 1e-6:
         last["dur"] = round(max(_MIN_DUR, exit_floor - last_st), 3)
@@ -3773,6 +3781,9 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
         hold = min(hold, max(floor, max_hold))
         if min_hold <= _mid_max() + 1e-9:
             hold = min(hold, _mid_max())
+        if (not b.get("literal_quote") and not b.get("cap_extended_spoken")
+                and not _OS_VO_CARDS.get()):
+            hold = min(hold, _mid_max())
         b["dur"] = round(hold, 3)
     for i in range(1, len(beats)):
         prev, cur = beats[i - 1], beats[i]
@@ -3806,10 +3817,10 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
                 p_end = p_st + float(prev.get("dur") or 0)
                 if p_end < min_exit - 1e-6:
                     prev["dur"] = round(max(_MIN_DUR, min_exit - p_st), 3)
-                    need_st = p_st + float(prev["dur"]) + _GAP
                     if spoken:
-                        cur["start"] = round(max(need_st, float(spoken[0])), 3)
+                        cur["start"] = round(float(spoken[0]), 3)
                     else:
+                        need_st = p_st + float(prev["dur"]) + _GAP
                         cur["start"] = round(need_st, 3)
                     st = float(cur["start"])
             floor = float(prev["start"]) + float(prev["dur"]) + _GAP
@@ -3829,11 +3840,33 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
             c_st = float(cur.get("start") or 0)
         except (TypeError, ValueError):
             continue
+        spoken_cur = _spoken_span_of(cur, words, sources)
+        if spoken_cur:
+            want = round(float(spoken_cur[0]), 3)
+            if c_st + 1e-6 < p_end + _GAP or c_st > want + craft.SYNC_TOL_S + 1e-6:
+                _shrink_prev_to(prev, want - _GAP, words, sources, with_tail=False,
+                                speech_sync=True)
+                cur["start"] = want
+            continue
         if c_st + 1e-6 < p_end + _GAP:
             cur["start"] = round(p_end + _GAP, 3)
     if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
         if not _seat_os_cta(beats[-2], beats[-1], words, duration, sources):
             return False
+    if not _OS_VO_CARDS.get():
+        for b in beats:
+            typ = b.get("type") or ""
+            if typ in ("hook",) or typ in craft.CTA_TYPES:
+                continue
+            if b.get("literal_quote") or b.get("cap_extended_spoken"):
+                continue
+            try:
+                st = float(b.get("start") or 0)
+                du = float(b.get("dur") or 0)
+            except (TypeError, ValueError):
+                continue
+            if du > _mid_max() + 1e-6:
+                b["dur"] = round(_mid_max(), 3)
     return _clamp_os_cta_to_duration(beats, duration)
 
 

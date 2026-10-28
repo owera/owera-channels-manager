@@ -1775,7 +1775,9 @@ def is_literal_quote_beat(beat: dict | None, sources=None, script: str | None = 
     if not isinstance(beat, dict) or (beat.get("type") or "") != "quote":
         return False
     text = str(beat.get("text") or beat.get("cue") or "").strip()
-    if beat.get("literal_quote") or beat.get("_lit"):
+    if beat.get("literal_quote"):
+        return True
+    if beat.get("_lit"):
         return bool(script and text and text_in_script(text, script))
     if beat.get("plain"):
         return False
@@ -1973,16 +1975,12 @@ def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[di
                 out.append({"i": i, "check": "cli_not_in_allowlist",
                             "detail": f"card {i} type={typ} line(s) not byte-exact in "
                                       f"on_screen_allow: {bad[0]!r}"})
-                prev = i
-                continue
         if typ == "quote" and script:
             txt = str(b.get("text") or b.get("cue") or "").strip()
             if txt and not text_in_script(txt, script):
                 out.append({"i": i, "check": "quote_not_in_vo",
                             "detail": f"card {i} quote {txt[:60]!r} is not a verbatim "
                                       "VO substring (allowlist does not exempt quote cards)"})
-                prev = i
-                continue
         if (script or words) and not card_is_literal(b, script, sources, words=words):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
@@ -2136,9 +2134,26 @@ def card_exits_early_hits(beats, words, sources=None, *,
             continue
         end = _cue_start(b) + _cue_span(board, i)
         min_end = float(span[1]) + CARD_PAD_FLOOR_S
-        if i + 1 < len(board) and (board[i + 1].get("type") or "") in CTA_TYPES:
-            # Subscribe speech follows immediately; pad is folded into the chip fade.
-            min_end = float(span[1])
+        if i + 1 < len(board):
+            nxt = board[i + 1]
+            if (nxt.get("type") or "") in CTA_TYPES:
+                # Subscribe speech follows immediately; pad is folded into the chip fade.
+                min_end = float(span[1])
+            else:
+                ntext = _card_spoken_text(nxt, sources)
+                nspan = spoken_span(ntext, words)
+                if nspan is not None:
+                    try:
+                        nst = float(nxt.get("start") or 0)
+                    except (TypeError, ValueError):
+                        nst = None
+                    if (nst is not None
+                            and abs(nst - float(nspan[0])) <= SYNC_TOL_S + 1e-6):
+                        # Next mid enters on its first spoken word; pad may truncate
+                        # to the gap budget (never before the last word).
+                        pad_cap = float(nspan[0]) - BEAT_GAP_S
+                        min_end = max(float(span[1]),
+                                      min(float(span[1]) + CARD_PAD_FLOOR_S, pad_cap))
         if end < min_end - SYNC_TOL_S - 1e-6:
             out.append({
                 "i": i, "check": "card_exits_early",

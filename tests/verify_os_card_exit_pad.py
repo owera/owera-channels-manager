@@ -45,13 +45,25 @@ board = [
     _beat("quote", 8.04, 3.0, text="A maximum of 4 blocks with cache_control may be provided."),
     _beat("cta", 28.0, 2.5, text="Subscribe · Agent traps", cue="Subscribe"),
 ]
-storyboard._snap_os_cards_to_speech(board, w1452, S1452, duration=D1452)
+_tok = storyboard._OS_VO_CARDS.set(True)
+try:
+    storyboard._snap_os_cards_to_speech(board, w1452, S1452, duration=D1452)
+finally:
+    storyboard._OS_VO_CARDS.reset(_tok)
 for i in (1, 2):
     b = board[i]
     sp = craft.spoken_span(craft._card_spoken_text(b, None), w1452)
     end = float(b["start"]) + float(b["dur"])
-    ok(sp and end + 1e-6 >= float(sp[1]) + craft.CARD_PAD_FLOOR_S - craft.SYNC_TOL_S,
-       f"after snap card {i} end {end:.2f} >= last {sp[1]:.2f} + pad")
+    floor = float(sp[1])
+    if i == 1:
+        # Next card is speech-anchored on the CAPIError quote (8.04); pad may truncate.
+        nxt_sp = craft.spoken_span(craft._card_spoken_text(board[2], None), w1452)
+        pad_cap = float(nxt_sp[0]) - craft.BEAT_GAP_S if nxt_sp else floor + craft.CARD_PAD_FLOOR_S
+        floor = max(floor, min(floor + craft.CARD_PAD_FLOOR_S, pad_cap))
+    else:
+        floor = floor + craft.CARD_PAD_FLOOR_S
+    ok(sp and end + 1e-6 >= floor - craft.SYNC_TOL_S,
+       f"after snap card {i} end {end:.2f} >= min hold floor {floor:.2f}")
 
 # Fade starts at card end (not end − fade).
 th = theme.resolve(47, "One folder broke Copilot CLI.", brand="os")
@@ -102,6 +114,67 @@ def boom(*a, **k):
     raise AssertionError("LLM must not run")
 
 
+ALLOW1452 = [
+    {"kind": "quote", "text": "A maximum of 4 blocks with cache_control may be provided.",
+     "source": "https://example.test"},
+    {"kind": "log", "text": "Found 5.", "source": "https://example.test"},
+]
+
+print("TTS whisper pins: #1451 c2/c9 + #1458 c8 (1452 board) end ≥ last_word + pad")
+_words1452 = whisper_words(1452)
+_out1452 = storyboard.compose(
+    subject="acceptance pins",
+    script=S1452,
+    words=_words1452,
+    duration=D1452,
+    resolution="portrait",
+    width=1080,
+    height=1920,
+    topic_id=47,
+    content_format="short",
+    language="English",
+    llm=boom,
+    brand="os",
+    topic_name="Agent traps",
+    on_screen_allow=ALLOW1452,
+)
+_beats1452 = craft.beats_from_html(_out1452)
+def _min_exit_floor(b, board, idx, words):
+    sp = craft.spoken_span(craft._card_spoken_text(b, None), words)
+    if not sp:
+        return None
+    floor = float(sp[1]) + craft.CARD_PAD_FLOOR_S
+    if idx + 1 < len(board):
+        nxt = board[idx + 1]
+        if (nxt.get("type") or "") not in craft.CTA_TYPES:
+            nsp = craft.spoken_span(craft._card_spoken_text(nxt, None), words)
+            if nsp is not None:
+                try:
+                    nst = float(nxt.get("start") or 0)
+                except (TypeError, ValueError):
+                    nst = None
+                if nst is not None and abs(nst - float(nsp[0])) <= craft.SYNC_TOL_S + 1e-6:
+                    pad_cap = float(nsp[0]) - craft.BEAT_GAP_S
+                    floor = max(float(sp[1]), min(floor, pad_cap))
+    return sp, floor
+
+
+for idx, label in ((2, "#1451 c2"), (8, "#1458 c8"), (9, "#1451 c9")):
+    b = _beats1452[idx]
+    sp, floor = _min_exit_floor(b, _beats1452, idx, _words1452)
+    end = float(b["start"]) + float(b["dur"])
+    ok(sp and end + 1e-6 >= floor - craft.SYNC_TOL_S,
+       f"{label} card {idx} end {end:.2f} ≥ hold floor {floor:.2f} (last {sp[1]:.2f})")
+
+print("blank gap budget ≤ 0.62s (0.5s stale + 0.12s fade) on #1452 compose")
+_blank_max = craft.BLANK_GAP_MAX_S + craft.BEAT_GAP_S
+for i in range(len(_beats1452) - 1):
+    a_end = float(_beats1452[i]["start"]) + float(_beats1452[i]["dur"])
+    b_start = float(_beats1452[i + 1]["start"])
+    extra = b_start - a_end - craft.BEAT_GAP_S
+    ok(extra <= _blank_max + 1e-6,
+       f"gap after card {i} extra {extra:.2f}s ≤ {_blank_max:.2f}s")
+
 for vid in (1452, 1453):
     words = whisper_words(vid)
     script = snapshot_script(vid)
@@ -120,6 +193,7 @@ for vid in (1452, 1453):
         llm=boom,
         brand="os",
         topic_name="Agent traps",
+        on_screen_allow=ALLOW1452 if vid == 1452 else None,
     )
     ok(out, f"#{vid} compose returns HTML")
     beats = craft.beats_from_html(out)

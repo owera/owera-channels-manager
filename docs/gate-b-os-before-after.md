@@ -13,9 +13,9 @@ Checks novos: `card_exits_early`, `card_enters_early` (lead > 0,3s), `card_overl
 
 | vídeo | topic | BEFORE B | AFTER B | BEFORE kinds | AFTER kinds | hook BEFORE | hook AFTER |
 |------:|------:|:--------:|:-------:|--------------|-------------|------------:|-----------:|
-| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, card_timing, sentence_too_long, code_read_too_short, card_sync, stale_card, quote_before_speech | 2.33s | 2.54s |
-| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, allowlist_required, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, card_vo, card_timing, sentence_too_long, allowlist_required, card_sync, stale_card, quote_before_speech | 2.33s | 2.56s |
-| #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, card_text, os_cards, card_timing, sentence_too_long, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_sync, stale_card, quote_before_speech | 7.43s | 3.62s |
+| #1452 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, sentence_too_long, code_read_too_short | 2.33s | 2.54s |
+| #1453 | 47 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, allowlist_required, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, card_vo, sentence_too_long, allowlist_required | 2.33s | 2.56s |
+| #1465 | 7 | FAIL | FAIL | card_text, os_cards, card_timing, sentence_too_long, card_exits_early, card_enters_early, ambiguous_cue, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_sync, vs_card_not_allowed, single_term_card, echo_card, stale_card, quote_before_speech, unspoken_card | beat_hold, card_text, os_cards, sentence_too_long, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_text_not_literal | 7.43s | 3.62s |
 
 Tabelas por vídeo abaixo.
 
@@ -61,29 +61,27 @@ BEFORE = board visível do `VM_FAIL_21fe.md` (main `c35e110`). AFTER = `storyboa
 | # | type | start | dur | end | text |
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 2.54 | 2.54 | One folder broke Copilot CLI. |
-| 1 | quote | 2.66 | 2.40 | 5.06 | Add a directory with the add-dir flag |
-| 2 | quote | 5.18 | 3.02 | 8.20 | and every Claude subagent failed on the spot. |
-| 3 | quote | 8.32 | 3.78 | 12.10 | A maximum of 4 blocks with cache_control may be provided. |
-| 4 | code | 12.22 | 0.90 | 13.12 | Found 5. |
-| 5 | quote | 13.24 | 1.54 | 14.78 | One block over the limit. |
-| 6 | quote | 14.90 | 1.82 | 16.72 | The parent agent got an empty answer. |
-| 7 | quote | 16.88 | 5.40 | 22.28 | Update Copilot CLI, and Anthropic subagents keep working with extra directories. |
-| 8 | quote | 22.40 | 1.98 | 24.38 | Exact version in the description. |
+| 1 | quote | 2.66 | 2.36 | 5.02 | Add a directory with the add-dir flag |
+| 2 | quote | 5.14 | 2.82 | 7.96 | and every Claude subagent failed on the spot. |
+| 3 | quote | 8.04 | 3.78 | 11.82 | A maximum of 4 blocks with cache_control may be provided. |
+| 4 | code | 11.94 | 0.84 | 12.78 | Found 5. |
+| 5 | quote | 12.90 | 1.54 | 14.44 | One block over the limit. |
+| 6 | quote | 14.72 | 1.82 | 16.54 | The parent agent got an empty answer. |
+| 7 | quote | 16.88 | 5.32 | 22.20 | Update Copilot CLI, and Anthropic subagents keep working with extra directories. |
+| 8 | quote | 22.32 | 1.98 | 24.30 | Exact version in the description. |
 | 9 | quote | 24.60 | 1.38 | 25.98 | Subagent came back empty? |
 | 10 | quote | 26.18 | 1.94 | 28.12 | Read its error, not the parent's. |
 | 11 | cta | 28.12 | 2.47 | 30.59 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, card_timing, sentence_too_long, code_read_too_short, card_sync, stale_card, quote_before_speech
+**kinds:** beat_hold, sentence_too_long, code_read_too_short
 
 **reasons:**
 
-- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 3.22s incl. fade (hold 3.02s + 0.20s fade; limit 3.0s); beat[3] type=quote mid card 3.98s incl. fade (hold 3.78s + 0.20s fade; limit 3.0s); beat[7] type=quote mid card 5.60s incl. fade (hold 5.40s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Card sync: FAIL — card 3 (quote) at 8.32s appears 0.28s AFTER its speech (8.04s); card 4 (code) at 12.22s appears 0.28s AFTER its speech (11.94s); card 5 (quote) at 13.24s appears 0.34s AFTER its speech (12.90s); card 6 (quote) at 14.90s appears 0.18s AFTER its speech (14.72s); card 8 (quote) at 22.40s appears 0.08s AFTER its speech (22.32s). A card never appears after its own words; it may lead them by ≤1.1s.
-- [B] Card timing: FAIL — stale_card: card 3 type=quote ends at 12.10s, last spoken word at 11.58s (0.52s leftover; max 0.50s); stale_card: card 5 type=quote ends at 14.78s, last spoken word at 14.24s (0.54s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).
+- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 3.02s incl. fade (hold 2.82s + 0.20s fade; limit 3.0s); beat[3] type=quote mid card 3.98s incl. fade (hold 3.78s + 0.20s fade; limit 3.0s); beat[7] type=quote mid card 5.52s incl. fade (hold 5.32s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
 - [B] Sentence too long: FAIL — sentence_too_long: card 3 'A maximum of 4 blocks with cache_control may be provided.' spoken 3.54s (first word 8.04s–last word 11.58s; max 3.0s) — split the sentence; sentence_too_long: card 7 'Update Copilot CLI, and Anthropic subagents keep working with extra directories.' spoken 5.20s (first word 16.88s–last word 22.08s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
-- [B] Code read time: FAIL — code_read_too_short: card 4 'Found 5.' held 0.90s (min 1.2s to read a code/command line). Code/command cards need ≥1.2s on screen.
+- [B] Code read time: FAIL — code_read_too_short: card 4 'Found 5.' held 0.84s (min 1.2s to read a code/command line). Code/command cards need ≥1.2s on screen.
 
 ---
 
@@ -131,28 +129,26 @@ BEFORE = board visível do `VM_FAIL_c638.md` (main `c35e110`). AFTER = `storyboa
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 2.56 | 2.56 | One type hint broke MCP tools. |
 | 1 | quote | 2.68 | 1.44 | 4.12 | On Python three ten |
-| 2 | quote | 4.28 | 4.54 | 8.82 | a tool that returns a TypedDict with a NotRequired key failed at registration |
-| 3 | quote | 8.94 | 1.56 | 10.50 | before it ever ran. |
-| 4 | quote | 10.62 | 2.30 | 12.92 | Pydantic called the annotation invalid. |
-| 5 | quote | 13.04 | 2.34 | 15.38 | Python three eleven and up were fine. |
+| 2 | quote | 4.28 | 4.34 | 8.62 | a tool that returns a TypedDict with a NotRequired key failed at registration |
+| 3 | quote | 8.62 | 1.56 | 10.18 | before it ever ran. |
+| 4 | quote | 10.42 | 2.30 | 12.72 | Pydantic called the annotation invalid. |
+| 5 | quote | 12.98 | 2.34 | 15.32 | Python three eleven and up were fine. |
 | 6 | quote | 15.50 | 2.64 | 18.14 | Update the MCP Python SDK. |
-| 7 | quote | 18.42 | 1.20 | 19.62 | Registration works |
-| 8 | quote | 19.74 | 3.28 | 23.02 | and optional keys are left out instead of sent as null. |
-| 9 | quote | 23.24 | 2.00 | 25.24 | Exact version in the description. |
-| 10 | quote | 25.36 | 1.82 | 27.18 | Old Python in prod? |
-| 11 | quote | 27.30 | 0.52 | 27.82 | Test registration there. |
+| 7 | quote | 18.42 | 1.18 | 19.60 | Registration works |
+| 8 | quote | 19.72 | 3.28 | 23.00 | and optional keys are left out instead of sent as null. |
+| 9 | quote | 23.24 | 1.80 | 25.04 | Exact version in the description. |
+| 10 | quote | 25.04 | 1.82 | 26.86 | Old Python in prod? |
+| 11 | quote | 27.12 | 0.70 | 27.82 | Test registration there. |
 | 12 | cta | 27.82 | 2.94 | 30.76 | Subscribe · Agent traps same series |
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, card_vo, card_timing, sentence_too_long, allowlist_required, card_sync, stale_card, quote_before_speech
+**kinds:** beat_hold, card_vo, sentence_too_long, allowlist_required
 
 **reasons:**
 
-- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 4.74s incl. fade (hold 4.54s + 0.20s fade; limit 3.0s); beat[8] type=quote mid card 3.48s incl. fade (hold 3.28s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Card sync: FAIL — card 3 (quote) at 8.94s appears 0.32s AFTER its speech (8.62s); card 4 (quote) at 10.62s appears 0.20s AFTER its speech (10.42s); card 5 (quote) at 13.04s appears 0.06s AFTER its speech (12.98s); card 10 (quote) at 25.36s appears 0.32s AFTER its speech (25.04s); card 11 (quote) at 27.30s appears 0.18s AFTER its speech (27.12s). A card never appears after its own words; it may lead them by ≤1.1s.
+- [B] Beats ≤3.0s incl. fade: FAIL — beat[2] type=quote mid card 4.54s incl. fade (hold 4.34s + 0.20s fade; limit 3.0s); beat[8] type=quote mid card 3.48s incl. fade (hold 3.28s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
 - [B] Card ⊂ VO: FAIL — card_fragment: card 7 'Registration works' is a piece of the sentence 'Registration works, and optional keys are left out instead of sent as null.': not a whole VO sentence nor an isolated term (has a verb (a clause, not a term)) (a card shows the whole sentence or an isolated term). Every text card shows one whole sentence the VO says (a long sentence may continue on the next card only with its literal next words), and each spoken sentence gets one card.
-- [B] Card timing: FAIL — stale_card: card 3 type=quote ends at 10.50s, last spoken word at 9.98s (0.52s leftover; max 0.50s); stale_card: card 10 type=quote ends at 27.18s, last spoken word at 26.66s (0.52s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).
 - [B] Sentence too long: FAIL — sentence_too_long: card 2 'a tool that returns a TypedDict with a NotRequired key failed at registration' spoken 4.34s (first word 4.28s–last word 8.62s; max 3.0s) — split the sentence; sentence_too_long: card 8 'and optional keys are left out instead of sent as null.' spoken 3.08s (first word 19.72s–last word 22.80s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
 - [B] Allowlist required: FAIL — allowlist_required: topic 47 has no on_screen_allow. allowlist_required topics need overrides on_screen_allow.
 
@@ -199,9 +195,9 @@ BEFORE = board visível do `VM_FAIL_0465.md` (main `c35e110`). AFTER = `storyboa
 | # | type | start | dur | end | text |
 |---|------|------:|----:|----:|------|
 | 0 | hook | 0.00 | 3.62 | 3.62 | The crew failed the handoff. tasks.yaml was empty. |
-| 1 | quote | 4.00 | 3.64 | 7.64 | tasks.yaml was empty, so the next agent received nothing to do. |
-| 2 | quote | 7.76 | 2.56 | 10.32 | CrewAI will not invent the work for you. |
-| 3 | quote | 10.44 | 2.64 | 13.08 | The crew runner only moves what that file declares. |
+| 1 | quote | 4.00 | 3.44 | 7.44 | tasks.yaml was empty, so the next agent received nothing to do. |
+| 2 | quote | 7.44 | 2.56 | 10.00 | CrewAI will not invent the work for you. |
+| 3 | quote | 10.22 | 2.64 | 12.86 | The crew runner only moves what that file declares. |
 | 4 | quote | 13.30 | 5.50 | 18.80 | A task needs a description, an expected output, and an agent, or the handoff never starts. |
 | 5 | quote | 19.32 | 2.84 | 22.16 | Staring at the crew logs will not fill a blank file. |
 | 6 | quote | 22.50 | 2.98 | 25.48 | Write each task in tasks.yaml before you run. |
@@ -210,15 +206,12 @@ BEFORE = board visível do `VM_FAIL_0465.md` (main `c35e110`). AFTER = `storyboa
 
 **Gate B:** `FAIL` / result `FAIL`
 
-**kinds:** beat_hold, card_text, os_cards, card_timing, sentence_too_long, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_sync, stale_card, quote_before_speech
+**kinds:** beat_hold, card_text, os_cards, sentence_too_long, repeated_vo_sentence, enumeration_needs_rewrite, description_missing_source, card_text_not_literal
 
 **reasons:**
 
-- [B] Beats ≤3.0s incl. fade: FAIL — beat[1] type=quote mid card 3.84s incl. fade (hold 3.64s + 0.20s fade; limit 3.0s); beat[4] type=quote mid card 5.70s incl. fade (hold 5.50s + 0.20s fade; limit 3.0s); beat[5] type=quote mid card 3.04s incl. fade (hold 2.84s + 0.20s fade; limit 3.0s); beat[6] type=quote mid card 3.18s incl. fade (hold 2.98s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
-- [B] Card sync: FAIL — card 2 (quote) at 7.76s appears 0.32s AFTER its speech (7.44s); card 3 (quote) at 10.44s appears 0.22s AFTER its speech (10.22s). A card never appears after its own words; it may lead them by ≤1.1s.
-- [B] Card text: FAIL — quote_not_in_vo: card 1 quote 'tasks.yaml was empty, so the next agent received nothing to ' is not a verbatim VO substring (allowlist does not exempt quote cards). One card per spoken sentence, quotes only of words the VO says, no invented tool output, PT-BR copy on PT cards, no back-to-back near-duplicate cards.
-- [B] OS cards: FAIL — quote_not_in_vo: card 1 quote 'tasks.yaml was empty, so the next agent received nothing to ' is not a verbatim VO substring (allowlist does not exempt quote cards). OS mid cards are one whole VO sentence (or its strong-clause units); no compare/VS, term_define, list, or isolated term; copy is VO-literal or allowlist-literal.
-- [B] Card timing: FAIL — stale_card: card 2 type=quote ends at 10.32s, last spoken word at 9.80s (0.52s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).
+- [B] Beats ≤3.0s incl. fade: FAIL — beat[1] type=quote mid card 3.64s incl. fade (hold 3.44s + 0.20s fade; limit 3.0s); beat[4] type=quote mid card 5.70s incl. fade (hold 5.50s + 0.20s fade; limit 3.0s); beat[5] type=quote mid card 3.04s incl. fade (hold 2.84s + 0.20s fade; limit 3.0s); beat[6] type=quote mid card 3.18s incl. fade (hold 2.98s + 0.20s fade; limit 3.0s). Mid cards/slides must be ≤3.0s including the fade (hold ≤2.80s); cta/endcard ≤3.9s including the fade (hold ≤3.78s) — split or add beats, never stretch a card (not a Follow-tomorrow hold).
+- [B] Card text: FAIL — quote_not_in_vo: card 1 quote 'tasks.yaml was empty, so the next agent received nothing to ' is not a verbatim VO substring (allowlist does not exempt quote cards); card_text_not_literal: card 1 type=quote 'tasks.yaml was empty, so the next agent received nothing to ' is not VO-literal or allowlist-literal. One card per spoken sentence, quotes only of words the VO says, no invented tool output, PT-BR copy on PT cards, no back-to-back near-duplicate cards.
 - [B] Sentence too long: FAIL — sentence_too_long: card 1 'tasks.yaml was empty, so the next agent received nothing to do.' spoken 3.44s (first word 4.00s–last word 7.44s; max 3.0s) — split the sentence; sentence_too_long: card 4 'A task needs a description, an expected output, and an agent, or the handoff never starts.' spoken 5.30s (first word 13.30s–last word 18.60s; max 3.0s) — split the sentence. Any mid card (quotes included) may not cover more than 3.0s of speech (first word to last word). If no clause split lands ≤ that cap, rewrite the VO.
 - [B] Repeated VO sentence: FAIL — repeated_vo_sentence: VO sentence 'tasks.yaml was empty, so the next agent received nothing to do.' repeats sentence 1 — rewrite the VO. The same sentence must not be spoken twice — rewrite the VO.
 - [B] Enumeration split: FAIL — enumeration_needs_rewrite: comma split would fragment the enumeration 'A task needs a description, an expected output, and an agent, or the handoff never starts.' into 'A task needs a description / an expected output / and an agent / or the handoff never starts.'; spoken 5.30s — rewrite the VO. A comma list is not a clause split; rewrite the VO.
