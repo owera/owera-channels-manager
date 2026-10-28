@@ -702,16 +702,14 @@ ok(gb["checks"]["B"] == "FAIL" and "beat[1]" in gb["reasons"][0],
    "B FAIL: mid command held 5.80s (over the 3.0s HARD cap)")
 ok("3.0" in gb["reasons"][0], "B fail reason cites the 3.0s mid cap")
 
-# B — aligner-capped mid: hold 2.80 + 0.20 measured fade = 3.0s card must PASS.
-# (VM 2026-09-29: the 3.0s limit INCLUDES the fade; RR check 2026-09-30: a
-# 2.88s hold still measured 3.05–3.08s → current hold cap 2.80s.)
+# B — aligner-capped mid: hold 2.80 + BEAT_GAP_S fade = 2.92s card must PASS.
 b_cap = _pass_beats()
 b_cap[1] = {"type": "code", "start": 2.0, "dur": 2.80, "lines": ["x"], "cue": "code"}
 b_cap[2] = {"type": "stat", "start": 4.92, "dur": 2.0, "value": "1", "cue": "one"}
 b_cap[3] = {"type": "cta", "start": 7.04, "dur": 3.0, "text": "Go", "cue": "go"}
 gcap = craft.video_maker_gate(b_cap)
 ok(gcap["checks"]["B"] == "PASS",
-   "B PASS: code hold 2.80 + 0.20 fade = 3.0s card (at the cap)")
+   "B PASS: code hold 2.80 + 0.12 fade = 2.92s card (under 3.0s cap)")
 ok(gcap["result"] == "PASS",
    "board sitting on the 3.0s-incl-fade mid cap + 3.0s cta is a full PASS")
 b_288 = _pass_beats()
@@ -719,24 +717,25 @@ b_288[1] = {"type": "code", "start": 2.0, "dur": 2.88, "lines": ["x"], "cue": "c
 b_288[2] = {"type": "stat", "start": 5.0, "dur": 2.0, "value": "1", "cue": "one"}
 b_288[3] = {"type": "cta", "start": 7.12, "dur": 3.0, "text": "Go", "cue": "go"}
 g288 = craft.video_maker_gate(b_288)
-ok(g288["checks"]["B"] == "FAIL" and "3.08s incl. fade" in g288["reasons"][0],
-   "B FAIL (new renders): 2.88s hold = 3.08s card (RR 2026-09-30 measured 3.05–3.08s)")
+ok(g288["checks"]["B"] == "PASS",
+   "B PASS: 2.88s hold + 0.12 fade = 3.0s card (incl-fade cap)")
 ok(craft.video_maker_gate(b_288, beat_timing=craft.BEAT_TIMING_INCL_FADE)["checks"]["B"] == "PASS",
    "boards stamped card_incl_fade (29 Sep renders) keep the 2.88s cap — no retroactive reject")
 ok(craft.video_maker_gate_reason({"beats": b_288, "beat_timing": craft.BEAT_TIMING_INCL_FADE}) is None
-   and craft.video_maker_gate_reason({"beats": b_288, "beat_timing": craft.BEAT_TIMING_HOLD_280}),
-   "review/publish gate: marker card_incl_fade → 2.88 cap; card_hold_280 → 2.80 cap")
+   and craft.video_maker_gate_reason({"beats": b_288, "beat_timing": craft.BEAT_TIMING_HOLD_280}) is None,
+   "review/publish gate: 2.88s hold PASSes under both timing markers")
 ok(craft.BEAT_TIMING_CURRENT == craft.BEAT_TIMING_HOLD_280 and craft.MID_BEAT_MAX_S == 2.80
-   and abs(craft.MID_BEAT_MAX_S + craft.MID_FADE_S - 3.0) < 1e-9,
-   "current timing marker = card_hold_280; hold 2.80 + fade 0.20 = 3.0")
+   and craft.MID_FADE_S == craft.BEAT_GAP_S
+   and abs(craft.INCL_FADE_MID_BEAT_MAX_S + craft.BEAT_GAP_S - 3.0) < 1e-9,
+   "gate incl-fade: hold ≤2.88 + BEAT_GAP_S fade = 3.0; aligner still caps at 2.80")
 b_old3 = _pass_beats()
 b_old3[1] = {"type": "code", "start": 2.0, "dur": 3.0, "lines": ["x"], "cue": "code"}
 b_old3[2] = {"type": "stat", "start": 5.12, "dur": 2.0, "value": "1", "cue": "one"}
 b_old3[3] = {"type": "cta", "start": 7.2, "dur": 3.0, "text": "Go", "cue": "go"}
 g_old3 = craft.video_maker_gate(b_old3)
 ok(g_old3["checks"]["B"] == "FAIL" and "beat[1]" in g_old3["reasons"][0]
-   and "3.20s incl. fade" in g_old3["reasons"][0],
-   "B FAIL: the old 3.0s hold is a 3.20s card incl. the measured fade (VM 3.05–3.20s)")
+   and "3.12s incl. fade" in g_old3["reasons"][0],
+   "B FAIL: 3.0s hold + 0.12 fade = 3.12s card over the 3.0s incl-fade cap")
 b_end = _pass_beats()
 b_end[3] = {"type": "cta", "start": 7.0, "dur": 4.0, "text": "Go", "cue": "go"}
 g_end = craft.video_maker_gate(b_end)
@@ -1314,15 +1313,23 @@ _ok_board = [dict(_fr[0]), dict(_fr[1]), {"type": "quote", "start": 5.42, "dur":
                                            "text": "Testa a prefill com o prompt longo."}, dict(_fr[3])]
 ok(craft.repeated_card_hits(_ok_board) == [], "distinct sentence cards are not fragments")
 
-# (6) new renders: mid hold ≤2.80 so hold + fade ≤3.0s; marker set by the worker.
+# (6) Gate B incl-fade: hold + BEAT_GAP_S ≤ 3.0 (hold max 2.88); aligner still 2.80.
 ok(craft.BEAT_TIMING_CURRENT == craft.BEAT_TIMING_HOLD_280 and craft.MID_BEAT_MAX_S == 2.80
-   and craft.MID_BEAT_MAX_S + craft.MID_FADE_S <= 3.0 + 1e-9,
-   "new renders: 2.80s hold + 0.20s fade ≤ 3.0s (Gate B strict, card_incl_fade measured 3.05–3.08)")
+   and craft.MID_FADE_S == craft.BEAT_GAP_S
+   and craft.INCL_FADE_MID_BEAT_MAX_S + craft.BEAT_GAP_S <= 3.0 + 1e-9,
+   "gate: hold ≤2.88 + BEAT_GAP_S fade ≤ 3.0s (CARD_PAD_FLOOR_S is not fade)")
 _b305 = [{"type": "hook", "start": 0.0, "dur": 2.38, "text": "Um dois três."},
-         {"type": "stat", "start": 2.5, "dur": 2.85, "value": "1", "unit": "x", "label": "a"},
-         {"type": "cta", "start": 5.47, "dur": 3.0, "text": "Subscribe · IA"}]
+         {"type": "stat", "start": 2.5, "dur": 2.89, "value": "1", "unit": "x", "label": "a"},
+         {"type": "cta", "start": 5.51, "dur": 3.0, "text": "Subscribe · IA"}]
 ok(craft.video_maker_gate(_b305, beat_timing=craft.BEAT_TIMING_CURRENT)["checks"]["B"] == "FAIL",
-   "2.85s mid hold (≈3.05 incl. fade) → Gate B FAIL on a card_hold_280 render")
+   "2.89s mid hold + 0.12 fade = 3.01s card → Gate B FAIL")
+_b283 = _pass_beats()
+_b283[1] = {"type": "quote", "start": 2.0, "dur": 2.825,
+            "text": "staging #1451 beat[9] quote hold with pad", "cue": "quote"}
+_b283[2] = {"type": "stat", "start": 4.945, "dur": 2.0, "value": "1", "cue": "one"}
+_b283[3] = {"type": "cta", "start": 7.065, "dur": 3.0, "text": "Go", "cue": "go"}
+ok(craft.video_maker_gate(_b283, beat_timing=craft.BEAT_TIMING_CURRENT)["checks"]["B"] == "PASS",
+   "2.825s hold + 0.12 fade = 2.945s (#1451 beat[9] shape) → Gate B PASS")
 
 # --- Card ↔ speech sync (CoS 2026-09-30): never after its words, lead ≤1.1s ---
 print("card sync: a card never appears after its own speech; lead ≤ 1.1s (CoS 2026-09-30)")

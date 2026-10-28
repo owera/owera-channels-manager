@@ -1132,12 +1132,12 @@ OS_BANNED_TERM = frozenset({"term_define"})
 OS_BANNED_LIST = frozenset({"list"})
 CARD_TIMING_V1 = "card_timing_v1"
 ALLOWLIST_REQ_V1 = "allowlist_req_v1"
-# RR publish check 2026-09-30: with the real fade a 2.88s hold still measured
-# 3.05–3.08s card-to-card (blank midpoint to blank midpoint). Content hold is
-# now ≤2.80s so hold + fade ≤ 3.0s. MUST equal storyboard._MID_MAX.
-MID_BEAT_MAX_S = 2.80                                        # visual hold (current)
-MID_FADE_S = round(MID_CARD_MAX_S - MID_BEAT_MAX_S, 2)       # 0.20 measured fade
-INCL_FADE_MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)  # 2.88 (card_incl_fade boards)
+# Aligner caps visual hold at MID_BEAT_MAX_S (must equal storyboard._MID_MAX).
+# Gate B incl.-fade uses BEAT_GAP_S (0.12) at card end — never CARD_PAD_FLOOR_S
+# (0.20 post-last-word hold pad). Mid hold + fade ≤ MID_CARD_MAX_S → hold ≤2.88s.
+MID_BEAT_MAX_S = 2.80                                        # visual hold (aligner)
+MID_FADE_S = BEAT_GAP_S                                      # inter-beat fade (not pad)
+INCL_FADE_MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)  # 2.88 gate hold max
 CTA_CARD_MAX_S = ENDCARD_CARD_MAX_S                          # 3.9 incl. fade
 CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
 # creation_config["beat_timing"] marker: boards rendered by the aligner that
@@ -3618,25 +3618,32 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
             continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
-        hold_cap = cta_hold if is_cta else mid_hold
-        if span > hold_cap + 1e-6:
-            label = "cta/endcard" if is_cta else "mid"
-            # fade as measured for this hold cap (0.20s on ≤2.80s mids, 0.12s
-            # otherwise); card = hold + fade vs the card limit.
-            fade = (MID_FADE_S if (not is_cta and hold_cap == MID_BEAT_MAX_S)
-                    else BEAT_GAP_S)
-            limit = hold_cap + fade
+        fade = BEAT_GAP_S
+        label = "cta/endcard" if is_cta else "mid"
+        if legacy_timing:
+            hold_cap = cta_hold if is_cta else mid_hold
+            over = span > hold_cap + 1e-6
+            card_limit = hold_cap + fade
+            card_incl = span + fade
+        else:
+            card_limit = CTA_CARD_MAX_S if is_cta else MID_CARD_MAX_S
+            card_incl = span + fade
+            over = card_incl > card_limit + 1e-6
+        if over:
             b_hits.append(
-                f"beat[{i}] type={btype} {label} card {span + fade:.2f}s incl. fade "
-                f"(hold {span:.2f}s + {fade:.2f}s fade; limit {limit:.1f}s)"
+                f"beat[{i}] type={btype} {label} card {card_incl:.2f}s incl. fade "
+                f"(hold {span:.2f}s + {fade:.2f}s fade; limit {card_limit:.1f}s)"
             )
     if b_hits:
         checks["B"] = "FAIL"
+        mid_hold_msg = (LEGACY_MID_BEAT_MAX_S if legacy_timing
+                        else INCL_FADE_MID_BEAT_MAX_S)
+        cta_hold_msg = (LEGACY_CTA_BEAT_MAX_S if legacy_timing else CTA_BEAT_MAX_S)
         reasons.append(
             f"[B] Beats ≤{MID_CARD_MAX_S:.1f}s incl. fade: FAIL — " + "; ".join(b_hits) +
             f". Mid cards/slides must be ≤{MID_CARD_MAX_S:.1f}s including the fade "
-            f"(hold ≤{mid_hold:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
-            f"including the fade (hold ≤{cta_hold:.2f}s) — split or add "
+            f"(hold ≤{mid_hold_msg:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
+            f"including the fade (hold ≤{cta_hold_msg:.2f}s) — split or add "
             "beats, never stretch a card (not a Follow-tomorrow hold)."
         )
     # Repeated card: an identical card split only by the fade blink reads as

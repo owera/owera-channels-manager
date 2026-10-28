@@ -166,6 +166,25 @@ for idx, label in ((2, "#1451 c2"), (8, "#1458 c8"), (9, "#1451 c9")):
     ok(sp and end + 1e-6 >= floor - craft.SYNC_TOL_S,
        f"{label} card {idx} end {end:.2f} ≥ hold floor {floor:.2f} (last {sp[1]:.2f})")
 
+print("Gate B #1451 beat[9]: incl-fade uses BEAT_GAP_S (not CARD_PAD_FLOOR_S)")
+# Staging #1451 Gate B visual PASS: mid quote hold 2.825s + 0.12s fade = 2.945s.
+# False FAIL was hold 2.83 + CARD_PAD_FLOOR_S (0.20) treated as fade → 3.03s.
+_hold9 = 2.825
+_staging9 = [
+    _beat("hook", 0.0, 2.5, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("stat", 2.62, 2.0, value="1", label="x"),
+    _beat("quote", 4.74, _hold9, text="Subagent came back empty?", plain=True),
+    _beat("cta", 7.695, 3.0, text="Subscribe · Agent traps", cue="Subscribe"),
+]
+_card9 = _hold9 + craft.BEAT_GAP_S
+ok(_card9 <= craft.MID_CARD_MAX_S + 1e-6,
+   f"#1451 beat[9] card {_card9:.2f}s = hold {_hold9:.2f}s + fade {craft.BEAT_GAP_S:.2f}s ≤ 3.0")
+ok(_hold9 + craft.CARD_PAD_FLOOR_S > craft.MID_CARD_MAX_S + 1e-6,
+   "regression: pad-as-fade accounting (hold+0.20) falsely exceeded 3.0s cap")
+_g1451 = craft.video_maker_gate(_staging9, beat_timing=craft.BEAT_TIMING_CURRENT)
+ok(_g1451["checks"]["B"] == "PASS",
+   "#1451 beat[9] Gate B incl-fade PASS (BEAT_GAP_S fade, not CARD_PAD_FLOOR_S pad)")
+
 print("blank gap budget ≤ 0.62s (0.5s stale + 0.12s fade) on #1452 compose")
 _blank_max = craft.BLANK_GAP_MAX_S + craft.BEAT_GAP_S
 for i in range(len(_beats1452) - 1):
