@@ -11,6 +11,7 @@ from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoSt
                         utcnow)
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 from app.services import quota, video_gen
+from app.services.subject_guard import subject_guard_reason
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -190,7 +191,12 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     session.commit()
     session.refresh(topic)
 
-    # 2. Seed ideas; auto-produce the first `produce_count` (QUEUED), rest as DRAFT.
+    # 2. Seed ideas. Auto-produce `produce_count` legal subjects (QUEUED).
+    # A subject the pre-produce guard rejects stays DRAFT — generate_ideas
+    # keeps an R$N title on purpose, and a lowercase fragment can still
+    # arrive from a stub or a future prompt. Those must not take a render
+    # slot. Later legal ideas fill the same produce_count (same skip-and-
+    # continue as auto-produce). The idea itself is kept.
     try:
         ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
                                          idea_count, fmt,
@@ -211,10 +217,23 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
         select(func.max(Video.position)).where(Video.channel_id == ch.id)).one() or 0
     produced = 0
     for i, subject in enumerate(ideas):
-        status = VideoStatus.QUEUED if i < produce_count else VideoStatus.DRAFT
-        session.add(Video(channel_id=ch.id, topic_id=topic.id, subject=subject,
-                          status=status, position=mx_v + 1 + i))
-        produced += status == VideoStatus.QUEUED
+        held = subject_guard_reason(subject)
+        v = Video(channel_id=ch.id, topic_id=topic.id, subject=subject,
+                  status=VideoStatus.DRAFT, position=mx_v + 1 + i,
+                  error=held)
+        if not held and produced < produce_count:
+            v.status = VideoStatus.QUEUED
+            v.error = None
+            produced += 1
+        session.add(v)
+        # Log only while a produce slot is still open. A held idea after the
+        # quota is filled was never going to queue; auto-produce records it
+        # on the next tick if it is still a draft.
+        if held and produced < produce_count:
+            session.flush()
+            quota.log(session, kind="produce", status="error", video_id=v.id,
+                      channel_id=ch.id,
+                      detail=f"adopt held draft (not queued): {held}")
 
     # 3. Link + close out the trend.
     t.adopted_topic_id = topic.id
