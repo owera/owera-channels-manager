@@ -433,6 +433,7 @@ def _queued_candidates(session: Session) -> list[Video]:
             select(Video).where(
                 Video.status == VideoStatus.QUEUED,
                 Video.channel_id == channel.id,
+                Video.held.is_not(True),  # operator hold: no render slot (#1458)
             ).order_by(Video.position, Video.id)
         ).all()
         if not queued:
@@ -482,6 +483,7 @@ def _rebalance_queued_mix(session: Session) -> None:
             select(Video).where(
                 Video.channel_id == ch.id,
                 Video.status == VideoStatus.QUEUED,
+                Video.held.is_not(True),
             ).order_by(Video.position, Video.id)
         ).all()
         longs, shorts = _split_queued_by_format(session, queued)
@@ -525,6 +527,7 @@ def _rebalance_queued_mix(session: Session) -> None:
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == ch.id,
                    Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)),
+                   Video.held.is_not(True),
                    Topic.content_format == "long")
         ).one()
         if in_flight_longs > 0 or not shorts:
@@ -582,6 +585,8 @@ def _submit_new(session: Session) -> None:
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
             break
+        if video.held:
+            continue  # belt: DB hold on QUEUED must never burn a render slot
         # compose-script (no render) owns this row's script right now: submitting
         # would generate a second script and race the compose write.
         from app.services.script_compose import is_composing
@@ -833,6 +838,7 @@ def _auto_produce(session: Session) -> None:
                 select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
                 .where(Video.channel_id == ch.id,
                        Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)),
+                       Video.held.is_not(True),
                        Topic.content_format == "long")
             ).one()
             # Urgent: nothing long in the whole pipeline.

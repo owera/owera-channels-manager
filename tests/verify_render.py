@@ -336,6 +336,23 @@ s.commit()
 ok(len(by_status(s, ch, VideoStatus.RENDERING)) == 3,
    "single tick with concurrency 8 submits only budget (3)")
 
+# Belém 2026-10-28 (#1458): held=true on QUEUED must not be claimed by render_loop.
+print("submit_new: skips held QUEUED (no render slot burn)")
+s = fresh_session()
+set_concurrency(s, 4)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_held.id).status == VideoStatus.QUEUED,
+   "held QUEUED stays queued — not picked by _submit_new")
+ok(s.get(Video, v_free.id).status == VideoStatus.RENDERING,
+   "unheld QUEUED sibling still renders")
+ok(v_held.id not in [v.id for v in render_loop._queued_candidates(s)],
+   "_queued_candidates omits held QUEUED rows")
+
 print("submit_new: brand + channel_id/slug wired into worker params")
 s = fresh_session()
 set_concurrency(s, 1)

@@ -883,21 +883,29 @@ def retry(video_id: int, session: Session = Depends(get_session)):
     return _set_status(session, video_id, VideoStatus.QUEUED, **_clear_render_artifact(v))
 
 
+_HOLD_FROM = frozenset({VideoStatus.APPROVED, VideoStatus.QUEUED})
+
+
 @router.post("/{video_id}/hold")
 def hold(video_id: int, session: Session = Depends(get_session)):
-    """Pull an APPROVED video out of the publish drip without re-rendering.
+    """Hold a video without re-rendering.
 
-    Status and craft_review stay as they are; the publish loop (selection and
-    craft sweep) skips held rows and runway/queue counts exclude them."""
+    APPROVED: out of the publish drip (status/craft unchanged). QUEUED: out of
+    the render loop until unheld. The publish loop skips held rows; the render
+    loop skips held QUEUED rows."""
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
-    if v.status != VideoStatus.APPROVED:
-        raise HTTPException(409, f"cannot hold from status '{v.status}' (need approved)")
+    if v.status not in _HOLD_FROM:
+        raise HTTPException(
+            409, f"cannot hold from status '{v.status}' "
+                 f"(allowed: {', '.join(sorted(_HOLD_FROM))})")
     if v.held:
         raise HTTPException(409, "video is already held")
+    detail = ("held via API: approved, out of publish drip" if v.status == VideoStatus.APPROVED
+              else "held via API: queued, out of render loop")
     quota.log(session, kind="hold", status="success", video_id=v.id,
-              channel_id=v.channel_id, detail="held via API: approved, out of publish drip")
+              channel_id=v.channel_id, detail=detail)
     v.held, v.held_at = True, utcnow()
     v.updated_at = utcnow()
     session.add(v)
@@ -911,12 +919,16 @@ def unhold(video_id: int, session: Session = Depends(get_session)):
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
-    if v.status != VideoStatus.APPROVED:
-        raise HTTPException(409, f"cannot unhold from status '{v.status}' (need approved)")
+    if v.status not in _HOLD_FROM:
+        raise HTTPException(
+            409, f"cannot unhold from status '{v.status}' "
+                 f"(allowed: {', '.join(sorted(_HOLD_FROM))})")
     if not v.held:
         raise HTTPException(409, "video is not held")
+    detail = ("unheld via API: back in publish drip" if v.status == VideoStatus.APPROVED
+              else "unheld via API: back in render queue")
     quota.log(session, kind="unhold", status="success", video_id=v.id,
-              channel_id=v.channel_id, detail="unheld via API: back in publish drip")
+              channel_id=v.channel_id, detail=detail)
     v.held, v.held_at = False, None
     v.updated_at = utcnow()
     session.add(v)
