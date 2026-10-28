@@ -102,6 +102,10 @@ def _to(sel: str, t: float, to: str, dur: float = 0.45, ease: str = "power2.in")
     return "tl.to('" + sel + "',{" + to + ",duration:" + _r(dur) + ",ease:'" + ease + "'}," + _r(t) + ");"
 
 
+# Exit fade: all brands share ``build_index_html`` / ``_wrap`` (OS, RR, literal).
+# Default duration is ``craft.BEAT_GAP_S`` (0.12s), matching the aligner gap —
+# not the old hard-coded 0.45s that started at ``end - dur``. Pass ``dur=`` to
+# override (no brand-specific branch today).
 def _fade_out(sel: str, end: float, dur: float | None = None, extra: str = "") -> str:
     """Fade starts at ``end`` (full-opacity hold includes the post-word pad)."""
     from app.services import craft

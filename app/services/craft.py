@@ -1767,26 +1767,31 @@ def vo_source_text(script: str | None, words=None) -> str:
     return spoken if _sync_toks(spoken) else (script or "")
 
 
-def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
-    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception)."""
+def is_literal_quote_beat(beat: dict | None, sources=None, script: str | None = None) -> bool:
+    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception).
+
+    The quote text must still be spoken in the VO; allowlist alone is not enough.
+    """
     if not isinstance(beat, dict) or (beat.get("type") or "") != "quote":
         return False
+    text = str(beat.get("text") or beat.get("cue") or "").strip()
     if beat.get("literal_quote") or beat.get("_lit"):
-        return True
+        return bool(script and text and text_in_script(text, script))
     if beat.get("plain"):
         return False
-    if sources is not None:
-        return bool(source_literal(beat.get("text"), sources, {"quote"}))
+    if sources is not None and source_literal(text, sources, {"quote"}):
+        return bool(script and text and text_in_script(text, script))
     return False
 
 
-def is_spoken_span_hold(beat: dict | None, words=None, sources=None) -> bool:
+def is_spoken_span_hold(beat: dict | None, words=None, sources=None,
+                        script: str | None = None) -> bool:
     """Generator timing helper: literal quote / cap_extended_spoken.
 
     Gate B visual hold (``video_maker_gate`` mid ≤3.0s incl. fade) does
     **not** use this — every mid card, quotes included, FAILs over the cap.
     """
-    if is_literal_quote_beat(beat, sources):
+    if is_literal_quote_beat(beat, sources, script=script):
         return True
     if not isinstance(beat, dict):
         return False
@@ -1817,6 +1822,10 @@ def _part_is_literal(field: str, text: str, script: str | None, sources=None, *,
     raw = str(text or "").strip()
     if not raw:
         return True
+    # Quote cards (spec B): on-screen text must be a verbatim VO substring —
+    # allowlist kind=quote does not exempt from spoken/script match.
+    if typ == "quote" and field in _BODY_FIELDS:
+        return bool(script) and text_in_script(raw, script)
     if sources is not None:
         kinds = CLI_ALLOW_KINDS if field in ("line", "command", "output") else None
         if source_literal(raw, sources, kinds):
@@ -1866,6 +1875,10 @@ def card_is_literal(beat: dict, script: str | None, sources=None,
     for f, t in parts:
         raw = str(t or "").strip()
         if not raw:
+            continue
+        if typ == "quote" and f in _BODY_FIELDS:
+            if not text_in_script(raw, spoken or script):
+                return False
             continue
         if sources is not None:
             kinds = CLI_ALLOW_KINDS if f in ("line", "command", "output") else None
@@ -1965,12 +1978,11 @@ def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[di
         if typ == "quote" and script:
             txt = str(b.get("text") or b.get("cue") or "").strip()
             if txt and not text_in_script(txt, script):
-                if not (sources and source_literal(txt, sources, {"quote"})):
-                    out.append({"i": i, "check": "quote_not_in_vo",
-                                "detail": f"card {i} quote {txt[:60]!r} is not a verbatim "
-                                          "VO substring"})
-                    prev = i
-                    continue
+                out.append({"i": i, "check": "quote_not_in_vo",
+                            "detail": f"card {i} quote {txt[:60]!r} is not a verbatim "
+                                      "VO substring (allowlist does not exempt quote cards)"})
+                prev = i
+                continue
         if (script or words) and not card_is_literal(b, script, sources, words=words):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
@@ -3587,7 +3599,7 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # OS: every mid card, quotes included, visual hold + fade ≤ 3.0s.
         # is_spoken_span_hold is a generator helper — it does not exempt
         # an OS quote. RR keeps the spoken-span exemption (RR unchanged).
-        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources):
+        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources, script=script):
             continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES

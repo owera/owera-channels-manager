@@ -437,8 +437,10 @@ for vid, hold, text in (
     ok(g["checks"]["B"] == "FAIL" and any("beat[1]" in r for r in mid),
        f"#{vid} mid visible {hold:.2f}s (quote) → OS beat_hold FAIL "
        f"({g.get('reasons')})")
-    g_rr = craft.video_maker_gate(board, beat_timing=craft.BEAT_TIMING_CURRENT,
-                                  brand="rr", sources=ALLOW1452)
+    scr = snapshot_script(vid)
+    g_rr = craft.video_maker_gate(
+        board, beat_timing=craft.BEAT_TIMING_CURRENT, brand="rr",
+        sources=ALLOW1452, script=scr, words=whisper_words(vid))
     ok(not any("beat[1]" in r and "mid card" in r
                for r in (g_rr.get("reasons") or [])),
        f"#{vid} RR keeps the quote hold exemption")
@@ -803,10 +805,13 @@ s1465 = next(s for s in summaries if s["id"] == 1465)
 q = next((b for b in s1452["after"]
           if "maximum of 4 blocks" in (b.get("text") or "")), None)
 ok(q is not None, "#1452 AFTER has the CAPIError quote")
-ok(abs(float(q["start"]) - 8.04) < 0.05, f"#1452 quote start {q['start']}")
-ok(float(q["start"]) + float(q["dur"]) >= 11.4,
-   f"#1452 CAPIError holds through last whisper word "
-   f"(end {float(q['start']) + float(q['dur']):.2f})")
+q_sp = craft.spoken_span(craft._card_spoken_text(q, None), w1452)
+ok(q_sp and float(q["start"]) + 1e-6 >= float(q_sp[0]) - craft.SYNC_TOL_S,
+   f"#1452 quote start {q['start']} not before first word {q_sp[0] if q_sp else None}")
+ok(q_sp and float(q["start"]) + float(q["dur"]) + 1e-6
+   >= float(q_sp[1]) + craft.CARD_PAD_FLOOR_S - craft.SYNC_TOL_S,
+   f"#1452 CAPIError holds through last word + pad "
+   f"(end {float(q['start']) + float(q['dur']):.2f}, last {q_sp[1]})")
 ok(float(q["dur"]) > craft.MID_BEAT_MAX_S, "literal quote exceeds mid cap")
 ok("beat_hold" in s1452["after_kinds"]
    or any("mid card" in r for r in (s1452["ga"].get("reasons") or [])),

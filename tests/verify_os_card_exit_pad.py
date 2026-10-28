@@ -73,6 +73,20 @@ bad_quote = [
 hits = craft.os_card_hits(bad_quote, S1452, None, words=w1452)
 ok(any(h["check"] == "quote_not_in_vo" for h in hits),
    "paraphrase / invented quote → quote_not_in_vo")
+forum_line = "Can you check that you're on 3.20.21 or higher? It should be fixed there!"
+allow_quote = [{"kind": "quote", "text": forum_line, "source": "https://forum.example/raw/1"}]
+allowlisted_not_vo = [
+    _beat("hook", 0.0, 2.0, text="One folder broke Copilot CLI.", object="terminal"),
+    _beat("quote", 2.12, 2.5, text=forum_line),
+    _beat("cta", 5.0, 3.0, text="Subscribe"),
+]
+hits_q = craft.os_card_hits(allowlisted_not_vo, S1452, allow_quote, words=w1452)
+ok(any(h["check"] == "quote_not_in_vo" for h in hits_q),
+   "allowlisted forum quote not in VO → quote_not_in_vo (no allowlist bypass)")
+ok(not craft.card_is_literal(allowlisted_not_vo[1], S1452, allow_quote, words=w1452),
+   "card_is_literal: quote type requires VO substring, not allowlist alone")
+ok(not craft._part_is_literal("text", forum_line, S1452, allow_quote, typ="quote"),
+   "_part_is_literal: quote body ignores allowlist")
 allow = [{"kind": "code", "text": "Found 5.", "source": "https://example.test/log"}]
 bad_code = [
     _beat("hook", 0.0, 2.0, text="One folder broke Copilot CLI.", object="terminal"),
