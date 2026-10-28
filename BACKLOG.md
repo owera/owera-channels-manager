@@ -1962,3 +1962,31 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 87. ✅ DONE (PR autoimprove/2026-10-28-adopt-subject-guard) adopt skip-and-continues subjects the produce guard holds — normal
+- **resolution (2026-10-28):** `POST /api/trends/{id}/adopt` now runs
+  `subject_guard_reason` on each seeded idea. A held subject stays
+  DRAFT with `video.error` = the guard reason; later legal ideas fill
+  `produce_count` (same skip-and-continue as `_auto_produce` /
+  `_hold_invalid_subject`). While a produce slot is still open, one
+  `produce` error JobRun is logged (`adopt held draft (not queued)`).
+  A held idea after the quota is filled writes none — auto-produce
+  records it on the next tick. `generate_ideas` keeps an R$N / $N
+  title on purpose (`is_title_fragment` carves that out); those used
+  to take the first produce slots. All-legal prefix and
+  `produce_count=0` are unchanged. Suite:
+  `tests/verify_adopt_subject_guard.py` (40 checks). Isolated commit;
+  no money-path files.
+- **why (left open by #85 / PR #85):** API produce and auto-produce
+  already hold a lowercase fragment / bare unit / currency subject.
+  Adopt still marked the first `produce_count` ideas QUEUED in order,
+  so a growth-agent adopt spent render slots on videos the publish
+  craft gate will not ship.
+- **caution:** normal (`trends.py` adopt only). Isolated commit + new
+  regression suite. `youtube.py` / `publish_loop.py` / oauth untouched.
+- **acceptance:** a lowercase fragment and a `$47` title stay DRAFT;
+  the next two legal ideas queue; a third legal stays DRAFT;
+  `produce_count=0` queues nothing; all-legal still queues a prefix.
+  Remaining: open PRs #139 / #140 / #143 / #146 / #148 append items
+  82–86 at this same BACKLOG tail — keep every section when merging.
+  `run/code-experiments.jsonl` is union-merge.
