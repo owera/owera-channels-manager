@@ -1106,6 +1106,9 @@ OS_VO_SENTENCE_CARDS = True
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
+# Minimum post-last-word hold before the inter-beat fade starts (VM/CTO OS 0/2).
+# Gate B card_exits_early and the OS snap both enforce last word + this pad.
+CARD_PAD_FLOOR_S = 0.20
 # CMO + VM (final): ANY mid card — plain VO, cap_extended_spoken, or
 # literal quote — FAILs Gate B (sentence_too_long) when first word → last
 # word exceeds this. No quote-span exemption. The generator still tries
@@ -1949,6 +1952,25 @@ def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[di
                                       f"card {prev} already showed it"})
             prev = i
             continue
+        if typ in CLI_BEAT_TYPES and sources is not None:
+            bad = [ln for ln in cli_lines(b)
+                   if str(ln or "").strip()
+                   and not source_literal(ln, sources, CLI_ALLOW_KINDS)]
+            if bad:
+                out.append({"i": i, "check": "cli_not_in_allowlist",
+                            "detail": f"card {i} type={typ} line(s) not byte-exact in "
+                                      f"on_screen_allow: {bad[0]!r}"})
+                prev = i
+                continue
+        if typ == "quote" and script:
+            txt = str(b.get("text") or b.get("cue") or "").strip()
+            if txt and not text_in_script(txt, script):
+                if not (sources and source_literal(txt, sources, {"quote"})):
+                    out.append({"i": i, "check": "quote_not_in_vo",
+                                "detail": f"card {i} quote {txt[:60]!r} is not a verbatim "
+                                          "VO substring"})
+                    prev = i
+                    continue
         if (script or words) and not card_is_literal(b, script, sources, words=words):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
@@ -2101,11 +2123,16 @@ def card_exits_early_hits(beats, words, sources=None, *,
                 out.append(_unspoken_card_hit(i, b.get("type") or "", text))
             continue
         end = _cue_start(b) + _cue_span(board, i)
-        if end < float(span[1]) - SYNC_TOL_S - 1e-6:
+        min_end = float(span[1]) + CARD_PAD_FLOOR_S
+        if i + 1 < len(board) and (board[i + 1].get("type") or "") in CTA_TYPES:
+            # Subscribe speech follows immediately; pad is folded into the chip fade.
+            min_end = float(span[1])
+        if end < min_end - SYNC_TOL_S - 1e-6:
             out.append({
                 "i": i, "check": "card_exits_early",
                 "detail": f"card {i} ends at {end:.2f}s, last spoken word "
-                          f"at {span[1]:.2f}s (must hold through the last word)",
+                          f"at {span[1]:.2f}s (must hold through the last word "
+                          f"+ {CARD_PAD_FLOOR_S:.2f}s pad)",
             })
     return out
 
