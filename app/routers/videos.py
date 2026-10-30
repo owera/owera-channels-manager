@@ -195,7 +195,9 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
 @router.get("/queue-plan")
 def queue_plan(channel_id: int, session: Session = Depends(get_session)):
     """Why each queued video isn't rendering yet — mirrors the gates in
-    render_loop._submit_new so the board can label queued cards. Returns
+    render_loop._submit_new / _queued_candidates so the board can label
+    queued cards (including operator hold: omitted from the drain, labeled
+    "on hold — not rendering", never "next to render"). Returns
     {video_id: {"reason": str, "eta": iso8601|null}}."""
     ch = session.get(Channel, channel_id)
     if not ch:
@@ -212,11 +214,25 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
     def entry(reason: str, eta: str | None = None) -> dict:
         return {"reason": reason, "eta": eta}
 
-    # Global / channel-wide stops apply to every queued video.
+    # Operator hold (#153 / #1458): these rows are omitted from
+    # _queued_candidates, so they must not fall through to "next to render"
+    # and must not vanish from the plan. Label them first; pause/budget
+    # apply only to the live remainder (unhold then shows the real gate).
+    held_queued = [v for v in queued if v.held]
+    live = [v for v in queued if not v.held]
+    plan: dict[str, dict] = {
+        str(v.id): entry("on hold — not rendering") for v in held_queued
+    }
+    if not live:
+        return plan
+
+    # Global / channel-wide stops apply to every live queued video.
     if cfg_row.scheduler_paused:
-        return {str(v.id): entry("scheduler paused") for v in queued}
+        plan.update({str(v.id): entry("scheduler paused") for v in live})
+        return plan
     if ch.paused:
-        return {str(v.id): entry("channel paused") for v in queued}
+        plan.update({str(v.id): entry("channel paused") for v in live})
+        return plan
 
     budget = ch.daily_render_budget
     rendered = quota.rendered_today(session, channel_id)
@@ -231,10 +247,14 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
     # when no approved long, shorts-first when a long is already banked). FIFO-by
     # position/id lied: a queued long behind lower-id shorts was labeled "budget
     # full" while it was actually next to render (the 2026-08-07 ch2 shape).
+    # Held rows are already in `plan`. _queued_candidates omits them; if it
+    # is empty (paused already returned), fall back to live FIFO — never the
+    # full `queued` list, which re-lied "next to render" on held-only after
+    # #153. Belt: skip held even if a candidate leak overwrites the label.
     ordered = [v for v in _queued_candidates(session) if v.channel_id == channel_id]
     if not ordered:
-        ordered = queued
-    plan: dict[str, dict] = {}
+        ordered = live
+    ordered = [v for v in ordered if not v.held]
     for i, v in enumerate(ordered):
         if i >= slots_today:                              # today's render budget spent
             plan[str(v.id)] = entry(f"render budget full ({spent}/{budget})", reset)

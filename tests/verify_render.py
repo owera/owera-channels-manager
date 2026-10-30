@@ -689,6 +689,106 @@ ok(plan[str(v_s.id)]["reason"] == "next to render",
 ok(plan[str(v_long.id)]["reason"] == "queued · renders today",
    "extra queued long is not labeled next when shorts need the mix slots")
 
+# Belém #1458 follow-up: queue-plan documents that it mirrors _submit_new /
+# _queued_candidates. After #153 those omit held QUEUED, so a held-only queue
+# fell through to `ordered = queued` and labeled the held row "next to render"
+# (a lie — the loop will never claim it). A mixed queue dropped the held row
+# from the plan entirely, so the board card had no hold label.
+print("queue-plan: held QUEUED is labeled hold, never next-to-render")
+HOLD_REASON = "on hold — not rendering"
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_only = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_only.id)]["reason"] == HOLD_REASON,
+   "held-only queue is labeled hold, not 'next to render'")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(str(v_held.id) in plan and plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "mixed queue: held row stays in the plan with the hold label")
+ok(plan[str(v_free.id)]["reason"] == "next to render",
+   "mixed queue: unheld sibling is next to render (held does not take the slot)")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=1)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "budget 1: held is hold, not budget-full")
+ok(plan[str(v_free.id)]["reason"] == "next to render",
+   "budget 1: the unheld sibling takes the only slot (held is not in the drain)")
+
+s = fresh_session()
+set_concurrency(s, 8)
+cfg = app_settings(s)
+cfg.scheduler_paused = True
+s.add(cfg)
+s.commit()
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "scheduler paused: held still reads as hold (unhold would then show paused)")
+ok(plan[str(v_free.id)]["reason"] == "scheduler paused",
+   "scheduler paused: unheld sibling is still labeled paused")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5, paused=True)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "channel paused: held still reads as hold")
+ok(plan[str(v_free.id)]["reason"] == "channel paused",
+   "channel paused: unheld sibling is still labeled paused")
+
+print("queue-plan: empty _queued_candidates still labels live; held belt holds")
+from unittest.mock import patch  # noqa: E402
+from app.routers import videos as videos_router  # noqa: E402
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+with patch.object(videos_router, "_queued_candidates", return_value=[]):
+    plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "candidates=[] fallback: held stays hold (not next-to-render via queued)")
+ok(plan[str(v_free.id)]["reason"] == "next to render",
+   "candidates=[] fallback: live FIFO still labeled (fallback is live, not empty)")
+
+s = fresh_session()
+set_concurrency(s, 8)
+ch = make_channel(s, daily_render_budget=5)
+t = make_topic(s, ch, content_format="short")
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_free = make_video(s, ch, t, status=VideoStatus.QUEUED)
+with patch.object(videos_router, "_queued_candidates",
+                  return_value=[v_held, v_free]):
+    plan = queue_plan(channel_id=ch.id, session=s)
+ok(plan[str(v_held.id)]["reason"] == HOLD_REASON,
+   "belt: a held leak in candidates does not overwrite the hold label")
+ok(plan[str(v_free.id)]["reason"] == "next to render",
+   "belt: leaked held is stripped so the live sibling stays i=0 next")
+
 # ══ Non-budget lifecycle: recovery, timeout/retry, finalize (backlog 7) ════════
 
 import json  # noqa: E402

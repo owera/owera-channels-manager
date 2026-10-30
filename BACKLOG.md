@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 88. ✅ DONE (PR autoimprove/2026-10-30-queue-plan-held) queue-plan labels held QUEUED instead of "next to render" — normal
+- **resolution (2026-10-30):** `/api/videos/queue-plan` labels operator-held
+  QUEUED rows `"on hold — not rendering"` and drains only the live
+  remainder. After #153 `_queued_candidates` omits held, so a held-only
+  queue fell through to `ordered = queued` and the board said "next to
+  render" (a lie — the loop never claims it); a mixed queue dropped the
+  held row from the plan. Pause/budget apply to live rows only (unhold
+  then shows the real gate). Suite: `tests/verify_render.py` 157 → 170.
+  Isolated commit; `publish_loop.py` / `youtube.py` / oauth untouched.
+- **why (found 2026-10-30, after #153 / #1458):** the board endpoint
+  documents that it mirrors `_submit_new`. #153 added the hold gate to
+  the loop and not the mirror.
+- **caution:** normal (`videos.py` queue-plan only). Not a money-path
+  file. Isolated commit + regression tests.
+- **acceptance:** a held-only queue is hold, never "next to render"; a
+  mixed queue keeps the held row labeled and the unheld sibling is
+  next (held does not take a drain slot); scheduler/channel pause still
+  labels the live sibling. Remaining (not bundled): Board queued-card
+  color keys off `"paused"` so the hold reason renders in ice, not
+  amber. Open PRs append items 72–87 at this same BACKLOG tail — keep
+  every section when merging. `run/code-experiments.jsonl` is union-merge.
