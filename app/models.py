@@ -153,10 +153,9 @@ class Video(SQLModel, table=True):
     # so legacy approved rows cannot publish until evaluated to pass.
     craft_review: str = Field(default="pending", index=True)
 
-    # Operator hold on an APPROVED video (P0 2026-09-29): the publish loop skips
-    # held rows (selection + craft sweep) and runway/queue counts exclude them.
-    # Orthogonal to status and craft_review — unhold resumes the drip with the
-    # same artifact, no re-render. Only POST /api/videos/{id}/hold|unhold set it.
+    # Operator hold (P0 2026-09-29, extended 2026-10-28 #1458): publish loop skips
+    # held APPROVED rows; render_loop skips held QUEUED. Runway/queue counts
+    # exclude held APPROVED. Orthogonal to craft_review. Only hold|unhold set it.
     held: bool = Field(default=False, index=True)
     held_at: Optional[datetime] = None
 

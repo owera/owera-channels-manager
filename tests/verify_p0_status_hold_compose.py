@@ -263,7 +263,7 @@ ok(r.status_code == 200 and get(vstale).status == VideoStatus.APPROVED,
 # ---------------------------------------------------------------------------
 print("(ii) hold / unhold")
 for st in ALL:
-    if st == VideoStatus.APPROVED:
+    if st in (VideoStatus.APPROVED, VideoStatus.QUEUED):
         continue
     vid = mk(st)
     ok(client.post(f"/api/videos/{vid}/hold", auth=auth).status_code == 409
@@ -304,13 +304,21 @@ vl = mk2(VideoStatus.APPROVED, t_l2, craft_review=craft.CRAFT_REVIEW_PASS, title
 vp = mk2(VideoStatus.APPROVED, t_s2, craft_review=craft.CRAFT_REVIEW_PENDING, title=_OK_TITLE,
          script="", video_path=artifact("h/p.mp4"), approved_at=utcnow())
 
+vq = mk2(VideoStatus.QUEUED, t_s2)
+r = client.post(f"/api/videos/{vq}/hold", auth=auth)
+ok(r.status_code == 200 and r.json()["held"] is True and r.json()["status"] == "queued",
+   "hold queued → held, status unchanged (render loop skips — verify_render)")
+r = client.post(f"/api/videos/{vq}/unhold", auth=auth)
+ok(r.status_code == 200 and r.json()["held"] is False and r.json()["status"] == "queued",
+   "unhold queued → back in render queue")
+
 r = client.post(f"/api/videos/{va}/hold", auth=auth)
 ok(r.status_code == 200 and r.json()["held"] is True and r.json()["status"] == "approved"
    and r.json()["craft_review"] == "pass", "hold approved → held, status/craft unchanged")
 ok(client.post(f"/api/videos/{va}/hold", auth=auth).status_code == 409, "double hold 409")
 for vid in (vl, vp):
     client.post(f"/api/videos/{vid}/hold", auth=auth)
-ok(len(runs("hold")) == 3, "each hold writes one JobRun kind=hold")
+ok(len(runs("hold")) == 4, "each hold writes one JobRun kind=hold (incl. queued)")
 
 with Session(engine) as s:
     ok(publish_loop._next_approved(s, ch2) is None, "_next_approved never returns a held row")
