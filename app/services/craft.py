@@ -1106,6 +1106,9 @@ OS_VO_SENTENCE_CARDS = True
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
+# Minimum post-last-word hold before the inter-beat fade starts (VM/CTO OS 0/2).
+# Gate B card_exits_early and the OS snap both enforce last word + this pad.
+CARD_PAD_FLOOR_S = 0.20
 # CMO + VM (final): ANY mid card — plain VO, cap_extended_spoken, or
 # literal quote — FAILs Gate B (sentence_too_long) when first word → last
 # word exceeds this. No quote-span exemption. The generator still tries
@@ -1129,12 +1132,12 @@ OS_BANNED_TERM = frozenset({"term_define"})
 OS_BANNED_LIST = frozenset({"list"})
 CARD_TIMING_V1 = "card_timing_v1"
 ALLOWLIST_REQ_V1 = "allowlist_req_v1"
-# RR publish check 2026-09-30: with the real fade a 2.88s hold still measured
-# 3.05–3.08s card-to-card (blank midpoint to blank midpoint). Content hold is
-# now ≤2.80s so hold + fade ≤ 3.0s. MUST equal storyboard._MID_MAX.
-MID_BEAT_MAX_S = 2.80                                        # visual hold (current)
-MID_FADE_S = round(MID_CARD_MAX_S - MID_BEAT_MAX_S, 2)       # 0.20 measured fade
-INCL_FADE_MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)  # 2.88 (card_incl_fade boards)
+# Aligner caps visual hold at MID_BEAT_MAX_S (must equal storyboard._MID_MAX).
+# Gate B incl.-fade uses BEAT_GAP_S (0.12) at card end — never CARD_PAD_FLOOR_S
+# (0.20 post-last-word hold pad). Mid hold + fade ≤ MID_CARD_MAX_S → hold ≤2.88s.
+MID_BEAT_MAX_S = 2.80                                        # visual hold (aligner)
+MID_FADE_S = BEAT_GAP_S                                      # inter-beat fade (not pad)
+INCL_FADE_MID_BEAT_MAX_S = round(MID_CARD_MAX_S - BEAT_GAP_S, 2)  # 2.88 gate hold max
 CTA_CARD_MAX_S = ENDCARD_CARD_MAX_S                          # 3.9 incl. fade
 CTA_BEAT_MAX_S = ENDCARD_MAX_S                               # 3.78 visual hold
 # creation_config["beat_timing"] marker: boards rendered by the aligner that
@@ -1764,26 +1767,33 @@ def vo_source_text(script: str | None, words=None) -> str:
     return spoken if _sync_toks(spoken) else (script or "")
 
 
-def is_literal_quote_beat(beat: dict | None, sources=None) -> bool:
-    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception)."""
+def is_literal_quote_beat(beat: dict | None, sources=None, script: str | None = None) -> bool:
+    """Allowlisted quote card — may hold the whole spoken span (mid-cap exception).
+
+    The quote text must still be spoken in the VO; allowlist alone is not enough.
+    """
     if not isinstance(beat, dict) or (beat.get("type") or "") != "quote":
         return False
-    if beat.get("literal_quote") or beat.get("_lit"):
+    text = str(beat.get("text") or beat.get("cue") or "").strip()
+    if beat.get("literal_quote"):
         return True
+    if beat.get("_lit"):
+        return bool(script and text and text_in_script(text, script))
     if beat.get("plain"):
         return False
-    if sources is not None:
-        return bool(source_literal(beat.get("text"), sources, {"quote"}))
+    if sources is not None and source_literal(text, sources, {"quote"}):
+        return bool(script and text and text_in_script(text, script))
     return False
 
 
-def is_spoken_span_hold(beat: dict | None, words=None, sources=None) -> bool:
+def is_spoken_span_hold(beat: dict | None, words=None, sources=None,
+                        script: str | None = None) -> bool:
     """Generator timing helper: literal quote / cap_extended_spoken.
 
     Gate B visual hold (``video_maker_gate`` mid ≤3.0s incl. fade) does
     **not** use this — every mid card, quotes included, FAILs over the cap.
     """
-    if is_literal_quote_beat(beat, sources):
+    if is_literal_quote_beat(beat, sources, script=script):
         return True
     if not isinstance(beat, dict):
         return False
@@ -1814,6 +1824,10 @@ def _part_is_literal(field: str, text: str, script: str | None, sources=None, *,
     raw = str(text or "").strip()
     if not raw:
         return True
+    # Quote cards (spec B): on-screen text must be a verbatim VO substring —
+    # allowlist kind=quote does not exempt from spoken/script match.
+    if typ == "quote" and field in _BODY_FIELDS:
+        return bool(script) and text_in_script(raw, script)
     if sources is not None:
         kinds = CLI_ALLOW_KINDS if field in ("line", "command", "output") else None
         if source_literal(raw, sources, kinds):
@@ -1863,6 +1877,10 @@ def card_is_literal(beat: dict, script: str | None, sources=None,
     for f, t in parts:
         raw = str(t or "").strip()
         if not raw:
+            continue
+        if typ == "quote" and f in _BODY_FIELDS:
+            if not text_in_script(raw, spoken or script):
+                return False
             continue
         if sources is not None:
             kinds = CLI_ALLOW_KINDS if f in ("line", "command", "output") else None
@@ -1949,6 +1967,20 @@ def os_card_hits(beats, script: str | None, sources=None, words=None) -> list[di
                                       f"card {prev} already showed it"})
             prev = i
             continue
+        if typ in CLI_BEAT_TYPES and sources is not None:
+            bad = [ln for ln in cli_lines(b)
+                   if str(ln or "").strip()
+                   and not source_literal(ln, sources, CLI_ALLOW_KINDS)]
+            if bad:
+                out.append({"i": i, "check": "cli_not_in_allowlist",
+                            "detail": f"card {i} type={typ} line(s) not byte-exact in "
+                                      f"on_screen_allow: {bad[0]!r}"})
+        if typ == "quote" and script:
+            txt = str(b.get("text") or b.get("cue") or "").strip()
+            if txt and not text_in_script(txt, script):
+                out.append({"i": i, "check": "quote_not_in_vo",
+                            "detail": f"card {i} quote {txt[:60]!r} is not a verbatim "
+                                      "VO substring (allowlist does not exempt quote cards)"})
         if (script or words) and not card_is_literal(b, script, sources, words=words):
             out.append({"i": i, "check": "card_text_not_literal",
                         "detail": f"card {i} type={typ} {shown!r} is not VO-literal "
@@ -2101,11 +2133,33 @@ def card_exits_early_hits(beats, words, sources=None, *,
                 out.append(_unspoken_card_hit(i, b.get("type") or "", text))
             continue
         end = _cue_start(b) + _cue_span(board, i)
-        if end < float(span[1]) - SYNC_TOL_S - 1e-6:
+        min_end = float(span[1]) + CARD_PAD_FLOOR_S
+        if i + 1 < len(board):
+            nxt = board[i + 1]
+            if (nxt.get("type") or "") in CTA_TYPES:
+                # Subscribe speech follows immediately; pad is folded into the chip fade.
+                min_end = float(span[1])
+            else:
+                ntext = _card_spoken_text(nxt, sources)
+                nspan = spoken_span(ntext, words)
+                if nspan is not None:
+                    try:
+                        nst = float(nxt.get("start") or 0)
+                    except (TypeError, ValueError):
+                        nst = None
+                    if (nst is not None
+                            and abs(nst - float(nspan[0])) <= SYNC_TOL_S + 1e-6):
+                        # Next mid enters on its first spoken word; pad may truncate
+                        # to the gap budget (never before the last word).
+                        pad_cap = float(nspan[0]) - BEAT_GAP_S
+                        min_end = max(float(span[1]),
+                                      min(float(span[1]) + CARD_PAD_FLOOR_S, pad_cap))
+        if end < min_end - SYNC_TOL_S - 1e-6:
             out.append({
                 "i": i, "check": "card_exits_early",
                 "detail": f"card {i} ends at {end:.2f}s, last spoken word "
-                          f"at {span[1]:.2f}s (must hold through the last word)",
+                          f"at {span[1]:.2f}s (must hold through the last word "
+                          f"+ {CARD_PAD_FLOOR_S:.2f}s pad)",
             })
     return out
 
@@ -3560,29 +3614,36 @@ def video_maker_gate(beats, *, content_format: str | None = "short",
         # OS: every mid card, quotes included, visual hold + fade ≤ 3.0s.
         # is_spoken_span_hold is a generator helper — it does not exempt
         # an OS quote. RR keeps the spoken-span exemption (RR unchanged).
-        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources):
+        if (brand or "") != "os" and is_spoken_span_hold(b, words, sources, script=script):
             continue
         span = _cue_span(board, i)
         is_cta = btype in CTA_TYPES
-        hold_cap = cta_hold if is_cta else mid_hold
-        if span > hold_cap + 1e-6:
-            label = "cta/endcard" if is_cta else "mid"
-            # fade as measured for this hold cap (0.20s on ≤2.80s mids, 0.12s
-            # otherwise); card = hold + fade vs the card limit.
-            fade = (MID_FADE_S if (not is_cta and hold_cap == MID_BEAT_MAX_S)
-                    else BEAT_GAP_S)
-            limit = hold_cap + fade
+        fade = BEAT_GAP_S
+        label = "cta/endcard" if is_cta else "mid"
+        if legacy_timing:
+            hold_cap = cta_hold if is_cta else mid_hold
+            over = span > hold_cap + 1e-6
+            card_limit = hold_cap + fade
+            card_incl = span + fade
+        else:
+            card_limit = CTA_CARD_MAX_S if is_cta else MID_CARD_MAX_S
+            card_incl = span + fade
+            over = card_incl > card_limit + 1e-6
+        if over:
             b_hits.append(
-                f"beat[{i}] type={btype} {label} card {span + fade:.2f}s incl. fade "
-                f"(hold {span:.2f}s + {fade:.2f}s fade; limit {limit:.1f}s)"
+                f"beat[{i}] type={btype} {label} card {card_incl:.2f}s incl. fade "
+                f"(hold {span:.2f}s + {fade:.2f}s fade; limit {card_limit:.1f}s)"
             )
     if b_hits:
         checks["B"] = "FAIL"
+        mid_hold_msg = (LEGACY_MID_BEAT_MAX_S if legacy_timing
+                        else INCL_FADE_MID_BEAT_MAX_S)
+        cta_hold_msg = (LEGACY_CTA_BEAT_MAX_S if legacy_timing else CTA_BEAT_MAX_S)
         reasons.append(
             f"[B] Beats ≤{MID_CARD_MAX_S:.1f}s incl. fade: FAIL — " + "; ".join(b_hits) +
             f". Mid cards/slides must be ≤{MID_CARD_MAX_S:.1f}s including the fade "
-            f"(hold ≤{mid_hold:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
-            f"including the fade (hold ≤{cta_hold:.2f}s) — split or add "
+            f"(hold ≤{mid_hold_msg:.2f}s); cta/endcard ≤{CTA_CARD_MAX_S:.1f}s "
+            f"including the fade (hold ≤{cta_hold_msg:.2f}s) — split or add "
             "beats, never stretch a card (not a Follow-tomorrow hold)."
         )
     # Repeated card: an identical card split only by the fade blink reads as

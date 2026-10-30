@@ -2836,4 +2836,6 @@ ok("8. CARD TEXT" in _sp_rr and "8. CARD TEXT" in _sp_os, "every prompt: one car
 ok("9. TERMINAL OUTPUT" in _sp_rr and "T1–T4" in _sp_rr and "9. TERMINAL OUTPUT" not in _sp_os
    and "T1–T4" not in _sp_os, "RR prompt: no invented output; PT-BR cards (T3 not Q3)")
 
+craft.OS_VO_SENTENCE_CARDS = True
+
 print(f"\nALL {_checks} CHECKS PASSED")

@@ -254,9 +254,12 @@ expect = round(span_end + craft.QUOTE_HOLD_TAIL_S - 3.0, 3)
 ok(abs(qb[1]["dur"] - expect) < 0.02, f"hold = spoken span + 0.3 ({qb[1]['dur']} vs {expect})")
 ok(qb[1]["dur"] > craft.MID_BEAT_MAX_S, "literal quote may exceed the mid cap")
 ok(qb[1].get("literal_quote") is True, "literal_quote flag stays on")
-gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT, sources=ALLOW)
-ok(gg["checks"]["B"] != "FAIL" or not any("mid card" in r and "beat[1]" in r for r in gg["reasons"]),
-   f"Gate B hold check exempts the literal quote ({gg.get('reasons')})")
+gg = craft.video_maker_gate(qb, beat_timing=craft.BEAT_TIMING_CURRENT, sources=ALLOW,
+                           script=SCRIPT, words=qt)
+ok(gg["checks"]["B"] == "FAIL"
+   and any(("mid card" in r and "beat[1]" in r) or ("sentence_too_long" in r and "card 1" in r)
+           for r in (gg.get("reasons") or [])),
+   f"OS long literal quote fails Gate B hold/speech cap ({gg.get('reasons')})")
 
 print("OS cover order: strong clause → weak clause → cap_extended_spoken")
 long_and = ("Add a directory with the add-dir flag, and every Claude subagent "

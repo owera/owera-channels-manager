@@ -171,5 +171,7 @@ ok(big["generator_slips"] == 100 and len(big["generator_slip_list"]) == craft.GE
    "count is exact; the list is capped")
 ok(craft.attach_generator_slips({"result": "PASS"}, None) == {"result": "PASS"}, "no record → gate untouched")
 
+craft.OS_VO_SENTENCE_CARDS = True
+
 print()
 print(f"ALL {_checks} CHECKS PASSED")
