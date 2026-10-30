@@ -792,7 +792,12 @@ def _auto_produce(session: Session) -> None:
       overnight cycle (observed ch1 2026-08-11 noon: approved 0L+3S).
     - Remaining headroom → shorts by topic-weight share (smooth WRR), then longs.
     """
-    for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+    for ch in session.exec(
+        select(Channel).where(
+            Channel.paused == False,  # noqa: E712
+            Channel.auto_produce_enabled == True,  # noqa: E712
+        )
+    ).all():
         active = session.exec(
             select(func.count(Video.id)).where(
                 Video.channel_id == ch.id,
