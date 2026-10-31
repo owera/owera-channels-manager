@@ -49,11 +49,11 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero, oauthHol
         </div>
       )}
 
-      {v.status === "queued" && qinfo && (
+      {v.status === "queued" && (v.held || qinfo) && (
         <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
-          style={{ color: qinfo.reason.includes("paused") ? "#f5a524" : STATUS_META.queued.hex }}>
+          style={{ color: (v.held || qinfo?.reason?.includes("paused")) ? "#f5a524" : STATUS_META.queued.hex }}>
           <span>◷</span>
-          {qinfo.reason}{qinfo.eta ? ` · in ${relTime(qinfo.eta)}` : ""}
+          {v.held ? "on hold — not rendering" : `${qinfo?.reason ?? ""}${qinfo?.eta ? ` · in ${relTime(qinfo.eta)}` : ""}`}
         </div>
       )}
 

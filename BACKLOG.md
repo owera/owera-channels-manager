@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 89. ✅ DONE (PR autoimprove/2026-10-31-queued-held-label) Board queued-card honors v.held — normal
+- **resolution (2026-10-31):** queued cards key off `v.held` the same way
+  approved cards already do. Subtitle renders when `v.held || qinfo`
+  (mixed queue after #153 drops the held row from queue-plan, so qinfo
+  was missing and the card had no label). Copy is `"on hold — not
+  rendering"`; color is amber. Unheld cards still show the plan reason
+  in ice; pause still ambers via `includes("paused")`. Suite:
+  `tests/verify_render.py` 157 → 169. Isolated commit; `videos.py` /
+  `publish_loop.py` / oauth untouched. #88 (PR #154) still owns the
+  queue-plan API labels.
+- **why (found 2026-10-31, after #153 / named in #88 as not bundled):**
+  Board queued-card color keyed off `"paused"` and the subtitle required
+  qinfo. Operator hold on QUEUED (allowed after #153) stayed ice and,
+  on a mixed queue, had no subtitle at all.
+- **caution:** normal (SPA only). Not a money-path file.
+- **acceptance:** a held queued card without qinfo still says
+  `"on hold — not rendering"` in amber; an unheld sibling still shows
+  the plan reason in ice; approved `"on hold — not publishing"`
+  unchanged. Open PRs append items 72–88 at this same BACKLOG tail —
+  keep every section when merging. `run/code-experiments.jsonl` is
+  union-merge.
