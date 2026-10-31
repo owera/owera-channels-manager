@@ -1397,4 +1397,45 @@ render_loop.tick()
 ok(s.get(Video, q.id).status == VideoStatus.RENDERING,
    "unpaused: the same tick submits it")
 
+# Defect (found after #153, named in #88 / PR #154 as not bundled): Board
+# queued-card subtitle requires qinfo and ambers only when reason includes
+# "paused". After _queued_candidates omits held, a mixed queue drops the
+# held row from queue-plan so the card has no qinfo (no subtitle, ice). A
+# held-only queue falls back to the full list and is labeled "next to
+# render". Approved cards already key off v.held. Queued cards must too —
+# the video row is the source of truth even when the plan omits it.
+print("board queued hold: v.held copy even when queue-plan omits the row")
+board_src = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Board.tsx").read_text()
+_q_start = board_src.find('{v.status === "queued"')
+_q_end = board_src.find("{hold ?", _q_start)
+ok(_q_start >= 0 and _q_end > _q_start,
+   "Board.tsx still has a queued-card subtitle block")
+_queued = board_src[_q_start:_q_end]
+_a_start = board_src.find('{v.status === "approved"')
+_approved = board_src[_a_start:_q_start]
+ok('{v.status === "queued" && (v.held || qinfo)' in _queued,
+   "held queued card shows a subtitle even if queue-plan omitted the row")
+ok('{v.status === "queued" && qinfo &&' not in _queued,
+   "queued subtitle is not gated on qinfo alone (mixed hold had no label)")
+ok('v.held ? "on hold — not rendering"' in _queued,
+   "held queued copy is 'on hold — not rendering' (not the 'next to render' lie)")
+ok("qinfo?.reason" in _queued,
+   "unheld queued cards still show the queue-plan reason")
+ok("qinfo?.eta" in _queued and "relTime(qinfo.eta)" in _queued,
+   "unheld queued cards still show the plan eta (held copy must not drop it)")
+ok("v.held" in _queued.split("style={{ color:")[1].split("}}")[0],
+   "queued hold is amber via v.held (pre-fix keyed only off 'paused')")
+ok('(v.held || qinfo?.reason?.includes("paused"))' in _queued,
+   "queued amber is held OR pause (not always-true / not paused-only)")
+ok('qinfo?.reason?.includes("paused")' in _queued
+   or 'qinfo?.reason.includes("paused")' in _queued
+   or 'qinfo.reason.includes("paused")' in _queued,
+   "channel/scheduler pause still ambers the queued card")
+ok("STATUS_META.queued.hex" in _queued,
+   "live next-to-render stays ice (not always-amber)")
+ok('"on hold — not publishing"' not in _queued,
+   "queued copy is not the approved publish-hold string")
+ok('v.held ? "on hold — not publishing"' in _approved,
+   "approved hold copy unchanged")
+
 print(f"\nALL {_checks} CHECKS PASSED")
