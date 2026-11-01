@@ -434,23 +434,26 @@ s = fresh_session()
 ch = make_channel(s, slug="ch-consent")
 
 
-def seed_flow(state, channel_id):
-    channels_router._pending_flows[state] = channels_router._PendingFlow(
-        channel_id, object(), time.monotonic())
+def seed_flow(state, channel_id, session):
+    from app.services import oauth_pending
+    oauth_pending.create_pending(
+        session, state=state, channel_id=channel_id, workspace_id=1,
+        code_verifier="test-verifier", redirect_uri="http://localhost/cb")
 
 
 cap = CaptureAlerts()
-seed_flow("st-live", ch.id)
+seed_flow("st-live", ch.id, s)
 channels_router.oauth_callback(ch.id, None, code=None, state="st-live",
                                error="access_denied", session=s)
 s.refresh(ch)
 ok(ch.oauth_status == OAuthStatus.ERROR, "a failed consent flips a CONNECTED channel to ERROR")
 ok(len(cap.records) == 1, "and alerts exactly once")
-ok("st-live" not in channels_router._pending_flows,
+from app.services import oauth_pending as _op
+ok(not _op.has_unconsumed_state(s, "st-live"),
    "the failed consent consumed its pending flow")
 
 ch_dead = make_channel(s, slug="ch-consent-dead", oauth_status=OAuthStatus.EXPIRED)
-seed_flow("st-dead", ch_dead.id)
+seed_flow("st-dead", ch_dead.id, s)
 channels_router.oauth_callback(ch_dead.id, None, code=None, state="st-dead",
                                error="access_denied", session=s)
 s.refresh(ch_dead)
@@ -479,15 +482,14 @@ ok(len(cap.records) == 1, "and alerts nothing")
 
 # A state minted for ANOTHER channel's consent neither fails this channel nor
 # gets consumed — the other channel's consent can still complete.
-seed_flow("st-other", ch.id)
+seed_flow("st-other", ch.id, s)
 channels_router.oauth_callback(ch_ok.id, None, code=None, state="st-other",
                                error="access_denied", session=s)
 s.refresh(ch_ok)
 ok(ch_ok.oauth_status == OAuthStatus.CONNECTED,
    "another channel's state can't fail this channel")
-ok("st-other" in channels_router._pending_flows,
+ok(_op.has_unconsumed_state(s, "st-other"),
    "and the other channel's pending flow survives")
-channels_router._pending_flows.clear()
 ok(len(cap.records) == 1, "cross-channel state hit alerts nothing")
 cap.close()
 

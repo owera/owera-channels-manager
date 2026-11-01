@@ -37,9 +37,10 @@ from sqlmodel import Session, SQLModel, create_engine
 from app import reconnect
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthStatus
+from app.models import Channel, OAuthPending, OAuthStatus
 from app.routers import channels as channels_router
-from app.services import notify, youtube
+from app.services import notify, oauth_pending, youtube
+from sqlmodel import select
 
 _checks = 0
 
@@ -582,26 +583,48 @@ state_other = start_consent(channel_id=CH_ID)
 r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_other}")
 ok(channel_row()["status"] == OAuthStatus.CONNECTED,
    "another channel's state can't fail this channel")
-ok(state_other in channels_router._pending_flows,
+ok(oauth_pending.has_unconsumed_state(Session(engine), state_other),
    "and the other channel's flow is still pending")
-channels_router._pending_flows.pop(state_other, None)
+with Session(engine) as s:
+    row = s.exec(select(OAuthPending).where(
+        OAuthPending.state_hash == oauth_pending._state_hash(state_other))).first()
+    if row:
+        s.delete(row)
+        s.commit()
 
-channels_router._pending_flows["st-abandoned"] = channels_router._PendingFlow(
-    CH2_ID, object(), time.monotonic() - channels_router._PENDING_FLOW_TTL - 1)
+with Session(engine) as s:
+    from datetime import timedelta
+    from app.models import utcnow
+    s.add(OAuthPending(
+        state_hash=oauth_pending._state_hash("st-abandoned"),
+        channel_id=CH2_ID, workspace_id=1, code_verifier="v",
+        redirect_uri="http://x", expires_at=utcnow() + timedelta(minutes=5),
+        created_at=utcnow() - timedelta(hours=2),
+    ))
+    s.commit()
 start_consent()
-ok("st-abandoned" not in channels_router._pending_flows,
-   "starts prune abandoned flows past the TTL")
+with Session(engine) as s:
+    gone = s.exec(select(OAuthPending).where(
+        OAuthPending.state_hash == oauth_pending._state_hash("st-abandoned"))).first()
+ok(gone is None, "starts prune abandoned flows past the TTL")
 
-# TTL is also enforced at consumption: an expired-but-unpruned flow (no start
-# ever ran to sweep it) reads as stale — a session-restored ancient consent
-# cancel must not flip the channel days later.
-channels_router._pending_flows["st-expired"] = channels_router._PendingFlow(
-    CH2_ID, object(), time.monotonic() - channels_router._PENDING_FLOW_TTL - 1)
+with Session(engine) as s:
+    from datetime import timedelta
+    from app.models import utcnow
+    s.add(OAuthPending(
+        state_hash=oauth_pending._state_hash("st-expired"),
+        channel_id=CH2_ID, workspace_id=1, code_verifier="v",
+        redirect_uri="http://x",
+        expires_at=utcnow() - timedelta(minutes=1),
+    ))
+    s.commit()
 r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state=st-expired")
 ok(channel_row()["status"] == OAuthStatus.CONNECTED,
    "cancelling an expired pending consent doesn't flip the channel")
-ok("st-expired" not in channels_router._pending_flows,
-   "and the expired entry is consumed")
+with Session(engine) as s:
+    ex = s.exec(select(OAuthPending).where(
+        OAuthPending.state_hash == oauth_pending._state_hash("st-expired"))).first()
+ok(ex and ex.consumed_at is not None, "and the expired entry is consumed")
 
 state_real = start_consent()
 r = client.get(f"/api/channels/{CH2_ID}/oauth/callback?error=access_denied&state={state_real}")

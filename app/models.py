@@ -52,6 +52,19 @@ class OAuthStatus:
     ERROR = "error"
 
 
+class OAuthPending(SQLModel, table=True):
+    """Single-use OAuth state + PKCE verifier (survives process restart)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    state_hash: str = Field(index=True)
+    workspace_id: int = Field(default=1, index=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
+    code_verifier: str
+    redirect_uri: str
+    expires_at: datetime
+    consumed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Channel(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     slug: str = Field(index=True, unique=True)
