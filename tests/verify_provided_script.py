@@ -142,10 +142,11 @@ ok(craft.publish_craft_block_reason(
     creation_config=json.dumps({"script_source": "generated"}),
     content_format="short", video_path=None) is None,
    "generated scripts are not subject to the new check (no behavior change)")
+_hook_only = "PDF escaneado colado no chat não é engenharia."
 ok(craft.publish_craft_block_reason(
-    title="no series here", script=A1_SCRIPT, creation_config=cc_prov,
-    content_format="short", video_path=None) == craft.TITLE_GATE_REASON,
-   "title gate still runs first for provided scripts (not weakened)")
+    title=_hook_only, script=A1_SCRIPT, creation_config=cc_prov,
+    content_format="short", video_path=None) is None,
+   "hook-only title passes title + provided-script hook gate when aligned")
 status, why = craft.evaluate_craft_review(
     title=A1_SUBJECT, script=MISALIGNED, creation_config=cc_prov,
     content_format="short")

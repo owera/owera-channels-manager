@@ -663,6 +663,15 @@ ok(video_gen.renumber_series(["Q · IA 12", "R"], _used) == ["Q · IA 228", "R"]
    "IA continues at 228; unsuffixed ideas untouched")
 ok(video_gen.renumber_series(["New · Local 01"], []) == ["New · Local 01"], "first in a series keeps width")
 
+print("finalize_draft_subjects: new drafts store hook-only subjects")
+ok(video_gen.strip_series_suffix("Hook claim · IA 228") == "Hook claim",
+   "strip_series_suffix drops trailing · Series NN")
+ok(video_gen.strip_series_suffix("Already hook-only") == "Already hook-only",
+   "strip_series_suffix is a no-op without suffix")
+ok(video_gen.finalize_draft_subjects(["A · Shipping 3", "  B · Copilot Credits 14  ", ""])
+   == ["A", "B"],
+   "finalize_draft_subjects strips suffixes and drops blanks")
+
 print("RR draft-time hook pace: ideas are born ≤8 words and spoken ≤2.8s")
 _fake = {"Modelo em swap não pensa.": 1.9, "O 14B com KV q8 rodou. Sem, não.": 3.6}
 ok(video_gen.rr_hook_reason("Modelo em swap não pensa. · IA 9", "pt-BR-AntonioNeural",
