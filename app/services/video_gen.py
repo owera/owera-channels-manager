@@ -196,6 +196,25 @@ def renumber_series(ideas: list[str], used_subjects) -> list[str]:
     return out
 
 
+def strip_series_suffix(text: str | None) -> str:
+    """Hook-only draft subject: drop a trailing ``· <Series> NN`` if present."""
+    s = (text or "").strip()
+    m = _SERIES_SUFFIX_RE.search(s)
+    if not m:
+        return s
+    return s[: m.start()].strip()
+
+
+def finalize_draft_subjects(ideas: list[str]) -> list[str]:
+    """New draft rows store hook-only subjects (no ``· Topic/Series N`` suffix)."""
+    out: list[str] = []
+    for idea in ideas or []:
+        head = strip_series_suffix(idea)
+        if head:
+            out.append(head)
+    return out
+
+
 def channel_series_subjects(session, channel_id: int | None) -> list[str]:
     """Every subject and title on the channel (all statuses)."""
     from sqlmodel import select
@@ -317,9 +336,9 @@ AGENT_MEMORY_DOMAINS = (
 )
 AGENT_MEMORY_SPREAD = (
     "TITLE (Agent memory, new shorts only): ONE sentence, max 8 words. It is "
-    "the first spoken sentence AND the full hook card text, same words. Then "
-    "' · Agent memory {nn}'. Rotate hook patterns, never the same pattern "
-    "twice in a row: A) \"Agents don't <human verb>, they <machine verb>.\" "
+    "the first spoken sentence AND the full hook card text, same words. "
+    "Do NOT append · Agent memory or any episode number. Rotate hook patterns, "
+    "never the same pattern twice in a row: A) \"Agents don't <human verb>, they <machine verb>.\" "
     "B) \"<memory operation> <lost|found|wiped> <exact fact>.\" "
     "C) \"Ask your agent <question that exposes memory>.\" "
     "Subject = a memory mechanism (context, trimming, summary, retrieval, "

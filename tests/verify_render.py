@@ -1314,10 +1314,10 @@ t = make_topic(s, ch, content_format="short")
 v = drive_complete(s, ch, t, skip_gate=True, title=OK_TITLE, script=OK_SCRIPT)
 ok(v.status == VideoStatus.APPROVED and v.craft_review == "pass",
    "video skip_gate True overrides channel False -> APPROVED")
-v_blocked = drive_complete(s, ch, t, skip_gate=True)  # MetaStub title=gen-title
+v_blocked = drive_complete(s, ch, t, skip_gate=True)  # MetaStub title=gen-title, no script
 ok(v_blocked.status == VideoStatus.REVIEW
-   and "spoken series pattern" in (v_blocked.error or ""),
-   "skip_gate True + pré-pattern title stays REVIEW (park via reject, no auto-approve)")
+   and "script is empty" in (v_blocked.error or ""),
+   "skip_gate True + craft gate fail stays REVIEW (hook-only title ok; empty script blocks)")
 FAIL_BOARD = {
     "beats": [
         {"type": "hook", "start": 0, "dur": 3, "text": "only type", "emoji": "🔥"},

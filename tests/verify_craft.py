@@ -54,8 +54,8 @@ ok(not craft.spoken_title_ok("Hook · Copilot Credits"),
 ok(not craft.spoken_title_ok(""), "empty title is rejected")
 ok(not craft.spoken_title_ok(None), "None title is rejected")
 
-ok(craft.title_gate_reason("nope", "short") == craft.TITLE_GATE_REASON,
-   "shorts without the pattern get the parked-via-reject reason")
+ok(craft.title_gate_reason("nope", "short") is None,
+   "hook-only shorts without a legacy · series nn suffix are allowed")
 ok(craft.title_gate_reason("nope", "long") is None,
    "longs are exempt from the series suffix")
 ok(craft.title_gate_reason(
@@ -70,9 +70,11 @@ ok(craft.title_gate_reason(
    "Follow-tomorrow Credits title fails pre-approve ban")
 ok(craft.title_gate_reason(
         "Memory died between chats · Agent memory 2", "short") is None,
-   "non-Credits/IA patterned series still only needs ·nn")
+   "legacy ·nn Agent memory titles still pass when claim is valid")
+ok(craft.title_gate_reason("Memory died between chats", "short") is None,
+   "hook-only Agent memory title passes (no ·nn required)")
 ok("pré-pattern" in craft.TITLE_GATE_REASON and "reject" in craft.TITLE_GATE_REASON,
-   "error text tells ops to park via reject, not mass-retitle")
+   "legacy TITLE_GATE_REASON text still tells ops to park pré-pattern leftovers")
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +591,7 @@ ok("Compress THIS claim" in src,
 
 
 # ---------------------------------------------------------------------------
-print("publish_loop refuses a pré-pattern title (no upload)")
+print("publish_loop: hook-only title passes title gate (other gates may still block)")
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
@@ -601,21 +603,24 @@ t = Topic(channel_id=ch.id, name="Credits", theme_prompt="x", content_format="sh
 s.add(t); s.commit(); s.refresh(t)
 v = Video(channel_id=ch.id, topic_id=t.id, subject="billed",
           status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
-          title="Copilot billed the cancelled run")  # no · series nn
+          craft_review=craft.CRAFT_REVIEW_PASS,
+          title="Copilot billed the cancelled run")  # hook-only — no · series nn
 s.add(v); s.commit(); s.refresh(v)
+
+ok(craft.title_gate_reason(v.title, "short") is None,
+   "hook-only title is not blocked by title precheck")
 
 _uploads = []
 _orig_get, _orig_up = youtube.get_service, youtube.upload_video
 youtube.get_service = lambda slug: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v)
-ok(_uploads == [], "bad title never opens upload_video")
+ok(_uploads == [], "empty script still blocks upload (not the title gate)")
 ok(v.status == VideoStatus.REVIEW and v.approved_at is None,
    "OS publish craft FAIL parks review/held (never failed/rejected)")
 ok(v.craft_review == "fail", "blocked publish sets craft_review=fail")
-ok(v.error and "spoken series pattern" in v.error
-   and str(v.error).startswith("held:"),
-   "blocked publish records held: + the gate reason")
+ok(v.error and "script is empty" in v.error and str(v.error).startswith("held:"),
+   "blocked publish records held: + the non-title gate reason")
 ok(v.yt_video_id is None, "no YouTube id on a blocked publish")
 
 v2 = Video(channel_id=ch.id, topic_id=t.id, subject="ok",
@@ -929,9 +934,8 @@ ok(craft.video_maker_gate_reason({"craft_gate": {"result": "FAIL",
 reason = craft.video_maker_gate_reason({"beats": typo}, "short")
 ok(reason.startswith("Video Maker craft gate FAIL:") and "[A]" in reason,
    "gate reason is operator-readable and letter-tagged")
-ok(craft.review_gate_reason("nope", "short", {"beats": _pass_beats()})
-   == craft.TITLE_GATE_REASON,
-   "review_gate_reason: title pattern wins over a PASS board")
+ok(craft.review_gate_reason("nope", "short", {"beats": _pass_beats()}) is None,
+   "review_gate_reason: hook-only title + PASS board clears")
 ok("craft gate FAIL" in (craft.review_gate_reason(
         "Your RAG reads junk and still wrong · IA 12", "short",
         {"beats": typo}) or ""),

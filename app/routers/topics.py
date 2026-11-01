@@ -189,8 +189,7 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
                 t.name, (t.theme_prompt or "") + extra, list(existing) + list(ideas), count,
                 t.content_format, language=video_gen.channel_language(session, t.channel_id)))
     ideas = review_guard.drop_teaser_ideas(ideas)
-    ideas = video_gen.renumber_series(
-        ideas, video_gen.channel_series_subjects(session, t.channel_id))
+    ideas = video_gen.finalize_draft_subjects(ideas)
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0
     for i, subj in enumerate(ideas):
         session.add(Video(channel_id=t.channel_id, topic_id=t.id, subject=subj,
