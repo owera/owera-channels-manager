@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, func, select
 
-from app.models import JobRun, Topic, Video, VideoStatus
+from app.config import settings
+from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace
 
 
 def _next_pt_midnight_utc(now: datetime) -> datetime:
@@ -103,6 +104,39 @@ def quota_spent_today(session: Session, channel_id: int) -> int:
         )
     ).one()
     return int(total or 0)
+
+
+def _channel_ids_for_workspace(session: Session, workspace_id: int) -> list[int]:
+    return list(session.exec(
+        select(Channel.id).where(Channel.workspace_id == workspace_id)
+    ).all())
+
+
+def quota_spent_workspace_today(session: Session, workspace_id: int) -> int:
+    """Sum YouTube quota units logged today for all channels in a workspace."""
+    ids = _channel_ids_for_workspace(session, workspace_id)
+    if not ids:
+        return 0
+    total = session.exec(
+        select(func.coalesce(func.sum(JobRun.quota_cost), 0)).where(
+            JobRun.channel_id.in_(ids), JobRun.created_at >= _quota_day_start(),
+        )
+    ).one()
+    return int(total or 0)
+
+
+def youtube_quota_cap_for_workspace(session: Session, workspace_id: int) -> int:
+    """Per-workspace daily cap (PR-G), clamped to the global safety ceiling."""
+    ws = session.get(Workspace, workspace_id)
+    cap = ws.daily_youtube_quota_cap if ws else settings.youtube_daily_quota_cap
+    return min(int(cap), settings.youtube_daily_quota_cap)
+
+
+def workspace_quota_would_exceed(
+    session: Session, workspace_id: int, extra_units: int,
+) -> bool:
+    cap = youtube_quota_cap_for_workspace(session, workspace_id)
+    return quota_spent_workspace_today(session, workspace_id) + extra_units > cap
 
 
 def last_publish_at(session: Session, channel_id: int):

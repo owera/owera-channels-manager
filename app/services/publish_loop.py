@@ -592,9 +592,10 @@ def tick() -> None:
                 continue  # fallback: same-day cap logged but cooldown not set
             if quota.published_today(session, channel.id) >= channel.daily_publish_budget:
                 continue
-            if (quota.quota_spent_today(session, channel.id) + QUOTA_UPLOAD
-                    + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT
-                    > settings.youtube_daily_quota_cap):
+            publish_units = QUOTA_UPLOAD + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT
+            if quota.workspace_quota_would_exceed(
+                session, channel.workspace_id, publish_units,
+            ):
                 continue
             if not _drip_ok(session, channel, cfg.publish_drip_minutes):
                 continue

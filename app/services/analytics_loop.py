@@ -57,7 +57,8 @@ def _publish_reserve(session: Session, channel: Channel) -> int:
     publish gate itself will refuse, starving analytics permanently."""
     if channel.paused:
         return 0
-    fits = settings.youtube_daily_quota_cap // _QUOTA_PER_PUBLISH
+    ws_cap = quota.youtube_quota_cap_for_workspace(session, channel.workspace_id)
+    fits = ws_cap // _QUOTA_PER_PUBLISH
     budget = min(channel.daily_publish_budget or 0, fits)
     remaining = budget - quota.published_today(session, channel.id)
     return max(0, remaining) * _QUOTA_PER_PUBLISH
@@ -186,7 +187,8 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
         # slow-moving tail — never the fresh cohort the growth loop steers by.
         .order_by(Video.published_at.desc())
     ).all()
-    cap = settings.youtube_daily_quota_cap - _publish_reserve(session, channel)
+    ws_cap = quota.youtube_quota_cap_for_workspace(session, channel.workspace_id)
+    cap = ws_cap - _publish_reserve(session, channel)
     recorded = 0
     failures = 0
     for video in videos:
@@ -194,7 +196,7 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
             continue
         if not _mature(video, now):
             continue
-        if quota.quota_spent_today(session, channel.id) + _QUOTA_PER_VIDEO > cap:
+        if quota.quota_spent_workspace_today(session, channel.workspace_id) + _QUOTA_PER_VIDEO > cap:
             logger.info("analytics: quota cap reached for %s, stopping", channel.slug)
             break
         try:
