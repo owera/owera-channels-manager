@@ -206,7 +206,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
                 topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
                 language=video_gen.channel_language(session, ch.id)))
     ideas = review_guard.drop_teaser_ideas(ideas)
-    ideas = video_gen.renumber_series(ideas, video_gen.channel_series_subjects(session, ch.id))
+    ideas = video_gen.finalize_draft_subjects(ideas)
     mx_v = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == ch.id)).one() or 0
     produced = 0

@@ -108,8 +108,9 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 "search — no Follow/Siga/waitlist/Cloud/SMY/Instagram/LinkedIn CTA, no hashtags inside), hashtags "
                 f"(array of 3 strings each starting with #). DECOLAR: the title MUST equal "
                 "the first spoken sentence of the script (the title hook) — same claim, no "
-                "second slogan, no curiosity gap. If the subject already contains "
-                "'· <series> <nn>', the title MUST be that subject verbatim (keep the suffix). "
+                "second slogan, no curiosity gap. If the subject still contains a legacy "
+                "'· <series> <nn>' suffix, keep it verbatim; otherwise the title is the hook "
+                "only (no episode suffix). "
                 f"No commentary.{lang_rule}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )

@@ -95,9 +95,7 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
     if not ideas:
         return 0
     ideas = ideas[:batch]  # board-space math assumes len <= batch; the LLM can return more
-    # "· <Series> NN" continues from the channel's max used number (P0 2026-10-03)
-    ideas = video_gen.renumber_series(
-        ideas, video_gen.channel_series_subjects(session, topic.channel_id))
+    ideas = video_gen.finalize_draft_subjects(ideas)
     mx = session.exec(
         select(func.max(Video.position)).where(Video.channel_id == topic.channel_id)
     ).one() or 0

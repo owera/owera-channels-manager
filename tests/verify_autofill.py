@@ -730,9 +730,7 @@ run_tick(s, _Cfg(target=3, horizon=1), raise_on_first)
 ok(drafts_for(s, first.id) == 0, "raising topic produced nothing")
 ok(drafts_for(s, second.id) == 3, "later topic still refilled after the skip")
 
-print("case: P0 2026-10-03 — series numbers continue from the channel max (all statuses)")
-# Fixture moved from Shipping to Agent traps: since CMO 2026-10-06 autogen never
-# creates Shipping rows (see the Shipping case below); renumbering is per series.
+print("case: Phase 1 — autofill strips · Series NN from new draft subjects")
 s = fresh_session()
 ch = make_channel(s, slug="owera-traps", daily_render_budget=5)
 t_trap = make_topic(s, ch, name="Agent traps", content_format="short")
@@ -742,8 +740,8 @@ run_tick(s, _Cfg(target=3, horizon=1),
          lambda *_a, **_k: ["New A · Agent traps 3", "New B · Agent traps 4"])
 subs = sorted(v.subject for v in s.exec(select(Video).where(
     Video.topic_id == t_trap.id, Video.status == VideoStatus.DRAFT)).all())
-ok(subs == ["New A · Agent traps 9", "New B · Agent traps 10"],
-   f"LLM-picked Agent traps 3/4 renumbered to 9/10 (max used 8, rejected 3 burnt): {subs}")
+ok(subs == ["New A", "New B"],
+   f"LLM suffix dropped; hook-only subjects stored: {subs}")
 
 print("case: CMO 2026-10-06 — autofill never creates a Shipping row (no source CM PR)")
 s = fresh_session()
@@ -764,8 +762,8 @@ run_tick(s, _Cfg(target=3, horizon=1), lambda *_a, **_k: [
     "Your caption saves itself · Shipping 3", "Channels Manager queues your render",
     "Memory died between chats · Agent memory 2"])
 subs = [v.subject for v in s.exec(select(Video).where(Video.topic_id == t_mem.id)).all()]
-ok(subs == ["Memory died between chats · Agent memory 1"],
-   f"only the non-teaser idea lands (renumbered): {subs}")
+ok(subs == ["Memory died between chats"],
+   f"only the non-teaser idea lands (suffix stripped): {subs}")
 
 print("case: P0 2026-10-03 — RR (ch2) ideas are born passing hook pace")
 s = fresh_session()
@@ -783,8 +781,8 @@ def _rr_ideas(name, theme, existing, n, fmt, language=None):
 
 run_tick(s, _Cfg(target=2, horizon=1), _rr_ideas)
 subs = sorted(v.subject for v in s.exec(select(Video).where(Video.topic_id == t_rr.id)).all())
-ok(subs == ["Modelo em swap não pensa · IA 1", "Swap mata o 14B · IA 2"],
-   f"9-word head dropped, one regeneration with feedback, numbering continues: {subs}")
+ok(subs == ["Modelo em swap não pensa", "Swap mata o 14B"],
+   f"9-word head dropped, one regeneration with feedback, suffix stripped: {subs}")
 ok(len(_regen_calls) == 1 and "9 words" in _regen_calls[0], "regeneration carries the measured miss")
 
 print()

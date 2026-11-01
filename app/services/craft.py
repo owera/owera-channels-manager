@@ -167,12 +167,12 @@ CRAFT_RULES_SHORT = (
     "('Subscribe — next {series} {noun}.') + chip 'Subscribe · {series}'. FORBIDDEN in the "
     "mid-short / body / miolo: no Subscribe text, VO, or chip before the endcard. "
     "(noun = trap|receipt|bill|drop; optional micro 'same series' only if it fits). "
-    "Title suffix must be '· <series> <nn>' with series one of: "
-    + " | ".join(SERIES_LABELS) + ". "
+    "Do NOT append '· <series> <nn>' or any episode/topic number to the title — "
+    "hook-only subjects. "
     "NEVER put a money value (a currency symbol followed by a number) in the TITLE — "
     "the publish gate rejects it. Where a money amount is spoken in the VO, keep it "
-    "as numerals — NEVER spell it out in words. Credits/IA pre-approve needs "
-    "spoken phrase + concrete noun + ·nn."
+    "as numerals — NEVER spell it out in words. Legacy Credits/IA rows that still "
+    "carry · Copilot Credits|IA nn need spoken phrase + concrete noun on that pattern."
 )
 
 STOPWORDS = {
@@ -297,8 +297,6 @@ def title_gate_reason(title: str | None, content_format: str | None = "short") -
         return None
     if contains_banned(title):
         return TITLE_BANNED_REASON
-    if not spoken_title_ok(title):
-        return TITLE_GATE_REASON
     if not credits_ia_title_ok(title):
         return TITLE_CLAIM_REASON
     return None
