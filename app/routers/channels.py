@@ -370,7 +370,7 @@ def oauth_status(
 ):
     ch = require_ws_channel(session, ws, channel_id)
     try:
-        _probe_connected(session, ch, youtube.get_service(ch.slug))
+        _probe_connected(session, ch, youtube.get_service(ch.slug, channel=ch, session=session))
     except Exception as e:  # NeedsConnect, refresh failure, bad/old-scope token, etc.
         notify.mark_dead_committed(session, ch, str(e))
     return {"oauth_status": ch.oauth_status, "error": ch.oauth_error,

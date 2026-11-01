@@ -463,7 +463,7 @@ _probe: dict = {"service": object(), "identity": {"id": "UCbound", "title": "Bou
                 "calls": 0}
 
 
-def _fake_get_service(slug):
+def _fake_get_service(slug, channel=None, session=None):
     if _probe.get("dead"):
         raise youtube.NeedsConnect(
             f"token missing/expired for channel '{slug}' — reconnect required")

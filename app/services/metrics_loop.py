@@ -34,7 +34,7 @@ def _snapshot_due(session: Session, channel_id: int) -> bool:
 def record_snapshot(session: Session, channel: Channel) -> ChannelMetric | None:
     """Fetch live statistics and store a snapshot. Returns None if unreachable."""
     try:
-        service = youtube.get_service(channel.slug)
+        service = youtube.get_service(channel.slug, channel=channel, session=session)
         data = youtube.fetch_channel(service)
     except youtube.NeedsConnect as e:
         # A dead token on a channel with nothing queued never reaches the publish

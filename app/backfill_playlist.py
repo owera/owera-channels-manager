@@ -28,7 +28,7 @@ def run() -> None:
             print(f"topic '{TOPIC_NAME}' not found")
             return
 
-        service = youtube.get_service(ch.slug)
+        service = youtube.get_service(ch.slug, channel=ch)
 
         # Reuse an existing same-named playlist if there is one; else create.
         pl = session.get(Playlist, topic.playlist_id) if topic.playlist_id else None

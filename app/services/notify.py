@@ -55,11 +55,18 @@ def reconnect_recipe(channel_id: int) -> str:
             f"and open the returned auth_url")
 
 
-def dead_status_for(slug: str) -> str:
+def dead_status_for(slug: str, channel: Channel | None = None) -> str:
     """Classify how dead: EXPIRED = the token file exists but is unusable
     (revoked / unrefreshable); DISCONNECTED = the token file itself is gone."""
     from app.services import youtube
-    return OAuthStatus.EXPIRED if youtube.has_token(slug) else OAuthStatus.DISCONNECTED
+    ch = channel
+    if ch is None:
+        return OAuthStatus.EXPIRED if youtube.has_token(slug) else OAuthStatus.DISCONNECTED
+    return (
+        OAuthStatus.EXPIRED
+        if youtube.has_token(slug, channel=ch)
+        else OAuthStatus.DISCONNECTED
+    )
 
 
 def mark_dead(channel: Channel, error: str | None, *,
@@ -74,7 +81,7 @@ def mark_dead(channel: Channel, error: str | None, *,
     which orders the alert after durability.
     """
     prev = channel.oauth_status
-    new_status = status or dead_status_for(channel.slug)
+    new_status = status or dead_status_for(channel.slug, channel)
     channel.oauth_status = new_status
     channel.oauth_error = str(error)[:300] if error else None
     flipped = prev == OAuthStatus.CONNECTED and new_status in DEAD_STATUSES

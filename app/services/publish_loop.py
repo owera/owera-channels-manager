@@ -441,7 +441,7 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
             session.commit()
 
     try:
-        service = youtube.get_service(channel.slug)
+        service = youtube.get_service(channel.slug, channel=channel, session=session)
     except NeedsConnect as e:
         from app.services import notify
         video.status = VideoStatus.APPROVED

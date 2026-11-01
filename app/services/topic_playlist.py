@@ -20,7 +20,7 @@ def ensure_topic_playlist(session: Session, topic: Topic, channel: Channel) -> O
     if channel.oauth_status != OAuthStatus.CONNECTED:
         return None  # can't create yet; will retry when production/publish runs while connected
     try:
-        service = youtube.get_service(channel.slug)
+        service = youtube.get_service(channel.slug, channel=channel, session=session)
         r = youtube.create_playlist(service, topic.name, topic.theme_prompt or "",
                                     channel.default_privacy)
     except Exception as e:
