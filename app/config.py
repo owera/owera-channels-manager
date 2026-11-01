@@ -172,7 +172,8 @@ class Settings(BaseSettings):
     #     when the video has no overrides on_screen_allow.
     topic_flags: dict[str, list[int | str]] = {"vm_pass_required": ["*"], "vm_pass_exempt": [],
                                                "literal_cards": [47], "tight_mid_cards": [47],
-                                               "allowlist_required": [47]}
+                                               "allowlist_required": [47],
+                                               "gate_b_preflight": [47]}
 
 
 settings = Settings()

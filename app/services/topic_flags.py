@@ -34,6 +34,10 @@ Flags:
     such a topic with no overrides on_screen_allow is held (review_guard
     allowlist_required_reason; 409 "held: …") and Gate B FAILs
     (craft.allowlist_required_marker).
+  * GATE_B_PREFLIGHT ("gate_b_preflight", default [47]) — before submit,
+    run hook / first-cut / card-sync Gate B checks on compose + TTS timings
+    (gate_b_preflight); FAIL holds the QUEUED row without burning
+    daily_render_budget.
 """
 from __future__ import annotations
 
@@ -43,6 +47,7 @@ VM_PASS_EXEMPT = "vm_pass_exempt"
 LITERAL_CARDS = "literal_cards"
 TIGHT_MID_CARDS = "tight_mid_cards"
 ALLOWLIST_REQUIRED = "allowlist_required"
+GATE_B_PREFLIGHT = "gate_b_preflight"
 
 DEFAULTS: dict[str, tuple] = {
     VM_PASS_REQUIRED: (ALL,),
@@ -50,6 +55,7 @@ DEFAULTS: dict[str, tuple] = {
     LITERAL_CARDS: (47,),
     TIGHT_MID_CARDS: (47,),
     ALLOWLIST_REQUIRED: (47,),
+    GATE_B_PREFLIGHT: (47,),
 }
 
 
