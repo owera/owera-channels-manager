@@ -25,6 +25,12 @@ def _slug_from_basic_auth(request: Request) -> str | None:
 
 
 def resolve_workspace_slug(request: Request) -> str:
+    """When multi_workspace is on, the slug comes from Basic Auth username.
+
+    Treating the username as tenant id is only safe if Cloudflare Access (or
+    equivalent) has already authenticated the user at the tunnel — see
+    docs/WS4_CLAW0_RUNBOOK.md. X-Workspace-Slug is dev-only (allow_workspace_header).
+    """
     if settings.multi_workspace:
         slug = _slug_from_basic_auth(request)
         if not slug and settings.allow_workspace_header:
@@ -33,7 +39,7 @@ def resolve_workspace_slug(request: Request) -> str:
             raise HTTPException(
                 401,
                 "multi-workspace: Basic Auth username = workspace slug "
-                "or X-Workspace-Slug (dev)",
+                "or X-Workspace-Slug (dev only)",
             )
         return slug
     return "owera"
