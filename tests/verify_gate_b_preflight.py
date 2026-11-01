@@ -76,7 +76,7 @@ ok(reason.startswith(gate_b_preflight.PREFIX), "reason is prefixed")
 cc = json.loads(gate_b_preflight.stamp_creation_config("{}", hits=[{"area": "cut", "detail": "x"}]))
 ok(cc["gate_b_preflight"]["result"] == "FAIL", "creation_config records FAIL")
 
-print("render_loop: preflight hold skips submit (no budget burn)")
+print("render_loop: preflight FAIL → FAILED, skips submit (no budget burn)")
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
@@ -154,11 +154,23 @@ s.commit()
 render_loop._submit_new(s)
 s.commit()
 s.refresh(v)
-ok(v.status == VideoStatus.QUEUED and v.held is True,
-   "preflight FAIL → QUEUED+held (no RENDERING)")
+ok(v.status == VideoStatus.FAILED and not v.held,
+   "preflight FAIL → FAILED, not held (no RENDERING)")
 ok(v.error and v.error.startswith(gate_b_preflight.PREFIX), "error carries preflight reason")
 ok(not s.exec(select(Video).where(Video.status == VideoStatus.RENDERING)).all(),
    "no render JobRun / slot consumed")
+
+v_held = make_video(s, ch, t, status=VideoStatus.QUEUED, held=True)
+v_held.creation_config = json.dumps(cc)
+v_held.script = v.script
+v_held.title = v.title
+s.add(v_held)
+s.commit()
+gate_b_preflight.evaluate = _fail_eval
+render_loop._submit_new(s)
+s.commit()
+ok(s.get(Video, v_held.id).status == VideoStatus.QUEUED,
+   "operator held QUEUED still skipped by submit (#153)")
 
 gate_b_preflight.evaluate = lambda **kw: None
 v2 = make_video(s, ch, t, status=VideoStatus.QUEUED)

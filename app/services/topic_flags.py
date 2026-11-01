@@ -36,8 +36,8 @@ Flags:
     (craft.allowlist_required_marker).
   * GATE_B_PREFLIGHT ("gate_b_preflight", default [47]) — before submit,
     run hook / first-cut / card-sync Gate B checks on compose + TTS timings
-    (gate_b_preflight); FAIL holds the QUEUED row without burning
-    daily_render_budget.
+    (gate_b_preflight); FAIL → ``status=failed`` with a prefixed error (no
+    ``held``); does not burn daily_render_budget.
 """
 from __future__ import annotations
 

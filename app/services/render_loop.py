@@ -148,10 +148,11 @@ def _cc_dict(raw) -> dict:
     return {}
 
 
-def _gate_b_preflight_hold(session: Session, video: Video, channel: Channel,
-                           provided_script: str, params: dict) -> bool:
-    """True when preflight FAIL holds the row (no render submit this tick)."""
-    from app.models import utcnow
+def _gate_b_preflight_block(session: Session, video: Video, channel: Channel,
+                            provided_script: str, params: dict) -> bool:
+    """True when preflight FAIL parks the row FAILED (no render submit this tick).
+
+    Operator hold (#1458) is a separate path — preflight never sets ``held``."""
     from app.services import gate_b_preflight as _gbp
 
     vo = (provided_script or (video.script or "")).strip()
@@ -170,10 +171,8 @@ def _gate_b_preflight_hold(session: Session, video: Video, channel: Channel,
             session.add(video)
         return False
     reason = _gbp.format_reason(hits)
-    if video.error != reason or not video.held:
-        video.held = True
-        if getattr(video, "held_at", None) is None:
-            video.held_at = utcnow()
+    if video.status != VideoStatus.FAILED or video.error != reason:
+        video.status = VideoStatus.FAILED
         video.error = reason
         video.creation_config = _gbp.stamp_creation_config(video.creation_config, hits=hits)
         session.add(video)
@@ -182,7 +181,7 @@ def _gate_b_preflight_hold(session: Session, video: Video, channel: Channel,
             channel_id=channel.id,
             detail=f"gate B preflight blocked before render (no slot used): {reason}",
         )
-        logger.info("gate B preflight held queued video %s on %s: %s",
+        logger.info("gate B preflight failed queued video %s on %s: %s",
                     video.id, channel.slug, reason)
     return True
 
@@ -667,7 +666,7 @@ def _submit_new(session: Session) -> None:
         params["brand"] = brand
         # Same title-first claim the pre-check uses (provided_script_hook_reason).
         params["title"] = video.title
-        if _gate_b_preflight_hold(session, video, channel, provided_script, params):
+        if _gate_b_preflight_block(session, video, channel, provided_script, params):
             continue
         # A video is starting production → make sure its topic playlist exists.
         ensure_topic_playlist(session, topic, channel)
