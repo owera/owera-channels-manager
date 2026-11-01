@@ -17,9 +17,9 @@ from sqlmodel import Session, func, select
 from app.config import ensure_dirs, load_dotenv_into_env, settings
 from app.db import get_session, init_db
 from app.models import Channel, OAuthStatus, Video, VideoStatus
-from app.routers import (channels, media, music, platform_oauth, playlists, profiles,
-                         queue, settings as settings_router, thumbnails, topics, trends,
-                         videos, youtube_admin)
+from app.routers import (channels, features, media, music, platform_oauth, playlists,
+                         profiles, queue, settings as settings_router, thumbnails, topics,
+                         trends, videos, youtube_admin)
 from app.services import render_loop, scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -112,8 +112,8 @@ async def basic_auth(request: Request, call_next):
         headers={"WWW-Authenticate": 'Basic realm="Owera Channels Manager"'},
     )
 
-for r in (channels, platform_oauth, playlists, profiles, topics, videos, queue, media,
-          settings_router, youtube_admin, trends, music, thumbnails):
+for r in (channels, features, platform_oauth, playlists, profiles, topics, videos, queue,
+          media, settings_router, youtube_admin, trends, music, thumbnails):
     app.include_router(r.router)
 
 

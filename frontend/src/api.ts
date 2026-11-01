@@ -268,6 +268,18 @@ export const useRuns = (channelId?: number) =>
 export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: () => api<AppSettings>("/settings") });
 
+export interface ManagerFeatures {
+  google_web_oauth: boolean;
+  multi_workspace: boolean;
+}
+
+export const useFeatures = () =>
+  useQuery({
+    queryKey: ["features"],
+    queryFn: () => api<ManagerFeatures>("/features"),
+    staleTime: 60_000,
+  });
+
 export const useTrends = (status?: string) =>
   useQuery({
     queryKey: ["trends", status ?? "all"],
@@ -396,6 +408,10 @@ export const useMut = () => {
     }),
     oauthStart: useMutation({
       mutationFn: (id: number) => api<{ auth_url: string }>(`/channels/${id}/oauth/start`, { method: "POST" }),
+    }),
+    platformOauthStart: useMutation({
+      mutationFn: (id: number) =>
+        api<{ auth_url: string }>("/oauth/google/start", { method: "POST", body: j({ channel_id: id }) }),
     }),
     oauthStatus: useMutation({
       mutationFn: (id: number) => api(`/channels/${id}/oauth-status`, { method: "GET" }),
