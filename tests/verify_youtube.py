@@ -91,6 +91,10 @@ ok("https://www.googleapis.com/auth/youtube.force-ssl" in youtube.CONSENT_SCOPES
    "CONSENT_SCOPES includes force-ssl (commentThreads.insert)")
 ok("https://www.googleapis.com/auth/yt-analytics.readonly" in youtube.CONSENT_SCOPES,
    "CONSENT_SCOPES includes analytics.readonly")
+ok(youtube.SCOPE_YOUTUBE_LEGACY not in youtube.CONSENT_SCOPES,
+   "CONSENT_SCOPES omits redundant full youtube scope (WS4 v1)")
+ok(youtube.required_grant_scopes() == youtube.CONSENT_SCOPES,
+   "required_grant_scopes defaults to CONSENT_SCOPES")
 ok(all("force-ssl" not in s and "analytics" not in s for s in youtube.SCOPES),
    "SCOPES itself must not pin force-ssl or analytics (refresh would narrow)")
 ok(youtube.SELECT_ALL_HINT == "click 'Select all' (\"Selecionar tudo\")",
