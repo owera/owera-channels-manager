@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     # OAuth grant verification: empty = use youtube.CONSENT_SCOPES (WS4 v1 tier).
     oauth_required_scopes: list[str] = []
 
+    # Shared claw0: scope API data by Workspace (EA tenant #1 = default workspace).
+    multi_workspace: bool = False
+    allow_workspace_header: bool = True
+
+    # Platform OAuth (PR-E): inert unless MANAGER_GOOGLE_WEB_OAUTH=1.
+    google_web_oauth: bool = False
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    oauth_redirect_uri: str = "https://channels.owera.com/api/oauth/google/callback"
+    token_enc_key: str = ""
+
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_storage_dir: str = str(MPT_DIR / "storage" / "tasks")

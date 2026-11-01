@@ -59,7 +59,10 @@ def _add_missing_columns() -> None:
                         ("traffic_json", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME"),
                     ("publish_windows", "VARCHAR"),
-                    ("publish_tz", "VARCHAR")],
+                    ("publish_tz", "VARCHAR"),
+                    ("workspace_id", "INTEGER DEFAULT 1"),
+                    ("credential_source", "VARCHAR DEFAULT 'legacy_file'")],
+        "oauthpending": [("workspace_id", "INTEGER DEFAULT 1")],
         "topic": [("content_format", "VARCHAR DEFAULT 'short'"),
                   ("weight", "INTEGER DEFAULT 1")],
         "settings": [("topic_autogen_enabled", "BOOLEAN DEFAULT 0"),
@@ -105,11 +108,23 @@ def _relax_videometric_notnull() -> bool:
     return True
 
 
+def _ensure_default_workspace(session: Session) -> None:
+    ws = session.get(models.Workspace, 1)
+    if ws is None:
+        session.add(models.Workspace(
+            id=1, slug="owera", name="Owera (legacy default workspace)"))
+        session.commit()
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE channel SET workspace_id = 1 WHERE workspace_id IS NULL"))
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _relax_videometric_notnull()
     with Session(engine) as s:
+        _ensure_default_workspace(s)
         if s.get(models.Settings, 1) is None:
             s.add(models.Settings(id=1))
             s.commit()
