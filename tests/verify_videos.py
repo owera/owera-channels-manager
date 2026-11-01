@@ -22,8 +22,11 @@ not ``Optional[str]``). ``createVideo`` is unused in the SPA;
 growth-agent / curl still reach this path.
 
 title / description / privacy / skip_gate stay nullable (null is
-inherit or "not yet generated"). ``render_profile_id`` null is still
-legal (unbound / inherit). JSON bool is not: lax ``Optional[int]``
+inherit or "not yet generated"). A *blank* title is not: Review save
+and approve send the input as-is, so clearing it writes ``""``.
+Create already 400s a provided blank title; PATCH/approve now share
+``_floor_optional_title`` (null still clears). ``render_profile_id``
+null is still legal (unbound / inherit). JSON bool is not: lax ``Optional[int]``
 coerces ``false→0`` / ``true→1`` before the handler. ``true`` silently
 rebinds the video to profile id=1; ``false`` writes 0, which
 ``resolve_engine`` treats as unbound today (``if not pid``) but is
@@ -136,6 +139,18 @@ ok(0 <= _save.find("subject.trim()") < _restore < _ret < _mut,
    "trim then restore+return BEFORE mutate (empty never PATCHes)")
 ok("body: { subject: trimmed" in _save,
    "valid save PATCHes the trimmed subject (not the raw textarea)")
+
+# Review save/approve send the title input as-is. Clearing it PATCHes
+# "" / POSTs approve {title:""}. Create already 400s a provided blank
+# title; PATCH/approve did not. The API floor is the choke point
+# (frontend restore is a follow-up, same class as #48 after #47).
+_review = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Review.tsx").read_text()
+ok("saveBody = () => ({ title, description, tags: tagList, privacy })" in _review,
+   "Review save/approve still send the title input as-is (empty is \"\")")
+ok("updateVideo.mutate({ id: t.id, body: saveBody() })" in _review,
+   "save draft PATCHes saveBody (title included)")
+ok("approveVideo.mutate({ id: t.id, body: saveBody() }" in _review,
+   "approve POSTs saveBody (title included)")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
@@ -283,6 +298,24 @@ try:
     ok(r.status_code == 400, "whitespace-only subject is 400")
     ok(snapshot() == before, "whitespace-only subject writes nothing")
 
+    print("PATCH /api/videos/{id}: blank title is 400, writes nothing (null still clears)")
+    r = patch(title="")
+    ok(r.status_code == 400, "title=\"\" is 400 (Review empty-save)")
+    ok("non-empty" in r.text and "title" in r.text.lower(),
+       "empty-title 400 names the title floor (not a generic 400)")
+    ok(snapshot() == before, "empty title writes nothing")
+    ok(snapshot()["title"] != "", "empty title did not persist a blank published claim")
+
+    r = patch(title="   ")
+    ok(r.status_code == 400, "whitespace-only title is 400")
+    ok(snapshot() == before, "whitespace-only title writes nothing")
+
+    r = patch(title="", skip_gate=True)
+    ok(r.status_code == 400, "mixed PATCH with empty title is 400")
+    ok(snapshot() == before, "400 empty-title mixed PATCH writes nothing")
+    ok(snapshot()["skip_gate"] == before["skip_gate"],
+       "400 empty-title mixed PATCH did not smuggle skip_gate")
+
     print("PATCH /api/videos/{id}: mixed body cannot smuggle a title past a 400")
     r = patch(subject=None, title="smuggled")
     ok(r.status_code == 400, "mixed PATCH with subject=null is 400")
@@ -319,6 +352,38 @@ try:
     r = patch(title="Existing title", subject=before["subject"])
     ok(r.status_code == 200, "restore title is 200")
 
+    print("PATCH /api/videos/{id}: padded title strips (same as create / subject)")
+    r = patch(title="  Padded title  ")
+    ok(r.status_code == 200, "whitespace-padded title is 200")
+    ok(snapshot()["title"] == "Padded title",
+       "PATCH strips surrounding title whitespace")
+    ok(snapshot()["subject"] == "Padded title",
+       "title-only PATCH syncs the stripped title onto subject")
+    r = patch(title="Existing title", subject=before["subject"])
+    ok(r.status_code == 200, "restore title/subject after padded pin")
+    ok(snapshot()["title"] == "Existing title"
+       and snapshot()["subject"] == before["subject"],
+       "title/subject restored after padded pin")
+
+    print("POST /api/videos/{id}/approve: blank title is 400 before the status gate")
+    r = client.post("/api/videos/1/approve", auth=auth, json={"title": ""})
+    ok(r.status_code == 400, "approve title=\"\" is 400 even from draft")
+    ok("non-empty" in r.text and "title" in r.text.lower(),
+       "approve empty-title 400 names the title floor")
+    ok(snapshot()["title"] == "Existing title"
+       and snapshot()["status"] == VideoStatus.DRAFT,
+       "approve empty title writes nothing (draft stays draft)")
+
+    r = client.post("/api/videos/1/approve", auth=auth, json={"title": "   "})
+    ok(r.status_code == 400, "approve whitespace-only title is 400")
+    ok(snapshot()["title"] == "Existing title",
+       "approve whitespace-only title writes nothing")
+
+    r = client.post("/api/videos/1/approve", auth=auth, json={"title": "", "privacy": "private"})
+    ok(r.status_code == 400, "approve mixed empty title is 400")
+    ok(snapshot()["privacy"] == before["privacy"],
+       "approve 400 empty title did not smuggle privacy")
+
     print("PATCH /api/videos/{id}: 404 + auth")
     r = patch(999, subject="nope")
     ok(r.status_code == 404, "PATCH missing video is 404")
@@ -339,6 +404,16 @@ try:
     _setattr = _vid_src.find("for k, val in data.items():", _update_def)
     ok(0 <= _update_def < _req < _setattr,
        "update_video floors subject before setattr")
+    _req_title = _vid_src.find("_floor_optional_title(data)", _update_def)
+    ok(0 <= _update_def < _req_title < _setattr,
+       "update_video floors title before setattr")
+    _approve_def = _vid_src.find("def approve(")
+    _approve_floor = _vid_src.find("_floor_optional_title(data)", _approve_def)
+    _approve_from = _vid_src.find("_require_from(v, APPROVE_FROM", _approve_def)
+    _approve_setattr = _vid_src.find(
+        'for k in ("title", "description", "privacy")', _approve_def)
+    ok(0 <= _approve_def < _approve_floor < _approve_from < _approve_setattr,
+       "approve floors title before the status gate and before setattr")
 
     print("PATCH /api/videos/{id}: JSON bool render_profile_id is 4xx")
     # Lax Optional[int] coerces false→0 / true→1 BEFORE the handler.
@@ -450,6 +525,12 @@ try:
        "empty-subject POST 400 names the subject floor (not a generic 400)")
     ok(n_videos() == n_before, "POST subject=\"\" creates no row")
     ok(video_ids() == ids_before, "POST subject=\"\" did not mint an id")
+
+    r = post(topic_id=1, subject="ok idea", title="")
+    ok(r.status_code == 400, "POST title=\"\" is 400 (create already floors a provided blank)")
+    ok("non-empty" in r.text and "title" in r.text.lower(),
+       "empty-title POST 400 names the title floor")
+    ok(n_videos() == n_before, "POST title=\"\" creates no row")
 
     r = post(topic_id=1, subject="   ")
     ok(r.status_code == 400, "POST whitespace-only subject is 400")

@@ -43,6 +43,23 @@ def _require_str(fields: dict, key: str, hint: str) -> None:
     fields[key] = v.strip()
 
 
+def _floor_optional_title(fields: dict) -> None:
+    """Blank title is a published-claim wipe. Null still clears.
+
+    ``Video.title`` is nullable (not-yet-generated / inherit subject).
+    Review save and approve send the title input as-is, so clearing it
+    writes ``""``. Create already 400s a provided blank title. Publish
+    uploads ``video.title or video.subject``; craft prefers title as
+    the published claim. A truthy-only guard (``if fields.get("title")``)
+    would skip ``""`` and persist the wipe.
+    """
+    if fields.get("title") is None:
+        return
+    _require_str(fields, "title",
+                 "title must be a non-empty string "
+                 "(send null to clear; blank is a published-claim wipe)")
+
+
 @router.get("")
 def list_videos(channel_id: int | None = None, topic_id: int | None = None,
                 status: str | None = None, session: Session = Depends(get_session)):
@@ -342,6 +359,7 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
                  "subject must be a non-empty string "
                  "(null/blank TypeErrors metadata.generate: "
                  "(title or subject)[:100])")
+    _floor_optional_title(data)
     title_sent = "title" in data
     subject_sent = "subject" in data
     if "overrides" in data:
@@ -708,6 +726,12 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     v = session.get(Video, video_id)
     if not v:
         raise HTTPException(404, "video not found")
+    data = body.model_dump(exclude_unset=True) if body else {}
+    # Floor before the status gate: Review sends saveBody() on approve, so
+    # a blank title must 400 even when the video is not yet approvable.
+    # Craft-fail on approve commits the row (park_os_held / craft_review);
+    # setattr of "" would persist the wipe even on a later 409.
+    _floor_optional_title(data)
     _require_from(v, APPROVE_FROM, "approve")
     stale = _stale_artifact_reason(session, v)
     if stale:
@@ -726,8 +750,7 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     need_al = review_guard.allowlist_required_reason(v)
     if need_al:
         raise HTTPException(409, need_al)
-    if body:
-        data = body.model_dump(exclude_unset=True)
+    if data:
         if "tags" in data:
             v.tags_json = json.dumps(data.pop("tags") or [])
         for k in ("title", "description", "privacy"):

@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 90. ✅ DONE (PR autoimprove/2026-11-01-video-title-floor) PATCH/approve reject a blank video title — normal
+- **resolution (2026-11-01):** `_floor_optional_title` is the choke point.
+  Null still clears (not-yet-generated / inherit subject). `""` /
+  `"   "` 400 before setattr. PATCH and approve share the helper;
+  approve floors before the status gate because Review's approve
+  button sends `saveBody()` (title included) and a later craft 409
+  commits the row. Create already 400'd a provided blank title.
+  Suite: `tests/verify_videos.py` 236 → 265. Isolated commit;
+  `publish_loop.py` / oauth untouched. Review empty-title restore
+  is a follow-up (same class as #48 after #47).
+- **why (found 2026-11-01 ranking remaining setattr after #47/#49):**
+  create floors a provided title; PATCH setattr'd the raw body, so
+  Review empty-save wrote `""`. Title is the published claim (craft
+  prefers it; upload is `video.title or video.subject`).
+- **caution:** normal (`videos.py` PATCH + approve; not a money-path
+  file). Isolated commit + regression tests.
+- **acceptance:** PATCH/approve `title=""` / `"   "` is 400 and writes
+  nothing; `title=null` still 200; padded title strips; create
+  `title=""` still 400. Open PRs append items 72–89 at this same
+  BACKLOG tail — keep every section when merging.
+  `run/code-experiments.jsonl` is union-merge.
