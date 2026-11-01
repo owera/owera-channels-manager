@@ -242,15 +242,26 @@ def build_flow(slug: str, redirect_uri: str) -> Flow:
     return Flow.from_client_secrets_file(str(cs), scopes=CONSENT_SCOPES, redirect_uri=redirect_uri)
 
 
-def authorization_url(flow: Flow) -> tuple[str, str]:
+def authorization_url(
+    flow: Flow,
+    *,
+    code_challenge: str | None = None,
+    code_verifier: str | None = None,
+) -> tuple[str, str]:
     """Returns (url, state). The state is the CSRF token Google echoes back on
     the redirect — the web callback pairs redirects with their pending flow by
     it; the reconnect CLI validates it inside fetch_token instead."""
-    url, state = flow.authorization_url(
-        access_type="offline",          # request a refresh token
+    kwargs: dict = dict(
+        access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",               # force refresh-token issuance on re-consent
+        prompt="consent",
     )
+    if code_challenge:
+        kwargs["code_challenge"] = code_challenge
+        kwargs["code_challenge_method"] = "S256"
+    url, state = flow.authorization_url(**kwargs)
+    if code_verifier:
+        flow.code_verifier = code_verifier
     return url, state
 
 
