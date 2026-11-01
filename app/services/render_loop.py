@@ -148,6 +148,44 @@ def _cc_dict(raw) -> dict:
     return {}
 
 
+def _gate_b_preflight_block(session: Session, video: Video, channel: Channel,
+                            provided_script: str, params: dict) -> bool:
+    """True when preflight FAIL parks the row FAILED (no render submit this tick).
+
+    Operator hold (#1458) is a separate path — preflight never sets ``held``."""
+    from app.services import gate_b_preflight as _gbp
+
+    vo = (provided_script or (video.script or "")).strip()
+    if not vo or not _gbp.applies(video.topic_id, content_format=params.get("content_format")):
+        return False
+    try:
+        hits = _gbp.evaluate(script=vo, subject=video.subject, params=params)
+    except Exception as e:
+        logger.info("gate B preflight skipped for video %s: %s", video.id, e)
+        return False
+    if not hits:
+        cc = _cc_dict(video.creation_config)
+        if cc.get(_gbp.CC_KEY):
+            cc[_gbp.CC_KEY] = {"result": "PASS", "hits": []}
+            video.creation_config = json.dumps(cc)
+            session.add(video)
+        return False
+    reason = _gbp.format_reason(hits)
+    if video.status != VideoStatus.FAILED or video.error != reason:
+        video.status = VideoStatus.FAILED
+        video.error = reason
+        video.creation_config = _gbp.stamp_creation_config(video.creation_config, hits=hits)
+        session.add(video)
+        quota.log(
+            session, kind="render", status="error", video_id=video.id,
+            channel_id=channel.id,
+            detail=f"gate B preflight blocked before render (no slot used): {reason}",
+        )
+        logger.info("gate B preflight failed queued video %s on %s: %s",
+                    video.id, channel.slug, reason)
+    return True
+
+
 def _prepare_provided_script(session: Session, video: Video, channel: Channel,
                              fmt: str, brand: str | None) -> str | None:
     """Pre-render gate + prep for a provided script. Returns the VO text to
@@ -614,8 +652,6 @@ def _submit_new(session: Session) -> None:
         provided_script = _prepare_provided_script(session, video, channel, fmt, brand)
         if provided_script is None:
             continue
-        # A video is starting production → make sure its topic playlist exists.
-        ensure_topic_playlist(session, topic, channel)
         params = build_video_params(
             video.subject,
             _profile_params(session, channel.default_render_profile_id),
@@ -630,6 +666,10 @@ def _submit_new(session: Session) -> None:
         params["brand"] = brand
         # Same title-first claim the pre-check uses (provided_script_hook_reason).
         params["title"] = video.title
+        if _gate_b_preflight_block(session, video, channel, provided_script, params):
+            continue
+        # A video is starting production → make sure its topic playlist exists.
+        ensure_topic_playlist(session, topic, channel)
         if provided_script:
             # Spoken verbatim: HyperFrames worker skips _generate_script on
             # provided_script; MPT uses its native video_script field.
