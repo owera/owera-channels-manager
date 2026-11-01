@@ -142,12 +142,12 @@ def record_video_snapshot(session: Session, analytics, channel: Channel,
     return m
 
 
-def _dead_token_error(slug: str) -> str | None:
+def _dead_token_error(channel: Channel) -> str | None:
     """The NeedsConnect message if the narrow-scope (upload) token is dead,
     None when it still loads — i.e. an analytics failure is scope-only or
     transient and must not kill the channel."""
     try:
-        youtube.get_service(slug)
+        youtube.get_service(channel.slug, channel=channel)
         return None
     except youtube.NeedsConnect as e:
         return str(e)
@@ -161,12 +161,14 @@ def _snapshot_channel(session: Session, channel: Channel, now: datetime,
     recorded. Builds the analytics client once; skips the whole channel if it isn't
     reconsented yet. `force` bypasses the once-per-day gate (for manual refresh)."""
     try:
-        analytics = youtube.get_analytics_service(channel.slug)
+        analytics = youtube.get_analytics_service(
+            channel.slug, channel=channel, session=session,
+        )
     except Exception as e:
         # Distinguish a genuinely dead token from one merely missing the
         # analytics scope: the narrow-scope Data-API creds still load for the
         # latter, and only the former may flip (and alert) the channel.
-        dead = _dead_token_error(channel.slug)
+        dead = _dead_token_error(channel)
         if dead is not None:
             notify.mark_dead_committed(session, channel, dead)
             return 0

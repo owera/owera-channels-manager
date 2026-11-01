@@ -28,7 +28,7 @@ def list_local(channel_id: int, session: Session = Depends(get_session)):
 def sync(channel_id: int, session: Session = Depends(get_session)):
     ch = _require_channel(channel_id, session)
     try:
-        service = youtube.get_service(ch.slug)
+        service = youtube.get_service(ch.slug, channel=ch, session=session)
     except youtube.NeedsConnect as e:
         # A dead token must not hide behind the 400 (see youtube_admin._connected).
         notify.mark_dead_committed(session, ch, str(e))
@@ -54,7 +54,7 @@ def sync(channel_id: int, session: Session = Depends(get_session)):
 def create(channel_id: int, body: PlaylistCreate, session: Session = Depends(get_session)):
     ch = _require_channel(channel_id, session)
     try:
-        service = youtube.get_service(ch.slug)
+        service = youtube.get_service(ch.slug, channel=ch, session=session)
     except youtube.NeedsConnect as e:
         # A dead token must not hide behind the 400 (see youtube_admin._connected).
         notify.mark_dead_committed(session, ch, str(e))

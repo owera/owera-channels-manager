@@ -83,6 +83,15 @@ class CredentialSource:
     PLATFORM_OAUTH = "platform_oauth"
 
 
+class OAuthCredential(SQLModel, table=True):
+    """Platform OAuth refresh token at rest (one row per channel). Legacy ch1/ch2 use token.json."""
+    channel_id: int = Field(primary_key=True, foreign_key="channel.id")
+    workspace_id: int = Field(foreign_key="workspace.id", index=True)
+    key_id: str = Field(default="v1", max_length=32)
+    ciphertext_b64: str
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Channel(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     workspace_id: int = Field(default=1, foreign_key="workspace.id", index=True)

@@ -29,7 +29,7 @@ def _connected(session: Session, channel_id: int):
     if not ch:
         raise HTTPException(404, "channel not found")
     try:
-        return ch, youtube.get_service(ch.slug)
+        return ch, youtube.get_service(ch.slug, channel=ch, session=session)
     except NeedsConnect as e:
         # Committed here because the HTTPException unwinds the request
         # without one.

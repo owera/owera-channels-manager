@@ -32,7 +32,7 @@ def run() -> None:
             if not pubs:
                 continue
             try:
-                service = youtube.get_service(ch.slug)
+                service = youtube.get_service(ch.slug, channel=ch)
             except Exception as e:
                 print(f"channel '{ch.name}': cannot authenticate, skipping ({e})")
                 continue

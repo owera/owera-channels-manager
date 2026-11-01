@@ -500,28 +500,33 @@ print("\n_dead_token_error: narrow-scope probe classification")
 _ORIG_GET = youtube.get_service
 
 
-def _raise_needs(slug):
+def _probe_ch(slug):
+    from types import SimpleNamespace
+    return SimpleNamespace(slug=slug, id=1, workspace_id=1, credential_source="legacy_file")
+
+
+def _raise_needs(slug, channel=None, session=None):
     raise youtube.NeedsConnect(f"token dead for {slug}")
 
 
 youtube.get_service = _raise_needs
 try:
-    msg = analytics_loop._dead_token_error("dead-ch")
+    msg = analytics_loop._dead_token_error(_probe_ch("dead-ch"))
     ok(msg == "token dead for dead-ch",
        "NeedsConnect → returns the exception message")
 finally:
     youtube.get_service = _ORIG_GET
 
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 try:
-    ok(analytics_loop._dead_token_error("ok-ch") is None,
+    ok(analytics_loop._dead_token_error(_probe_ch("ok-ch")) is None,
        "healthy narrow-scope token → None (scope-only failure path)")
 finally:
     youtube.get_service = _ORIG_GET
 
-youtube.get_service = lambda slug: (_ for _ in ()).throw(RuntimeError("blip"))
+youtube.get_service = lambda slug, channel=None, session=None: (_ for _ in ()).throw(RuntimeError("blip"))
 try:
-    ok(analytics_loop._dead_token_error("blip-ch") is None,
+    ok(analytics_loop._dead_token_error(_probe_ch("blip-ch")) is None,
        "transient narrow-scope error → None (must not kill the channel)")
 finally:
     youtube.get_service = _ORIG_GET
@@ -536,7 +541,7 @@ _ORIG_ANA = youtube.get_analytics_service
 _snap_order: list[str] = []
 
 
-def _ana_ok(slug):
+def _ana_ok(slug, channel=None, session=None):
     return f"ana-{slug}"
 
 
@@ -792,10 +797,10 @@ finally:
 print("\n_snapshot_channel: dead token flips; missing scope only skips (contract)")
 
 _ORIG_HAS = youtube.has_token
-youtube.has_token = lambda slug: True  # dead_status_for → EXPIRED
+youtube.has_token = lambda slug, channel=None: True  # dead_status_for → EXPIRED
 
 
-def _raise_ana(slug):
+def _raise_ana(slug, channel=None, session=None):
     raise youtube.NeedsConnect(f"no analytics for {slug}")
 
 
@@ -813,7 +818,7 @@ try:
        "genuinely dead token flips the channel to EXPIRED")
 
     # scope-only: narrow scope still loads
-    youtube.get_service = lambda slug: object()
+    youtube.get_service = lambda slug, channel=None, session=None: object()
     s2 = fresh_session()
     ch2 = make_channel(s2, slug="scope-only")
     with patch.object(notify, "alert_dead", lambda *a, **k: None):
@@ -846,7 +851,7 @@ def _scoped(session):
     session.commit()
 
 
-def _probe_ana(slug):
+def _probe_ana(slug, channel=None, session=None):
     _probe_slugs.append(slug)
     return f"ana-{slug}"
 

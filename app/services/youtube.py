@@ -12,7 +12,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 # The redirect-based flow uses an http loopback redirect (http://localhost:7070/...)
 # and the authorization response arrives over http — relax oauthlib's https-only
@@ -30,6 +30,12 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from app.config import settings
+from app.models import CredentialSource
+
+if TYPE_CHECKING:
+    from sqlmodel import Session
+
+    from app.models import Channel
 
 logger = logging.getLogger("manager.youtube")
 
@@ -145,11 +151,26 @@ def token_path(slug: str) -> Path:
     return channel_dir(slug) / "token.json"
 
 
-def has_client_secret(slug: str) -> bool:
+def _uses_platform_oauth(channel: "Channel | None") -> bool:
+    return (
+        channel is not None
+        and channel.credential_source == CredentialSource.PLATFORM_OAUTH
+    )
+
+
+def has_client_secret(slug: str, channel: "Channel | None" = None) -> bool:
+    if _uses_platform_oauth(channel):
+        return bool(settings.google_client_id and settings.google_client_secret)
     return client_secret_path(slug).exists()
 
 
-def has_token(slug: str) -> bool:
+def has_token(slug: str, channel: "Channel | None" = None) -> bool:
+    if _uses_platform_oauth(channel):
+        from app.db import session_scope
+        from app.services import token_store
+
+        with session_scope() as session:
+            return token_store.has_credential(session, channel.id)  # type: ignore[union-attr]
     return token_path(slug).exists()
 
 
@@ -173,7 +194,71 @@ def _loads_token_info(raw: str) -> tuple[Optional[dict], bool]:
     return info, bool(raw[end:].strip())
 
 
-def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credentials]:
+def _refresh_and_persist(
+    slug: str,
+    creds: Credentials | None,
+    *,
+    channel: "Channel | None" = None,
+    session: "Session | None" = None,
+    raw_before: str | None = None,
+) -> Optional[Credentials]:
+    if creds and creds.valid:
+        return creds
+    if not (creds and creds.expired and creds.refresh_token):
+        return None
+    try:
+        creds.refresh(Request())
+    except RefreshError:
+        return None
+    if _uses_platform_oauth(channel):
+        from app.services import token_store
+
+        if session is not None:
+            token_store.save_credentials(session, channel, creds)  # type: ignore[arg-type]
+        else:
+            from app.db import session_scope
+
+            with session_scope() as sess:
+                token_store.save_credentials(sess, channel, creds)  # type: ignore[arg-type]
+        return creds
+    tp = token_path(slug)
+    try:
+        changed = tp.read_text() != raw_before if (raw_before is not None and tp.exists()) else True
+    except OSError:
+        changed = True
+    if changed:
+        return creds
+    _write_atomic(tp, creds.to_json())
+    return creds
+
+
+def _load_creds(
+    slug: str,
+    scopes: Optional[list] = None,
+    *,
+    channel: "Channel | None" = None,
+    session: "Session | None" = None,
+) -> Optional[Credentials]:
+    if _uses_platform_oauth(channel):
+        from app.services import token_store
+        from app.services.token_store import TokenStoreError
+
+        try:
+            if session is not None:
+                creds = token_store.load_credentials(session, channel, scopes)  # type: ignore[arg-type]
+            else:
+                from app.db import session_scope
+
+                with session_scope() as sess:
+                    creds = token_store.load_credentials(sess, channel, scopes)  # type: ignore[arg-type]
+        except TokenStoreError as e:
+            raise NeedsConnect(f"platform token store misconfigured: {e}") from e
+        if creds is None:
+            return None
+        if creds.valid:
+            return creds
+        return _refresh_and_persist(slug, creds, channel=channel, session=session)
+
     tp = token_path(slug)
     if not tp.exists():
         return None
@@ -185,46 +270,32 @@ def _load_creds(slug: str, scopes: Optional[list] = None) -> Optional[Credential
         logger.warning("token.json for %s has trailing data after the first "
                        "JSON object — using the first object", slug)
     if scopes is None:
-        # Unpinned load (see SCOPES note): drop the stored scopes field too —
-        # from_authorized_user_info falls back to it, and tokens persisted by the
-        # pre-fix refresh path carry a narrowed list that would keep re-narrowing.
         info.pop("scopes", None)
     creds = Credentials.from_authorized_user_info(info, scopes)
     if creds and creds.valid:
         if trailing:
-            # Heal the on-disk file so the next load is a clean json.loads.
             _write_atomic(tp, creds.to_json())
         return creds
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except RefreshError:
-            # Refresh token revoked/expired (invalid_grant). Return None so get_service
-            # raises the clean NeedsConnect that callers already handle — instead of
-            # leaking a RefreshError that leaves an upload stuck in PUBLISHING (mislabeled
-            # a "stall" by the recovery loop) and never flags the channel for reconnect.
-            return None
-        try:
-            changed = tp.read_text() != raw if tp.exists() else True
-        except OSError:
-            changed = True
-        if changed:
-            # Someone replaced the token while we were refreshing (e.g. the
-            # reconnect CLI saving a fresh grant). The new token wins on disk;
-            # our refreshed creds are still good for this one call.
-            return creds
-        _write_atomic(tp, creds.to_json())
-        return creds
-    return None
+    return _refresh_and_persist(
+        slug, creds, channel=channel, session=session, raw_before=raw,
+    )
 
 
-def get_service(slug: str):
+def get_service(
+    slug: str,
+    channel: "Channel | None" = None,
+    session: "Session | None" = None,
+):
     """Build an authenticated YouTube client. Raises NeedsConnect if not usable —
     never opens a browser here (that only happens in connect_interactive)."""
-    if not has_client_secret(slug):
+    if not has_client_secret(slug, channel):
+        if _uses_platform_oauth(channel):
+            raise NeedsConnect(
+                f"platform Google OAuth client not configured for channel '{slug}'"
+            )
         raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
     try:
-        creds = _load_creds(slug)
+        creds = _load_creds(slug, channel=channel, session=session)
     except (OSError, json.JSONDecodeError, ValueError) as e:
         raise NeedsConnect(
             f"token unreadable for channel '{slug}' — reconnect required ({e})"
@@ -707,13 +778,17 @@ def unsubscribe(service, sub_id: str) -> None:
 
 # ---- Analytics (YouTube Analytics API v2, owner reports) ------------------
 
-def get_analytics_service(slug: str):
+def get_analytics_service(
+    slug: str,
+    channel: "Channel | None" = None,
+    session: "Session | None" = None,
+):
     """YouTube Analytics API v2 client. Requests the analytics scope, so it only
     works once the channel has been re-consented for it; otherwise raises NeedsConnect
     or the API returns an insufficient-scope error — callers treat that as 'skip'."""
-    if not has_client_secret(slug):
+    if not has_client_secret(slug, channel):
         raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
-    creds = _load_creds(slug, CONSENT_SCOPES)
+    creds = _load_creds(slug, CONSENT_SCOPES, channel=channel, session=session)
     if creds is None:
         raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
     return build("youtubeAnalytics", "v2", credentials=creds)
