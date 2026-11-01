@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # Shared claw0: scope API data by Workspace (EA tenant #1 = default workspace).
     multi_workspace: bool = False
-    allow_workspace_header: bool = True
+    allow_workspace_header: bool = False
 
     # Platform OAuth (PR-E): inert unless MANAGER_GOOGLE_WEB_OAUTH=1.
     google_web_oauth: bool = False
