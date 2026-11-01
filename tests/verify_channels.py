@@ -48,7 +48,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthStatus
+from app.models import Channel, OAuthStatus, Workspace
 from app.routers import channels as channels_router
 from app.schemas import ChannelUpdate
 from app.services import publish_loop, render_loop
@@ -115,9 +115,10 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
 SQLModel.metadata.create_all(engine)
 
 with Session(engine) as s:
-    s.add(Channel(slug="ch-a", name="A", oauth_status=OAuthStatus.CONNECTED,
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Channel(workspace_id=1, slug="ch-a", name="A", oauth_status=OAuthStatus.CONNECTED,
                   daily_render_budget=5, daily_publish_budget=5))
-    s.add(Channel(slug="ch-b", name="B", oauth_status=OAuthStatus.CONNECTED,
+    s.add(Channel(workspace_id=1, slug="ch-b", name="B", oauth_status=OAuthStatus.CONNECTED,
                   daily_render_budget=7, daily_publish_budget=7))
     s.commit()
 

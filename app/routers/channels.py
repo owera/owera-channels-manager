@@ -8,9 +8,10 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthStatus, utcnow
+from app.models import Channel, OAuthStatus, Workspace, utcnow
 from app.schemas import ChannelCreate, ChannelUpdate
 from app.services import notify, oauth_pending, youtube
+from app.workspace import channels_for_workspace, current_workspace, require_channel as require_ws_channel
 
 logger = logging.getLogger("manager.channels")
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
 def _channel_workspace_id(ch: Channel) -> int:
-    return getattr(ch, "workspace_id", None) or 1
+    return ch.workspace_id or 1
 
 
 def _rebuild_flow(ch: Channel, pending) -> object:
@@ -66,14 +67,23 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
 
 
 @router.get("")
-def list_channels(session: Session = Depends(get_session)):
-    return session.exec(select(Channel).order_by(Channel.id)).all()
+def list_channels(
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    return session.exec(channels_for_workspace(ws)).all()
 
 
 @router.post("", status_code=201)
-def create_channel(body: ChannelCreate, session: Session = Depends(get_session)):
+def create_channel(
+    body: ChannelCreate,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
     slug = _slugify(body.slug or body.name)
-    if session.exec(select(Channel).where(Channel.slug == slug)).first():
+    if session.exec(
+        select(Channel).where(Channel.workspace_id == ws.id, Channel.slug == slug)
+    ).first():
         raise HTTPException(409, f"channel slug '{slug}' already exists")
     fields = body.model_dump()
     # 0 is a legal stall (#27/#28). Negative is the same skip as 0 but a
@@ -91,6 +101,7 @@ def create_channel(body: ChannelCreate, session: Session = Depends(get_session))
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
     ch = Channel(
+        workspace_id=ws.id,
         slug=slug, name=body.name, default_privacy=body.default_privacy,
         default_skip_gate=body.default_skip_gate,
         daily_render_budget=body.daily_render_budget,
@@ -104,18 +115,22 @@ def create_channel(body: ChannelCreate, session: Session = Depends(get_session))
 
 
 @router.get("/{channel_id}")
-def get_channel(channel_id: int, session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
-    return ch
+def get_channel(
+    channel_id: int,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    return require_ws_channel(session, ws, channel_id)
 
 
 @router.patch("/{channel_id}")
-def update_channel(channel_id: int, body: ChannelUpdate, session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+def update_channel(
+    channel_id: int,
+    body: ChannelUpdate,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    ch = require_ws_channel(session, ws, channel_id)
     fields = body.model_dump(exclude_unset=True)
     # 0 is a legal stall (#27/#28). null TypeErrors the publish/render ticks
     # (published_today >= budget; rendered_today + in_flight >= budget).
@@ -157,19 +172,24 @@ def update_channel(channel_id: int, body: ChannelUpdate, session: Session = Depe
 
 
 @router.delete("/{channel_id}", status_code=204)
-def delete_channel(channel_id: int, session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if ch:
-        session.delete(ch)
-        session.commit()
+def delete_channel(
+    channel_id: int,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    ch = require_ws_channel(session, ws, channel_id)
+    session.delete(ch)
+    session.commit()
 
 
 @router.post("/{channel_id}/credentials")
-def upload_credentials(channel_id: int, file: UploadFile = File(...),
-                       session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+def upload_credentials(
+    channel_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    ch = require_ws_channel(session, ws, channel_id)
     cdir = youtube.channel_dir(ch.slug)
     cdir.mkdir(parents=True, exist_ok=True)
     youtube.client_secret_path(ch.slug).write_bytes(file.file.read())
@@ -177,12 +197,15 @@ def upload_credentials(channel_id: int, file: UploadFile = File(...),
 
 
 @router.post("/{channel_id}/oauth/start")
-def oauth_start(channel_id: int, request: Request, session: Session = Depends(get_session)):
+def oauth_start(
+    channel_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
     """Begin the redirect-based consent: return the Google authorization URL for the
     user's own browser to open. No server-side browser needed."""
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_ws_channel(session, ws, channel_id)
     if not youtube.has_client_secret(ch.slug):
         raise HTTPException(400, "upload client_secret.json first")
     # MANAGER_PUBLIC_BASE_URL pins the redirect_uri (rationale on the setting).
@@ -285,10 +308,12 @@ def oauth_callback(channel_id: int, request: Request, code: str | None = None,
 
 
 @router.post("/{channel_id}/disconnect")
-def disconnect(channel_id: int, session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+def disconnect(
+    channel_id: int,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    ch = require_ws_channel(session, ws, channel_id)
     youtube.disconnect(ch.slug)
     # Operator-initiated: deliberately bypasses notify.mark_dead — an
     # intentional disconnect must not page anyone.
@@ -338,10 +363,12 @@ def _probe_connected(session: Session, ch: Channel, service) -> None:
 
 
 @router.get("/{channel_id}/oauth-status")
-def oauth_status(channel_id: int, session: Session = Depends(get_session)):
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+def oauth_status(
+    channel_id: int,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    ch = require_ws_channel(session, ws, channel_id)
     try:
         _probe_connected(session, ch, youtube.get_service(ch.slug))
     except Exception as e:  # NeedsConnect, refresh failure, bad/old-scope token, etc.

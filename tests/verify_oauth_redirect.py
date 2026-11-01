@@ -37,7 +37,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app import reconnect
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthPending, OAuthStatus
+from app.models import Channel, OAuthPending, OAuthStatus, Workspace
 from app.routers import channels as channels_router
 from app.services import notify, oauth_pending, youtube
 from sqlmodel import select
@@ -74,7 +74,8 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
-    ch = Channel(slug=SLUG, name="Verify", oauth_status=OAuthStatus.EXPIRED)
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    ch = Channel(workspace_id=1, slug=SLUG, name="Verify", oauth_status=OAuthStatus.EXPIRED)
     s.add(ch)
     s.commit()
     s.refresh(ch)
@@ -265,7 +266,7 @@ TOKEN = tmp / SLUG2 / "token.json"
 BAK = tmp / SLUG2 / "token.json.bak"
 
 with Session(engine) as s:
-    ch2 = Channel(slug=SLUG2, name="Verify Consent", oauth_status=OAuthStatus.CONNECTED,
+    ch2 = Channel(workspace_id=1, slug=SLUG2, name="Verify Consent", oauth_status=OAuthStatus.CONNECTED,
                   yt_channel_id="UCbound", yt_channel_title="Bound Channel")
     s.add(ch2)
     s.commit()

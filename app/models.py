@@ -52,11 +52,24 @@ class OAuthStatus:
     ERROR = "error"
 
 
+class Workspace(SQLModel, table=True):
+    """Early-access tenant on shared claw0 CM. EA tenant #1 shares this instance."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(index=True, unique=True)
+    name: str
+    # Per-workspace YouTube Data API quota cap (units/day); PR-G enforces in publish loop.
+    daily_youtube_quota_cap: int = 9000
+    subscription_status: str = "trialing"
+    onboarding_complete: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class OAuthPending(SQLModel, table=True):
     """Single-use OAuth state + PKCE verifier (survives process restart)."""
     id: Optional[int] = Field(default=None, primary_key=True)
     state_hash: str = Field(index=True)
-    workspace_id: int = Field(default=1, index=True)
+    workspace_id: int = Field(default=1, foreign_key="workspace.id", index=True)
     channel_id: int = Field(foreign_key="channel.id", index=True)
     code_verifier: str
     redirect_uri: str
@@ -65,10 +78,17 @@ class OAuthPending(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class CredentialSource:
+    LEGACY_FILE = "legacy_file"
+    PLATFORM_OAUTH = "platform_oauth"
+
+
 class Channel(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    slug: str = Field(index=True, unique=True)
+    workspace_id: int = Field(default=1, foreign_key="workspace.id", index=True)
+    slug: str = Field(index=True)
     name: str
+    credential_source: str = Field(default=CredentialSource.LEGACY_FILE)
     yt_channel_id: Optional[str] = None
     yt_channel_title: Optional[str] = None
     oauth_status: str = OAuthStatus.DISCONNECTED
