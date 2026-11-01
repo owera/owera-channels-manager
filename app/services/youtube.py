@@ -33,21 +33,19 @@ from app.config import settings
 
 logger = logging.getLogger("manager.youtube")
 
-# Full youtube scope so we can manage playlists, not just upload. Analytics read is
-# requested only at CONSENT time. The Data-API path (get_service) loads creds with NO
-# scope pin: google-auth sends the pinned list in the refresh grant and Google narrows
-# the refreshed access token to exactly that list, so pinning SCOPES here silently
-# stripped already-granted force-ssl on every refresh (403 on all first comments
-# 2026-07-12) and then persisted the narrowed list back into token.json. Unpinned,
-# a refresh returns every scope the refresh token granted — old youtube-only tokens
-# keep publishing, re-consented tokens keep force-ssl + analytics.
-SCOPES = ["https://www.googleapis.com/auth/youtube"]
-# Everything requested at consent time. force-ssl is required for comment endpoints
-# (commentThreads.insert — the author first-comment machinery 403s without it).
-CONSENT_SCOPES = SCOPES + [
-    "https://www.googleapis.com/auth/youtube.force-ssl",
-    "https://www.googleapis.com/auth/yt-analytics.readonly",
-]
+# Legacy full-youtube scope (ch1/ch2 Desktop tokens). Not requested on new consents.
+SCOPE_YOUTUBE_LEGACY = "https://www.googleapis.com/auth/youtube"
+SCOPE_FORCE_SSL = "https://www.googleapis.com/auth/youtube.force-ssl"
+SCOPE_ANALYTICS = "https://www.googleapis.com/auth/yt-analytics.readonly"
+
+# Back-compat alias: tests and reconnect paths refer to SCOPES as the legacy pin list.
+SCOPES = [SCOPE_YOUTUBE_LEGACY]
+
+# v1 platform consent (WS4): force-ssl covers upload/playlists/comments/branding over
+# HTTPS; analytics is incremental-friendly. Drop redundant full `youtube` scope.
+# get_service() still loads creds with NO scope pin (see below) so refreshes keep
+# every scope the refresh token was granted — including legacy youtube-only tokens.
+CONSENT_SCOPES = [SCOPE_FORCE_SSL, SCOPE_ANALYTICS]
 # Shared remediation phrase for the partial-scopes guard (verify_grant) and the
 # reconnect CLI pre-consent reminder (app.reconnect.SCOPE_REMINDER). Google's
 # consent checkboxes are UNCHECKED by default — both sites must say the same
@@ -283,10 +281,19 @@ def identity_for_creds(creds: Credentials) -> dict:
     return fetch_identity(build("youtube", "v3", credentials=creds))
 
 
+def required_grant_scopes(required_scopes: Optional[list[str]] = None) -> list[str]:
+    """Scopes that must appear on a fresh grant (tier/configurable; default = CONSENT_SCOPES)."""
+    if required_scopes is not None:
+        return list(required_scopes)
+    tier = getattr(settings, "oauth_required_scopes", None) or []
+    return list(tier) if tier else list(CONSENT_SCOPES)
+
+
 def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = None,
                  expected_channel_title: Optional[str] = None,
                  label: str = "this channel",
-                 allow_partial: bool = False, allow_rebind: bool = False) -> dict:
+                 allow_partial: bool = False, allow_rebind: bool = False,
+                 required_scopes: Optional[list[str]] = None) -> dict:
     """Verify a freshly-exchanged grant BEFORE anything touches disk or DB — the
     three checks learned from the 2026-07-05/11 reconnect incidents (rationale
     in app/reconnect.py's docstring): a refresh token was issued, every consent
@@ -301,7 +308,7 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
     # matched the request (RFC 6749 §5.1), so falling back to the requested set
     # is the spec reading, not a fail-open.
     granted = creds.granted_scopes or creds.scopes or []
-    missing = sorted(set(CONSENT_SCOPES) - set(granted))
+    missing = sorted(set(required_grant_scopes(required_scopes)) - set(granted))
     if missing and not allow_partial:
         raise GrantRejected(
             "grant is missing scope(s): " + ", ".join(missing) + ". Token NOT "

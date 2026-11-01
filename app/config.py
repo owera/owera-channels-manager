@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # password is accepted. Empty string = no auth (safe for local-only use).
     app_password: str = ""
 
+    # OAuth grant verification: empty = use youtube.CONSENT_SCOPES (WS4 v1 tier).
+    oauth_required_scopes: list[str] = []
+
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_storage_dir: str = str(MPT_DIR / "storage" / "tasks")

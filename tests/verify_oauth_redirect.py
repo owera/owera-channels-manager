@@ -158,12 +158,12 @@ ok(youtube.verify_grant(FakeCreds()) == IDENT,
 e = rejected(FakeCreds(refresh_token=None))
 ok(e and e.code == "no_refresh_token" and "refresh token" in str(e),
    "missing refresh token rejected (no_refresh_token)")
-e = rejected(FakeCreds(granted_scopes=youtube.SCOPES))
+e = rejected(FakeCreds(granted_scopes=[youtube.SCOPE_FORCE_SSL]))
 ok(e and e.code == "partial_scopes" and "yt-analytics.readonly" in str(e),
    "partial grant rejected, missing scopes named (partial_scopes)")
 ok(youtube.SELECT_ALL_HINT in str(e),
    "partial_scopes message carries SELECT_ALL_HINT (shared remediation phrase)")
-ok(youtube.verify_grant(FakeCreds(granted_scopes=youtube.SCOPES),
+ok(youtube.verify_grant(FakeCreds(granted_scopes=[youtube.SCOPE_FORCE_SSL]),
                         allow_partial=True) == IDENT,
    "allow_partial overrides exactly the scope guard")
 
