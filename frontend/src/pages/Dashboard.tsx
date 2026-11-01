@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useDashboard, useRuns, useSettings, type DashboardRow, type Status } from "../api";
+import { useDashboard, useOnboarding, useRuns, useSettings, type DashboardRow, type Status } from "../api";
 import { STATUS_META } from "../status";
 import { Dot } from "../ui";
 
@@ -127,6 +127,7 @@ export default function Dashboard() {
   const { data: rows } = useDashboard();
   const { data: runs } = useRuns();
   const { data: settings } = useSettings();
+  const { data: onboarding } = useOnboarding();
 
   const sum = (k: Status) => rows?.reduce((a, r) => a + (r.counts[k] || 0), 0) ?? 0;
   const live = sum("published");
@@ -138,6 +139,13 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 md:p-8 max-w-[1500px]">
+      {onboarding && !onboarding.onboarding_complete && (
+        <div className="mb-6 panel px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-signal/30">
+          <span className="text-sm text-fog-200">Early access onboarding incomplete — finish connect → topic → ideas.</span>
+          <Link to="/onboarding" className="btn btn-signal !py-1.5">Checklist →</Link>
+        </div>
+      )}
+
       <header className="flex items-end justify-between mb-6">
         <div>
           <div className="label mb-2">// overview</div>

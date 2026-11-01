@@ -5,6 +5,7 @@ import Board from "./pages/Board";
 import Review from "./pages/Review";
 import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
+import Onboarding from "./pages/Onboarding";
 import Trends from "./pages/Trends";
 import { HeldToasts } from "./ui";
 
@@ -12,6 +13,7 @@ const NAV = [
   { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
   { to: "/board", label: "Queue Board", short: "Board", code: "01" },
   { to: "/channels", label: "Channels", short: "Channels", code: "02" },
+  { to: "/onboarding", label: "Onboarding", short: "Start", code: "06" },
   { to: "/trends", label: "Trends", short: "Trends", code: "03" },
   { to: "/profiles", label: "Render Profiles", short: "Profiles", code: "04" },
   { to: "/settings", label: "Settings", short: "Config", code: "05" },
@@ -85,6 +87,7 @@ export default function App() {
           <Route path="/board" element={<Board />} />
           <Route path="/board/:channelId" element={<Board />} />
           <Route path="/channels" element={<Channels />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/trends" element={<Trends />} />
           <Route path="/review/:videoId" element={<Review />} />
           <Route path="/profiles" element={<Profiles />} />

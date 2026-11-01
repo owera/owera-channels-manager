@@ -280,6 +280,26 @@ export const useFeatures = () =>
     staleTime: 60_000,
   });
 
+export interface OnboardingStep {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+export interface OnboardingStatus {
+  workspace_id: number;
+  workspace_slug: string;
+  onboarding_complete: boolean;
+  steps: OnboardingStep[];
+}
+
+export const useOnboarding = () =>
+  useQuery({
+    queryKey: ["onboarding"],
+    queryFn: () => api<OnboardingStatus>("/onboarding/status"),
+    refetchInterval: 8000,
+  });
+
 export const useTrends = (status?: string) =>
   useQuery({
     queryKey: ["trends", status ?? "all"],
