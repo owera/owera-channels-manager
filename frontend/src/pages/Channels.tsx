@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  useChannels, useMut, useProfiles, useTopics, type Channel, type Topic,
+  useChannels, useFeatures, useMut, useProfiles, useTopics, type Channel, type Topic,
 } from "../api";
 import { intFromBlur } from "../intFromBlur";
 import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
@@ -165,6 +165,8 @@ function ContentTopics({ channel }: { channel: Channel }) {
 // ---------- Channel detail ----------
 function ChannelDetail({ channel }: { channel: Channel }) {
   const m = useMut();
+  const { data: features } = useFeatures();
+  const platformOauth = features?.google_web_oauth === true;
   const { data: profiles } = useProfiles(channel.id);
   const fileRef = useRef<HTMLInputElement>(null);
   const hexes = OAUTH_HEX[channel.oauth_status] || "#6c7681";
@@ -205,21 +207,50 @@ function ChannelDetail({ channel }: { channel: Channel }) {
       {channel.oauth_error && <div className="mt-2 text-xs font-mono text-amber">{channel.oauth_error}</div>}
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <input ref={fileRef} type="file" accept="application/json" className="hidden"
-          onChange={(e) => e.target.files?.[0] && m.uploadSecret.mutate({ id: channel.id, file: e.target.files[0] })} />
-        <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>
-          {m.uploadSecret.isPending ? "uploading…" : "upload client_secret.json"}
-        </button>
-        <button className="btn btn-signal" disabled={m.oauthStart.isPending || connecting}
-          onClick={async () => { try { const { auth_url } = await m.oauthStart.mutateAsync(channel.id); window.open(auth_url, "_blank", "noopener"); setConnecting(true); } catch {} }}>
-          {connecting ? "waiting for consent…" : m.oauthStart.isPending ? "starting…" : channel.oauth_status === "connected" ? "reconnect" : "connect oauth"}
+        {!platformOauth && (
+          <>
+            <input ref={fileRef} type="file" accept="application/json" className="hidden"
+              onChange={(e) => e.target.files?.[0] && m.uploadSecret.mutate({ id: channel.id, file: e.target.files[0] })} />
+            <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>
+              {m.uploadSecret.isPending ? "uploading…" : "upload client_secret.json"}
+            </button>
+          </>
+        )}
+        <button className="btn btn-signal"
+          disabled={(platformOauth ? m.platformOauthStart : m.oauthStart).isPending || connecting}
+          onClick={async () => {
+            try {
+              const start = platformOauth ? m.platformOauthStart : m.oauthStart;
+              const { auth_url } = await start.mutateAsync(channel.id);
+              window.open(auth_url, "_blank", "noopener");
+              setConnecting(true);
+            } catch { /* error row below */ }
+          }}>
+          {connecting
+            ? "waiting for consent…"
+            : (platformOauth ? m.platformOauthStart : m.oauthStart).isPending
+              ? "starting…"
+              : channel.oauth_status === "connected"
+                ? "reconnect"
+                : platformOauth
+                  ? "connect youtube"
+                  : "connect oauth"}
         </button>
         {channel.oauth_status === "connected" && (
           <button className="btn btn-ghost" onClick={() => m.disconnectChannel.mutate(channel.id)}>disconnect</button>
         )}
       </div>
       {connecting && <div className="mt-2 text-xs font-mono text-fog-300">A Google consent tab opened — approve there, then this updates automatically.</div>}
-      {m.oauthStart.isError && <div className="mt-2 text-xs font-mono text-[#f7768e]">{(m.oauthStart.error as Error).message}</div>}
+      {(platformOauth ? m.platformOauthStart : m.oauthStart).isError && (
+        <div className="mt-2 text-xs font-mono text-[#f7768e]">
+          {((platformOauth ? m.platformOauthStart : m.oauthStart).error as Error).message}
+        </div>
+      )}
+      {platformOauth && channel.oauth_status !== "connected" && (
+        <div className="mt-2 text-[12px] text-fog-400 max-w-xl">
+          Early access uses the shared Owera Google OAuth client — no client_secret.json upload.
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4">
         <div>
@@ -269,6 +300,8 @@ function ChannelDetail({ channel }: { channel: Channel }) {
 
 export default function Channels() {
   const { data: channels } = useChannels();
+  const { data: features } = useFeatures();
+  const platformOauth = features?.google_web_oauth === true;
   const m = useMut();
   const [sel, setSel] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
@@ -303,7 +336,10 @@ export default function Channels() {
       )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Add channel">
-        <Field label="channel name" hint="Use a separate Google Cloud project + client_secret.json per channel (independent quota).">
+        <Field label="channel name"
+          hint={platformOauth
+            ? "One YouTube channel per row; use Connect YouTube after creating."
+            : "Use a separate Google Cloud project + client_secret.json per channel (independent quota)."}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="AI Engineering Shorts" />
         </Field>
         <button className="btn btn-signal w-full" disabled={!name || m.createChannel.isPending}
