@@ -314,7 +314,7 @@ def disconnect(
     ws: Workspace = Depends(current_workspace),
 ):
     ch = require_ws_channel(session, ws, channel_id)
-    youtube.disconnect(ch.slug)
+    youtube.disconnect_channel(session, ch)
     # Operator-initiated: deliberately bypasses notify.mark_dead — an
     # intentional disconnect must not page anyone.
     ch.oauth_status = OAuthStatus.DISCONNECTED

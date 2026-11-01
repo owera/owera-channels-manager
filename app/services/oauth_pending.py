@@ -89,6 +89,30 @@ def consume_pending(
     return row
 
 
+def consume_pending_by_state(session: Session, *, state: str) -> OAuthPending | None:
+    """Platform fixed callback: resolve pending flow by state only."""
+    if not state:
+        return None
+    sh = _state_hash(state)
+    row = session.exec(
+        select(OAuthPending).where(
+            OAuthPending.state_hash == sh,
+            OAuthPending.consumed_at == None,  # noqa: E711
+        )
+    ).first()
+    if row is None:
+        return None
+    if _is_expired(row):
+        row.consumed_at = utcnow()
+        session.add(row)
+        session.commit()
+        return None
+    row.consumed_at = utcnow()
+    session.add(row)
+    session.commit()
+    return row
+
+
 def has_unconsumed_state(session: Session, state: str) -> bool:
     sh = _state_hash(state)
     row = session.exec(
