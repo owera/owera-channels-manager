@@ -17,8 +17,8 @@ from sqlmodel import Session, func, select
 from app.config import ensure_dirs, load_dotenv_into_env, settings
 from app.db import get_session, init_db
 from app.models import Channel, OAuthStatus, Video, VideoStatus
-from app.routers import (channels, media, music, playlists, profiles, queue,
-                         settings as settings_router, thumbnails, topics, trends,
+from app.routers import (channels, media, music, platform_oauth, playlists, profiles,
+                         queue, settings as settings_router, thumbnails, topics, trends,
                          videos, youtube_admin)
 from app.services import render_loop, scheduler
 
@@ -81,6 +81,7 @@ def routed_path(request: Request) -> str:
 # because an id past SQLite's int64 range makes session.get raise, turning an anonymous
 # request into a 500 with a ~19KB traceback in the log.
 _OAUTH_CALLBACK_PATH = re.compile(r"/api/channels/[0-9]{1,18}/oauth/callback")
+_PLATFORM_OAUTH_CALLBACK = "/api/oauth/google/callback"
 
 
 @app.middleware("http")
@@ -91,7 +92,9 @@ async def basic_auth(request: Request, call_next):
     # it exposes only aggregate counts, never channel names or tokens.
     if path == "/health":
         return await call_next(request)
-    if request.method == "GET" and _OAUTH_CALLBACK_PATH.fullmatch(path):
+    if request.method == "GET" and (
+        _OAUTH_CALLBACK_PATH.fullmatch(path) or path == _PLATFORM_OAUTH_CALLBACK
+    ):
         return await call_next(request)
     if not settings.app_password:
         return await call_next(request)
@@ -109,8 +112,8 @@ async def basic_auth(request: Request, call_next):
         headers={"WWW-Authenticate": 'Basic realm="Owera Channels Manager"'},
     )
 
-for r in (channels, playlists, profiles, topics, videos, queue, media, settings_router,
-          youtube_admin, trends, music, thumbnails):
+for r in (channels, platform_oauth, playlists, profiles, topics, videos, queue, media,
+          settings_router, youtube_admin, trends, music, thumbnails):
     app.include_router(r.router)
 
 

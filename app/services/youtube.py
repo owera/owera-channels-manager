@@ -305,6 +305,28 @@ def get_service(
     return build("youtube", "v3", credentials=creds)
 
 
+def _web_client_config() -> dict:
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise NeedsConnect("platform Google OAuth client is not configured")
+    return {
+        "web": {
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [settings.oauth_redirect_uri],
+        }
+    }
+
+
+def build_platform_flow(redirect_uri: str | None = None) -> Flow:
+    """Owera Web OAuth client (claw0 env) — no per-channel client_secret.json."""
+    uri = redirect_uri or settings.oauth_redirect_uri
+    return Flow.from_client_config(
+        _web_client_config(), scopes=CONSENT_SCOPES, redirect_uri=uri,
+    )
+
+
 def build_flow(slug: str, redirect_uri: str) -> Flow:
     """Create an OAuth Flow for the redirect-based consent (no server-side browser)."""
     cs = client_secret_path(slug)
@@ -418,8 +440,26 @@ def verify_grant(creds: Credentials, *, expected_channel_id: Optional[str] = Non
     return identity
 
 
+def _yt_channel_bound_elsewhere(session, yt_id: str, *, channel_id: int, workspace_id: int):
+    from sqlmodel import select
+
+    from app.models import Channel
+
+    rows = session.exec(select(Channel).where(Channel.yt_channel_id == yt_id)).all()
+    for other in rows:
+        if other.id == channel_id:
+            continue
+        if other.workspace_id != workspace_id:
+            raise GrantRejected(
+                f"YouTube channel {yt_id} is already linked to workspace "
+                f"id={other.workspace_id} (channel id={other.id}). Token NOT saved.",
+                code=GrantCode.CHANNEL_MISMATCH,
+            )
+
+
 def complete_consent(session, channel, creds: Credentials, *,
-                     allow_partial: bool = False, allow_rebind: bool = False) -> dict:
+                     allow_partial: bool = False, allow_rebind: bool = False,
+                     store_platform: bool = False) -> dict:
     """The one consent-completion sequence (BACKLOG 4c-e) — both the web
     callback and the reconnect CLI finish a freshly-exchanged grant HERE, so
     the 4b ordering cannot drift between them:
@@ -442,7 +482,19 @@ def complete_consent(session, channel, creds: Credentials, *,
                             expected_channel_title=channel.yt_channel_title,
                             label=f"'{channel.slug}'",
                             allow_partial=allow_partial, allow_rebind=allow_rebind)
-    save_token(channel.slug, creds)
+    _yt_channel_bound_elsewhere(
+        session, identity["id"],
+        channel_id=channel.id, workspace_id=channel.workspace_id,
+    )
+    if store_platform:
+        from app.models import CredentialSource
+        from app.services import token_store
+
+        channel.credential_source = CredentialSource.PLATFORM_OAUTH
+        session.add(channel)
+        token_store.save_credentials(session, channel, creds)
+    else:
+        save_token(channel.slug, creds)
     try:
         notify.mark_connected(session, channel, identity)
     except Exception as e:
@@ -450,12 +502,14 @@ def complete_consent(session, channel, creds: Credentials, *,
     return identity
 
 
-def finish_flow(session, channel, flow: Flow, code: str) -> dict:
+def finish_flow(session, channel, flow: Flow, code: str, *, store_platform: bool = False) -> dict:
     """Web-callback entry: exchange the authorization code, then hand the
     credentials to complete_consent (verify -> save -> flip). Exchange failures
     propagate raw — the callback flips those to ERROR as a real failed consent."""
     flow.fetch_token(code=code)
-    return complete_consent(session, channel, flow.credentials)
+    return complete_consent(
+        session, channel, flow.credentials, store_platform=store_platform,
+    )
 
 
 def fetch_identity(service) -> dict:
@@ -466,6 +520,15 @@ def fetch_identity(service) -> dict:
         return {"id": None, "title": None}
     it = items[0]
     return {"id": it["id"], "title": it["snippet"]["title"]}
+
+
+def disconnect_channel(session, channel: "Channel") -> None:
+    """Drop credentials for legacy file or platform store."""
+    if _uses_platform_oauth(channel):
+        from app.services import token_store
+
+        token_store.delete_credential(session, channel.id)  # type: ignore[arg-type]
+    disconnect(channel.slug)
 
 
 def disconnect(slug: str) -> None:
