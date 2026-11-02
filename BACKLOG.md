@@ -1962,3 +1962,21 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 91. ✅ DONE (PR autoimprove/2026-11-02-review-title-restore) Review empty title restores instead of sending "" — normal
+- **resolution (2026-11-02):** Review `saveBody` trims the title. Empty
+  or whitespace restores `t.title || t.subject` and returns null.
+  Save draft and approve both return before the request. A real title
+  is sent trimmed, with description, tags, and privacy unchanged.
+  Suite: `tests/verify_videos.py` 236 → 248. Frontend only.
+  The API floor that 400s `title=""` is PR #158 (not on main yet);
+  this stops the SPA from sending the wipe. Open PRs append items
+  72–90 at this same BACKLOG tail — keep every section when merging.
+  `run/code-experiments.jsonl` is union-merge.
+- **why (found 2026-11-02, the follow-up #158 names):** Board empty
+  subject already restores. Review save and approve sent the input
+  as-is, so clearing the field wrote `""` over the published claim.
+- **caution:** normal (`Review.tsx` only). Not a publish/oauth path.
+- **acceptance:** empty and whitespace-only save/approve restore
+  `t.title || t.subject` and do not call mutate. A padded title is
+  sent trimmed. Description, tags, and privacy still ride along.

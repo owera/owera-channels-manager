@@ -30,7 +30,28 @@ export default function Review() {
 
   const tagList = tags.split(",").map((s) => s.trim()).filter(Boolean);
   const editable = t.status === "review" || t.status === "rendered";
-  const saveBody = () => ({ title, description, tags: tagList, privacy });
+  // Empty / whitespace is not a clear. null title means "inherit subject"
+  // and is not what a wiped input should write. Restore the field the
+  // effect seeded (t.title || t.subject) and skip the request — same
+  // class as Board's empty-subject save.
+  const saveBody = () => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setTitle(t.title || t.subject);
+      return null;
+    }
+    return { title: trimmed, description, tags: tagList, privacy };
+  };
+  const saveDraft = () => {
+    const body = saveBody();
+    if (!body) return;
+    m.updateVideo.mutate({ id: t.id, body });
+  };
+  const approve = () => {
+    const body = saveBody();
+    if (!body) return;
+    m.approveVideo.mutate({ id: t.id, body }, { onSuccess: () => nav(-1) });
+  };
 
   return (
     <div className="p-8 max-w-[1200px]">
@@ -78,10 +99,10 @@ export default function Review() {
             <>
               <div className="flex gap-3">
                 <button className="btn btn-signal flex-1 justify-center" disabled={m.approveVideo.isPending}
-                  onClick={() => m.approveVideo.mutate({ id: t.id, body: saveBody() }, { onSuccess: () => nav(-1) })}>
+                  onClick={approve}>
                   ✓ approve &amp; publish
                 </button>
-                <button className="btn" onClick={() => m.updateVideo.mutate({ id: t.id, body: saveBody() })}>save draft</button>
+                <button className="btn" onClick={saveDraft}>save draft</button>
                 <button className="btn" onClick={() => m.regenMeta.mutate(t.id)} disabled={m.regenMeta.isPending}>
                   {m.regenMeta.isPending ? "…" : "↻ metadata"}
                 </button>

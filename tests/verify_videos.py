@@ -14,6 +14,12 @@ whitespace-only restore ``video.subject`` and skip the PATCH (same
 class as #34 after the API floor). Growth-agent / curl still send
 null and still 400.
 
+Review save and approve are the live title path. Both used to send
+the input as-is, so clearing the field PATCHed ``""`` (and approve
+posted it). Empty / whitespace-only now restore ``t.title || t.subject``
+and skip the request. A real title is trimmed before it is sent.
+Description, tags, and privacy still ride the same body.
+
 #47 floored PATCH. POST /api/videos still did ``body.subject.strip()``
 straight onto the row, so ``""`` / ``"   "`` persisted an empty
 subject — the same TypeError on the next metadata generate, and a
@@ -136,6 +142,43 @@ ok(0 <= _save.find("subject.trim()") < _restore < _ret < _mut,
    "trim then restore+return BEFORE mutate (empty never PATCHes)")
 ok("body: { subject: trimmed" in _save,
    "valid save PATCHes the trimmed subject (not the raw textarea)")
+
+# Review save/approve are the live title path. Clearing the input used
+# to PATCH "" and POST approve {title:""}. Restore the seeded title
+# (t.title || t.subject) and skip the request. A real title is trimmed.
+_review = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Review.tsx").read_text()
+ok("saveBody = () => ({ title, description, tags: tagList, privacy })" not in _review,
+   "Review no longer sends the raw title input (empty is \"\")")
+ok("body: saveBody()" not in _review,
+   "save draft and approve do not pass saveBody() straight to mutate")
+_sb0 = _review.find("const saveBody = () => {")
+ok(_sb0 >= 0, "Review.tsx still has a saveBody helper")
+_sb1 = _review.find("const saveDraft = () => {", _sb0)
+_save_body = _review[_sb0:_sb1]
+ok("const trimmed = title.trim();" in _save_body,
+   "saveBody trims before the empty gate (whitespace-only is also empty)")
+ok("if (!trimmed) {\n      setTitle(t.title || t.subject);\n      return null;\n    }" in _save_body,
+   "empty/whitespace gate restores t.title || t.subject and returns null")
+ok("return { title: trimmed, description, tags: tagList, privacy };" in _save_body,
+   "valid save sends the trimmed title plus description, tags, and privacy")
+_trim_at = _save_body.find("title.trim()")
+_restore_at = _save_body.find("setTitle(t.title || t.subject)")
+_null_at = _save_body.find("return null;")
+_send_at = _save_body.find("title: trimmed")
+ok(0 <= _trim_at < _restore_at < _null_at < _send_at,
+   "trim, then restore+return null, then the trimmed title (empty never sends)")
+ok('setTitle("")' not in _save_body and "setTitle(t.subject)" not in _save_body,
+   "restore is t.title || t.subject (not blank, not subject alone)")
+_draft = _review[_review.find("const saveDraft = () => {"):_review.find("const approve = () => {")]
+ok("const body = saveBody();\n    if (!body) return;\n    m.updateVideo.mutate({ id: t.id, body });" in _draft,
+   "save draft returns before PATCH when saveBody is null")
+_appr = _review[_review.find("const approve = () => {"):_review.find("return (", _review.find("const approve = () => {"))]
+ok("const body = saveBody();\n    if (!body) return;\n    m.approveVideo.mutate({ id: t.id, body }, { onSuccess: () => nav(-1) });" in _appr,
+   "approve returns before POST when saveBody is null")
+ok(_draft.find("if (!body) return") < _draft.find("updateVideo.mutate"),
+   "save draft's null return is before mutate")
+ok(_appr.find("if (!body) return") < _appr.find("approveVideo.mutate"),
+   "approve's null return is before mutate")
 
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
