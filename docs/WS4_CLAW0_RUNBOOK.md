@@ -29,7 +29,11 @@ Do **not** enable `MANAGER_GOOGLE_WEB_OAUTH=1` until operator sign-off.
 | `MANAGER_ALLOW_WORKSPACE_HEADER=0` | **Default.** `X-Workspace-Slug` disabled in production. |
 | `MANAGER_ALLOW_WORKSPACE_HEADER=1` | **Dev only** — local/Vite without Basic Auth username. |
 
-When `MANAGER_MULTI_WORKSPACE=1`, the API scopes data by **Workspace**. Today the workspace slug is taken from **HTTP Basic Auth username**. That is only safe if **Cloudflare Access (or the tunnel)** authenticates users before traffic reaches the manager — otherwise any client could pick another tenant’s slug. Longer term: bind workspace to the authenticated identity, not a client-supplied header.
+When `MANAGER_MULTI_WORKSPACE=1`, the API scopes data by **Workspace**. Today the workspace slug is taken from **HTTP Basic Auth username** (not an empty username). Use `curl -u "owera:$MANAGER_APP_PASSWORD"` for the default EA tenant — **not** `curl -u ":$MANAGER_APP_PASSWORD"`, which returns **401** on almost all routes (except unscoped ones like `/api/features`). That is only safe if **Cloudflare Access (or the tunnel)** authenticates users before traffic reaches the manager — otherwise any client could pick another tenant’s slug. Longer term: bind workspace to the authenticated identity, not a client-supplied header.
+
+With `MANAGER_ALLOW_WORKSPACE_HEADER=1` (dev only), local scripts may send `X-Workspace-Slug` instead of a Basic username; production claw0 keeps this **0**.
+
+Encrypted platform refresh tokens use **`MANAGER_TOKEN_ENC_KEY`** (env prefix `MANAGER_` — there is no bare `TOKEN_ENC_KEY`).
 
 ## Per-workspace quota (PR-G)
 
