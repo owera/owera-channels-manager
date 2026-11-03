@@ -1962,3 +1962,29 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 93. ✅ DONE (PR autoimprove/2026-11-03-missing-table-alter) column backfill skips a table that is not there — normal
+- **resolution (2026-11-03):** `_add_missing_columns` treated an empty
+  `PRAGMA table_info` as "every column is missing" and issued
+  `ALTER TABLE`. A legacy database with no `oauthpending` table (the
+  pre-P0 fixture, and any DB `create_all` has not created yet) crashed
+  the helper. Missing tables are now skipped. `create_all` still creates
+  current models, including `oauthpending.workspace_id`. The pre-P0
+  video row still gains `held` / `held_at` (default 0 / NULL) and stays
+  publishable. The helper does not invent `oauthpending`. Suite:
+  `tests/verify_p0_status_hold_compose.py` all 125 checks passed (one
+  new pin). Dropping the empty-table guard dies on
+  `ALTER TABLE oauthpending`. Isolated commit. Open PRs append items
+  72–92 at this same BACKLOG tail — keep every section.
+  `run/code-experiments.jsonl` is union-merge.
+- **why (found 2026-11-03, gate red on origin/main after WS4):** the
+  wanted list gained `oauthpending.workspace_id`. The migration check
+  builds a pre-P0 schema on purpose and called the helper directly.
+- **caution:** normal (`app/db.py` column helper only). Not a new
+  column and not a money-path file. A typo in a wanted table name now
+  skips instead of crashing; the video-table pin still fails if `video`
+  itself is skipped.
+- **acceptance:** the pre-P0 fixture gains `held` without raising; a
+  second call is idempotent; `oauthpending` is not created. Remaining
+  (not bundled): `verify_health` authenticated `GET /api/channels` is
+  404 when the fixture has no workspace row.
