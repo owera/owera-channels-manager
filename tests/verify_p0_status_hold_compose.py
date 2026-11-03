@@ -609,8 +609,12 @@ with patch.object(app_db, "engine", _old):
 with _old.begin() as c:
     cols = {r[1] for r in c.execute(_sql("PRAGMA table_info(video)"))}
     row = c.execute(_sql("SELECT held, held_at FROM video")).one()
+    names = {r[0] for r in c.execute(_sql(
+        "SELECT name FROM sqlite_master WHERE type='table'"))}
 ok({"held", "held_at"} <= cols, "held + held_at columns added (idempotent)")
 ok(row[0] == 0 and row[1] is None, "legacy approved row migrates as not held")
+ok("oauthpending" not in names,
+   "a table the legacy DB never had is not created or altered here")
 with Session(_old) as s2:
     ok(s2.exec(select(Video.id).where(Video.held.is_not(True))).all() == [1],
        "held IS NOT 1 filter keeps legacy rows publishable")

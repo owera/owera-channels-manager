@@ -71,7 +71,13 @@ def _add_missing_columns() -> None:
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
+            # PRAGMA table_info on a missing table returns no rows. ALTER would
+            # then abort startup (and the pre-P0 migration check). New tables
+            # belong to create_all; this helper only adds columns to tables
+            # that already exist.
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            if not existing:
+                continue
             for name, decl in cols:
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
