@@ -612,7 +612,7 @@ ok(craft.title_gate_reason(v.title, "short") is None,
 
 _uploads = []
 _orig_get, _orig_up = youtube.get_service, youtube.upload_video
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v)
 ok(_uploads == [], "empty script still blocks upload (not the title gate)")
@@ -968,7 +968,7 @@ v3 = Video(channel_id=ch.id, topic_id=t.id, subject="craft",
            creation_config=json.dumps({"beats": typo, "used_fallback": False}))
 s.add(v3); s.commit(); s.refresh(v3)
 _uploads = []
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append("up") or "vid")
 publish_loop._publish_one(s, ch, v3)
 ok(_uploads == [], "craft-gate FAIL never opens upload_video")

@@ -256,7 +256,7 @@ def _fake_upload(*a, **k):
     uploaded.append(a)
     return "ytFAKE1"
 
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = _fake_upload
 youtube.set_thumbnail = lambda *a, **k: None
 youtube.insert_comment = lambda *a, **k: None
@@ -330,7 +330,7 @@ pre = make_video(
     title=_OK_TITLE, script=_OK_SCRIPT, creation_config=_pre_cc,
 )
 uploaded_pre = []
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = lambda *a, **k: uploaded_pre.append(a) or "ytPRE"
 youtube.set_thumbnail = lambda *a, **k: None
 youtube.insert_comment = lambda *a, **k: None
