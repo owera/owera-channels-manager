@@ -1962,3 +1962,28 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 92. ✅ DONE (PR autoimprove/2026-11-03-get-service-stubs) YouTube stubs accept channel= and session= — normal
+- **resolution (2026-11-03):** platform `get_service` / `get_analytics_service`
+  pass `channel=` and `session=`, and `dead_status_for` passes `channel=`
+  into `has_token`. Suites that still stubbed `(slug)` raised TypeError
+  before the pin, so a revoked token no longer proved the EXPIRED flip.
+  Stubs now take the same optional kwargs as the live functions and still
+  ignore them. `verify_notify`'s direct `oauth_status` call also passes
+  the legacy workspace (id=1); FastAPI does not inject `Depends` on a
+  plain call, and `require_channel` compares `workspace_id`. Suites:
+  publish 239, notify 68, publish_craft_gate 40, metrics 40,
+  topic_playlist 32, analytics_null_backoff 29, analytics 90, craft 503,
+  gate_grandfather 57, storyboard 604. A slug-only `_raise_needs_connect`
+  mutant dies on "revoked token flips the channel to EXPIRED". Tests
+  only. Open PRs append items 72–91 at this same BACKLOG tail — keep
+  every section when merging. `run/code-experiments.jsonl` is union-merge.
+- **why (found 2026-11-03, gate red on origin/main after WS4):** the
+  money-path regression suites failed closed on the stub signature, so
+  a real EXPIRED regression would not be distinguished from the TypeError.
+- **caution:** normal (tests only). Not a publish/oauth behavior change.
+- **acceptance:** the revoked-token check flips EXPIRED again; a slug-only
+  stub fails that check; n does not decrease. Remaining (not bundled):
+  `_add_missing_columns` ALTER on a missing `oauthpending` table
+  (`verify_p0_status_hold_compose`), and `GET /api/channels` 404s in
+  `verify_health` when the fixture has no workspace row.

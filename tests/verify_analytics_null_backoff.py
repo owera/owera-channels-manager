@@ -238,7 +238,8 @@ def fetch_first_fails(analytics, ch_yt, vid, start, end):
             "comments": 0, "subscribers_gained": 0}
 
 
-with patch.object(youtube, "get_analytics_service", lambda slug: "ana"), \
+with patch.object(youtube, "get_analytics_service",
+                  lambda slug, channel=None, session=None: "ana"), \
         patch.object(youtube, "fetch_video_analytics", fetch_first_fails), \
         patch.object(youtube, "fetch_traffic_sources", lambda *a: {"sources": {}}):
     n = analytics_loop._snapshot_channel(s2, ch2, now)

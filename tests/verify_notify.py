@@ -29,7 +29,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
 from app.config import settings
-from app.models import Channel, OAuthStatus, Video, VideoStatus
+from app.models import Channel, OAuthStatus, Video, VideoStatus, Workspace
 from app.routers import channels as channels_router
 from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
@@ -103,7 +103,7 @@ class CaptureAlerts(logging.Handler):
         super().close()
 
 
-def _raise_needs_connect(slug):
+def _raise_needs_connect(slug, channel=None, session=None):
     raise youtube.NeedsConnect("token missing/expired — reconnect required")
 
 
@@ -172,10 +172,10 @@ cap.close()
 # --- dead_status_for: classification of *how* dead -----------------------------
 print("dead_status_for: EXPIRED with a token file, DISCONNECTED without")
 _orig_has = youtube.has_token
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 ok(notify.dead_status_for("any") == OAuthStatus.EXPIRED,
    "token file present -> EXPIRED (revoked/unrefreshable)")
-youtube.has_token = lambda slug: False
+youtube.has_token = lambda slug, channel=None: False
 ok(notify.dead_status_for("any") == OAuthStatus.DISCONNECTED,
    "token file gone -> DISCONNECTED")
 youtube.has_token = _orig_has
@@ -283,7 +283,7 @@ print("publish_loop wiring: NeedsConnect alerts exactly once")
 _orig_get, _orig_has = youtube.get_service, youtube.has_token
 
 youtube.get_service = _raise_needs_connect
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 s = fresh_session()
 ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
 v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
@@ -296,7 +296,7 @@ ok(len(cap.records) == 1, "the flip emits exactly one alert")
 publish_loop._publish_one(s, ch, v)   # channel already expired (e.g. manual retry)
 ok(len(cap.records) == 1, "a repeat NeedsConnect on the dead channel adds no alert")
 
-youtube.has_token = lambda slug: False   # the token *file* itself vanished
+youtube.has_token = lambda slug, channel=None: False   # the token *file* itself vanished
 ch3 = make_channel(s, slug="ch-gone")
 v3 = make_video(s, ch3, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4",
                 title=_OK_TITLE)
@@ -311,7 +311,7 @@ youtube.get_service, youtube.has_token = _orig_get, _orig_has
 print("metrics_loop wiring: the daily probe alerts a dead token; transient skips don't")
 _orig_get, _orig_has = youtube.get_service, youtube.has_token
 youtube.get_service = _raise_needs_connect
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 s = fresh_session()
 ch = make_channel(s, slug="ch-metrics")
 
@@ -325,7 +325,7 @@ ok(metrics_loop.record_snapshot(s, ch) is None and len(cap.records) == 1,
    "a repeat probe on the dead channel stays silent")
 
 
-def _raise_transient(slug):
+def _raise_transient(slug, channel=None, session=None):
     raise RuntimeError("network down")
 
 
@@ -343,7 +343,7 @@ _now = datetime.now(timezone.utc)
 _orig_get, _orig_ana, _orig_has = (youtube.get_service, youtube.get_analytics_service,
                                    youtube.has_token)
 youtube.get_analytics_service = _raise_needs_connect
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 s = fresh_session()
 
 youtube.get_service = _raise_needs_connect       # narrow scope dead too -> dead channel
@@ -354,7 +354,7 @@ s.refresh(ch)
 ok(ch.oauth_status == OAuthStatus.EXPIRED, "a genuinely dead token flips the channel")
 ok(len(cap.records) == 1, "the analytics-discovered flip alerts exactly once")
 
-youtube.get_service = lambda slug: object()      # narrow scope healthy -> scope-only
+youtube.get_service = lambda slug, channel=None, session=None: object()      # narrow scope healthy -> scope-only
 ch2 = make_channel(s, slug="ch-ana-scope")
 ok(analytics_loop._snapshot_channel(s, ch2, _now) == 0, "a missing scope records nothing")
 ok(ch2.oauth_status == OAuthStatus.CONNECTED and len(cap.records) == 1,
@@ -367,7 +367,7 @@ youtube.get_service, youtube.get_analytics_service, youtube.has_token = (
 print("youtube_admin wiring: the 409 also flips and alerts the channel")
 _orig_get, _orig_has = youtube.get_service, youtube.has_token
 youtube.get_service = _raise_needs_connect
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 s = fresh_session()
 ch = make_channel(s, slug="ch-admin")
 
@@ -408,22 +408,25 @@ _orig_get, _orig_has = youtube.get_service, youtube.has_token
 
 s = fresh_session()
 ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
+# Direct call skips FastAPI injection. Channel.workspace_id defaults to 1,
+# the same id init_db gives the legacy workspace.
+ws = Workspace(id=1, slug="owera", name="Owera")
 
 youtube.get_service = _raise_needs_connect
-youtube.has_token = lambda slug: True
+youtube.has_token = lambda slug, channel=None: True
 cap = CaptureAlerts()
-out = channels_router.oauth_status(ch.id, session=s)
+out = channels_router.oauth_status(ch.id, session=s, ws=ws)
 ok(out["oauth_status"] == OAuthStatus.EXPIRED, "dashboard check flips a dead token to EXPIRED")
 ok(len(cap.records) == 1, "the dashboard-discovered flip emits exactly one alert")
 s.refresh(ch)
 ok(ch.oauth_status == OAuthStatus.EXPIRED,
    "the flip is committed before the alert fires (alert can't gate persistence)")
-channels_router.oauth_status(ch.id, session=s)
+channels_router.oauth_status(ch.id, session=s, ws=ws)
 ok(len(cap.records) == 1, "re-checking the already-dead channel stays silent")
 
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 ch2 = make_channel(s, slug="ch-ok", name="Healthy")
-channels_router.oauth_status(ch2.id, session=s)
+channels_router.oauth_status(ch2.id, session=s, ws=ws)
 ok(len(cap.records) == 1, "a healthy check alerts nothing")
 cap.close()
 youtube.get_service, youtube.has_token = _orig_get, _orig_has

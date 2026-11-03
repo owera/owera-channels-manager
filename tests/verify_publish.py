@@ -160,13 +160,13 @@ ch = make_channel(s, oauth_status=OAuthStatus.CONNECTED)
 v = make_video(s, ch, status=VideoStatus.APPROVED, video_path="/tmp/x.mp4", title=_OK_TITLE)
 
 
-def _raise_needs_connect(slug):
+def _raise_needs_connect(slug, channel=None, session=None):
     raise youtube.NeedsConnect("token missing/expired — reconnect required")
 
 
 youtube.get_service = _raise_needs_connect
 _ORIG_HAS = youtube.has_token
-youtube.has_token = lambda slug: True   # revoked = the token *file* still exists
+youtube.has_token = lambda slug, channel=None: True   # revoked = the token *file* still exists
 publish_loop._publish_one(s, ch, v)
 ok(ch.oauth_status == OAuthStatus.EXPIRED, "revoked token flips the channel to EXPIRED")
 ok(v.status == VideoStatus.APPROVED, "video returns to approved, not stranded in publishing")
@@ -176,7 +176,7 @@ youtube.has_token = _ORIG_HAS
 print("publish_one: get_service crash reverts to approved")
 
 
-def _raise_json_extra(slug):
+def _raise_json_extra(slug, channel=None, session=None):
     raise json.JSONDecodeError("Extra data", "{...}x", 5)
 
 
@@ -199,7 +199,7 @@ youtube.get_service = _ORIG_GET
 print("publish_one: upload stall retry-then-fail")
 
 
-def _dummy_service(slug):
+def _dummy_service(slug, channel=None, session=None):
     return object()
 
 
@@ -369,7 +369,7 @@ def _test_scope():
 
 
 publish_loop.session_scope = _test_scope
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = lambda *a, **k: (_uploads.append(a), "vidW")[1]
 youtube.insert_comment = lambda *a, **k: "c1"
 youtube.create_playlist = lambda service, title, description="", privacy="public": {
@@ -1188,7 +1188,7 @@ _COST = (youtube.QUOTA_UPLOAD + youtube.QUOTA_THUMBNAIL_SET
 def _arm_tick():
     _tick_services.clear()
     _tick_uploads.clear()
-    youtube.get_service = lambda slug: (_tick_services.append(slug) or object())
+    youtube.get_service = lambda slug, channel=None, session=None: (_tick_services.append(slug) or object())
     youtube.upload_video = lambda *a, **k: (_tick_uploads.append(a[2] if len(a) > 2 else k.get("title")) or "vidT")
     youtube.insert_comment = lambda *a, **k: "c1"
     youtube.create_playlist = lambda *a, **k: {

@@ -170,7 +170,7 @@ _ORIG_FETCH = youtube.fetch_channel
 _calls = {"get_service": [], "fetch_channel": []}
 
 
-def _fake_get(slug):
+def _fake_get(slug, channel=None, session=None):
     _calls["get_service"].append(slug)
     return {"service": slug}
 
@@ -228,7 +228,7 @@ finally:
 # ---------------------------------------------------------------------------
 print("\nrecord_snapshot: missing/empty statistics → zeros")
 
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 try:
     for label, payload in (
         ("no statistics key", {"id": "x", "title": "t"}),
@@ -254,14 +254,14 @@ finally:
 print("\nrecord_snapshot: NeedsConnect flips dead; transient skips cleanly")
 
 _ORIG_HAS = youtube.has_token
-youtube.has_token = lambda slug: True  # dead_status_for → EXPIRED (file present)
+youtube.has_token = lambda slug, channel=None: True  # dead_status_for → EXPIRED (file present)
 
 
-def _raise_needs(slug):
+def _raise_needs(slug, channel=None, session=None):
     raise youtube.NeedsConnect(f"token dead for {slug}")
 
 
-def _raise_transient(slug):
+def _raise_transient(slug, channel=None, session=None):
     raise RuntimeError("network blip")
 
 
@@ -315,7 +315,7 @@ def _scoped(session):
     session.commit()
 
 
-def _probe_get(slug):
+def _probe_get(slug, channel=None, session=None):
     _probe_slugs.append(slug)
     return {"service": slug}
 
