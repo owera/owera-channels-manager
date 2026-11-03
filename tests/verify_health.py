@@ -46,7 +46,7 @@ import app.main as main                                               # noqa: E4
 from app.config import settings                                       # noqa: E402
 from app.db import get_session                                        # noqa: E402
 from app.main import _contained_file, _health_snapshot                # noqa: E402
-from app.models import Channel, OAuthStatus, Video, VideoStatus       # noqa: E402
+from app.models import Channel, OAuthStatus, Video, VideoStatus, Workspace  # noqa: E402
 
 
 class _patched_process_headroom:
@@ -82,10 +82,16 @@ def make_engine():
 
 
 def seeded_engine():
-    """3 channels (connected / expired / disconnected-but-paused) + 1 failed video."""
+    """3 channels (connected / expired / disconnected-but-paused) + 1 failed video.
+
+    The HTTP section pins multi_workspace off, so current_workspace looks up
+    slug "owera" and 404s when that row is missing. Channel.workspace_id
+    defaults to 1, so this workspace has to be id 1 or the list is empty.
+    """
     engine = make_engine()
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
+        s.add(Workspace(id=1, slug="owera", name="Owera (legacy default workspace)"))
         s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
         s.add(Channel(slug="b", name="B", oauth_status=OAuthStatus.EXPIRED))
         s.add(Channel(slug="c", name="C", oauth_status=OAuthStatus.DISCONNECTED, paused=True))
@@ -153,7 +159,11 @@ def _override_session():
 
 main.app.dependency_overrides[get_session] = _override_session
 _orig_pw = settings.app_password
+_orig_mw = settings.multi_workspace
 settings.app_password = "testpw"          # turn auth ON so the exemption is meaningful
+# Any username is accepted. A local .env may turn multi_workspace on, which
+# would treat "x" as a tenant slug. This suite pins the single-tenant path.
+settings.multi_workspace = False
 client = TestClient(main.app)
 
 with _patched_process_headroom({"count": 100, "max": 2000, "pct_used": 5.0}):
@@ -166,6 +176,9 @@ ok(r2.status_code == 401, "other API routes still require auth (exemption did no
 
 r3 = client.get("/api/channels", auth=("x", "testpw"))
 ok(r3.status_code == 200, "an authenticated API request still passes")
+_listed = r3.json()
+ok(isinstance(_listed, list) and {c["slug"] for c in _listed} == {"a", "b", "c"},
+   "the legacy workspace lists the three seeded channels")
 
 # --- OAuth callback exemption (BACKLOG 8) -------------------------------------
 # Google's consent redirect lands in a browser that may hold no Basic Auth session,
@@ -338,6 +351,7 @@ ok("no-cache" in client.get("/index.html").headers.get("cache-control", ""),
 
 main.app.dependency_overrides.clear()
 settings.app_password = _orig_pw
+settings.multi_workspace = _orig_mw
 
 # --- unit: _read_process_headroom (real reading, not mocked) ------------------
 print("_read_process_headroom (real sysctl/ps reading)")
