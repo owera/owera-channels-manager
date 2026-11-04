@@ -11,6 +11,9 @@ from app.config import settings
 from app.db import get_session
 from app.models import Channel, Workspace
 
+# Basic Auth usernames that map to a different workspace slug (multi_workspace only).
+_BASIC_AUTH_USERNAME_TO_WORKSPACE_SLUG: dict[str, str] = {"admin": "owera"}
+
 
 def _slug_from_basic_auth(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
@@ -33,6 +36,8 @@ def resolve_workspace_slug(request: Request) -> str:
     """
     if settings.multi_workspace:
         slug = _slug_from_basic_auth(request)
+        if slug:
+            slug = _BASIC_AUTH_USERNAME_TO_WORKSPACE_SLUG.get(slug, slug)
         if not slug and settings.allow_workspace_header:
             slug = (request.headers.get("X-Workspace-Slug") or "").strip() or None
         if not slug:
