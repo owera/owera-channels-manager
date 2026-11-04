@@ -38,7 +38,7 @@ from sqlmodel import Session, SQLModel, create_engine
 # create_all() below builds the full schema.
 from app.config import settings
 from app.models import (Channel, JobRun, OAuthStatus, Topic, Video,
-                        VideoStatus, utcnow)
+                        VideoStatus, Workspace, utcnow)
 from app.services import issues
 
 CAP = settings.publish_max_retries              # 5
@@ -395,6 +395,84 @@ s.commit()
 d = issues.detect(s)
 ok(len(d["quota"]) == 1, "a channel over the near-cap spend fraction hits the quota bucket")
 ok(d["quota"][0]["auto"] is False, "a quota wall is a monitor/operator signal, not auto")
+ok(d["quota"][0]["daily_limit_hit"] is False
+   and d["quota"][0]["quota_spent_today"] == spend
+   and d["quota"][0]["quota_cap"] == settings.youtube_daily_quota_cap,
+   "with no workspace row the near-cap wall uses that channel's spend against the global cap")
+
+# Workspace cap (PR-G) is what tick() enforces. Two channels splitting a
+# 4000-unit cap never each reach 90% of the global 9000, so a per-channel
+# compare stays silent while the publish loop skips both.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=4000))
+s.commit()
+ch_a = make_channel(s, slug="a", name="Alpha")
+ch_b = make_channel(s, slug="b", name="Beta")
+quota.log(s, kind="publish", status="success", channel_id=ch_a.id, quota_cost=2000)
+quota.log(s, kind="publish", status="success", channel_id=ch_b.id, quota_cost=2000)
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1, "a split workspace cap is one wall, not one per channel")
+wall = d["quota"][0]
+ok(wall["workspace_id"] == 1 and wall["quota_spent_today"] == 4000
+   and wall["quota_cap"] == 4000 and wall["daily_limit_hit"] is False
+   and wall["auto"] is False and wall["channel_id"] == ch_a.id,
+   "a tied split names the workspace cap on the earlier channel")
+
+# Unequal split: the wall names the channel that spent, not the lower id.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=4000))
+s.commit()
+low = make_channel(s, slug="low", name="Low")
+high = make_channel(s, slug="high", name="High")
+quota.log(s, kind="publish", status="success", channel_id=low.id, quota_cost=100)
+quota.log(s, kind="publish", status="success", channel_id=high.id, quota_cost=3900)
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1 and d["quota"][0]["channel_id"] == high.id
+   and d["quota"][0]["quota_spent_today"] == 4000 and d["quota"][0]["quota_cap"] == 4000,
+   "the workspace wall names the channel with the higher spend")
+
+# Below 90% but the next upload (1600+50+50) does not fit — tick() already
+# continues, and the digest must page before spend reaches the fraction.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=4000))
+s.commit()
+ch = make_channel(s, slug="tight", name="Tight")
+quota.log(s, kind="publish", status="success", channel_id=ch.id, quota_cost=2500)
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1 and d["quota"][0]["quota_spent_today"] == 2500
+   and d["quota"][0]["quota_cap"] == 4000,
+   "spend under 90% of the workspace cap still walls when the next upload does not fit")
+
+# Room for the next upload and under the fraction: quiet.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=4000))
+s.commit()
+ch = make_channel(s)
+quota.log(s, kind="publish", status="success", channel_id=ch.id, quota_cost=2000)
+s.commit()
+ok(issues.detect(s)["quota"] == [],
+   "2000 of a 4000 cap still fits a publish and stays under the near-cap fraction")
+
+# A full sibling workspace must not page the quiet one, and must not be
+# judged against the global 9000 cap.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=9000))
+s.add(Workspace(id=2, slug="other", name="Other", daily_youtube_quota_cap=4000))
+s.commit()
+quiet = make_channel(s, slug="quiet", name="Quiet", workspace_id=1)
+hot = make_channel(s, slug="hot", name="Hot", workspace_id=2)
+quota.log(s, kind="publish", status="success", channel_id=quiet.id, quota_cost=100)
+quota.log(s, kind="publish", status="success", channel_id=hot.id, quota_cost=4000)
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1 and d["quota"][0]["workspace_id"] == 2
+   and d["quota"][0]["channel_id"] == hot.id
+   and d["quota"][0]["quota_spent_today"] == 4000
+   and d["quota"][0]["quota_cap"] == 4000,
+   "only the workspace that is out of cap is walled; the sibling stays quiet")
 
 
 # --- detect(): recurring error signatures ----------------------------------
@@ -700,6 +778,46 @@ ok(len(d["quota"]) == 1 and d["quota"][0]["daily_limit_hit"] is True
    and d["quota"][0]["quota_spent_today"] == 0,
    "daily_limit_hit (quota exceeded: prefix) is a quota wall at zero spend")
 ok(d["quota"][0]["auto"] is False, "a daily-limit-hit wall is not auto")
+
+# The same channel over the fraction AND rejected by YouTube is still one
+# wall (the hit). A second workspace copy would double needs_operator.
+s = fresh_session()
+ch = make_channel(s)
+spend = int(settings.youtube_daily_quota_cap * NEAR_CAP) + 1
+quota.log(s, kind="publish", status="success", channel_id=ch.id, quota_cost=spend)
+quota.log(s, kind="publish", status="error", channel_id=ch.id, quota_cost=0,
+          detail="quota exceeded: [quotaExceeded] cooldown until 2026-08-24")
+s.commit()
+d = issues.detect(s)
+ok(len(d["quota"]) == 1 and d["quota"][0]["daily_limit_hit"] is True
+   and d["quota"][0]["quota_spent_today"] == spend
+   and "workspace_id" not in d["quota"][0],
+   "a hit against the global cap does not also emit a workspace copy")
+
+# A lower workspace cap is a different fact from YouTube's rejection: both walls.
+s = fresh_session()
+s.add(Workspace(id=1, slug="owera", name="Owera", daily_youtube_quota_cap=4000))
+s.commit()
+ch = make_channel(s, slug="capped", name="Capped")
+quota.log(s, kind="publish", status="success", channel_id=ch.id, quota_cost=4000)
+quota.log(s, kind="publish", status="error", channel_id=ch.id, quota_cost=0,
+          detail="quota exceeded: [quotaExceeded] cooldown until 2026-11-04")
+s.commit()
+d = issues.detect(s)
+kinds = {(w["daily_limit_hit"], w.get("workspace_id"), w["quota_cap"]) for w in d["quota"]}
+ok(kinds == {(True, None, settings.youtube_daily_quota_cap), (False, 1, 4000)},
+   "a workspace cap below the global cap still walls when YouTube also rejected the channel")
+
+# The digest's upload size is the same sum tick() reserves. A local copy
+# that drifts would page a workspace tick() can still publish.
+import inspect
+from app.services import publish_loop
+from app.services.youtube import QUOTA_COMMENT_INSERT, QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD
+ok(issues._PUBLISH_UNITS == QUOTA_UPLOAD + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT,
+   "digest publish units are the YouTube upload + thumbnail + comment costs")
+ok("publish_units = QUOTA_UPLOAD + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT"
+   in inspect.getsource(publish_loop.tick),
+   "tick() reserves that same upload + thumbnail + comment sum")
 
 # auto-only issues inflate total but not needs_operator
 s = fresh_session()
