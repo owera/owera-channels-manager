@@ -526,6 +526,29 @@ ok(worker._strip_script_preamble(
 ).startswith("This title is the bug."),
    "a real 'This title is the bug' hook is not treated as series-rules CoT")
 
+# 10-31 ch1-concept golden: unpatterned subject, frame0/title locked
+# "The first line has to hit the forgetfulness pain in ten words or fewer,
+# then land a clear verdict." (hook-planning CoT, not a claim). Distinct from
+# the unmerged 10-25 "The hook has to hit … one short sentence" strip.
+_FLAKE_1031 = (
+    "The first line has to hit the forgetfulness pain in ten words or fewer, "
+    "then land a clear verdict. "
+    "Why your AI agent forgets everything between chats. It does not forget."
+)
+ok(worker._strip_script_preamble(_FLAKE_1031).startswith(
+    "Why your AI agent forgets everything between chats."),
+   "10-31 ch1-concept flake: 'The first line has to hit … ten words' drops")
+ok("first line has to" not in worker._strip_script_preamble(_FLAKE_1031).lower()
+   and "ten words or fewer" not in worker._strip_script_preamble(_FLAKE_1031).lower()
+   and "clear verdict" not in worker._strip_script_preamble(_FLAKE_1031).lower(),
+   "10-31 first-line hook-planning CoT does not leak into the VO")
+ok("It does not forget." in worker._strip_script_preamble(_FLAKE_1031),
+   "spoken claim after the first-line CoT is kept")
+ok(worker._strip_script_preamble(
+    "The first line has to be a shebang. The parser skipped the file."
+).startswith("The first line has to be a shebang."),
+   "a real first-line-has-to-be hook is not treated as hook-planning CoT")
+
 def _expand_dollar(_prompt, system=None, max_tokens=2000):
     _llm_calls.append({"prompt": _prompt})
     return (
