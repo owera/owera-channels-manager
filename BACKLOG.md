@@ -1962,3 +1962,39 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 95. ✅ DONE (PR autoimprove/2026-11-04-workspace-quota-digest) issues digest pages the workspace YouTube cap — normal
+- **resolution (2026-11-04):** `issues.detect` raises one quota wall per
+  workspace when today's summed spend is at 90% of
+  `youtube_quota_cap_for_workspace`, or when the next upload
+  (1600+50+50, the same sum `publish_loop.tick` reserves) would not fit.
+  The wall names the channel with the higher spend. A per-channel
+  `daily_limit_hit` stays its own wall. A lone channel already rejected
+  by YouTube against the same global cap is not copied a second time; a
+  lower workspace cap still adds the workspace wall. No workspace row
+  keeps the old global-cap fallback. Suite: `tests/verify_issues.py`
+  119 → 130.
+- **why:** PR-G stops `tick()` on the workspace sum and logs nothing.
+  The digest still compared each channel to the global 9000 cap, so
+  ch1 2000 + ch2 2000 against a 4000 workspace cap stalled publishing
+  with `quota: []`. The growth agent had no page.
+- **caution:** normal (`issues.py` digest only). Does not change
+  `publish_loop.py` or quota accounting.
+- **acceptance:** a split under the global cap pages once with the
+  workspace cap and the summed spend; a sibling workspace stays quiet;
+  2000 of 4000 stays quiet; a YouTube rejection at spend 0 is still one
+  hit wall.
+
+### 96. publish-plan and dashboard ETA still size the day from the global quota cap — normal
+- **why:** `publish_plan` and `queue._next_publish_eta` /
+  `_publish_hold` still do `min(daily_publish_budget, youtube_daily_quota_cap // 1600)`.
+  `tick()` can skip earlier on the workspace unit cap, so the board
+  shows a publish time the loop will not take. Found while shipping #95.
+  Not bundled.
+- **approach:** size the plan's daily slot count from the workspace cap
+  as well as the channel budget, and cover it in `verify_publish.py`
+  or `verify_workspace_quota.py`.
+- **caution:** normal for the plan endpoints. Do not change
+  `publish_loop.py` in that commit unless the slot math has to move.
+- **acceptance:** a workspace with 4000 units left and a channel budget
+  of 6 does not get six ETAs the loop cannot publish.

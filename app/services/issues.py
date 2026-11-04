@@ -22,6 +22,7 @@ from app.config import settings
 from app.db import app_settings
 from app.models import (Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus)
 from app.services import quota
+from app.services.youtube import QUOTA_COMMENT_INSERT, QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD
 
 # Same signatures render_loop treats as transient (retryable) render failures. Kept here
 # as the single source the agent reasons over; mirror render_loop._TRANSIENT if changed
@@ -43,7 +44,9 @@ TRANSIENT_SIGNATURES = (
 # Tunable thresholds (could move to the Settings table later).
 REVIEW_STALE_HOURS = 48          # a video sitting in Review longer than this is a gate backlog
 DEAD_VIDEO_AGE_DAYS = 7          # failed/rejected older than this are delete candidates
-QUOTA_NEAR_CAP_FRACTION = 0.9    # flag a channel once it has spent this share of the daily cap
+QUOTA_NEAR_CAP_FRACTION = 0.9    # flag a workspace once spend reaches this share of its cap
+# Same unit total tick() reserves before it will upload (publish_loop.tick).
+_PUBLISH_UNITS = QUOTA_UPLOAD + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT
 MAX_RETRIES = 2                  # render_loop gives up after this many retries
 # Runway target = daily_publish_budget + settings.runway_buffer (5 + 1 = 6). The
 # buffer lives on app.config.settings so it can be tuned without touching budgets.
@@ -323,6 +326,10 @@ def detect(session: Session, now: datetime | None = None) -> dict:
 
     # Channel health — OAuth (escalate) and quota cooldown / spend (monitor).
     oauth, cooldown, quota_walls = [], [], []
+    # Highest per-channel spend in each workspace, so the one wall names the
+    # channel that actually used the cap (not whichever row sorts first).
+    workspace_rep: dict[int, tuple[int, Channel]] = {}
+    hit_channel_ids: set[int] = set()
     for ch in channels:
         if ch.oauth_status != OAuthStatus.CONNECTED:
             oauth.append({
@@ -336,12 +343,43 @@ def detect(session: Session, now: datetime | None = None) -> dict:
                 "channel_id": ch.id, "name": ch.name, "until": cu.isoformat(),
                 "suggested_action": "self-resets at reset; monitor", "auto": False,
             })
+        ch_spent = quota.quota_spent_today(session, ch.id)
         hit = quota.daily_limit_hit(session, ch.id)
-        spent = quota.quota_spent_today(session, ch.id)
-        if hit or spent >= settings.youtube_daily_quota_cap * QUOTA_NEAR_CAP_FRACTION:
+        if hit:
+            # YouTube itself rejected this channel today. That signal stays
+            # per channel: the sibling may still have room under a shared cap.
+            hit_channel_ids.add(ch.id)
             quota_walls.append({
-                "channel_id": ch.id, "name": ch.name, "daily_limit_hit": hit,
-                "quota_spent_today": spent, "quota_cap": settings.youtube_daily_quota_cap,
+                "channel_id": ch.id, "name": ch.name, "daily_limit_hit": True,
+                "quota_spent_today": ch_spent,
+                "quota_cap": settings.youtube_daily_quota_cap,
+                "suggested_action": "lower publish budget / widen drip, or monitor",
+                "auto": False,
+            })
+        ws_id = ch.workspace_id or 1
+        prev = workspace_rep.get(ws_id)
+        if prev is None or ch_spent > prev[0]:
+            workspace_rep[ws_id] = (ch_spent, ch)
+    # tick() skips the whole workspace when the next upload would not fit
+    # the workspace cap. A per-channel compare against the global 9000 stays
+    # quiet while two channels split a smaller cap, so the digest never says
+    # publishing has stopped. One wall per workspace.
+    for ws_id, (_ch_spent, ch) in workspace_rep.items():
+        cap = quota.youtube_quota_cap_for_workspace(session, ws_id)
+        spent = quota.quota_spent_workspace_today(session, ws_id)
+        near = spent >= cap * QUOTA_NEAR_CAP_FRACTION
+        blocked = quota.workspace_quota_would_exceed(session, ws_id, _PUBLISH_UNITS)
+        # A lone channel YouTube already rejected, on the same global cap,
+        # is already the hit wall above. A second wall with the same spend
+        # would double needs_operator. A lower workspace cap still pages.
+        if (ch.id in hit_channel_ids and spent == _ch_spent
+                and cap == settings.youtube_daily_quota_cap):
+            continue
+        if near or blocked:
+            quota_walls.append({
+                "channel_id": ch.id, "workspace_id": ws_id, "name": ch.name,
+                "daily_limit_hit": False,
+                "quota_spent_today": spent, "quota_cap": cap,
                 "suggested_action": "lower publish budget / widen drip, or monitor",
                 "auto": False,
             })
