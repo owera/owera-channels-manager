@@ -319,7 +319,13 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
             _retry_or_fail(session, video, err,
                            transient=any(sig in err for sig in _TRANSIENT))
             return
-        video.title = video.title or meta["title"]
+        from app.services import craft as _meta_craft
+        prior = (video.title or "").strip()
+        locked = meta["title"]
+        if prior and not _meta_craft.meta_craft_title_reason(prior):
+            video.title = prior
+        else:
+            video.title = locked
         video.description = video.description or meta["description"]
         video.tags_json = video.tags_json or json.dumps(meta["tags"])
         video.metadata_generated = True

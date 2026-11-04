@@ -310,6 +310,84 @@ def first_spoken_sentence(script: str | None) -> str:
     return (parts[0] if parts else text).strip()
 
 
+# Internal craft / gate / LLM-planning language must never become the YouTube
+# title (MPT social-metadata sometimes emits it; v1473/v1474). Shared with
+# metadata Decolar lock, publish gate, and worker script preamble strip.
+_META_CRAFT_START = re.compile(
+    r"^(?:"
+    r"the hook has to|the first line has to|the script has to|"
+    r"the title is a\b|the title maps|the tests pin|this title is tied|"
+    r"i'll|i will|i am going to|let me\b|looking at|sure[,.]|"
+    r"checking the workspace|checking the (?:word )?count|count(?:ing)? carefully|"
+    r"conferindo a contagem|vou conferir|"
+    r"the endcard|this (?:voiceover|script) (?:has|must|should|needs)|"
+    r"here(?:'s| is) (?:a |the )?(?:script|draft|voiceover)|"
+    r"the prompt|vou |deixa eu |deixe-me "
+    r")\b",
+    re.IGNORECASE,
+)
+_META_CRAFT_BODY = re.compile(
+    r"\b(?:"
+    r"path-check failure|allowlist miss|"
+    r"land the allowlist|one short sentence|"
+    r"video-worker|voiceover conventions|series naming|"
+    r"craft rules|script shape|expected script|tests pin|title maps|"
+    r"two-beat incident|opens on that hook|open on the pain|"
+    r"word[- ]count|count the script|"
+    r"faixa de \d+ a \d+ palavras|\d+\s*(?:to|-)\s*\d+\s*words"
+    r")\b",
+    re.IGNORECASE,
+)
+
+META_CRAFT_TITLE_REASON = (
+    "title is internal craft/gate/meta language — must be the viewer-facing "
+    "spoken hook (subject or first VO sentence), not operator brief text"
+)
+
+
+def is_meta_craft_sentence(text: str | None) -> bool:
+    """True when a sentence is LLM/gate planning, not a viewer-facing claim."""
+    s = (text or "").strip()
+    if not s:
+        return False
+    s = (
+        s.replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    return bool(_META_CRAFT_START.search(s) or _META_CRAFT_BODY.search(s))
+
+
+def meta_craft_title_reason(title: str | None) -> str | None:
+    """None when the title head is viewer-facing; else a publish-block reason."""
+    head = title_head(title) or (title or "").strip()
+    if not head:
+        return None
+    return META_CRAFT_TITLE_REASON if is_meta_craft_sentence(head) else None
+
+
+def first_spoken_claim(script: str | None, subject: str | None = None) -> str:
+    """First non-meta sentence in the VO, else the subject hook."""
+    subj = (subject or "").strip()
+    raw = (script or "").strip()
+    if not raw:
+        return subj
+    parts = [
+        p.strip()
+        for p in re.split(r"(?<=[.!?…])(?=\s|[A-ZÁÉÍÓÚÃÕÂÊÔ])", raw)
+        if p.strip()
+    ]
+    if not parts:
+        parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", raw) if p.strip()]
+    for part in parts:
+        if not is_meta_craft_sentence(part):
+            return part
+    if subj and not is_meta_craft_sentence(subj):
+        return subj
+    return first_spoken_sentence(raw) or subj
+
+
 def spoken_hook_source(title: str | None, script: str | None, subject: str | None = None) -> str:
     """The claim frame0/thumb must echo: title before '·', else first spoken sentence."""
     raw = (title or "").strip()
@@ -4765,6 +4843,9 @@ def _title_head_for_nonsense(title: str | None) -> str:
 
 def nonsense_title_reason(title: str | None) -> str | None:
     """None when the title is not nonsense-spam under the configured patterns."""
+    blocked = meta_craft_title_reason(title)
+    if blocked:
+        return blocked
     head = _title_head_for_nonsense(title)
     whole = (title or "").strip()
     if not head and not whole:
