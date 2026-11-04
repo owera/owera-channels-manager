@@ -408,6 +408,39 @@ with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_ok):
 ok(long_out["title"] == "MPT Title",
    "long-form is exempt from the Decolar title lock")
 
+# v1473/v1474: MPT title is craft brief; VO may open on the same planning line.
+_V1473_SUBJ = "Your fetch tool followed a redirect off the allowlist."
+_V1473_BAD = "The hook has to land the allowlist miss in one short sentence."
+_V1474_SUBJ = "Your path check trusted the string and followed the symlink."
+_V1474_BAD = "The title is a path-check failure."
+
+
+def _mpt_bad_1473(subject, script, platform="youtube_shorts", language="en-US"):
+    return {"title": _V1473_BAD, "caption": "c", "hashtags": ["#x"]}
+
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_bad_1473):
+    out1473 = metadata.generate(
+        _V1473_SUBJ,
+        f"{_V1473_BAD} {_V1473_SUBJ} More VO here.",
+        content_format="short",
+    )
+ok(out1473["title"] == _V1473_SUBJ,
+   "v1473: meta MPT title + meta VO opener → subject hook")
+
+def _mpt_bad_1474(subject, script, platform="youtube_shorts", language="en-US"):
+    return {"title": _V1474_BAD, "caption": "c", "hashtags": ["#x"]}
+
+
+with patch.object(metadata.mpt, "social_metadata", side_effect=_mpt_bad_1474):
+    out1474 = metadata.generate(
+        _V1474_SUBJ,
+        f"{_V1474_BAD} {_V1474_SUBJ} Body.",
+        content_format="short",
+    )
+ok(out1474["title"] == _V1474_SUBJ,
+   "v1474: path-check failure brief → subject hook")
+
 
 # -------------------------------------------------------------- module wiring
 print("module wiring: public surface")

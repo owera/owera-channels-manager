@@ -618,10 +618,16 @@ def _fold_script_punct(s: str) -> str:
 
 
 def _is_script_preamble(sentence: str) -> bool:
+    from app.services import craft
+
     s = _fold_script_punct(sentence).strip()
     if not s:
         return True
-    return bool(_PREAMBLE_START.match(s) or _PREAMBLE_BODY.search(s))
+    return bool(
+        _PREAMBLE_START.match(s)
+        or _PREAMBLE_BODY.search(s)
+        or craft.is_meta_craft_sentence(s)
+    )
 
 
 def _drop_preamble_sentences(parts: list[str], *, keep_all_if_empty: bool) -> list[str]:

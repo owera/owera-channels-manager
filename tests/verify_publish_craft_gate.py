@@ -163,6 +163,16 @@ ok(craft.nonsense_title_reason("Copilot billed $58 when it timed out · Copilot 
 ok(craft.nonsense_title_reason("Copilot billed the run that timed out · Copilot Credits 1")
    is None,
    "billing words without an amount are NOT nonsense (real spoken stake)")
+ok(craft.nonsense_title_reason(
+       "The hook has to land the allowlist miss in one short sentence.")
+   == craft.META_CRAFT_TITLE_REASON,
+   "v1473-class craft brief is blocked at publish gate")
+ok(craft.nonsense_title_reason("The title is a path-check failure.")
+   == craft.META_CRAFT_TITLE_REASON,
+   "v1474-class craft brief is blocked at publish gate")
+ok(craft.nonsense_title_reason(
+       "Your path check trusted the string and followed the symlink.") is None,
+   "viewer-facing path-check claim is not meta craft")
 
 ok(craft.publish_craft_block_reason(
        title=_OK_TITLE, script="", creation_config=_OK_CC)

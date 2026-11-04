@@ -131,6 +131,16 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
         }
 
 
+def _decolar_hook(subject: str, script: str) -> str:
+    """Viewer-facing spoken hook for a short (patterned subject or VO claim)."""
+    from app.services import craft
+
+    subj = (subject or "").strip()
+    if craft.spoken_title_ok(subj):
+        return subj[:100]
+    return (craft.first_spoken_claim(script, subject) or subj)[:100]
+
+
 def _lock_decolar_title(meta: dict, subject: str, script: str,
                         content_format: str) -> dict:
     """Decolar: the YouTube title IS the spoken title hook.
@@ -138,21 +148,22 @@ def _lock_decolar_title(meta: dict, subject: str, script: str,
     Patterned subjects (`· <series> <nn>`) win verbatim so the publish gate
     cannot strand a good render in review (v1249). Otherwise a drifted LLM
     slogan is replaced by the first spoken sentence.
+
+    MPT / grok social-metadata sometimes returns craft brief text ("The hook
+    has to land…", "The title is a path-check failure."). When the VO also
+    opens on that planning sentence, ``first_spoken_sentence`` would lock the
+    same garbage — ``first_spoken_claim`` skips meta sentences and falls back
+    to the draft subject (v1473/v1474).
     """
     from app.services import craft
     if (content_format or "short") == "long":
         return meta
-    subj = (subject or "").strip()
-    if craft.spoken_title_ok(subj):
-        meta["title"] = subj[:100]
-        return meta
-    hook = craft.first_spoken_sentence(script) or subj
+    hook = _decolar_hook(subject, script)
     if not hook:
         return meta
     title = (meta.get("title") or "").strip()
-    if _is_title_echo(title, hook):
-        return meta
-    meta["title"] = hook[:100]
+    if craft.meta_craft_title_reason(title) or not _is_title_echo(title, hook):
+        meta["title"] = hook[:100]
     return meta
 
 
