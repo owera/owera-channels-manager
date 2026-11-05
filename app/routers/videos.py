@@ -814,7 +814,7 @@ def requeue(video_id: int, request: Request, session: Session = Depends(get_sess
 def vm_pass(video_id: int, request: Request, body: dict | None = None,
             session: Session = Depends(get_session)):
     """Record the Video Maker's Gate B PASS on the CURRENT render (Channels/VM
-    only; X-Actor: channels|vm). Required before any video can be approved
+    Basic users only). Required before any video can be approved
     (every topic by default; topic_flags vm_pass_required / vm_pass_exempt).
     Body (optional): {"note": "..."}. Bound to video_path: a re-render clears it."""
     v = session.get(Video, video_id)
@@ -823,7 +823,7 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
     actor = review_guard.actor_of(request)
     if not review_guard.can_record_vm_pass(actor):
         raise HTTPException(403, f"vm_pass is set by Channels/VM only (actor={actor!r}; "
-                                 "send X-Actor: channels or vm)")
+                                 "authenticate as a Channels or VM Basic user)")
     if v.status != VideoStatus.REVIEW:
         raise HTTPException(409, f"vm_pass needs a video in review (status={v.status})")
     stale = _stale_artifact_reason(session, v)

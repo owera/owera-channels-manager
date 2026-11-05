@@ -30,12 +30,13 @@ auto-approve, retry-republish and the publish loop all need vm_pass on the
 current render (vm_pass_required_reason, 409 "held: needs vm_pass"); any actor
 may approve once it is there (CM teasers keep their Channels-only rule).
 
-Actor (every approve / requeue / reject / vm_pass): the ``X-Actor`` request
-header (lower-cased, ≤40 chars), else the HTTP Basic auth username, else
-"unknown". It is recorded in the transition's JobRun detail ("actor=<name>";
-JobRun.created_at is the timestamp) and, for vm_pass, inside the record.
-The actor is self-declared: this is a process guard and an audit trail,
-not an authentication boundary (every caller shares the one app password).
+Actor (every approve / requeue / reject / vm_pass): when HTTP Basic auth is
+enabled (``MANAGER_APP_PASSWORD``), the authenticated Basic username only
+(lower-cased, ≤40 chars) — ``X-Actor`` is ignored for authz and audit so a
+shared password cannot be combined with a forged header (#110). Local-only
+(no app password): ``X-Actor`` header, else Basic username, else "unknown".
+Recorded in JobRun detail ("actor=<name>"; JobRun.created_at is the timestamp)
+and, for vm_pass, inside the record.
 """
 from __future__ import annotations
 
@@ -55,20 +56,37 @@ VM_PASS_ACTORS = CHANNELS_ACTORS | VM_ACTORS
 _ACTOR_RE = re.compile(r"[^a-z0-9_.@\-]+")
 
 
+def _normalize_actor_name(raw: str) -> str:
+    actor = _ACTOR_RE.sub("-", raw.strip().lower())[:40].strip("-")
+    return actor or "unknown"
+
+
+def basic_user_of(request) -> str:
+    """HTTP Basic auth username, normalized; else "unknown"."""
+    if request is None:
+        return "unknown"
+    auth = request.headers.get("Authorization", "") or ""
+    if auth.startswith("Basic "):
+        try:
+            raw = base64.b64decode(auth[6:]).decode("utf-8", errors="replace").partition(":")[0]
+            return _normalize_actor_name(raw)
+        except Exception:
+            pass
+    return "unknown"
+
+
 def actor_of(request) -> str:
-    """X-Actor header → Basic auth username → "unknown"."""
+    """Review-gate identity for authz + audit (see module doc)."""
+    from app.config import settings
+
+    if settings.app_password:
+        return basic_user_of(request)
     if request is None:
         return "unknown"
     raw = (request.headers.get("X-Actor") or "").strip()
-    if not raw:
-        auth = request.headers.get("Authorization", "") or ""
-        if auth.startswith("Basic "):
-            try:
-                raw = base64.b64decode(auth[6:]).decode("utf-8", errors="replace").partition(":")[0]
-            except Exception:
-                raw = ""
-    actor = _ACTOR_RE.sub("-", raw.strip().lower())[:40].strip("-")
-    return actor or "unknown"
+    if raw:
+        return _normalize_actor_name(raw)
+    return basic_user_of(request)
 
 
 def is_channels_actor(actor: str | None) -> bool:
@@ -77,7 +95,8 @@ def is_channels_actor(actor: str | None) -> bool:
 
 
 def can_record_vm_pass(actor: str | None) -> bool:
-    """Channels or the Video Maker — who may record the Gate B PASS."""
+    """Channels or the Video Maker — who may record the Gate B PASS (#110: actor
+    must be the authenticated Basic username when app_password is set)."""
     return (actor or "").lower() in VM_PASS_ACTORS
 
 
@@ -154,9 +173,9 @@ def teaser_approve_block(v, actor: str, topic_name: str | None = None):
     if not is_cm_teaser(v, topic_name):
         return None
     if not is_channels_actor(actor):
-        return (403, f"CM teaser: only Channels approves it (actor={actor!r}; send "
-                     "X-Actor: channels). The growth agent and the Video Maker never "
-                     "approve a CM teaser (the VM records vm-pass).")
+        return (403, f"CM teaser: only Channels approves it (actor={actor!r}; "
+                     "authenticate as the Channels Basic user). The growth agent and "
+                     "the Video Maker never approve a CM teaser (the VM records vm-pass).")
     if vm_pass_of(v) is None:
         return (409, "held: needs vm_pass — CM teaser: approve requires the VM's Gate B "
                      "PASS on this final render "
@@ -217,8 +236,9 @@ def teaser_requeue_block(v, actor: str, topic_name: str | None = None):
     """(status, message) when requeueing this video must be refused, else None.
     Chosen rule: a CM teaser is requeued by Channels only (blocked otherwise)."""
     if is_cm_teaser(v, topic_name) and not can_record_vm_pass(actor):
-        return (403, f"CM teaser: only Channels requeues it (actor={actor!r}; send "
-                     "X-Actor: channels). The growth agent never requeues a CM teaser.")
+        return (403, f"CM teaser: only Channels requeues it (actor={actor!r}; "
+                     "authenticate as the Channels Basic user). The growth agent never "
+                     "requeues a CM teaser.")
     return None
 
 

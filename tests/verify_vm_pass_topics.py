@@ -132,6 +132,7 @@ _pw = settings.app_password
 settings.app_password = "pw"
 client = TestClient(main.app)
 GROWTH = ("growth", "pw")
+VM_AUTH = ("vm", "pw")
 VM = {"X-Actor": "vm"}
 
 try:
@@ -150,9 +151,12 @@ try:
         r = client.post(f"/api/videos/{a}/vm-pass", auth=GROWTH)
         ok(r.status_code == 403, "growth still cannot record vm_pass")
         r = client.post(f"/api/videos/{a}/vm-pass", auth=GROWTH, headers=VM,
+                        json={"note": "forged"})
+        ok(r.status_code == 403, "growth + X-Actor: vm cannot forge vm_pass (#110)")
+        r = client.post(f"/api/videos/{a}/vm-pass", auth=VM_AUTH,
                         json={"note": "Gate B PASS"})
         ok(r.status_code == 200 and r.json()["vm_pass"]["artifact"],
-           "VM records vm_pass (bound to path + artifact fingerprint)")
+           "VM Basic user records vm_pass (bound to path + artifact fingerprint)")
         r = client.post(f"/api/videos/{a}/approve", auth=GROWTH)
         ok(r.status_code == 200 and r.json()["status"] == VideoStatus.APPROVED,
            "vm_pass on the current render → approve OK (any actor, not a CM teaser)")

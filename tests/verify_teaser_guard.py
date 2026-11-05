@@ -13,7 +13,8 @@ Maker Gate B FAIL after a non-Channels approve. Pins:
   * requeue of a CM teaser by a non-Channels actor → 403 (blocked);
   * non-teasers unchanged for any actor;
   * every approve / requeue / reject / vm_pass JobRun carries actor=<name>
-    (X-Actor header, else the Basic auth username).
+    from the authenticated Basic user when app_password is set (#110);
+  * X-Actor: vm with growth credentials cannot forge vm_pass (403).
 In-memory DB + TestClient; craft publish gate stubbed (not under test).
 """
 import json
@@ -108,6 +109,8 @@ _pw = settings.app_password
 settings.app_password = "pw"
 client = TestClient(main.app)
 GROWTH = ("growth", "pw")
+CHANNELS = ("channels", "pw")
+VM_AUTH = ("vm", "pw")
 CH = {"X-Actor": "channels"}
 
 
@@ -122,25 +125,31 @@ try:
         r = client.post("/api/videos/1/approve", auth=GROWTH)
         ok(r.status_code == 403 and "only Channels approves" in r.json()["detail"],
            f"growth agent approving a CM teaser → 403 ({r.status_code})")
-        r = client.post("/api/videos/1/approve", auth=GROWTH, headers=CH)
+        r = client.post("/api/videos/1/approve", auth=CHANNELS)
         ok(r.status_code == 409 and "vm-pass" in r.json()["detail"],
            f"Channels without vm_pass → 409 with the reason ({r.status_code})")
+        r = client.post("/api/videos/1/approve", auth=GROWTH, headers=CH)
+        ok(r.status_code == 403 and "only Channels approves" in r.json()["detail"],
+           "forged X-Actor: channels with growth credentials → 403 on CM teaser approve")
         ok(runs("approve", 1) == [], "refused approves write no JobRun")
 
         print("vm_pass endpoint")
         r = client.post("/api/videos/1/vm-pass", auth=GROWTH)
         ok(r.status_code == 403, "growth cannot set vm_pass")
         r = client.post("/api/videos/1/vm-pass", auth=GROWTH, headers={"X-Actor": "vm"},
+                        json={"note": "forged header"})
+        ok(r.status_code == 403, "growth + X-Actor: vm cannot forge vm_pass (#110)")
+        r = client.post("/api/videos/1/vm-pass", auth=VM_AUTH,
                         json={"note": "Gate B PASS 2026-10-04 final render"})
         ok(r.status_code == 200 and r.json()["vm_pass"]["actor"] == "vm"
            and r.json()["vm_pass"]["result"] == "PASS" and r.json()["vm_pass"]["at"],
-           "VM sets vm_pass: recorded with actor + timestamp")
+           "VM Basic user sets vm_pass: recorded with actor + timestamp")
         with Session(engine) as s:
             cc = json.loads(s.get(Video, 1).creation_config)
         ok(cc["vm_pass"]["video_path"].endswith("1.mp4"), "vm_pass bound to the current artifact")
         vr = runs("vm_pass", 1)
         ok(len(vr) == 1 and "actor=vm" in vr[0].detail, "vm_pass JobRun carries the actor")
-        r = client.post("/api/videos/2/vm-pass", auth=GROWTH, headers={"X-Actor": "vm"})
+        r = client.post("/api/videos/2/vm-pass", auth=VM_AUTH)
         ok(r.status_code == 200, "vm_pass may be recorded on any review render")
 
         r = client.post("/api/videos/1/approve", auth=GROWTH)
@@ -157,11 +166,11 @@ try:
            and not review_guard.can_record_vm_pass("growth"), "vm_pass allowlist: Channels + VM, not growth")
         ok(review_guard.is_channels_actor("channels") and not review_guard.is_channels_actor("vm")
            and not review_guard.is_channels_actor("video-maker"), "approve allowlist: Channels only")
-        r = client.post("/api/videos/1/vm-pass", auth=GROWTH, headers={"X-Actor": "video-maker"},
+        r = client.post("/api/videos/1/vm-pass", auth=("video-maker", "pw"),
                         json={"note": "re-check"})
         ok(r.status_code == 200 and r.json()["vm_pass"]["actor"] == "video-maker",
-           "VM (video-maker) can still record the PASS")
-        r = client.post("/api/videos/1/approve", auth=GROWTH, headers=CH)
+           "VM (video-maker Basic user) can still record the PASS")
+        r = client.post("/api/videos/1/approve", auth=CHANNELS)
         ok(r.status_code == 200 and r.json()["status"] == VideoStatus.APPROVED,
            "Channels + vm_pass on this render → approved")
         ar = runs("approve", 1)
@@ -175,7 +184,7 @@ try:
             v.video_path = art("3-rerender")   # a new render replaced the artifact
             s.add(v)
             s.commit()
-        r = client.post("/api/videos/3/approve", auth=GROWTH, headers=CH)
+        r = client.post("/api/videos/3/approve", auth=CHANNELS)
         ok(r.status_code == 409, "vm_pass recorded for an older render → 409")
 
         print("requeue guard (chosen: blocked for non-Channels actors)")
@@ -183,7 +192,7 @@ try:
         ok(r.status_code == 403 and "only Channels requeues" in r.json()["detail"],
            "growth requeueing a CM teaser → 403")
         ok(runs("requeue", 3) == [], "refused requeue writes nothing")
-        r = client.post("/api/videos/3/requeue", auth=GROWTH, headers=CH)
+        r = client.post("/api/videos/3/requeue", auth=CHANNELS)
         ok(r.status_code == 200 and r.json()["status"] == VideoStatus.QUEUED, "Channels requeue → 200")
         rq = runs("requeue", 3)
         ok(len(rq) == 1 and rq[0].detail.endswith("actor=channels"), "requeue JobRun records the actor")
@@ -207,8 +216,8 @@ try:
                 s.commit()
             r = client.post("/api/videos/5/reject", auth=GROWTH, headers={"X-Actor": "cto"},
                             json={"reason": "weak"})
-            ok(r.status_code == 200 and runs("reject", 5)[0].detail.endswith("actor=cto"),
-               "reject JobRun records the actor (X-Actor)")
+            ok(r.status_code == 200 and runs("reject", 5)[0].detail.endswith("actor=growth"),
+               "reject JobRun records the authenticated Basic user, not forged X-Actor (#110)")
 finally:
     settings.app_password = _pw
     main.app.dependency_overrides.pop(get_session, None)

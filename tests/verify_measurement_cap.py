@@ -210,9 +210,12 @@ try:
         ok(r.status_code == 403, "growth cannot record vm_pass")
         ok(client.post("/api/videos/1/approve", auth=auth).status_code == 409,
            "still 409 before VM review")
-        r = client.post("/api/videos/1/vm-pass", auth=auth, headers={"X-Actor": "vm"},
+        ok(client.post("/api/videos/1/vm-pass", auth=auth, headers={"X-Actor": "vm"},
+                       json={"note": "forged"}).status_code == 403,
+           "X-Actor: vm cannot forge vm_pass with a non-VM Basic user")
+        r = client.post("/api/videos/1/vm-pass", auth=("vm", "pw"),
                         json={"note": "eyeballed card sync"})
-        ok(r.status_code == 200, f"VM records Gate B PASS on this render ({r.status_code})")
+        ok(r.status_code == 200, f"VM Basic user records Gate B PASS on this render ({r.status_code})")
         ok(gate_reason(get(1), MEAS) is None, "cap released by the VM PASS bound to this render")
         r = client.post("/api/videos/1/approve", auth=auth)
         ok(r.status_code == 200 and r.json()["status"] == VideoStatus.APPROVED,
