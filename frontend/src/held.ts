@@ -33,7 +33,7 @@ export function videoIdOf(path: string): number | null {
 export class HeldError extends Error {
   readonly held = true;
   constructor(readonly reason: string, readonly videoId: number | null, readonly path: string) {
-    super(`Segurado: ${reason}`);
+    super(`On hold: ${reason}`);
     this.name = "HeldError";
   }
 }

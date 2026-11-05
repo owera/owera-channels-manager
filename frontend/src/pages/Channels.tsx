@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   useChannels, useFeatures, useMut, useProfiles, useTopics, type Channel, type Topic,
 } from "../api";
+import { oauthStatusLabel } from "../copy";
 import { intFromBlur } from "../intFromBlur";
 import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
 import ChannelYoutube from "./ChannelYoutube";
@@ -187,24 +188,37 @@ function ChannelDetail({ channel }: { channel: Channel }) {
     m.updateChannel.mutate({ id: channel.id, body: { [key]: n } });
   };
 
+  const connected = channel.oauth_status === "connected";
+
   return (
-    <div className="panel p-6">
-      <div className="flex items-start justify-between">
+    <div className="panel p-6 md:p-8">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="font-display font-extrabold text-2xl text-fog-50">{channel.yt_channel_title || channel.name}</h2>
-          <div className="label mt-1">
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-1">Channel setup</p>
+          <h2 className="font-display font-extrabold text-2xl sm:text-3xl text-fog-50 tracking-tight">{channel.yt_channel_title || channel.name}</h2>
+          <p className="text-sm text-fog-400 mt-1.5">
             {channel.yt_channel_id
-              ? <span className="font-mono normal-case text-fog-400">{channel.yt_channel_id}</span>
-              : "not connected"}
-          </div>
+              ? <span className="font-mono text-fog-500 text-xs">{channel.yt_channel_id}</span>
+              : "Connect YouTube to publish and sync playlists."}
+          </p>
         </div>
-        <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider" style={{ color: hexes }}>
-          <Dot hex={hexes} pulse={channel.oauth_status === "connected"} />
-          {channel.oauth_status}
+        <div className="flex items-center gap-2 text-xs font-medium shrink-0 panel px-3 py-1.5" style={{ color: hexes }}>
+          <Dot hex={hexes} pulse={connected} />
+          {oauthStatusLabel(channel.oauth_status)}
         </div>
       </div>
 
-      {channel.oauth_error && <div className="mt-2 text-xs font-mono text-amber">{channel.oauth_error}</div>}
+      {!connected && (
+        <div className="mt-6 rounded-md border border-signal/25 bg-signal/[0.04] px-5 py-5">
+          <h3 className="font-display font-bold text-lg text-fog-50">Connect YouTube</h3>
+          <p className="text-sm text-fog-300 mt-2 max-w-xl leading-relaxed">
+            Sign in with Google so Channels Manager can upload videos, create playlists, and read basic channel stats.
+            {platformOauth ? " Early access uses Owera's shared Google sign-in — no JSON key upload." : " Upload your Google Cloud client secret if prompted, then connect."}
+          </p>
+        </div>
+      )}
+
+      {channel.oauth_error && <div className="mt-4 text-sm text-amber leading-relaxed">{channel.oauth_error}</div>}
 
       <div className="mt-5 flex flex-wrap gap-2">
         {!platformOauth && (
@@ -230,29 +244,23 @@ function ChannelDetail({ channel }: { channel: Channel }) {
             ? "waiting for consent…"
             : (platformOauth ? m.platformOauthStart : m.oauthStart).isPending
               ? "starting…"
-              : channel.oauth_status === "connected"
-                ? "reconnect"
-                : platformOauth
-                  ? "connect youtube"
-                  : "connect oauth"}
+              : connected
+                ? "Reconnect YouTube"
+                : "Connect YouTube"}
         </button>
-        {channel.oauth_status === "connected" && (
-          <button className="btn btn-ghost" onClick={() => m.disconnectChannel.mutate(channel.id)}>disconnect</button>
+        {connected && (
+          <button className="btn btn-ghost" onClick={() => m.disconnectChannel.mutate(channel.id)}>Disconnect</button>
         )}
       </div>
-      {connecting && <div className="mt-2 text-xs font-mono text-fog-300">A Google consent tab opened — approve there, then this updates automatically.</div>}
+      {connecting && <p className="mt-3 text-sm text-fog-300">A Google sign-in tab opened — approve access there. This page updates when you&apos;re done.</p>}
       {(platformOauth ? m.platformOauthStart : m.oauthStart).isError && (
         <div className="mt-2 text-xs font-mono text-[#f7768e]">
           {((platformOauth ? m.platformOauthStart : m.oauthStart).error as Error).message}
         </div>
       )}
-      {platformOauth && channel.oauth_status !== "connected" && (
-        <div className="mt-2 text-[12px] text-fog-400 max-w-xl">
-          Early access uses the shared Owera Google OAuth client — no client_secret.json upload.
-        </div>
-      )}
-
-      <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4">
+      <div className="mt-8 pt-6 border-t border-ink-line/60">
+        <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-4">Publishing defaults</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
         <div>
           <div className="label mb-1.5">default privacy</div>
           <select className="input" value={channel.default_privacy}
@@ -279,15 +287,16 @@ function ChannelDetail({ channel }: { channel: Channel }) {
             onBlur={commitBudget("daily_publish_budget")} />
         </div>
       </div>
+      </div>
 
-      <div className="mt-5 flex items-center gap-6">
+      <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-6">
         <div className="flex items-center gap-3">
           <Toggle on={channel.default_skip_gate} onChange={(v) => m.updateChannel.mutate({ id: channel.id, body: { default_skip_gate: v } })} />
-          <div><div className="text-sm text-fog-100">Skip approval gate</div><div className="label">auto-publish after render</div></div>
+          <div><div className="text-sm text-fog-100">Publish without review</div><div className="text-xs text-fog-400 mt-0.5">When off, you approve each video on the review queue first.</div></div>
         </div>
         <div className="flex items-center gap-3">
           <Toggle on={channel.paused} onChange={(v) => m.updateChannel.mutate({ id: channel.id, body: { paused: v } })} />
-          <div><div className="text-sm text-fog-100">Pause channel</div><div className="label">halt render + publish</div></div>
+          <div><div className="text-sm text-fog-100">Pause channel</div><div className="text-xs text-fog-400 mt-0.5">Stops rendering and publishing until you turn this off.</div></div>
         </div>
       </div>
 
@@ -311,13 +320,20 @@ export default function Channels() {
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
       <header className="flex items-end justify-between mb-6 md:mb-8">
-        <div><div className="label mb-2">// channels</div>
-          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Channels</h1></div>
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-2">Setup</p>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Channels</h1>
+          <p className="text-sm text-fog-400 mt-2 max-w-lg">Connect YouTube, set budgets, and organize videos into topics.</p>
+        </div>
         <button className="btn btn-signal" onClick={() => setOpen(true)}>+ add channel</button>
       </header>
 
       {!channels?.length ? (
-        <Empty>No channels yet. Click <span className="text-signal">+ add channel</span> to begin.</Empty>
+        <Empty>
+          <p className="text-fog-100 font-medium mb-2">Create your first channel</p>
+          <p className="mb-4">Each channel maps to one YouTube account. You can add topics and connect YouTube next.</p>
+          <button type="button" className="btn btn-signal inline-flex" onClick={() => setOpen(true)}>Add channel</button>
+        </Empty>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4 md:gap-6">
           <div className="space-y-1.5">
@@ -327,7 +343,7 @@ export default function Channels() {
                   selected?.id === c.id ? "border-signal/50 bg-signal/5" : "border-ink-line bg-ink-800/40 hover:border-fog-300/40"}`}>
                 <div className="flex items-center gap-2"><Dot hex={OAUTH_HEX[c.oauth_status]} />
                   <span className="text-fog-50 font-medium">{c.name}</span></div>
-                <div className="label mt-1 pl-[14px]">{c.oauth_status}</div>
+                <div className="text-[10px] text-fog-400 mt-1 pl-[14px] normal-case tracking-normal">{oauthStatusLabel(c.oauth_status)}</div>
               </button>
             ))}
           </div>
