@@ -8,7 +8,8 @@ from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
 from app.db import app_settings, get_session
-from app.models import Channel, JobRun, Topic, Video, VideoStatus, utcnow
+from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace, utcnow
+from app.workspace import current_workspace, require_channel, require_video
 from app.schemas import (
     RejectBody,
     ReorderBody,
@@ -45,9 +46,16 @@ def _require_str(fields: dict, key: str, hint: str) -> None:
 
 @router.get("")
 def list_videos(channel_id: int | None = None, topic_id: int | None = None,
-                status: str | None = None, session: Session = Depends(get_session)):
-    q = select(Video)
+                status: str | None = None, session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
+    ch_ids = session.exec(
+        select(Channel.id).where(Channel.workspace_id == ws.id)
+    ).all()
+    if not ch_ids:
+        return []
+    q = select(Video).where(Video.channel_id.in_(ch_ids))
     if channel_id is not None:
+        require_channel(session, ws, channel_id)
         q = q.where(Video.channel_id == channel_id)
     if topic_id is not None:
         q = q.where(Video.topic_id == topic_id)
@@ -78,12 +86,11 @@ def _pt_date(dt: datetime):
 
 
 @router.get("/publish-plan")
-def publish_plan(channel_id: int, session: Session = Depends(get_session)):
+def publish_plan(channel_id: int, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     """Estimated publish time for each approved video, honoring drip spacing and the
     per-channel daily publish/quota budget. Returns {video_id: iso8601}."""
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_channel(session, ws, channel_id)
     cfg_row = app_settings(session)
     from app.services import craft as craft_svc
     approved = session.exec(
@@ -193,13 +200,12 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session)):
 
 
 @router.get("/queue-plan")
-def queue_plan(channel_id: int, session: Session = Depends(get_session)):
+def queue_plan(channel_id: int, session: Session = Depends(get_session),
+               ws: Workspace = Depends(current_workspace)):
     """Why each queued video isn't rendering yet — mirrors the gates in
     render_loop._submit_new so the board can label queued cards. Returns
     {video_id: {"reason": str, "eta": iso8601|null}}."""
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_channel(session, ws, channel_id)
     queued = session.exec(
         select(Video).where(Video.channel_id == channel_id, Video.status == VideoStatus.QUEUED)
         .order_by(Video.position, Video.id)
@@ -248,10 +254,12 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("", status_code=201)
-def create_video(body: VideoCreate, session: Session = Depends(get_session)):
+def create_video(body: VideoCreate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     topic = session.get(Topic, body.topic_id)
     if not topic:
         raise HTTPException(404, "topic not found")
+    require_channel(session, ws, topic.channel_id)
     # PATCH already floors through _require_str. Create used to strip
     # straight onto the row, so "" / "   " persisted an empty subject
     # (metadata.generate TypeErrors; board card is blank). Null is
@@ -325,18 +333,15 @@ def _apply_provided_script(v: Video, script: str | None) -> None:
 
 
 @router.get("/{video_id}")
-def get_video(video_id: int, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
-    return v
+def get_video(video_id: int, session: Session = Depends(get_session),
+              ws: Workspace = Depends(current_workspace)):
+    return require_video(session, ws, video_id)
 
 
 @router.patch("/{video_id}")
-def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     data = body.model_dump(exclude_unset=True)
     _require_str(data, "subject",
                  "subject must be a non-empty string "
@@ -380,7 +385,8 @@ def update_video(video_id: int, body: VideoUpdate, session: Session = Depends(ge
 
 @router.patch("/{video_id}/craft")
 def persist_craft(video_id: int, body: VideoCraftPersist,
-                  session: Session = Depends(get_session)):
+                  session: Session = Depends(get_session),
+                  ws: Workspace = Depends(current_workspace)):
     """Persist script / creation_config without burning a re-render slot.
 
     #1257 ship-nit: PATCH /api/videos ignores script & creation_config because
@@ -397,9 +403,7 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
     video drops back to review. The saved text is still the input of the
     next render; only the old mp4 stops being publishable.
     """
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     allowed = (VideoStatus.APPROVED, VideoStatus.REVIEW, VideoStatus.RENDERED)
     if v.status not in allowed:
         raise HTTPException(
@@ -500,7 +504,8 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
 
 @router.patch("/{video_id}/script")
 def set_script(video_id: int, body: VideoScriptSet,
-               session: Session = Depends(get_session)):
+               session: Session = Depends(get_session),
+               ws: Workspace = Depends(current_workspace)):
     """Set / clear the provided script before rendering (item 8).
 
     Allowed on draft | queued (queued = not submitted yet; submit flips to
@@ -510,9 +515,7 @@ def set_script(video_id: int, body: VideoScriptSet,
     grok -p. ``{"script": null}`` clears it → the engine generates again.
     Never touches status / budget; post-render edits stay on PATCH …/craft.
     """
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     allowed = v.status in (VideoStatus.DRAFT, VideoStatus.QUEUED) or (
         v.status == VideoStatus.FAILED and not v.video_path)
     if not allowed:
@@ -545,8 +548,13 @@ def set_script(video_id: int, body: VideoScriptSet,
 
 
 @router.delete("/{video_id}", status_code=204)
-def delete_video(video_id: int, session: Session = Depends(get_session)):
+def delete_video(video_id: int, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     v = session.get(Video, video_id)
+    if v:
+        ch = session.get(Channel, v.channel_id)
+        if not ch or ch.workspace_id != ws.id:
+            raise HTTPException(404, "video not found")
     if v:
         # Deletion is the one lifecycle exit with no other trace (the row itself is
         # the record) — log it so bulk deletes are visible in /api/runs.
@@ -572,11 +580,10 @@ def _set_status(session, video_id, new, **fields):
 
 
 @router.post("/{video_id}/produce")
-def produce(video_id: int, session: Session = Depends(get_session)):
+def produce(video_id: int, session: Session = Depends(get_session),
+            ws: Workspace = Depends(current_workspace)):
     """Promote a draft idea into the render queue."""
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     if v.status != VideoStatus.DRAFT:
         raise HTTPException(409, f"cannot produce from status '{v.status}'")
     # Draft->queued from the API was the last unaudited transition (2026-08-01: an
@@ -589,12 +596,14 @@ def produce(video_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/produce")
-def produce_bulk(body: ReorderBody, session: Session = Depends(get_session)):
+def produce_bulk(body: ReorderBody, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     """Promote many drafts at once (reuses {channel_id, ordered_ids:[video ids]})."""
+    require_channel(session, ws, body.channel_id)
     n = 0
     for vid in body.ordered_ids:
         v = session.get(Video, vid)
-        if v and v.status == VideoStatus.DRAFT:
+        if v and v.channel_id == body.channel_id and v.status == VideoStatus.DRAFT:
             v.status = VideoStatus.QUEUED
             session.add(v)
             quota.log(session, kind="produce", status="success", video_id=v.id,
@@ -704,10 +713,9 @@ def _publish_side_failure(session: Session, v: Video) -> bool:
 # log rides the same commit as the status flip; refused calls write nothing.
 @router.post("/{video_id}/approve")
 def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
-            session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+            session: Session = Depends(get_session),
+            ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     _require_from(v, APPROVE_FROM, "approve")
     stale = _stale_artifact_reason(session, v)
     if stale:
@@ -779,10 +787,9 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
 
 @router.post("/{video_id}/reject")
 def reject(video_id: int, body: RejectBody, request: Request,
-           session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+           session: Session = Depends(get_session),
+           ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     _require_from(v, REJECT_FROM, "reject")
     actor = review_guard.actor_of(request)
     quota.log(session, kind="reject", status="success", video_id=v.id,
@@ -793,10 +800,9 @@ def reject(video_id: int, body: RejectBody, request: Request,
 
 
 @router.post("/{video_id}/requeue")
-def requeue(video_id: int, request: Request, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def requeue(video_id: int, request: Request, session: Session = Depends(get_session),
+            ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     _require_from(v, REQUEUE_FROM, "requeue")
     actor = review_guard.actor_of(request)
     _topic = session.get(Topic, v.topic_id)
@@ -812,14 +818,13 @@ def requeue(video_id: int, request: Request, session: Session = Depends(get_sess
 
 @router.post("/{video_id}/vm-pass")
 def vm_pass(video_id: int, request: Request, body: dict | None = None,
-            session: Session = Depends(get_session)):
+            session: Session = Depends(get_session),
+            ws: Workspace = Depends(current_workspace)):
     """Record the Video Maker's Gate B PASS on the CURRENT render (Channels/VM
     Basic users only). Required before any video can be approved
     (every topic by default; topic_flags vm_pass_required / vm_pass_exempt).
     Body (optional): {"note": "..."}. Bound to video_path: a re-render clears it."""
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     actor = review_guard.actor_of(request)
     if not review_guard.can_record_vm_pass(actor):
         raise HTTPException(403, f"vm_pass is set by Channels/VM only (actor={actor!r}; "
@@ -841,10 +846,9 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
 
 
 @router.post("/{video_id}/retry")
-def retry(video_id: int, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def retry(video_id: int, session: Session = Depends(get_session),
+          ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     _require_from(v, RETRY_FROM, "retry")
     from pathlib import Path as _P
     if v.video_path and _P(v.video_path).is_file() and _publish_side_failure(session, v):
@@ -887,15 +891,14 @@ _HOLD_FROM = frozenset({VideoStatus.APPROVED, VideoStatus.QUEUED})
 
 
 @router.post("/{video_id}/hold")
-def hold(video_id: int, session: Session = Depends(get_session)):
+def hold(video_id: int, session: Session = Depends(get_session),
+         ws: Workspace = Depends(current_workspace)):
     """Hold a video without re-rendering.
 
     APPROVED: out of the publish drip (status/craft unchanged). QUEUED: out of
     the render loop until unheld. The publish loop skips held rows; the render
     loop skips held QUEUED rows."""
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     if v.status not in _HOLD_FROM:
         raise HTTPException(
             409, f"cannot hold from status '{v.status}' "
@@ -915,10 +918,9 @@ def hold(video_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/{video_id}/unhold")
-def unhold(video_id: int, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def unhold(video_id: int, session: Session = Depends(get_session),
+           ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     if v.status not in _HOLD_FROM:
         raise HTTPException(
             409, f"cannot unhold from status '{v.status}' "
@@ -939,7 +941,8 @@ def unhold(video_id: int, session: Session = Depends(get_session)):
 
 @router.post("/{video_id}/compose-script", status_code=202)
 def compose_script(video_id: int, response: Response, force: bool = False,
-                   wait: bool = False, session: Session = Depends(get_session)):
+                   wait: bool = False, session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace)):
     """Compose the narration script for a draft/queued video WITHOUT rendering.
 
     grok -p with the storyboard-compose effort pin (settings.
@@ -952,9 +955,7 @@ def compose_script(video_id: int, response: Response, force: bool = False,
     already saved (pass ?force=true to replace it). Default is async (202 +
     background thread); ?wait=true runs inline and returns the video (200)."""
     from app.services import script_compose
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+    v = require_video(session, ws, video_id)
     blocked = script_compose.block_reason(v, force=force)
     if blocked:
         raise HTTPException(409, blocked)
@@ -977,10 +978,9 @@ def compose_script(video_id: int, response: Response, force: bool = False,
 
 
 @router.post("/{video_id}/regenerate-metadata")
-def regenerate_metadata(video_id: int, session: Session = Depends(get_session)):
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def regenerate_metadata(video_id: int, session: Session = Depends(get_session),
+                        ws: Workspace = Depends(current_workspace)):
+    v = require_video(session, ws, video_id)
     from app.services import video_gen
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
@@ -996,7 +996,9 @@ def regenerate_metadata(video_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/reorder")
-def reorder(body: ReorderBody, session: Session = Depends(get_session)):
+def reorder(body: ReorderBody, session: Session = Depends(get_session),
+            ws: Workspace = Depends(current_workspace)):
+    require_channel(session, ws, body.channel_id)
     for pos, vid in enumerate(body.ordered_ids):
         v = session.get(Video, vid)
         if v and v.channel_id == body.channel_id:

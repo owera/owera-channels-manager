@@ -62,9 +62,14 @@ def _normalize_actor_name(raw: str) -> str:
 
 
 def basic_user_of(request) -> str:
-    """HTTP Basic auth username, normalized; else "unknown"."""
+    """Review actor from Basic Auth (compound slug+role usernames supported)."""
     if request is None:
         return "unknown"
+    from app.workspace import basic_auth_identity
+
+    ident = basic_auth_identity(request)
+    if ident:
+        return _normalize_actor_name(ident[1])
     auth = request.headers.get("Authorization", "") or ""
     if auth.startswith("Basic "):
         try:

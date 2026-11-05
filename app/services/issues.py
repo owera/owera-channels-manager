@@ -238,19 +238,26 @@ def publish_signals(session: Session, ch: Channel, now: datetime | None = None,
     }
 
 
-def detect(session: Session, now: datetime | None = None) -> dict:
+def detect(session: Session, now: datetime | None = None,
+           workspace_id: int | None = None) -> dict:
     """Classify the system's current operational state into an issues digest.
 
-    `now` is injectable for tests (window / deadline checks); defaults to wall clock."""
+    `now` is injectable for tests (window / deadline checks); defaults to wall clock.
+    When ``workspace_id`` is set, only that workspace's channels/videos are included."""
     now = now or datetime.now(timezone.utc)
     cfg = app_settings(session)
     channels = session.exec(select(Channel).order_by(Channel.id)).all()
+    if workspace_id is not None:
+        channels = [c for c in channels if c.workspace_id == workspace_id]
+    ch_ids = {c.id for c in channels}
     names = {c.id: c.name for c in channels}
 
     failed, rejected = [], []
     stuck_rendering, stuck_publishing, stuck_review = [], [], []
 
     for v in session.exec(select(Video).where(Video.status == VideoStatus.FAILED)).all():
+        if workspace_id is not None and v.channel_id not in ch_ids:
+            continue
         age = _age_hours(v.updated_at, now)
         action, auto = _failed_action(v, age)
         failed.append({
@@ -261,6 +268,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
         })
 
     for v in session.exec(select(Video).where(Video.status == VideoStatus.REJECTED)).all():
+        if workspace_id is not None and v.channel_id not in ch_ids:
+            continue
         age = _age_hours(v.updated_at, now)
         old = age is not None and age > DEAD_VIDEO_AGE_DAYS * 24
         rejected.append({
@@ -270,6 +279,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
         })
 
     for v in session.exec(select(Video).where(Video.status == VideoStatus.RENDERING)).all():
+        if workspace_id is not None and v.channel_id not in ch_ids:
+            continue
         started = _aware(v.last_attempt_at or v.updated_at)
         if started and (now - started).total_seconds() > settings.render_timeout_seconds:
             stuck_rendering.append({
@@ -279,6 +290,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
             })
 
     for v in session.exec(select(Video).where(Video.status == VideoStatus.PUBLISHING)).all():
+        if workspace_id is not None and v.channel_id not in ch_ids:
+            continue
         started = _aware(v.last_attempt_at or v.updated_at)
         if started and (now - started).total_seconds() > settings.publish_timeout_seconds:
             stuck_publishing.append({
@@ -299,6 +312,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
     decide_by = review_decide_by(now)
     for v in session.exec(select(Video).where(Video.status == VideoStatus.REVIEW)
                           .order_by(Video.channel_id, Video.id)).all():
+        if workspace_id is not None and v.channel_id not in ch_ids:
+            continue
         age = _age_hours(review_age_ref(v), now)
         if age is not None and age > REVIEW_STALE_HOURS:
             stuck_review.append({
@@ -353,6 +368,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
         select(JobRun).where(JobRun.status == "error", JobRun.created_at >= since)
         .order_by(JobRun.created_at.desc())
     ).all():
+        if workspace_id is not None and r.channel_id is not None and r.channel_id not in ch_ids:
+            continue
         key = (r.kind, _signature(r.detail))
         g = groups.setdefault(key, {"kind": r.kind, "signature": key[1],
                                     "count": 0, "last_detail": r.detail})
@@ -366,6 +383,8 @@ def detect(session: Session, now: datetime | None = None) -> dict:
     ceiling_base = max(cfg.topic_autogen_min_pending, cfg.topic_autogen_target)
     board_overflow = []
     for t in session.exec(select(Topic).where(Topic.active == True)).all():  # noqa: E712
+        if workspace_id is not None and t.channel_id not in ch_ids:
+            continue
         weight = t.weight if t.weight is not None else 1
         if weight <= 0:
             continue
