@@ -19,7 +19,26 @@ const NAV = [
   { to: "/settings", label: "Settings", short: "Config", code: "05" },
 ];
 
-function Sidebar() {
+function SignOut({ email }: { email?: string }) {
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    window.location.href = "/";
+  };
+  return (
+    <div className="px-5 py-4 border-t border-ink-line mt-auto">
+      {email && (
+        <div className="text-[10px] text-fog-500 truncate mb-2 font-mono" title={email}>
+          {email}
+        </div>
+      )}
+      <button type="button" onClick={() => void logout()} className="btn w-full text-xs">
+        Sign out
+      </button>
+    </div>
+  );
+}
+
+function Sidebar({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: string }) {
   return (
     <aside className="hidden md:flex w-60 shrink-0 border-r border-ink-line bg-ink-800/60 flex-col">
       <div className="px-5 pt-6 pb-5 border-b border-ink-line">
@@ -51,6 +70,7 @@ function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      {spaLogin && <SignOut email={userEmail} />}
     </aside>
   );
 }
@@ -77,10 +97,10 @@ function BottomNav() {
   );
 }
 
-export default function App() {
+export default function App({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: string }) {
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Sidebar />
+      <Sidebar spaLogin={spaLogin} userEmail={userEmail} />
       <main className="flex-1 overflow-y-auto pb-[56px] md:pb-0">
         <Routes>
           <Route path="/" element={<Dashboard />} />

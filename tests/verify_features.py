@@ -31,5 +31,6 @@ ok(r.status_code == 200, "features 200")
 body = r.json()
 ok("google_client" not in str(body).lower() and "secret" not in str(body).lower(), "no secrets")
 ok(body.get("google_web_oauth") is False, "web oauth flag off by default")
+ok(body.get("spa_google_login") is False, "spa google login flag off by default")
 
 print(f"\nALL {_checks} CHECKS PASSED")

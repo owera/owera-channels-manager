@@ -12,4 +12,5 @@ def get_features():
     return {
         "google_web_oauth": settings.google_web_oauth,
         "multi_workspace": settings.multi_workspace,
+        "spa_google_login": settings.spa_google_login,
     }

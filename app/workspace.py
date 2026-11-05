@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.db import get_session
 from app.models import Channel, Video, Workspace
+from app.services import spa_google_login
 
 # Basic Auth usernames that map to a different workspace slug (multi_workspace only).
 _BASIC_AUTH_USERNAME_TO_WORKSPACE_SLUG: dict[str, str] = {"admin": "owera"}
@@ -88,6 +89,14 @@ def basic_auth_identity(request: Request) -> tuple[str, str] | None:
         return None
 
 
+def request_identity(request: Request) -> tuple[str, str] | None:
+    """Basic Auth identity, else SPA Google session identity."""
+    ident = basic_auth_identity(request)
+    if ident:
+        return ident
+    return spa_google_login.spa_session_identity(request)
+
+
 def resolve_workspace_slug(request: Request) -> str:
     """When multi_workspace is on, the slug comes from Basic Auth username.
 
@@ -96,7 +105,7 @@ def resolve_workspace_slug(request: Request) -> str:
     docs/WS4_CLAW0_RUNBOOK.md. X-Workspace-Slug is dev-only (allow_workspace_header).
     """
     if settings.multi_workspace:
-        ident = basic_auth_identity(request)
+        ident = request_identity(request)
         if ident:
             return ident[0]
         slug = _raw_username_from_basic_auth(request)
