@@ -62,12 +62,12 @@ def _normalize_actor_name(raw: str) -> str:
 
 
 def basic_user_of(request) -> str:
-    """Review actor from Basic Auth (compound slug+role usernames supported)."""
+    """Review actor from Basic Auth or SPA session (compound slug+role usernames supported)."""
     if request is None:
         return "unknown"
-    from app.workspace import basic_auth_identity
+    from app.workspace import request_identity
 
-    ident = basic_auth_identity(request)
+    ident = request_identity(request)
     if ident:
         return _normalize_actor_name(ident[1])
     auth = request.headers.get("Authorization", "") or ""

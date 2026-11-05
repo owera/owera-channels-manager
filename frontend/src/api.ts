@@ -170,6 +170,7 @@ export interface AppSettings {
 // ---- fetch wrapper ----
 async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
+    credentials: "include",
     headers: opts.body ? { "content-type": "application/json" } : {},
     ...opts,
   });
@@ -271,6 +272,13 @@ export const useSettings = () =>
 export interface ManagerFeatures {
   google_web_oauth: boolean;
   multi_workspace: boolean;
+  spa_google_login: boolean;
+}
+
+export interface AuthMe {
+  email: string;
+  workspace_slug: string;
+  actor: string;
 }
 
 export const useFeatures = () =>
@@ -278,6 +286,14 @@ export const useFeatures = () =>
     queryKey: ["features"],
     queryFn: () => api<ManagerFeatures>("/features"),
     staleTime: 60_000,
+  });
+
+export const useAuthMe = (enabled: boolean) =>
+  useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: () => api<AuthMe>("/auth/me"),
+    enabled,
+    retry: false,
   });
 
 export interface OnboardingStep {
@@ -445,7 +461,7 @@ export const useMut = () => {
       mutationFn: ({ id, file }: { id: number; file: File }) => {
         const fd = new FormData();
         fd.append("file", file);
-        return fetch(`/api/channels/${id}/credentials`, { method: "POST", body: fd }).then((r) => {
+        return fetch(`/api/channels/${id}/credentials`, { method: "POST", credentials: "include", body: fd }).then((r) => {
           if (!r.ok) throw new Error("upload failed");
           return r.json();
         });

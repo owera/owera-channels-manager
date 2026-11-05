@@ -12,14 +12,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 from sqlmodel import Session, func, select
 
 from app.config import ensure_dirs, load_dotenv_into_env, settings
 from app.db import get_session, init_db
 from app.models import Channel, OAuthStatus, Video, VideoStatus
 from app.routers import (channels, features, media, music, onboarding, platform_oauth,
-                         playlists, profiles, queue, settings as settings_router, thumbnails,
-                         topics, trends, videos, youtube_admin)
+                         playlists, profiles, queue, settings as settings_router, spa_auth,
+                         thumbnails, topics, trends, videos, youtube_admin)
+from app.services import spa_google_login
 from app.services import render_loop, scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -44,9 +46,9 @@ app = FastAPI(title="Owera Channels Manager", lifespan=lifespan)
 # Dev convenience: the Vite dev server proxies /api, but allow direct CORS too.
 app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
-
 
 def routed_path(request: Request) -> str:
     """The path the router will actually dispatch on.
@@ -82,12 +84,33 @@ def routed_path(request: Request) -> str:
 # request into a 500 with a ~19KB traceback in the log.
 _OAUTH_CALLBACK_PATH = re.compile(r"/api/channels/[0-9]{1,18}/oauth/callback")
 _PLATFORM_OAUTH_CALLBACK = "/api/oauth/google/callback"
+_SPA_AUTH_PREFIX = "/api/auth/"
+
+
+def _basic_password_ok(request: Request) -> bool:
+    if not settings.app_password:
+        return False
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
+        _username, _, password = decoded.partition(":")
+        return secrets.compare_digest(password, settings.app_password)
+    except Exception:
+        return False
+
+
+def _spa_session_ok(request: Request) -> bool:
+    return spa_google_login.spa_session_identity(request) is not None
 
 
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
-    """HTTP Basic Auth guard. Only active when MANAGER_APP_PASSWORD is set in .env."""
+    """HTTP Basic Auth for agents; SPA Google session for humans when enabled."""
     path = routed_path(request)
+    spa_login = spa_google_login.spa_login_enabled()
+
     # Liveness endpoint stays unauthenticated so external uptime monitors can reach it;
     # it exposes only aggregate counts, never channel names or tokens.
     if path == "/health":
@@ -96,24 +119,46 @@ async def basic_auth(request: Request, call_next):
         _OAUTH_CALLBACK_PATH.fullmatch(path) or path == _PLATFORM_OAUTH_CALLBACK
     ):
         return await call_next(request)
-    if not settings.app_password:
+    if path == "/api/features":
         return await call_next(request)
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
-            _username, _, password = decoded.partition(":")
-            if secrets.compare_digest(password, settings.app_password):
-                return await call_next(request)
-        except Exception:
-            pass
+    if spa_login and path.startswith(_SPA_AUTH_PREFIX):
+        return await call_next(request)
+    if spa_login and not path.startswith("/api"):
+        return await call_next(request)
+
+    if _basic_password_ok(request):
+        return await call_next(request)
+    if spa_login and _spa_session_ok(request):
+        return await call_next(request)
+
+    if not settings.app_password and not spa_login:
+        return await call_next(request)
+
+    if spa_login:
+        return Response(status_code=401)
+
     return Response(
         status_code=401,
         headers={"WWW-Authenticate": 'Basic realm="Owera Channels Manager"'},
     )
 
-for r in (channels, features, onboarding, platform_oauth, playlists, profiles, topics,
-          videos, queue, media, settings_router, youtube_admin, trends, music, thumbnails):
+
+# Session must wrap auth middleware (last added = outermost) so request.session is
+# populated before basic_auth checks the SPA cookie.
+if settings.spa_google_login:
+    _session_secret = settings.session_secret or secrets.token_hex(32)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=_session_secret,
+        session_cookie="cm_session",
+        max_age=60 * 60 * 24 * 14,
+        same_site="lax",
+        https_only=False,
+    )
+
+for r in (channels, features, onboarding, platform_oauth, spa_auth, playlists, profiles,
+          topics, videos, queue, media, settings_router, youtube_admin, trends, music,
+          thumbnails):
     app.include_router(r.router)
 
 

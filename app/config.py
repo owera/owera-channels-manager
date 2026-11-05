@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     oauth_redirect_uri: str = "https://channels.owera.com/api/oauth/google/callback"
     token_enc_key: str = ""
 
+    # SPA human login (Google Sign-In → session cookie). Separate Web OAuth client
+    # from platform YouTube Connect (MANAGER_GOOGLE_*). GCP project 618513602444.
+    spa_google_login: bool = False
+    spa_google_client_id: str = ""
+    spa_google_client_secret: str = ""
+    spa_google_redirect_uri: str = "https://channels.owera.com/api/auth/google/callback"
+    # Signed session cookie (required when spa_google_login=1 on claw0).
+    session_secret: str = ""
+
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_storage_dir: str = str(MPT_DIR / "storage" / "tasks")
