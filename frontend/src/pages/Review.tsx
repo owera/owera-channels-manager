@@ -26,7 +26,7 @@ export default function Review() {
     }
   }, [t?.id]);
 
-  if (!t) return <div className="p-8 font-mono text-fog-400">loading…</div>;
+  if (!t) return <div className="p-8 text-fog-400 text-sm">Loading…</div>;
 
   const tagList = tags.split(",").map((s) => s.trim()).filter(Boolean);
   const editable = t.status === "review" || t.status === "rendered";
@@ -35,8 +35,8 @@ export default function Review() {
   return (
     <div className="p-8 max-w-[1200px]">
       <header className="flex items-center gap-4 mb-6">
-        <button className="btn btn-ghost" onClick={() => nav(-1)}>← back</button>
-        <div className="label">// review</div>
+        <button className="btn btn-ghost" onClick={() => nav(-1)}>← Back</button>
+        <h1 className="font-display font-bold text-xl text-fog-50">Review video</h1>
         <StatusChip status={t.status} />
       </header>
 
@@ -79,14 +79,14 @@ export default function Review() {
               <div className="flex gap-3">
                 <button className="btn btn-signal flex-1 justify-center" disabled={m.approveVideo.isPending}
                   onClick={() => m.approveVideo.mutate({ id: t.id, body: saveBody() }, { onSuccess: () => nav(-1) })}>
-                  ✓ approve &amp; publish
+                  Approve &amp; publish
                 </button>
-                <button className="btn" onClick={() => m.updateVideo.mutate({ id: t.id, body: saveBody() })}>save draft</button>
+                <button className="btn" onClick={() => m.updateVideo.mutate({ id: t.id, body: saveBody() })}>Save</button>
                 <button className="btn" onClick={() => m.regenMeta.mutate(t.id)} disabled={m.regenMeta.isPending}>
-                  {m.regenMeta.isPending ? "…" : "↻ metadata"}
+                  {m.regenMeta.isPending ? "…" : "Refresh metadata"}
                 </button>
               </div>
-              <button className="btn btn-ghost mt-3 text-[#f7768e] hover:border-[#f7768e]/40" onClick={() => setRejecting((v) => !v)}>reject</button>
+              <button className="btn btn-ghost mt-3 text-[#f7768e] hover:border-[#f7768e]/40" onClick={() => setRejecting((v) => !v)}>Reject</button>
               {rejecting && (
                 <div className="mt-3 flex gap-2">
                   <input className="input" placeholder="reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />

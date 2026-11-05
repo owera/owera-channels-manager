@@ -11,7 +11,7 @@ import { HeldToasts } from "./ui";
 
 const NAV = [
   { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
-  { to: "/board", label: "Queue Board", short: "Board", code: "01" },
+  { to: "/board", label: "Review queue", short: "Queue", code: "01" },
   { to: "/channels", label: "Channels", short: "Channels", code: "02" },
   { to: "/onboarding", label: "Onboarding", short: "Start", code: "06" },
   { to: "/trends", label: "Trends", short: "Trends", code: "03" },
@@ -29,7 +29,7 @@ function Sidebar() {
             Owera <span className="text-signal">Channels Manager</span>
           </span>
         </div>
-        <div className="label mt-1.5 pl-[18px]">channel ops console</div>
+        <div className="text-[10px] text-fog-400 mt-1.5 pl-[18px] tracking-wide">YouTube channel studio</div>
       </div>
 
       <nav className="flex-1 py-4">

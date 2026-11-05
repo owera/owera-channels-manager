@@ -273,9 +273,12 @@ export default function ChannelYoutube({ channel }: { channel: Channel }) {
   if (channel.oauth_status !== "connected") {
     return (
       <div className="mt-6">
-        <SectionLabel>// youtube management</SectionLabel>
+        <SectionLabel>YouTube tools</SectionLabel>
         <div className="mt-2">
-          <Empty>Connect this channel to manage its branding, metrics, and subscriptions.</Empty>
+          <Empty compact>
+            <p className="text-fog-100 font-medium mb-1">YouTube tools unlock after connect</p>
+            <p>Branding, metrics, and subscription lists appear here once YouTube is connected.</p>
+          </Empty>
         </div>
       </div>
     );

@@ -42,15 +42,15 @@ function VideoCard({ v, onOpen, eta, qinfo, format, paused, budgetZero, oauthHol
       )}
 
       {v.status === "approved" && (
-        <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-fog-300"
           style={{ color: (v.held || paused || budgetZero || oauthHold) ? "#f5a524" : STATUS_META.approved.hex }}>
           <span>◷</span>
-          {v.held ? "on hold — not publishing" : paused ? "publishes when unpaused" : budgetZero ? "held — publish budget 0" : oauthHold ? "held — reconnect" : eta ? `publishes in ${relTime(eta)}` : "queued to publish"}
+          {v.held ? "On hold — not publishing" : paused ? "Publishes when unpaused" : budgetZero ? "On hold — daily publish limit is 0" : oauthHold ? "On hold — reconnect YouTube" : eta ? `Publishes in ${relTime(eta)}` : "Queued to publish"}
         </div>
       )}
 
       {v.status === "queued" && qinfo && (
-        <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-fog-300"
           style={{ color: qinfo.reason.includes("paused") ? "#f5a524" : STATUS_META.queued.hex }}>
           <span>◷</span>
           {qinfo.reason}{qinfo.eta ? ` · in ${relTime(qinfo.eta)}` : ""}
@@ -95,22 +95,27 @@ function Column({ status, videos, onOpen, onProduceAll, onApproveAll, onDeleteAl
       <div className="flex items-center justify-between px-1 mb-3">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-sm" style={{ background: meta.hex }} />
-          <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-fog-200">{meta.label}</span>
+          <span className="text-[11px] font-medium tracking-wide text-fog-200">{meta.label}</span>
         </div>
         <div className="flex items-center gap-2">
           {status === "draft" && items.length > 0 && (
-            <button className="label text-signal hover:text-white" onClick={onProduceAll}>produce all</button>
+            <button className="label text-signal hover:text-white normal-case tracking-normal" onClick={onProduceAll}>Produce all</button>
           )}
           {status === "review" && items.length > 0 && (
-            <button className="label text-signal hover:text-white" onClick={onApproveAll}>approve all</button>
+            <button className="label text-signal hover:text-white normal-case tracking-normal" onClick={onApproveAll}>Approve all</button>
           )}
           {items.length > 0 && (
-            <button className="label text-fog-400 hover:text-[#f7768e]" onClick={onDeleteAll}>delete all</button>
+            <button className="label text-fog-400 hover:text-[#f7768e] normal-case tracking-normal" onClick={onDeleteAll}>Delete all</button>
           )}
           <span className="font-mono text-xs tabular-nums text-fog-400">{items.length}</span>
         </div>
       </div>
-      <div className="flex-1 space-y-2.5 min-h-[60px] rounded-md p-1 overflow-y-auto">
+      <div className="flex-1 space-y-2.5 min-h-[120px] rounded-md p-1 overflow-y-auto">
+        {!items.length && (
+          <div className="rounded border border-dashed border-ink-line/60 bg-ink-800/20 px-3 py-6 text-center text-[11px] text-fog-500 leading-relaxed">
+            Nothing in {meta.label.toLowerCase()} yet
+          </div>
+        )}
         {items.map((v: Video) => <VideoCard key={v.id} v={v} onOpen={onOpen} eta={plan?.[v.id]} qinfo={queuePlan?.[v.id]} format={formats?.[v.topic_id]} paused={paused} budgetZero={budgetZero} oauthHold={oauthHold} />)}
       </div>
     </div>
@@ -160,11 +165,11 @@ function VideoModal({ video, channelId, onClose }: { video: Video; channelId: nu
             {profiles?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </Field>
-        <Field label="approval gate">
+        <Field label="Review before publish">
           <select className="input" value={skipGate} onChange={(e) => setSkipGate(e.target.value)}>
-            <option value="">inherit channel default</option>
-            <option value="false">require review</option>
-            <option value="true">auto-approve</option>
+            <option value="">Use channel default</option>
+            <option value="false">Yes — send to review</option>
+            <option value="true">No — publish after render</option>
           </select>
         </Field>
       </div>
@@ -177,7 +182,7 @@ function VideoModal({ video, channelId, onClose }: { video: Video; channelId: nu
           <button className="btn" onClick={() => nav(`/review/${video.id}`)}>open review →</button>
         )}
         {(video.status === "failed" || video.status === "rejected") && (
-          <button className="btn" onClick={() => m.requeueVideo.mutate(video.id, { onSuccess: onClose })}>requeue</button>
+          <button className="btn" onClick={() => m.requeueVideo.mutate(video.id, { onSuccess: onClose })}>Send to queue</button>
         )}
         <button className="btn btn-ghost ml-auto text-[#f7768e] hover:border-[#f7768e]/40"
           onClick={() => m.deleteVideo.mutate(video.id, { onSuccess: onClose })}>delete</button>
@@ -241,7 +246,7 @@ export default function Board() {
     <div className="p-4 md:p-8 h-full flex flex-col">
       <header className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
-          <div className="label mb-2">// video queue</div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-2">Review queue</p>
           <div className="flex items-center gap-2 sm:gap-3">
             <select className="bg-transparent font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight focus:outline-none cursor-pointer"
               value={active} onChange={(e) => nav(`/board/${e.target.value}`)}>
@@ -261,25 +266,32 @@ export default function Board() {
       </header>
 
       {channel?.paused ? (
-        <div className="panel px-4 py-2 mb-4 font-mono text-xs text-amber">
-          ⏸ channel paused — nothing renders or publishes. Unpause in <Link to="/channels" className="text-signal underline">Channels</Link>.
+        <div className="panel px-4 py-3 mb-4 text-sm text-amber leading-relaxed">
+          Channel is paused — nothing will render or publish until you turn pause off in <Link to="/channels" className="text-signal underline font-medium">Channels</Link>.
         </div>
       ) : budgetZero ? (
-        <div className="panel px-4 py-2 mb-4 font-mono text-xs text-amber">
-          publish budget is 0 — approved videos will not drip. Raise it in <Link to="/channels" className="text-signal underline">Channels</Link>.
+        <div className="panel px-4 py-3 mb-4 text-sm text-amber leading-relaxed">
+          Daily publish limit is set to 0 — approved videos stay queued. Raise the limit in <Link to="/channels" className="text-signal underline font-medium">Channels</Link>.
         </div>
       ) : oauthHold ? (
-        <div className="panel px-4 py-2 mb-4 font-mono text-xs text-amber">
-          OAuth needs reconnect — approved videos will not publish. Reconnect in <Link to="/channels" className="text-signal underline">Channels</Link>.
+        <div className="panel px-4 py-3 mb-4 text-sm text-amber leading-relaxed">
+          YouTube is not connected — approved videos will not publish. <Link to="/channels" className="text-signal underline font-medium">Connect YouTube</Link> to continue.
         </div>
       ) : (
-        <div className="panel px-4 py-2 mb-4 font-mono text-xs text-fog-300">
-          ▶ active — produced videos render automatically; {channel?.default_skip_gate ? "auto-approved" : "held in Review for approval"} before publishing.
+        <div className="panel px-4 py-3 mb-4 text-sm text-fog-300 leading-relaxed">
+          Videos render automatically after you produce them.
+          {channel?.default_skip_gate
+            ? " This channel publishes without a review step."
+            : " You approve each video in Review before it goes live."}
         </div>
       )}
 
       {!videos?.length ? (
-        <Empty>No videos yet. Go to <Link to="/channels" className="text-signal">Channels → a topic → generate ideas</Link>, then produce them here.</Empty>
+        <Empty>
+          <p className="text-fog-100 font-medium mb-2">Your queue is empty</p>
+          <p className="mb-4">Add a topic under Channels, generate ideas, then tap <span className="text-fog-200">Produce</span> to start rendering.</p>
+          <Link to="/channels" className="btn btn-signal inline-flex">Go to Channels</Link>
+        </Empty>
       ) : (
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <div className="flex gap-4 h-full pb-4">

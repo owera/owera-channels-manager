@@ -3,13 +3,14 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { STATUS_META } from "./status";
 import type { Status } from "./api";
+import { humanizeHeldReason } from "./copy";
 import { dismissHeld, heldSnapshot, subscribeHeld, type HeldNotice } from "./held";
 
 export function StatusChip({ status, sm }: { status: Status; sm?: boolean }) {
   const m = STATUS_META[status];
   return (
     <span
-      className="inline-flex items-center gap-1.5 font-mono uppercase tracking-wider rounded-sm border"
+      className="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide rounded-sm border"
       style={{
         color: m.hex,
         borderColor: `${m.hex}40`,
@@ -34,7 +35,10 @@ export function Dot({ hex, pulse }: { hex: string; pulse?: boolean }) {
 }
 
 export function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="label mb-3">{children}</div>;
+  const text = typeof children === "string" ? children.replace(/^\/\/\s*/, "") : children;
+  return (
+    <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-3">{text}</h3>
+  );
 }
 
 export function Stat({ value, label, accent }: { value: ReactNode; label: string; accent?: string }) {
@@ -98,9 +102,11 @@ export function Field({ label, children, hint }: { label: string; children: Reac
   );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
+export function Empty({ children, compact }: { children: ReactNode; compact?: boolean }) {
   return (
-    <div className="text-center py-16 text-fog-300 font-mono text-sm border border-dashed border-ink-line rounded-md">
+    <div
+      className={`text-center ${compact ? "py-10 px-6" : "py-16 px-8"} text-fog-300 text-sm leading-relaxed border border-dashed border-ink-line/80 rounded-md bg-ink-800/30`}
+    >
       {children}
     </div>
   );
@@ -133,12 +139,13 @@ const HELD_HEX = "#f5a524";
 
 /** Neutral amber badge — a hold is not an error. */
 export function HeldBadge({ reason }: { reason: string }) {
+  const text = humanizeHeldReason(reason);
   return (
-    <div className="mt-2 flex items-start gap-1.5 font-mono text-[10px] tracking-wider rounded-sm border px-1.5 py-1"
+    <div className="mt-2 flex items-start gap-1.5 text-[11px] leading-snug rounded-sm border px-2 py-1.5"
       style={{ color: HELD_HEX, borderColor: `${HELD_HEX}40`, background: `${HELD_HEX}14` }}
-      title={reason} data-held="1">
-      <span>⏸</span>
-      <span className="line-clamp-3"><span className="uppercase">Segurado:</span> {reason}</span>
+      title={text} data-held="1">
+      <span className="shrink-0">⏸</span>
+      <span className="line-clamp-3"><span className="font-medium text-fog-100">On hold.</span> {text}</span>
     </div>
   );
 }
@@ -156,12 +163,12 @@ export function HeldToasts() {
   return createPortal(
     <div className="fixed right-4 bottom-20 md:bottom-4 z-[60] flex flex-col gap-2 max-w-sm">
       {recent.map((n) => (
-        <div key={n.id} role="status" className="panel px-3 py-2 font-mono text-xs flex items-start gap-2"
+        <div key={n.id} role="status" className="panel px-3 py-2 text-xs flex items-start gap-2"
           style={{ color: HELD_HEX, borderColor: `${HELD_HEX}55` }}>
           <span>⏸</span>
-          <span className="flex-1">
-            <span className="uppercase">Segurado</span>
-            {n.videoId != null ? ` · #${n.videoId}` : ""}: {n.reason}
+          <span className="flex-1 leading-snug">
+            <span className="font-medium text-fog-100">On hold</span>
+            {n.videoId != null ? ` · video ${n.videoId}` : ""}: {humanizeHeldReason(n.reason)}
           </span>
           <button className="text-fog-300 hover:text-white" onClick={() => dismissHeld(n.id)}>×</button>
         </div>

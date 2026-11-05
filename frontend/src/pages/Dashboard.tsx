@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useDashboard, useOnboarding, useRuns, useSettings, type DashboardRow, type Status } from "../api";
+import { oauthStatusLabel } from "../copy";
 import { STATUS_META } from "../status";
-import { Dot } from "../ui";
+import { Dot, Empty } from "../ui";
 
 function relTime(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now();
@@ -63,7 +64,7 @@ function ChannelCard({ row, i }: { row: DashboardRow; i: number }) {
             <Dot hex={c.paused ? "#f5a524" : oauthHex} pulse={!c.paused && c.oauth_status === "connected"} />
             <Link to={`/board/${c.id}`} className="font-display font-bold text-fog-50 text-lg hover:text-signal transition-colors">{c.name}</Link>
           </div>
-          <div className="label mt-1">{c.paused ? "paused" : c.oauth_status} · {row.counts.published || 0} live</div>
+          <div className="label mt-1 normal-case tracking-normal">{c.paused ? "Paused" : oauthStatusLabel(c.oauth_status)} · {row.counts.published || 0} live</div>
         </div>
         {review > 0 && (
           <Link to={`/board/${c.id}`} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm"
@@ -116,8 +117,8 @@ function ChannelCard({ row, i }: { row: DashboardRow; i: number }) {
       <QuotaBar spent={row.quota_spent_today} cap={row.quota_cap} />
 
       <div className="flex gap-3 mt-4">
-        <Link to={`/board/${c.id}`} className="btn btn-ghost !py-1.5 flex-1 justify-center">board</Link>
-        <Link to="/channels" className="btn btn-ghost !py-1.5 flex-1 justify-center">topics</Link>
+        <Link to={`/board/${c.id}`} className="btn btn-ghost !py-1.5 flex-1 justify-center">Open queue</Link>
+        <Link to="/channels" className="btn btn-ghost !py-1.5 flex-1 justify-center">Topics</Link>
       </div>
     </motion.div>
   );
@@ -141,25 +142,28 @@ export default function Dashboard() {
     <div className="p-4 md:p-8 max-w-[1500px]">
       {onboarding && !onboarding.onboarding_complete && (
         <div className="mb-6 panel px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-signal/30">
-          <span className="text-sm text-fog-200">Early access onboarding incomplete — finish connect → topic → ideas.</span>
-          <Link to="/onboarding" className="btn btn-signal !py-1.5">Checklist →</Link>
+          <span className="text-sm text-fog-200 leading-relaxed">Finish setup: connect YouTube, add a topic, and generate your first ideas.</span>
+          <Link to="/onboarding" className="btn btn-signal !py-1.5 shrink-0">Setup checklist</Link>
         </div>
       )}
 
-      <header className="flex items-end justify-between mb-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
-          <div className="label mb-2">// overview</div>
-          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Control Room</h1>
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-2">Home</p>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Your channels</h1>
+          <p className="text-sm text-fog-400 mt-2 max-w-xl">Live counts, what&apos;s rendering, and what needs your review.</p>
         </div>
-        <div className="flex items-center gap-4 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-fog-300">
           {settings?.youtube_quota_reset_at && (
-            <span className="flex items-center gap-1.5 text-fog-400">
-              <span>◷</span>
-              <span className="text-fog-300">youtube quota resets in</span>
-              <span className="text-fog-100 tabular-nums">{relTime(settings.youtube_quota_reset_at)}</span>
+            <span className="flex items-center gap-1.5 panel px-3 py-1.5">
+              <span className="text-fog-400">◷</span>
+              <span>YouTube quota resets in</span>
+              <span className="text-fog-100 tabular-nums font-medium">{relTime(settings.youtube_quota_reset_at)}</span>
             </span>
           )}
-          {settings?.scheduler_paused && <span className="text-amber">scheduler paused</span>}
+          {settings?.scheduler_paused && (
+            <span className="panel px-3 py-1.5 text-amber">Publishing is paused workspace-wide</span>
+          )}
         </div>
       </header>
 
@@ -173,16 +177,16 @@ export default function Dashboard() {
       </div>
 
       {/* NOW panel */}
-      <div className="panel p-4 mb-6">
-        <div className="label mb-2">// now</div>
+      <div className="panel p-5 mb-6">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-3">Right now</h2>
         {active.length === 0 ? (
-          <div className="font-mono text-xs text-fog-400">pipeline idle — nothing rendering or publishing right now</div>
+          <p className="text-sm text-fog-400">Nothing is rendering or publishing. Generate ideas from a topic when you&apos;re ready.</p>
         ) : (
           <div className="space-y-2">
             {active.map((a) => (
               <div key={a.id} className="flex items-center gap-2 sm:gap-3">
                 <Dot hex={STATUS_META[a.status].hex} pulse />
-                <span className="font-mono text-[10px] uppercase tracking-wider w-[72px] sm:w-[88px] shrink-0" style={{ color: STATUS_META[a.status].hex }}>{STATUS_META[a.status].label}</span>
+                <span className="text-[11px] font-medium w-[72px] sm:w-[88px] shrink-0" style={{ color: STATUS_META[a.status].hex }}>{STATUS_META[a.status].label}</span>
                 <span className="text-sm text-fog-100 truncate flex-1">{a.subject}</span>
                 <span className="label text-fog-400 hidden sm:inline">{a.channel}</span>
                 <div className="hidden sm:block w-28 h-1.5 bg-ink-500 rounded-full overflow-hidden">
@@ -201,15 +205,17 @@ export default function Dashboard() {
           {rows.map((r, i) => <ChannelCard key={r.channel.id} row={r} i={i} />)}
         </div>
       ) : (
-        <div className="panel p-8 text-center text-fog-300 font-mono text-sm mb-8">
-          No channels yet — add one in <Link to="/channels" className="text-signal">Channels</Link>.
-        </div>
+        <Empty compact>
+          <p className="text-fog-200 mb-2">No channels yet</p>
+          <p>Add a channel, connect YouTube, and you&apos;ll see progress here.</p>
+          <Link to="/channels" className="btn btn-signal mt-5 inline-flex">Add channel</Link>
+        </Empty>
       )}
 
       {/* Activity */}
-      <div className="label mb-3">// activity log</div>
+      <h2 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-3">Recent activity</h2>
       <div className="panel divide-y divide-ink-line/60">
-        {!runs?.length && <div className="px-4 py-6 text-fog-400 font-mono text-xs">no activity yet</div>}
+        {!runs?.length && <div className="px-4 py-8 text-fog-400 text-sm text-center">Activity from renders and publishes will show up here.</div>}
         {runs?.slice(0, 16).map((r) => (
           <div key={r.id} className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 font-mono text-xs">
             <Dot hex={r.status === "success" ? "#c9f24e" : r.status === "error" ? "#f7768e" : "#56c8e6"} />
