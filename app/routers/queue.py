@@ -6,8 +6,9 @@ from sqlmodel import Session, func, select
 from app.config import settings
 from app.db import app_settings, get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendStatus,
-                        Video, VideoStatus)
+                        Video, VideoStatus, Workspace)
 from app.services import issues, quota
+from app.workspace import channels_for_workspace, current_workspace
 from app.services.mpt_client import mpt
 from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
@@ -65,11 +66,10 @@ def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
     return next_window_open(ch, now if not last else max(now, last + drip)).isoformat()
 
 
-@router.get("/dashboard")
-def dashboard(session: Session = Depends(get_session)):
+def _dashboard_for_workspace(session: Session, ws: Workspace):
     cfg = app_settings(session)
     out = []
-    for ch in session.exec(select(Channel).order_by(Channel.id)).all():
+    for ch in session.exec(channels_for_workspace(ws)).all():
         counts = {s: 0 for s in _STATUSES}
         for status, n in session.exec(
             select(Video.status, func.count(Video.id))
@@ -104,6 +104,11 @@ def dashboard(session: Session = Depends(get_session)):
     return out
 
 
+@router.get("/dashboard")
+def dashboard(session: Session = Depends(get_session), ws: Workspace = Depends(current_workspace)):
+    return _dashboard_for_workspace(session, ws)
+
+
 @router.get("/runs")
 def runs(channel_id: int | None = None, video_id: int | None = None, limit: int = 100,
          session: Session = Depends(get_session)):
@@ -116,16 +121,17 @@ def runs(channel_id: int | None = None, video_id: int | None = None, limit: int 
 
 
 @router.get("/agent/issues")
-def agent_issues(session: Session = Depends(get_session)):
+def agent_issues(session: Session = Depends(get_session), ws: Workspace = Depends(current_workspace)):
     """The operational triage digest: terminal/persistent issues the background loops
     don't auto-heal (failed/rejected videos, OAuth walls, quota cooldowns, recurring
     error signatures, gate backlog, idea-board overflow). The agent remediates by
     composing the existing video/topic/channel endpoints; OAuth/quota walls escalate."""
-    return issues.detect(session)
+    return issues.detect(session, workspace_id=ws.id)
 
 
 @router.get("/agent/state")
-def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
+def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
     """Everything the autonomous growth agent needs in one read: app settings, the
     full dashboard, the per-topic/format analytics leaderboard per channel, the topic
     control surface (active/weight/pending), and the recent run audit. The agent acts
@@ -134,7 +140,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
 
     cfg = app_settings(session)
-    channels = session.exec(select(Channel).order_by(Channel.id)).all()
+    channels = session.exec(channels_for_workspace(ws)).all()
+    ch_ids = {ch.id for ch in channels}
 
     analytics_by_topic = {}
     for ch in channels:
@@ -142,7 +149,14 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
             analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session)
 
     topics = []
-    for t in session.exec(select(Topic).order_by(Topic.channel_id, Topic.position)).all():
+    topic_rows = (
+        session.exec(
+            select(Topic).where(Topic.channel_id.in_(ch_ids))
+            .order_by(Topic.channel_id, Topic.position)
+        ).all()
+        if ch_ids else []
+    )
+    for t in topic_rows:
         pending = session.exec(
             select(func.count(Video.id)).where(
                 Video.topic_id == t.id,
@@ -158,14 +172,24 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
             "weight": t.weight, "pending": pending, "published": published,
         })
 
-    recent_runs = session.exec(
-        select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit)).all()
+    recent_runs_q = select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit * 3)
+    recent_runs = [
+        r for r in session.exec(recent_runs_q).all()
+        if r.channel_id is None or r.channel_id in ch_ids
+    ][:runs_limit]
 
     # Active trends (so the agent dedupes + learns from prior research each run).
-    trends = session.exec(
-        select(TrendSignal).where(TrendSignal.status.in_(
+    trends_q = (
+        select(TrendSignal)
+        .where(TrendSignal.status.in_(
             [TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED]))
-        .order_by(TrendSignal.updated_at.desc()).limit(30)).all()
+        .order_by(TrendSignal.updated_at.desc())
+        .limit(30)
+    )
+    trends = [
+        t for t in session.exec(trends_q).all()
+        if t.channel_id is None or t.channel_id in ch_ids
+    ]
 
     monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
 
@@ -186,12 +210,12 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session)):
     return {
         "now": datetime.now(timezone.utc).isoformat(),
         "settings": cfg,
-        "dashboard": dashboard(session),
+        "dashboard": _dashboard_for_workspace(session, ws),
         "analytics_by_topic": analytics_by_topic,
         "monetization_by_channel": monetization_by_channel,
         "topics": topics,
         "trends": trends,
         "recent_runs": recent_runs,
-        "issues": issues.detect(session),
+        "issues": issues.detect(session, workspace_id=ws.id),
         "bgm_pool": bgm_pool,
     }
