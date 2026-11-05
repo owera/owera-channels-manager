@@ -4,7 +4,12 @@ Separate from **YouTube Connect** (`MANAGER_GOOGLE_WEB_OAUTH`, `/api/oauth/googl
 
 ## GCP (project `618513602444`)
 
-Create a **Web application** OAuth client for human portal login (not the YouTube Connect client).
+**Live Web login client (CTO):** `owera-channels-spa-login` — separate from YouTube Connect (`MANAGER_GOOGLE_*`).
+
+Public client ID (safe to document; not a secret):  
+`618513602444-c497jppvaq67guu4g9noajmvq4tvmp9k.apps.googleusercontent.com`
+
+Ops wires **`MANAGER_SPA_GOOGLE_CLIENT_ID`** and **`MANAGER_SPA_GOOGLE_CLIENT_SECRET`** on claw0 tip only (never commit the secret).
 
 | Setting | Value |
 |---------|--------|
