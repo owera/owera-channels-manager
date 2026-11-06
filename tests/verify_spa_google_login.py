@@ -138,4 +138,41 @@ ok(r_plat.status_code == 404, "platform YT Connect untouched when MANAGER_GOOGLE
 r_index = client.get("/")
 ok(r_index.status_code in (200, 404), "non-/api routes do not require auth when SPA login on")
 
+# --- callback HTML must not reflect raw markup (YouTube callback already escapes) ---
+EVIL = "<img src=x onerror=alert(1)>"
+ESCAPED = "&lt;img src=x onerror=alert(1)&gt;"
+
+c_err = TestClient(main_mod.app)
+cancelled = c_err.get("/api/auth/google/callback", params={"error": EVIL})
+ok(cancelled.status_code == 400, "cancelled callback stays 400")
+ok("Sign-in cancelled" in cancelled.text, "cancelled page still names the failure")
+ok(EVIL not in cancelled.text and ESCAPED in cancelled.text,
+   "error query param is HTML-escaped")
+plain = c_err.get("/api/auth/google/callback", params={"error": "access_denied"})
+ok(plain.status_code == 400 and "access_denied" in plain.text,
+   "a plain Google error is still shown")
+amped = c_err.get("/api/auth/google/callback", params={"error": "tom & jerry"})
+ok("tom &amp; jerry" in amped.text and "tom & jerry" not in amped.text,
+   "error query escapes ampersands too")
+
+c_ex = TestClient(main_mod.app)
+with patch.object(spa_google_login, "consume_oauth_state", return_value=True):
+    with patch.object(spa_google_login, "exchange_code_and_profile",
+                      side_effect=RuntimeError(EVIL)):
+        exploded = c_ex.get("/api/auth/google/callback?code=abc&state=x")
+ok(exploded.status_code == 502, "exchange failure stays 502")
+ok(EVIL not in exploded.text and ESCAPED in exploded.text,
+   "exchange exception text is HTML-escaped")
+
+c_mail = TestClient(main_mod.app)
+with patch.object(spa_google_login, "consume_oauth_state", return_value=True):
+    with patch.object(spa_google_login, "exchange_code_and_profile",
+                      return_value={"email": EVIL + "@x", "email_verified": True}):
+        denied_html = c_mail.get("/api/auth/google/callback?code=abc&state=x")
+ok(denied_html.status_code == 403, "markup-looking email is still denied")
+ok("Access denied" in denied_html.text and "not allowlisted" in denied_html.text,
+   "deny copy kept")
+ok(EVIL not in denied_html.text and ESCAPED + "@x" in denied_html.text,
+   "deny page HTML-escapes the email")
+
 print(f"\nALL {_checks} CHECKS PASSED")
