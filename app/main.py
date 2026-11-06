@@ -153,7 +153,7 @@ if settings.spa_google_login:
         session_cookie="cm_session",
         max_age=60 * 60 * 24 * 14,
         same_site="lax",
-        https_only=False,
+        https_only=settings.session_cookie_secure,
     )
 
 for r in (channels, features, onboarding, platform_oauth, spa_auth, playlists, profiles,

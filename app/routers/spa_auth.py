@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from app.config import settings
 from app.services import spa_google_login as spa
 
 logger = logging.getLogger("manager.spa_auth")
@@ -93,8 +94,34 @@ def google_callback(
     return RedirectResponse("/", status_code=302)
 
 
-@router.post("/logout")
-def logout(request: Request):
-    _require_enabled()
+def _logout_response(request: Request) -> JSONResponse:
+    """Invalidate SPA session and force-remove `cm_session` in the browser.
+
+    SessionMiddleware clears the cookie when the session dict is empty, but its
+    `Set-Cookie` omits `Max-Age=0`; some clients keep the old cookie. We emit a
+    second deletion with explicit max-age 0 using the same path/flags as the
+    middleware (see `app/main.py` SessionMiddleware).
+    """
     spa.clear_session(request)
-    return {"ok": True}
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(
+        "cm_session",
+        path="/",
+        secure=settings.session_cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
+    return resp
+
+
+@router.post("/logout")
+def logout_post(request: Request):
+    _require_enabled()
+    return _logout_response(request)
+
+
+@router.get("/logout")
+def logout_get(request: Request):
+    """Compatibility: navigations and proxies may use GET; behavior matches POST."""
+    _require_enabled()
+    return _logout_response(request)
