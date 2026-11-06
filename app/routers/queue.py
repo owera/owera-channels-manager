@@ -11,16 +11,22 @@ from app.services import issues, quota
 from app.workspace import channels_for_workspace, current_workspace
 from app.services.mpt_client import mpt
 from app.services.publish_loop import next_window_open
-from app.services.youtube import QUOTA_UPLOAD
+from app.services.youtube import QUOTA_COMMENT_INSERT, QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
+
+# tick() refuses the next upload unless this many units still fit the workspace
+# cap (upload + thumbnail + first comment). Playlist insert is not in that
+# pre-check. publish_plan and the dashboard ETA must use the same sum — the
+# global cap // 1600 ceiling promised slots the loop will not take.
+PUBLISH_UNITS = QUOTA_UPLOAD + QUOTA_THUMBNAIL_SET + QUOTA_COMMENT_INSERT
 
 _STATUSES = [VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING, VideoStatus.RENDERED,
              VideoStatus.REVIEW, VideoStatus.APPROVED, VideoStatus.PUBLISHING,
              VideoStatus.PUBLISHED, VideoStatus.FAILED, VideoStatus.REJECTED]
 
 
-def _publish_hold(ch: Channel, approved: int) -> str | None:
+def _publish_hold(ch: Channel, approved: int, session: Session | None = None) -> str | None:
     """Why next_publish_eta is missing when approved work exists.
 
     None means either there's nothing approved (no hold to explain) or an
@@ -34,9 +40,19 @@ def _publish_hold(ch: Channel, approved: int) -> str | None:
         return "paused"
     if ch.oauth_status != OAuthStatus.CONNECTED:
         return "oauth"
-    daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
-    if daily_limit <= 0:
+    # Callers without a session keep the pre-workspace ceiling so a budget of
+    # 0 still reads as "budget". The dashboard passes the session: a workspace
+    # cap that cannot hold one upload is not a zero channel budget.
+    if session is None:
+        daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
+        if daily_limit <= 0:
+            return "budget"
+        return None
+    if ch.daily_publish_budget <= 0:
         return "budget"
+    cap = quota.youtube_quota_cap_for_workspace(session, ch.workspace_id)
+    if cap < PUBLISH_UNITS:
+        return "quota"
     return None
 
 
@@ -47,16 +63,23 @@ def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
         Video.held.is_not(True))).one()           # held rows never publish
     if not n or ch.paused or ch.oauth_status != OAuthStatus.CONNECTED:
         return None
-    daily_limit = min(ch.daily_publish_budget, settings.youtube_daily_quota_cap // QUOTA_UPLOAD)
-    # Same gate as publish_plan / tick(): budget<=0 means the channel isn't
-    # publishing. max(1, ...) claimed a slot the loop will never take.
-    if daily_limit <= 0:
+    # tick() skips on the channel budget, and also when the next upload does
+    # not fit the workspace cap. The global cap // 1600 ceiling ignored a
+    # lower cap and ignored units already spent by a sibling channel.
+    if ch.daily_publish_budget <= 0:
+        return None
+    cap = quota.youtube_quota_cap_for_workspace(session, ch.workspace_id)
+    if cap < PUBLISH_UNITS:
         return None
     now = datetime.now(timezone.utc)
-    if quota.published_today(session, ch.id) >= daily_limit:
+    if quota.published_today(session, ch.id) >= ch.daily_publish_budget:
         nxt = (now + timedelta(days=1)).date()
         return next_window_open(
             ch, datetime.combine(nxt, time.min, tzinfo=timezone.utc)).isoformat()
+    if quota.workspace_quota_would_exceed(session, ch.workspace_id, PUBLISH_UNITS):
+        # Spend clears at Pacific midnight, not the next UTC date. A UTC jump
+        # can still land inside the quota day tick() is skipping.
+        return next_window_open(ch, quota._next_pt_midnight_utc(now)).isoformat()
     last = quota.last_publish_at(session, ch.id)
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
@@ -95,7 +118,7 @@ def _dashboard_for_workspace(session: Session, ws: Workspace):
             "quota_cap": quota.youtube_quota_cap_for_workspace(session, ch.workspace_id),
             "next_publish_eta": _next_publish_eta(session, ch, cfg),
             "held": held,
-            "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0) - held),
+            "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0) - held, session),
             # Runway / under-publish signals (same computation as the issues digest).
             "publish_signals": issues.publish_signals(session, ch),
             "active": [{"id": v.id, "subject": v.subject, "status": v.status,
