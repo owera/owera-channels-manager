@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   useChannels, useFeatures, useMut, useProfiles, useTopics, type Channel, type Topic,
@@ -13,18 +13,43 @@ const OAUTH_HEX: Record<string, string> = {
 };
 
 // ---------- Topics (content themes) ----------
-function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
+function TopicCard({
+  topic,
+  channel,
+  orderedTopics,
+  index,
+}: {
+  topic: Topic;
+  channel: Channel;
+  orderedTopics: Topic[];
+  index: number;
+}) {
   const m = useMut();
   const countRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(topic.name);
   const [prompt, setPrompt] = useState(topic.theme_prompt ?? "");
   const [format, setFormat] = useState<"short" | "long">(topic.content_format);
+  const [weight, setWeight] = useState(String(topic.weight ?? 1));
+  const [active, setActive] = useState(topic.active);
+  const [steerTopic, setSteerTopic] = useState("");
+  const [steerTitle, setSteerTitle] = useState("");
+  const [steerAngle, setSteerAngle] = useState("");
+  const [steerNotes, setSteerNotes] = useState("");
   const openEdit = () => {
     setName(topic.name);
     setPrompt(topic.theme_prompt ?? "");
     setFormat(topic.content_format);
+    setWeight(String(topic.weight ?? 1));
+    setActive(topic.active);
     setEditing(true);
+  };
+  const move = (dir: number) => {
+    const j = index + dir;
+    if (j < 0 || j >= orderedTopics.length) return;
+    const next = [...orderedTopics];
+    [next[index], next[j]] = [next[j], next[index]];
+    m.reorderTopics.mutate({ channel_id: channel.id, ordered_ids: next.map((x) => x.id) });
   };
   const c: Record<string, number> = topic.video_counts || {};
   const drafts = c.draft || 0;
@@ -45,9 +70,21 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
           {topic.theme_prompt && <div className="text-[12px] text-fog-300 mt-0.5 line-clamp-2">{topic.theme_prompt}</div>}
         </div>
         <div className="flex items-center gap-2.5">
+          <button type="button" className="label hover:text-fog-100 disabled:opacity-30" disabled={index <= 0}
+            onClick={() => move(-1)} title="move up">↑</button>
+          <button type="button" className="label hover:text-fog-100 disabled:opacity-30"
+            disabled={index >= orderedTopics.length - 1} onClick={() => move(1)} title="move down">↓</button>
           <button className="label hover:text-signal" onClick={openEdit}>edit</button>
           <button className="label hover:text-[#f7768e]" onClick={() => m.deleteTopic.mutate(topic.id)}>del</button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-fog-400">
+        <span>weight <span className="text-fog-200 font-mono">{topic.weight ?? 1}</span></span>
+        <span>{topic.active ? <span className="text-signal">active</span> : <span className="text-[#f5a524]">inactive</span>}</span>
+        {(topic.weight ?? 1) <= 0 && (
+          <span className="label text-[#f5a524]">parked (no autofill / generate)</span>
+        )}
       </div>
 
       <div className="flex items-center gap-3 mt-3 font-mono text-[10px] uppercase tracking-wider">
@@ -61,6 +98,18 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
         {live > 0 && <span className="text-signal">{live} live</span>}
       </div>
 
+      <div className="mt-4 space-y-2">
+        <div className="label">Steer this batch (optional) — merged into the generate prompt</div>
+        <input className="input !py-1.5 text-sm" placeholder="topic focus" value={steerTopic}
+          onChange={(e) => setSteerTopic(e.target.value)} />
+        <input className="input !py-1.5 text-sm" placeholder="title / hook shape" value={steerTitle}
+          onChange={(e) => setSteerTitle(e.target.value)} />
+        <input className="input !py-1.5 text-sm" placeholder="angle" value={steerAngle}
+          onChange={(e) => setSteerAngle(e.target.value)} />
+        <input className="input !py-1.5 text-sm" placeholder="extra notes" value={steerNotes}
+          onChange={(e) => setSteerNotes(e.target.value)} />
+      </div>
+
       <div className="flex items-center gap-2 mt-4">
         <input ref={countRef} type="number" className="input !w-16 !py-1.5 text-center" defaultValue={8} min={1} max={20}
           onBlur={(e) => { const n = intFromBlur(e.target.value, 1); if (n === null) e.target.value = "8"; }} />
@@ -70,7 +119,14 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
             if (!el) return;
             const n = intFromBlur(el.value, 1);
             if (n === null) { el.value = "8"; return; }
-            m.generateVideos.mutate({ id: topic.id, count: n });
+            m.generateVideos.mutate({
+              id: topic.id,
+              count: n,
+              steer_topic: steerTopic || undefined,
+              steer_title: steerTitle || undefined,
+              steer_angle: steerAngle || undefined,
+              steer_notes: steerNotes || undefined,
+            });
           }}>
           {m.generateVideos.isPending ? "generating…" : "generate ideas"}
         </button>
@@ -95,10 +151,22 @@ function TopicCard({ topic, channel }: { topic: Topic; channel: Channel }) {
             ))}
           </div>
         </Field>
+        <Field label="weight" hint="0 = park topic (no autofill / manual generate). Higher = more share in auto-produce mix.">
+          <input type="number" className="input" min={0} max={8} value={weight}
+            onChange={(e) => setWeight(e.target.value)} />
+        </Field>
+        <div className="flex items-center justify-between mb-4">
+          <div><div className="text-sm text-fog-100">Topic active</div><div className="label">inactive topics are skipped by autofill and auto-produce</div></div>
+          <Toggle on={active} onChange={setActive} />
+        </div>
         <button className="btn btn-signal w-full" disabled={!name || m.updateTopic.isPending}
-          onClick={() => m.updateTopic.mutate(
-            { id: topic.id, body: { name, theme_prompt: prompt || null, content_format: format } },
-            { onSuccess: () => setEditing(false) })}>
+          onClick={() => {
+            const wn = intFromBlur(weight, 0);
+            if (wn === null) return;
+            m.updateTopic.mutate(
+            { id: topic.id, body: { name, theme_prompt: prompt || null, content_format: format, weight: wn, active } },
+            { onSuccess: () => setEditing(false) });
+          }}>
           {m.updateTopic.isPending ? "saving…" : "save changes"}
         </button>
       </Modal>
@@ -113,6 +181,10 @@ function ContentTopics({ channel }: { channel: Channel }) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [format, setFormat] = useState<"short" | "long">("short");
+  const sortedTopics = useMemo(
+    () => [...(topics ?? [])].sort((a, b) => (a.position - b.position) || (a.id - b.id)),
+    [topics],
+  );
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
@@ -128,7 +200,9 @@ function ContentTopics({ channel }: { channel: Channel }) {
         <Empty>No topics yet. Add one (e.g. “RAG”, “AI Agents”) to start generating videos.</Empty>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          {topics.map((t) => <TopicCard key={t.id} topic={t} channel={channel} />)}
+          {sortedTopics.map((t, i) => (
+            <TopicCard key={t.id} topic={t} channel={channel} orderedTopics={sortedTopics} index={i} />
+          ))}
         </div>
       )}
 
@@ -189,6 +263,10 @@ function ChannelDetail({ channel }: { channel: Channel }) {
   };
 
   const connected = channel.oauth_status === "connected";
+  const [nicheDraft, setNicheDraft] = useState(channel.niche ?? "");
+  useEffect(() => {
+    setNicheDraft(channel.niche ?? "");
+  }, [channel.id, channel.niche]);
 
   return (
     <div className="panel p-6 md:p-8">
@@ -258,6 +336,24 @@ function ChannelDetail({ channel }: { channel: Channel }) {
           {((platformOauth ? m.platformOauthStart : m.oauthStart).error as Error).message}
         </div>
       )}
+      <div className="mt-8 pt-6 border-t border-ink-line/60">
+        <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-2">Niche / category</h3>
+        <p className="text-[12px] text-fog-400 mb-3 max-w-2xl">
+          Free text — not a preset list. Steers idea generation and metadata prompts for this channel.
+        </p>
+        <textarea
+          className="input h-20 mb-4 max-w-2xl"
+          placeholder="e.g. Brazilian devs learning practical AI infra on a budget"
+          value={nicheDraft}
+          onChange={(e) => setNicheDraft(e.target.value)}
+          onBlur={() => {
+            const next = nicheDraft.trim() || null;
+            const prev = (channel.niche ?? "").trim() || null;
+            if (next !== prev) m.updateChannel.mutate({ id: channel.id, body: { niche: next } });
+          }}
+        />
+      </div>
+
       <div className="mt-8 pt-6 border-t border-ink-line/60">
         <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-fog-400 mb-4">Publishing defaults</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">

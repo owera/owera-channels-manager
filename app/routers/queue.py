@@ -169,7 +169,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
         topics.append({
             "id": t.id, "channel_id": t.channel_id, "name": t.name,
             "content_format": t.content_format, "active": t.active,
-            "weight": t.weight, "pending": pending, "published": published,
+            "weight": t.weight, "position": t.position,
+            "pending": pending, "published": published,
         })
 
     recent_runs_q = select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit * 3)

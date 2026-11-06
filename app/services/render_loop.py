@@ -312,8 +312,11 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         topic = session.get(Topic, video.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
         try:
+            _ch_meta = session.get(Channel, video.channel_id)
+            _niche = (_ch_meta.niche or "").strip() if _ch_meta else None
             meta = metadata.generate(video.subject, video.script or "", fmt,
-                                     language=video_gen.channel_language(session, video.channel_id))
+                                     language=video_gen.channel_language(session, video.channel_id),
+                                     niche=_niche)
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             _retry_or_fail(session, video, err,

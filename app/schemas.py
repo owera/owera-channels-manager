@@ -12,6 +12,8 @@ class ChannelCreate(BaseModel):
     default_skip_gate: bool = False
     daily_render_budget: int = 6
     daily_publish_budget: int = 6
+    # Free-text niche / category (not a preset list).
+    niche: Optional[str] = None
 
     @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
     @classmethod
@@ -35,6 +37,7 @@ class ChannelUpdate(BaseModel):
     # publish_tz (IANA name, e.g. "America/Sao_Paulo"). Null/"" clears.
     publish_windows: Optional[str] = None
     publish_tz: Optional[str] = None
+    niche: Optional[str] = None
 
     @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
     @classmethod
@@ -160,6 +163,11 @@ class TopicUpdate(BaseModel):
 
 class GenerateBody(BaseModel):
     count: int = 8
+    # Optional one-shot steering for POST /api/topics/{id}/generate (Generics v1).
+    steer_topic: Optional[str] = None
+    steer_title: Optional[str] = None
+    steer_angle: Optional[str] = None
+    steer_notes: Optional[str] = None
 
     @field_validator("count", mode="before")
     @classmethod
@@ -168,6 +176,25 @@ class GenerateBody(BaseModel):
         # 0 then looked like the idea-column cap (generated:0, "full").
         if isinstance(v, bool):
             raise ValueError("must be an integer >= 1, not a boolean")
+        return v
+
+
+class TopicReorderBody(BaseModel):
+    channel_id: int
+    ordered_ids: list[int]
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
+
+    @field_validator("ordered_ids", mode="before")
+    @classmethod
+    def _reject_bool_ids(cls, v):
+        if isinstance(v, list) and any(isinstance(item, bool) for item in v):
+            raise ValueError("must be integers, not booleans")
         return v
 
 

@@ -43,6 +43,8 @@ Dev-only: `X-Workspace-Slug` when `MANAGER_ALLOW_WORKSPACE_HEADER=1` and the Bas
 | `GET /api/agent/issues` | Operational triage digest |
 | `GET /api/videos` | List videos (optional `channel_id`, `topic_id`, `status`) |
 
+**Generics v1 (YouTube topics, niche, steer-next batch):** see [`docs/GENERICS_V1.md`](GENERICS_V1.md) for `Channel.niche`, topic reorder, generate steering fields, and pause semantics (`weight` / `active`).
+
 Example isolation smoke (`MANAGER_MULTI_WORKSPACE=1`):
 
 ```bash

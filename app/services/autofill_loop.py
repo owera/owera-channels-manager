@@ -75,10 +75,14 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
         logger.info("autofill skipped for topic '%s': %s", topic.name, blocked)
         return 0
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic.id)).all()
+    _ch = session.get(Channel, topic.channel_id)
+    _niche = (_ch.niche or "").strip() if _ch else None
     try:
         ideas = video_gen.generate_ideas(
             topic.name, topic.theme_prompt, list(existing), batch, topic.content_format,
-            language=video_gen.channel_language(session, topic.channel_id))
+            language=video_gen.channel_language(session, topic.channel_id),
+            niche=_niche,
+        )
         hp = video_gen.idea_hook_kwargs(session, topic.channel_id, topic.content_format)
         if hp and ideas:
             # RR #47: drafts are born passing hook pace (one regeneration)
@@ -87,7 +91,9 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
                 regen=lambda extra: video_gen.generate_ideas(
                     topic.name, (topic.theme_prompt or "") + extra,
                     list(existing) + list(ideas), batch, topic.content_format,
-                    language=video_gen.channel_language(session, topic.channel_id)))
+                    language=video_gen.channel_language(session, topic.channel_id),
+                    niche=_niche,
+                ))
     except Exception as e:
         logger.info("autofill skipped for topic '%s': %s", topic.name, e)
         return 0
