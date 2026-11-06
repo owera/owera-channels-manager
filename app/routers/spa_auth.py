@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
@@ -19,15 +20,34 @@ def _require_enabled() -> None:
         raise HTTPException(404, "SPA Google login is disabled")
 
 
-def _deny_html(email: str) -> HTMLResponse:
-    safe = (email or "unknown")[:120]
-    body = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Access denied</title></head>
+def _document(title: str, inner_html: str, status: int) -> HTMLResponse:
+    """Title is escaped. inner_html is markup; user text goes through _p first.
+
+    The `error` query param, the token-exchange exception, and the Google
+    email are attacker-controlled. The YouTube consent page already escapes
+    the same class of string in channels._callback_html.
+    """
+    safe_title = html.escape(title, quote=False)
+    body = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{safe_title}</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;">
-<h1>Access denied</h1>
-<p>The Google account <strong>{safe}</strong> is not allowlisted for Channels Manager.</p>
-<p>Contact your operator if you need access.</p>
+<h1>{safe_title}</h1>
+{inner_html}
 </body></html>"""
-    return HTMLResponse(body, status_code=403)
+    return HTMLResponse(body, status_code=status)
+
+
+def _p(text: str) -> str:
+    return f"<p>{html.escape(text, quote=False)}</p>"
+
+
+def _deny_html(email: str) -> HTMLResponse:
+    shown = html.escape((email or "unknown")[:120], quote=False)
+    inner = (
+        f"<p>The Google account <strong>{shown}</strong> is not allowlisted "
+        "for Channels Manager.</p>"
+        "<p>Contact your operator if you need access.</p>"
+    )
+    return _document("Access denied", inner, 403)
 
 
 @router.get("/me")
@@ -61,29 +81,28 @@ def google_callback(
 ):
     _require_enabled()
     if error or not code:
-        return HTMLResponse(
-            "<html><body><h1>Sign-in cancelled</h1>"
-            f"<p>{error or 'No authorization code was returned.'}</p></body></html>",
-            status_code=400,
+        return _document(
+            "Sign-in cancelled",
+            _p(error or "No authorization code was returned."),
+            400,
         )
     if not spa.consume_oauth_state(request, state):
-        return HTMLResponse(
-            "<html><body><h1>Sign-in failed</h1><p>Invalid or expired sign-in state.</p></body></html>",
-            status_code=400,
+        return _document(
+            "Sign-in failed",
+            _p("Invalid or expired sign-in state."),
+            400,
         )
     try:
         profile = spa.exchange_code_and_profile(code)
     except Exception as e:
         logger.warning("SPA Google token exchange failed: %s", e)
-        return HTMLResponse(
-            f"<html><body><h1>Sign-in failed</h1><p>{str(e)[:200]}</p></body></html>",
-            status_code=502,
-        )
+        return _document("Sign-in failed", _p(str(e)[:200]), 502)
     email = spa.normalized_email(str(profile.get("email") or ""))
     if not email or not profile.get("email_verified", True):
-        return HTMLResponse(
-            "<html><body><h1>Sign-in failed</h1><p>Google did not return a verified email.</p></body></html>",
-            status_code=400,
+        return _document(
+            "Sign-in failed",
+            _p("Google did not return a verified email."),
+            400,
         )
     ws = spa.workspace_for_email(email)
     if not ws:
