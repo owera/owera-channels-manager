@@ -25,6 +25,7 @@ const HOLD_LABEL: Record<string, string> = {
   paused: "paused",
   budget: "budget 0",
   oauth: "reconnect",
+  quota: "quota cap",
 };
 
 function Kpi({ value, label, accent }: { value: React.ReactNode; label: string; accent?: string }) {

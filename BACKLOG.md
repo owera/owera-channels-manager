@@ -1962,3 +1962,31 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 96. ✅ DONE (PR autoimprove/2026-11-06-workspace-quota-eta) publish-plan and dashboard ETA follow the workspace quota — normal
+- **resolution (2026-11-06):** `publish_plan` and `_next_publish_eta` no
+  longer size the day as `min(budget, youtube_daily_quota_cap // 1600)`.
+  Each planned upload bills `PUBLISH_UNITS` (1600+50+50, the same sum
+  `tick()` pre-checks). Today's base is `quota_spent_workspace_today`
+  (siblings included). A later quota day starts at 0 and is capped the
+  same way. A cap below one upload yields an empty plan, a null ETA, and
+  dashboard hold `quota` (label "quota cap"). Budget ≤ 0 stays an empty
+  plan and hold `budget`. Suite: `tests/verify_workspace_quota.py` 4 → 28.
+  A 1600-unit billing mutant dies on the 5000-left check; dropping the
+  spend gate dies on the 4000-left check. `publish_loop.py` and `quota.py`
+  are unchanged.
+- **why (found while shipping #95, not bundled):** the board showed a
+  publish time `tick()` will not take. A channel budget of 6 with 4000
+  units left still got a global day's ETAs.
+- **caution:** normal (plan endpoints + the dashboard hold label). Not
+  the publish loop.
+- **acceptance:** 4000 units left and budget 6 schedules 2 uploads today,
+  not six. 5000 left is 2 (not 3). 3400 left is 2 (not 1). 1500 left
+  waits until the next Pacific midnight.
+- **residual:** each channel's plan can still fill the shared remainder
+  on its own, so two channels can each show 2 today when only 2 fit in
+  the workspace. The next plan sees the spend once a publish is logged.
+  Playlist insert (50) stays outside `tick()`'s pre-check, so the plan
+  matches that pre-check and can be one slot optimistic after a playlist
+  bills. An empty plan still reads "Queued to publish" on the board when
+  the cap cannot hold one upload.

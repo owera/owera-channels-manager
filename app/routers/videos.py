@@ -6,7 +6,6 @@ from datetime import datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session, func, select
 
-from app.config import settings as cfg
 from app.db import app_settings, get_session
 from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace, utcnow
 from app.workspace import current_workspace, require_channel, require_video
@@ -21,7 +20,7 @@ from app.schemas import (
 from app.services import episode_guard, metadata, quota, review_guard
 from app.services.publish_loop import next_window_open
 from app.services.render_loop import _queued_candidates
-from app.services.youtube import QUOTA_UPLOAD
+from app.routers.queue import PUBLISH_UNITS
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
@@ -132,14 +131,18 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session),
         return scored[0][3]
 
     drip = timedelta(minutes=cfg_row.publish_drip_minutes)
-    daily_limit = min(ch.daily_publish_budget, cfg.youtube_daily_quota_cap // QUOTA_UPLOAD)
     # tick() skips when published_today >= daily_publish_budget, so 0 (and
-    # negative) never publish. max(1, ...) lied — the board got ETAs for a
-    # channel that isn't publishing. Without this return the plan still
-    # drains (one video per future quota day) instead of staying empty.
-    if daily_limit <= 0:
+    # negative) never publish. It also skips when the next upload does not
+    # fit the workspace cap. The old ceiling was the global cap // 1600, so
+    # a 4000-unit workspace still got a full global day's ETAs.
+    daily_limit = ch.daily_publish_budget
+    ws_cap = quota.youtube_quota_cap_for_workspace(session, ch.workspace_id)
+    if daily_limit <= 0 or ws_cap < PUBLISH_UNITS:
         return {}
     now = datetime.now(timezone.utc)
+    real_today = _pt_date(now)
+    spent_today = quota.quota_spent_workspace_today(session, ch.workspace_id)
+    extra_on_day = 0
     last = quota.last_publish_at(session, channel_id)
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
@@ -181,10 +184,21 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session),
         if _pt_date(cursor) != cur_day:              # natural rollover from dripping
             cur_day, day_count = _pt_date(cursor), 0
             long_out = False
+            extra_on_day = 0
         if day_count >= daily_limit:                 # day's budget spent → next quota day
             cursor = next_window_open(ch, _next_quota_reset(cursor))
             cur_day, day_count = _pt_date(cursor), 0
             long_out = False
+            extra_on_day = 0
+        # Today's base is units already logged (this channel and its siblings).
+        # A later quota day starts at 0. Each ETA we place bills PUBLISH_UNITS,
+        # the same pre-check tick() uses.
+        base = spent_today if cur_day == real_today else 0
+        if base + extra_on_day + PUBLISH_UNITS > ws_cap:
+            cursor = next_window_open(ch, _next_quota_reset(cursor))
+            cur_day, day_count = _pt_date(cursor), 0
+            long_out = False
+            extra_on_day = 0
         if not long_out:
             v = _pick(remaining, "long") or _pick(remaining, None)
         else:
@@ -194,6 +208,7 @@ def publish_plan(channel_id: int, session: Session = Depends(get_session),
         if t is not None and t.content_format == "long":
             long_out = True
         plan[str(v.id)] = cursor.isoformat()
+        extra_on_day += PUBLISH_UNITS
         day_count += 1
         cursor = cursor + drip
     return plan
