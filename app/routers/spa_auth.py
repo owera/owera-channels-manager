@@ -101,16 +101,30 @@ def _logout_response(request: Request) -> JSONResponse:
     `Set-Cookie` omits `Max-Age=0`; some clients keep the old cookie. We emit a
     second deletion with explicit max-age 0 using the same path/flags as the
     middleware (see `app/main.py` SessionMiddleware).
+
+    **Dual delete (secure=False + secure=True when enabled):** If the browser
+    still holds a legacy `cm_session` issued before HTTPS (`Secure` absent),
+    a deletion that only sets `Secure` does not evict it—so `/api/auth/me`
+    stays authenticated. Always clear the non-Secure name; when prod uses
+    `MANAGER_SESSION_COOKIE_SECURE=1`, also clear the Secure variant.
     """
     spa.clear_session(request)
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(
         "cm_session",
         path="/",
-        secure=settings.session_cookie_secure,
+        secure=False,
         httponly=True,
         samesite="lax",
     )
+    if settings.session_cookie_secure:
+        resp.delete_cookie(
+            "cm_session",
+            path="/",
+            secure=True,
+            httponly=True,
+            samesite="lax",
+        )
     return resp
 
 

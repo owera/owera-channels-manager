@@ -39,7 +39,7 @@ Only **`rodrigo@owera.com`** → workspace slug **`owera`**. Other Google accoun
 
 ## Sign out
 
-- **`POST /api/auth/logout`** (preferred) or **`GET /api/auth/logout`** — returns `{"ok":true}` and clears `cm_session` (including explicit `Max-Age=0` removal for the browser).
+- **`POST /api/auth/logout`** (preferred) or **`GET /api/auth/logout`** — returns `{"ok":true}` and clears `cm_session` (explicit `Max-Age=0` removal). With **`MANAGER_SESSION_COOKIE_SECURE=1`**, the response emits **two** deletions (non-Secure + Secure) so browsers drop a legacy pre-HTTPS cookie as well as the current one.
 - After success, **`GET /api/auth/me`** must be **401** until the user signs in again.
 
 ## Verify
