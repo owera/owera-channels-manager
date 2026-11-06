@@ -191,10 +191,12 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
     session.refresh(topic)
 
     # 2. Seed ideas; auto-produce the first `produce_count` (QUEUED), rest as DRAFT.
+    _niche = (ch.niche or "").strip() or None
     try:
         ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
                                          idea_count, fmt,
-                                         language=video_gen.channel_language(session, ch.id))
+                                         language=video_gen.channel_language(session, ch.id),
+                                         niche=_niche)
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     hp = video_gen.idea_hook_kwargs(session, ch.id, fmt)
@@ -204,7 +206,9 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
             ideas, idea_count, hook_voice=hp["hook_voice"],
             regen=lambda extra: video_gen.generate_ideas(
                 topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
-                language=video_gen.channel_language(session, ch.id)))
+                language=video_gen.channel_language(session, ch.id),
+                niche=_niche,
+            ))
     ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.finalize_draft_subjects(ideas)
     mx_v = session.exec(

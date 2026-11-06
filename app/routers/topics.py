@@ -1,15 +1,14 @@
 """Topics = channel content themes (managed in channel content settings).
 Each topic owns a playlist; videos are generated from its theme."""
 
-import json
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
 from app.db import app_settings, get_session
-from app.models import (Channel, Playlist, Topic, Video, VideoStatus, utcnow)
-from app.schemas import GenerateBody, TopicCreate, TopicUpdate
+from app.models import (Channel, Playlist, Topic, Video, VideoStatus, Workspace, utcnow)
+from app.schemas import GenerateBody, TopicCreate, TopicReorderBody, TopicUpdate
 from app.services import quota, video_gen, youtube
+from app.workspace import current_workspace, require_channel
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
@@ -128,6 +127,34 @@ def delete_topic(topic_id: int, session: Session = Depends(get_session)):
     session.commit()
 
 
+@router.post("/reorder")
+def reorder_topics(body: TopicReorderBody, session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace)):
+    """Set topic display / priority order within a channel (position 0..n-1)."""
+    require_channel(session, ws, body.channel_id)
+    for pos, tid in enumerate(body.ordered_ids):
+        t = session.get(Topic, tid)
+        if t and t.channel_id == body.channel_id:
+            t.position = pos
+            t.updated_at = utcnow()
+            session.add(t)
+    session.commit()
+    return {"ok": True}
+
+
+def _steer_notes_from_body(body: GenerateBody) -> str | None:
+    parts: list[str] = []
+    if (body.steer_topic or "").strip():
+        parts.append(f"Topic focus: {body.steer_topic.strip()}")
+    if (body.steer_title or "").strip():
+        parts.append(f"Prefer titles/hooks shaped like: {body.steer_title.strip()}")
+    if (body.steer_angle or "").strip():
+        parts.append(f"Angle / framing: {body.steer_angle.strip()}")
+    if (body.steer_notes or "").strip():
+        parts.append(body.steer_notes.strip())
+    return "\n".join(parts) if parts else None
+
+
 @router.post("/{topic_id}/generate")
 def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depends(get_session)):
     """Generate video ideas from the topic theme; they land as draft videos."""
@@ -173,11 +200,18 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
             count = min(count, board_space)
             if count == 0:
                 return {"generated": 0, "reason": "board at capacity (horizon reached)"}
+    ch = session.get(Channel, t.channel_id)
+    niche = (ch.niche or "").strip() if ch else None
+    steer_notes = _steer_notes_from_body(body)
     existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
     try:
-        ideas = video_gen.generate_ideas(t.name, t.theme_prompt, list(existing),
-                                         count, t.content_format,
-                                         language=video_gen.channel_language(session, t.channel_id))
+        ideas = video_gen.generate_ideas(
+            t.name, t.theme_prompt, list(existing),
+            count, t.content_format,
+            language=video_gen.channel_language(session, t.channel_id),
+            niche=niche,
+            steer_notes=steer_notes,
+        )
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     hp = video_gen.idea_hook_kwargs(session, t.channel_id, t.content_format)
@@ -187,7 +221,10 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
             ideas, count, hook_voice=hp["hook_voice"],
             regen=lambda extra: video_gen.generate_ideas(
                 t.name, (t.theme_prompt or "") + extra, list(existing) + list(ideas), count,
-                t.content_format, language=video_gen.channel_language(session, t.channel_id)))
+                t.content_format, language=video_gen.channel_language(session, t.channel_id),
+                niche=niche,
+                steer_notes=steer_notes,
+            ))
     ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.finalize_draft_subjects(ideas)
     mx = session.exec(select(func.max(Video.position)).where(Video.channel_id == t.channel_id)).one() or 0

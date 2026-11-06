@@ -25,6 +25,8 @@ export interface Channel {
   daily_render_budget: number;
   daily_publish_budget: number;
   paused: boolean;
+  /** Free-text niche / category for prompts (not a preset list). */
+  niche: string | null;
 }
 
 export interface Topic {
@@ -36,6 +38,7 @@ export interface Topic {
   playlist_id: number | null;
   render_profile_id: number | null;
   active: boolean;
+  weight: number;
   position: number;
   video_counts: Record<Status, number>;
   video_total: number;
@@ -502,8 +505,23 @@ export const useMut = () => {
       onSuccess: () => invalidate(qc, ["topics"]),
     }),
     generateVideos: useMutation({
-      mutationFn: ({ id, count }: any) => api(`/topics/${id}/generate`, { method: "POST", body: j({ count }) }),
+      mutationFn: ({ id, count, steer_topic, steer_title, steer_angle, steer_notes }: any) =>
+        api(`/topics/${id}/generate`, {
+          method: "POST",
+          body: j({
+            count,
+            ...(steer_topic != null && steer_topic !== "" ? { steer_topic } : {}),
+            ...(steer_title != null && steer_title !== "" ? { steer_title } : {}),
+            ...(steer_angle != null && steer_angle !== "" ? { steer_angle } : {}),
+            ...(steer_notes != null && steer_notes !== "" ? { steer_notes } : {}),
+          }),
+        }),
       onSuccess: () => invalidate(qc, ["topics", "videos", "dashboard"]),
+    }),
+    reorderTopics: useMutation({
+      mutationFn: (b: { channel_id: number; ordered_ids: number[] }) =>
+        api("/topics/reorder", { method: "POST", body: j(b) }),
+      onSuccess: () => invalidate(qc, ["topics"]),
     }),
     createTopicPlaylist: useMutation({
       mutationFn: (id: number) => api(`/topics/${id}/create-playlist`, { method: "POST" }),

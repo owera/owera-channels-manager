@@ -85,10 +85,12 @@ def finalize_description(description: str, language_code: str | None,
 
 
 def _llm_fallback(subject: str, script: str, content_format: str = "short",
-                  language: str | None = None) -> dict:
+                  language: str | None = None, niche: str | None = None) -> dict:
     """Direct LLM call if the MPT endpoint is unavailable."""
     lang_rule = (f" HARD RULE: write the title, caption, and hashtags in {language}."
                  if language else "")
+    niche_block = (f" Channel niche / audience positioning: {niche}."
+                   if (niche or "").strip() else "")
     try:
         if content_format == "long":
             prompt = (
@@ -97,7 +99,7 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 "clear and search-friendly), caption (<=800 chars: the FIRST sentence must be "
                 "keyword-rich — the exact phrase a developer would type into YouTube search — "
                 "then a substantive 2-3 sentence summary, no hashtags inside), hashtags (array "
-                f"of 5 strings each starting with #). No commentary.{lang_rule}\n\n"
+                f"of 5 strings each starting with #). No commentary.{lang_rule}{niche_block}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:4000]}"
             )
         else:
@@ -111,7 +113,7 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 "second slogan, no curiosity gap. If the subject still contains a legacy "
                 "'· <series> <nn>' suffix, keep it verbatim; otherwise the title is the hook "
                 "only (no episode suffix). "
-                f"No commentary.{lang_rule}\n\n"
+                f"No commentary.{lang_rule}{niche_block}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
         text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light)) or ""
@@ -188,16 +190,20 @@ def _is_title_echo(title: str, hook: str) -> bool:
 
 
 def generate(subject: str, script: str, content_format: str = "short",
-             language: str | None = None) -> dict:
+             language: str | None = None, niche: str | None = None) -> dict:
     """language is the channel's spoken-language name (e.g. 'Brazilian Portuguese')
     from video_gen.channel_language; None falls back to en-US (legacy behavior)."""
+    niche_line = (niche or "").strip()
+    subject_for_mpt = (
+        f"[Channel niche: {niche_line}]\n{subject}" if niche_line else subject
+    )
     platform = "youtube" if content_format == "long" else "youtube_shorts"
     mpt_language = _LANGUAGE_MPT_CODES.get(language or "", "en-US")
-    meta = mpt.social_metadata(subject, script or "", platform=platform, language=mpt_language)
+    meta = mpt.social_metadata(subject_for_mpt, script or "", platform=platform, language=mpt_language)
     if meta:
         out = _sanitize_meta(_from_meta(subject, meta))
     else:
-        out = _sanitize_meta(_llm_fallback(subject, script or "", content_format, language))
+        out = _sanitize_meta(_llm_fallback(subject, script or "", content_format, language, niche=niche))
     return _lock_decolar_title(out, subject, script or "", content_format)
 
 

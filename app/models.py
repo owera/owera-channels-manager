@@ -110,6 +110,10 @@ class Channel(SQLModel, table=True):
     daily_publish_budget: int = 6
     paused: bool = False
 
+    # Free-text niche / category for the channel (Generics v1). Included in idea/script
+    # prompts so agents can steer tone without preset enums.
+    niche: Optional[str] = None
+
     # Set when a YouTube daily cap is hit; the publish loop skips this channel until
     # then. tz-aware UTC; reset model depends on which cap (see quota.cooldown_until_for).
     cooldown_until: Optional[datetime] = None

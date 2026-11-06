@@ -415,10 +415,16 @@ def enforce_hook_pace(ideas: list[str], n: int, *, hook_voice: str | None,
 
 def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str],
                    n: int = 8, content_format: str = "short",
-                   language: str | None = None) -> list[str]:
+                   language: str | None = None,
+                   niche: str | None = None,
+                   steer_notes: str | None = None) -> list[str]:
 
     avoid = "\n".join(f"- {s}" for s in existing[-60:])
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
+    niche_line = (f"\nChannel niche / positioning (use for tone, audience, and examples): {niche}."
+                  if (niche or "").strip() else "")
+    steer_line = (f"\nOperator steering for this generation batch (obey strictly): {steer_notes}."
+                  if (steer_notes or "").strip() else "")
     lang_rule = (f"\nHARD RULE: write every title in {language} — the channel publishes "
                  f"exclusively in {language}, whatever language the theme name is in." if language else "")
     from app.services.craft import (CRAFT_RULES_SHORT, contains_banned,
@@ -430,7 +436,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     if content_format == "long":
         prompt = (
             f"Generate {n} distinct, compelling ideas for in-depth long-form YouTube videos, "
-            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}{craft_rule}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{niche_line}{steer_line}{lang_rule}{craft_rule}\n"
             "Each must be a clear, specific, search-friendly video title (6-15 words) covering a "
             "substantial topic worth several minutes. "
             "RULE: lead with a question, tension, or situation the viewer already feels — NOT the "
@@ -453,7 +459,7 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     else:
         prompt = (
             f"Generate {n} distinct, engaging short-video ideas for a YouTube Shorts channel, "
-            f"all about the theme: \"{topic_name}\".{guidance}{lang_rule}{craft_rule}\n"
+            f"all about the theme: \"{topic_name}\".{guidance}{niche_line}{steer_line}{lang_rule}{craft_rule}\n"
             "Each must be a concise, hooky video title under 12 words, covering a specific angle "
             "of the theme. "
             "RULE: lead with the viewer's situation or mistake — NOT the solution. The hook works "

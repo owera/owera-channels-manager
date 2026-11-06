@@ -984,8 +984,11 @@ def regenerate_metadata(video_id: int, session: Session = Depends(get_session),
     from app.services import video_gen
     topic = session.get(Topic, v.topic_id)
     fmt = "long" if topic and topic.content_format == "long" else "short"
+    ch = session.get(Channel, v.channel_id)
+    _niche = (ch.niche or "").strip() if ch else None
     meta = metadata.generate(v.subject, v.script or "", fmt,
-                             language=video_gen.channel_language(session, v.channel_id))
+                             language=video_gen.channel_language(session, v.channel_id),
+                             niche=_niche)
     v.title, v.description = meta["title"], meta["description"]
     v.tags_json = json.dumps(meta["tags"])
     v.metadata_generated = True

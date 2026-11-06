@@ -121,7 +121,7 @@ calls: list[dict] = []
 
 
 def fake_ideas(topic_name, theme_prompt, existing, n=8, content_format="short",
-               language=None):
+               language=None, niche=None, steer_notes=None):
     calls.append({
         "topic_name": topic_name,
         "theme_prompt": theme_prompt,

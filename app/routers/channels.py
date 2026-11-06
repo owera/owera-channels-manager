@@ -100,6 +100,9 @@ def create_channel(
                  "published_today >= budget)")
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
+    niche = None
+    if body.niche is not None:
+        niche = body.niche.strip() or None
     ch = Channel(
         workspace_id=ws.id,
         slug=slug, name=body.name, default_privacy=body.default_privacy,
@@ -107,6 +110,7 @@ def create_channel(
         daily_render_budget=body.daily_render_budget,
         daily_publish_budget=body.daily_publish_budget,
         default_render_profile_id=default_profile.id,
+        niche=niche,
     )
     session.add(ch)
     session.commit()
@@ -162,6 +166,9 @@ def update_channel(
     for key in ("publish_windows", "publish_tz"):
         if key in fields and not (fields[key] or "").strip():
             fields[key] = None
+    if "niche" in fields:
+        n = fields["niche"]
+        fields["niche"] = (n or "").strip() or None if n is not None else None
     for k, v in fields.items():
         setattr(ch, k, v)
     ch.updated_at = utcnow()
