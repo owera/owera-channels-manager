@@ -27,6 +27,8 @@ When `MANAGER_MULTI_WORKSPACE=1`, the Basic **username** selects the workspace a
 
 Password is always `MANAGER_APP_PASSWORD`. Wrong password → **401**. Unknown workspace slug → **404**. Cross-workspace channel/video id → **404** (not 403).
 
+Human SPA Google login (when `MANAGER_SPA_GOOGLE_LOGIN=1`) uses a browser **`cm_session` cookie** for `/api/*`; it does not use Basic. `POST` or `GET` **`/api/auth/logout`** clears that session; machine agents are unchanged and still use Basic as above.
+
 OAuth **callback GETs are exempt from Basic Auth** (human browser lands there after Google redirect): `GET /api/oauth/google/callback` (platform) and `GET /api/channels/{id}/oauth/callback` (legacy per-channel). Starting OAuth and polling channel state still require Basic Auth.
 
 Dev-only: `X-Workspace-Slug` when `MANAGER_ALLOW_WORKSPACE_HEADER=1` and the Basic username is empty.

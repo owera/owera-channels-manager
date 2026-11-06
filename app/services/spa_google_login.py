@@ -72,8 +72,13 @@ def establish_session(request: Request, *, email: str, workspace_slug: str) -> N
 
 
 def clear_session(request: Request) -> None:
-    request.session.pop(SESSION_KEY, None)
-    request.session.pop(OAUTH_STATE_SESSION_KEY, None)
+    """Drop all session data so SessionMiddleware clears the signed cookie.
+
+    Popping only SPA keys leaves other session keys behind; middleware then
+    still rewrites the cookie with a remaining payload, so the browser keeps a
+    non-empty session and `/api/auth/me` can stay authenticated after logout.
+    """
+    request.session.clear()
 
 
 def _require_oauth_config() -> tuple[str, str, str]:

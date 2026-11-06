@@ -29,12 +29,18 @@ Scopes: OpenID `openid`, `email`, `profile` (handled by the server OAuth start U
 | `MANAGER_SPA_GOOGLE_CLIENT_SECRET` | Web client secret. |
 | `MANAGER_SPA_GOOGLE_REDIRECT_URI` | Must match GCP (prod default in `.env.example`). |
 | `MANAGER_SESSION_SECRET` | Random secret for signed session cookie (`cm_session`). |
+| `MANAGER_SESSION_COOKIE_SECURE` | Set `1` on HTTPS (e.g. channels.owera.com) so session + logout clear use `Secure` consistently. |
 | `MANAGER_APP_PASSWORD` | **Keep set** for machine/agent Basic on `/api/*`. |
 | `MANAGER_MULTI_WORKSPACE=1` | Recommended on claw0 so session maps to workspace `owera`. |
 
 ## Allowlist (v1)
 
 Only **`rodrigo@owera.com`** → workspace slug **`owera`**. Other Google accounts receive HTTP 403 on callback.
+
+## Sign out
+
+- **`POST /api/auth/logout`** (preferred) or **`GET /api/auth/logout`** — returns `{"ok":true}` and clears `cm_session` (including explicit `Max-Age=0` removal for the browser).
+- After success, **`GET /api/auth/me`** must be **401** until the user signs in again.
 
 ## Verify
 

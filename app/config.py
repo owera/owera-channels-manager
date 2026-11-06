@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     spa_google_redirect_uri: str = "https://channels.owera.com/api/auth/google/callback"
     # Signed session cookie (required when spa_google_login=1 on claw0).
     session_secret: str = ""
+    # Match SessionMiddleware https_only (set True behind HTTPS in production).
+    session_cookie_secure: bool = False
 
     # MoneyPrinterTurbo engine
     mpt_base_url: str = "http://127.0.0.1:8080"

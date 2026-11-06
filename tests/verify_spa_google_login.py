@@ -125,9 +125,31 @@ ok(me.status_code == 200 and me.json()["workspace_slug"] == "owera", "/api/auth/
 ch = c4.get("/api/channels")
 ok(ch.status_code == 200 and len(ch.json()) == 2, "session cookie loads owera channels")
 
-c4.post("/api/auth/logout")
+logout_r = c4.post("/api/auth/logout")
+ok(logout_r.status_code == 200, "POST logout returns 200")
+set_cookies = logout_r.headers.get_list("set-cookie") or []
+ok(
+    any(
+        "cm_session=" in h and "max-age=0" in h.replace(" ", "").lower()
+        for h in set_cookies
+    ),
+    "logout response includes cm_session cleared with Max-Age=0",
+)
+
+# Same client still has no session until next login
 ok(c4.get("/api/auth/me").status_code == 401, "logout clears session")
 ok(c4.get("/api/channels").status_code == 401, "API requires sign-in after logout")
+
+# --- GET /logout matches POST (navigations, proxies) ---
+c5 = TestClient(main_mod.app)
+with patch.object(spa_google_login, "consume_oauth_state", return_value=True):
+    with patch.object(spa_google_login, "exchange_code_and_profile",
+                      return_value=MOCK_PROFILE_ALLOW):
+        c5.get("/api/auth/google/callback?code=abc&state=x", follow_redirects=False)
+ok(c5.get("/api/auth/me").status_code == 200, "GET logout precheck: session ok")
+get_logout = c5.get("/api/auth/logout")
+ok(get_logout.status_code == 200, "GET logout returns 200")
+ok(c5.get("/api/auth/me").status_code == 401, "GET logout clears session")
 
 # --- platform YouTube OAuth path unchanged (still 404 when disabled) ---
 settings.google_web_oauth = False
