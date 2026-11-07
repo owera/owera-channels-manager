@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, Video, Workspace
+from app.models import Channel, Topic, Video, Workspace
 from app.services import spa_google_login
 
 # Basic Auth usernames that map to a different workspace slug (multi_workspace only).
@@ -156,3 +156,19 @@ def require_video(session: Session, ws: Workspace, video_id: int) -> Video:
     if not ch or ch.workspace_id != ws.id:
         raise HTTPException(404, "video not found")
     return v
+
+
+def require_topic(session: Session, ws: Workspace, topic_id: int) -> Topic:
+    """404 if the topic is missing or belongs to another workspace.
+
+    Sibling of require_video: a raw session.get(Topic) is how a tenant
+    minted drafts on another workspace's channel (generics v1 scoped
+    reorder only).
+    """
+    t = session.get(Topic, topic_id)
+    if not t:
+        raise HTTPException(404, "topic not found")
+    ch = session.get(Channel, t.channel_id)
+    if not ch or ch.workspace_id != ws.id:
+        raise HTTPException(404, "topic not found")
+    return t

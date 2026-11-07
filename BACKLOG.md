@@ -1962,3 +1962,24 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-11-07-topics-workspace) remaining topic routes follow workspace isolation — normal
+- **resolution (2026-11-07):** `workspace.require_topic` is the sibling of
+  `require_video`. Generics v1 scoped only `POST /api/topics/reorder`
+  through `require_channel`; list/create/get/PATCH/DELETE/generate still
+  `session.get` the row by id, so a tenant could mint drafts on another
+  workspace's channel. List and create now `require_channel`; get / PATCH /
+  DELETE / generate go through `require_topic` (missing and foreign both
+  404 `topic not found`). Own-workspace traffic unchanged. Suite:
+  `tests/verify_topics.py` 268 → 286. Shipping autogen stub accepts
+  `niche=` / `steer_notes=` so generate tests reach `generate_ideas`
+  after generics-v1 (the Shipping topic returned before the call, so
+  the suite stayed green on a dead stub).
+- **why (found 2026-11-07 ranking remaining `session.get` after #195):**
+  reorder 404s a foreign channel; every other topic write was global.
+- **caution:** normal (`topics.py` + `workspace.require_topic`; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** tenant-b LIST/CREATE on an owera channel is 404 and
+  writes nothing; GET/PATCH/GENERATE/DELETE of an owera topic is 404
+  `topic not found` and does not call `generate_ideas` / does not
+  delete; own-workspace list and generate still 200.

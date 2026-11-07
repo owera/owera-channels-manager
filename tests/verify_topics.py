@@ -33,6 +33,13 @@ videos to the wrong series); ``false`` writes 0, which publish treats
 as unlinked but is not None. Create's ``if body.playlist_id`` skips
 the falsy 0 and returns 201 unbound. These checks pin both paths.
 
+Generics v1 scoped ``POST /api/topics/reorder`` through
+``require_channel``; list/create/get/PATCH/DELETE/generate still
+``session.get`` the row by id. A tenant can mint drafts on another
+workspace's channel. These checks pin every remaining route to the
+current workspace (404, no write) while own-workspace traffic still
+lands.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, no LLM). ``video_gen.generate_ideas`` is stubbed and recorded;
 the app lifespan/scheduler are never started. Exits non-zero on the
@@ -49,9 +56,11 @@ from sqlmodel import Session, SQLModel, create_engine, func, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Playlist, Topic, Video, VideoStatus
+from app.models import (Channel, JobRun, OAuthStatus, Playlist, Topic, Video,
+                        VideoStatus, Workspace)
 from app.routers import topics as topics_router
 from app.schemas import GenerateBody, TopicCreate, TopicUpdate
+from app import workspace as workspace_mod
 
 _checks = 0
 
@@ -76,9 +85,15 @@ SQLModel.metadata.create_all(engine)
 
 # High render budget so the board-horizon cap (budget × 2 = 40) does not
 # bind before the per-topic idea ceiling (target 6 × weight).
+# Workspace 1 is the legacy owera tenant current_workspace resolves when
+# multi_workspace is off; tenant-b is the cross-tenant isolation fixture.
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED,
-                  daily_render_budget=20))
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Workspace(slug="tenant-b", name="Tenant B"))
+    s.commit()
+    ws_b = s.exec(select(Workspace).where(Workspace.slug == "tenant-b")).one()
+    s.add(Channel(slug="a", name="A", workspace_id=1,
+                  oauth_status=OAuthStatus.CONNECTED, daily_render_budget=20))
     s.commit()
     s.add(Topic(channel_id=1, name="Parked", theme_prompt="parked theme",
                 weight=0, content_format="short"))          # id 1
@@ -102,7 +117,15 @@ with Session(engine) as s:
                    title="Series One"))
     s.add(Playlist(channel_id=1, yt_playlist_id="PLseriestwo0000000000000002",
                    title="Series Two"))
+    s.add(Channel(slug="tb", name="TB", workspace_id=ws_b.id,
+                  oauth_status=OAuthStatus.CONNECTED, daily_render_budget=20))
     s.commit()
+    ch_b = s.exec(select(Channel).where(Channel.slug == "tb")).one()
+    s.add(Topic(channel_id=ch_b.id, name="TB Live", theme_prompt="tb theme",
+                weight=1, content_format="short"))
+    s.commit()
+    CHANNEL_B_ID = ch_b.id
+    TOPIC_B_ID = s.exec(select(Topic).where(Topic.name == "TB Live")).one().id
 
 
 def _override_session():
@@ -868,6 +891,101 @@ try:
     ok('_reject_bool_playlist' in tu_pl
        and '@field_validator("playlist_id", mode="before")' in tu_pl,
        "TopicUpdate._reject_bool_playlist is mode=before on playlist_id")
+
+    print("workspace isolation: remaining topic routes follow reorder")
+    # Reorder already 404s a foreign channel (generics v1). list/create/
+    # get/PATCH/DELETE/generate still key off the raw id, so tenant-b
+    # can write onto owera's channel 1. multi_workspace on so Basic
+    # username is the tenant slug (A1).
+    _orig_mw = settings.multi_workspace
+    settings.multi_workspace = True
+    auth_ow = ("owera", "testpw")
+    auth_b = ("tenant-b", "testpw")
+    try:
+        r = client.get("/api/topics", auth=auth_b, params={"channel_id": 1})
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b LIST owera channel → 404 channel not found "
+           f"({r.status_code} {r.text[:80]})")
+
+        n_topics_before = n_topics()
+        r = client.post("/api/topics", auth=auth_b, json={
+            "channel_id": 1, "name": "CrossTenantMint"})
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b CREATE on owera channel → 404")
+        ok(n_topics() == n_topics_before
+           and "CrossTenantMint" not in topic_names(),
+           "tenant-b CREATE writes no topic on owera")
+
+        r = client.get("/api/topics/2", auth=auth_b)
+        ok(r.status_code == 404 and "topic not found" in r.text,
+           "tenant-b GET owera topic → 404 topic not found "
+           f"({r.status_code} {r.text[:80]})")
+
+        live_fmt = topic_format(2)
+        r = client.patch("/api/topics/2", auth=auth_b,
+                         json={"content_format": "long", "name": "Hijacked"})
+        ok(r.status_code == 404 and "topic not found" in r.text,
+           "tenant-b PATCH owera topic → 404")
+        ok(topic_format(2) == live_fmt and topic_name(2) == "Live",
+           "tenant-b PATCH leaves owera topic untouched")
+
+        n_calls = len(calls)
+        r = client.post("/api/topics/2/generate", auth=auth_b,
+                        json={"count": 1})
+        ok(r.status_code == 404 and "topic not found" in r.text,
+           "tenant-b GENERATE on owera topic → 404")
+        ok(len(calls) == n_calls,
+           "tenant-b GENERATE never called generate_ideas")
+
+        with Session(engine) as s:
+            s.add(Topic(channel_id=1, name="DoNotDelete", theme_prompt="x",
+                        weight=1, content_format="short"))
+            s.commit()
+            empty_id = s.exec(select(Topic).where(Topic.name == "DoNotDelete")).one().id
+        r = client.delete(f"/api/topics/{empty_id}", auth=auth_b)
+        ok(r.status_code == 404 and "topic not found" in r.text,
+           "tenant-b DELETE empty owera topic → 404 "
+           "(Live has drafts so a 409 would hide a missing workspace gate)")
+        ok("DoNotDelete" in topic_names(),
+           "tenant-b DELETE leaves the empty owera topic")
+
+        r = client.get("/api/topics", auth=auth_ow, params={"channel_id": 1})
+        ok(r.status_code == 200 and any(t["name"] == "Live" for t in r.json()),
+           "owera LIST own channel still 200")
+
+        r = client.get("/api/topics", auth=auth_b,
+                       params={"channel_id": CHANNEL_B_ID})
+        ok(r.status_code == 200
+           and any(t["id"] == TOPIC_B_ID for t in r.json()),
+           "tenant-b LIST own channel still 200")
+
+        r = client.post(f"/api/topics/{TOPIC_B_ID}/generate", auth=auth_b,
+                        json={"count": 1})
+        ok(r.status_code == 200 and r.json().get("generated", 0) >= 1,
+           f"tenant-b GENERATE own topic still 200 ({r.status_code} {r.text[:80]})")
+
+        src_list = inspect.getsource(topics_router.list_topics)
+        src_create = inspect.getsource(topics_router.create_topic)
+        src_get = inspect.getsource(topics_router.get_topic)
+        src_upd = inspect.getsource(topics_router.update_topic)
+        src_del = inspect.getsource(topics_router.delete_topic)
+        src_gen = inspect.getsource(topics_router.generate_videos)
+        ok("require_channel" in src_list and "current_workspace" in src_list,
+           "list_topics gates through require_channel + current_workspace")
+        ok("require_channel" in src_create and "current_workspace" in src_create,
+           "create_topic gates through require_channel + current_workspace")
+        ok("require_topic" in src_get and "require_topic" in src_upd
+           and "require_topic" in src_gen,
+           "get/update/generate go through require_topic "
+           "(session.get alone is the cross-tenant leak)")
+        ok("require_topic" in src_del,
+           "delete_topic goes through require_topic "
+           "(missing and foreign both 404 topic not found; a silent 204 "
+           "on miss would let a tenant distinguish 204 vs 404)")
+        ok("def require_topic" in inspect.getsource(workspace_mod),
+           "workspace.require_topic exists (sibling of require_video)")
+    finally:
+        settings.multi_workspace = _orig_mw
 finally:
     topics_router.video_gen.generate_ideas = _orig_ideas
     main.app.dependency_overrides.clear()
