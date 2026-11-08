@@ -1962,3 +1962,25 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-11-08-playlists-workspace) playlist routes follow workspace isolation — normal
+- **resolution (2026-11-08):** `playlists.py` `_require_channel` was a bare
+  `session.get(Channel)` (PR #196 residual). LIST / POST `/sync` / POST
+  create now go through `workspace.require_channel` + `current_workspace`.
+  Missing and foreign channels both 404 `channel not found` before
+  `get_service`, so a tenant cannot list another workspace's playlists,
+  spend quota on `playlists.list`/`insert`, or `mark_dead` a foreign
+  dead token. Own-workspace LIST/CREATE unchanged. Suite:
+  `tests/verify_playlists.py` (23 checks). `verify_notify.py` passes the
+  workspace into the direct `sync()` call (FastAPI does not inject
+  `Depends` on a plain call). Isolated commit; no money-path files.
+  Remaining (not bundled): `trends.py` / `profiles.py` /
+  `youtube_admin.py` still unscoped.
+- **why (found 2026-11-08, residual of PR #196):** topic routes were
+  gated; playlist create/sync still mutate live YouTube for any
+  `channel_id`.
+- **caution:** normal (`playlists.py` router only). Isolated commit +
+  regression tests. `youtube.py` / `publish_loop.py` untouched.
+- **acceptance:** tenant-b LIST/SYNC/CREATE on an owera channel is 404
+  and writes nothing (youtube never called); owera LIST and tenant-b
+  own CREATE still 200/201; missing channel still 404; unauth still 401.
