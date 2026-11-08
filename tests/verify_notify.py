@@ -29,7 +29,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
 from app.config import settings
-from app.models import Channel, OAuthStatus, Video, VideoStatus
+from app.models import Channel, OAuthStatus, Video, VideoStatus, Workspace
 from app.routers import channels as channels_router
 from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
@@ -390,8 +390,9 @@ ok(len(cap.records) == 1, "a repeat 409 on the dead channel stays silent")
 
 # playlists endpoints share the same gap class: 400 without a flip.
 ch_pl = make_channel(s, slug="ch-playlists")
+ws_pl = Workspace(id=ch_pl.workspace_id or 1, slug="owera", name="Owera")
 try:
-    playlists_router.sync(ch_pl.id, session=s)
+    playlists_router.sync(ch_pl.id, session=s, ws=ws_pl)
     code = None
 except HTTPException as e:
     code = e.status_code
