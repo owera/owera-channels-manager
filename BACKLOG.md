@@ -1962,3 +1962,26 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 73. ✅ DONE (PR autoimprove/2026-11-08-youtube-admin-workspace) youtube_admin routes follow workspace isolation — normal
+- **resolution (2026-11-08):** `_connected` and every GET-only 404 now go
+  through `workspace.require_channel` + `current_workspace` (PR #196
+  residual; sibling of #72 playlists). Missing and foreign channels
+  both 404 `channel not found` before `get_service` / `update_branding`
+  / `subscribe` / analytics snapshot, so a tenant cannot read YPP
+  numbers, refresh metrics, change branding, or subscribe as another
+  workspace's channel. Own-workspace monetization unchanged. Suite:
+  `tests/verify_youtube_admin.py` 23 → 51. `verify_notify.py` passes
+  the workspace into the direct `_connected()` call. Isolated commit;
+  `youtube.py` / `publish_loop.py` untouched. Remaining (not bundled):
+  `trends.py` / `profiles.py` still unscoped.
+- **why (found 2026-11-08, residual of PR #196):** topic routes were
+  gated; youtube_admin still `session.get` the channel, so PUT
+  `/branding` and POST `/subscriptions` mutate live YouTube for any
+  `channel_id`.
+- **caution:** normal (`youtube_admin.py` router only). Isolated
+  commit + regression tests. Not a money-path file.
+- **acceptance:** tenant-b GET monetization/metrics/youtube, PUT
+  branding, POST subscribe, and video-analytics refresh on an owera
+  channel are 404 and never call YouTube; owera and tenant-b own
+  monetization still 200; missing channel still 404; unauth still 401.

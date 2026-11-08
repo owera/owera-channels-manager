@@ -29,7 +29,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import os as _os_vmp; _os_vmp.environ["MANAGER_TOPIC_FLAGS"] = '{"vm_pass_required": []}'  # test-only: pre-vm_pass-lock flow (PR #87 default = all topics; lock pinned in verify_vm_pass_topics)
 from app.config import settings
-from app.models import Channel, OAuthStatus, Video, VideoStatus
+from app.models import Channel, OAuthStatus, Video, VideoStatus, Workspace
 from app.routers import channels as channels_router
 from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
@@ -370,10 +370,11 @@ youtube.get_service = _raise_needs_connect
 youtube.has_token = lambda slug: True
 s = fresh_session()
 ch = make_channel(s, slug="ch-admin")
+ws_admin = Workspace(id=ch.workspace_id or 1, slug="owera", name="Owera")
 
 cap = CaptureAlerts()
 try:
-    youtube_admin._connected(s, ch.id)
+    youtube_admin._connected(s, ch.id, ws_admin)
     code = None
 except HTTPException as e:
     code = e.status_code
@@ -383,7 +384,7 @@ ok(ch.oauth_status == OAuthStatus.EXPIRED,
    "the 409 path flips the channel durably (committed before the alert)")
 ok(len(cap.records) == 1, "the admin-discovered flip alerts exactly once")
 try:
-    youtube_admin._connected(s, ch.id)
+    youtube_admin._connected(s, ch.id, ws_admin)
 except HTTPException:
     pass
 ok(len(cap.records) == 1, "a repeat 409 on the dead channel stays silent")

@@ -15,24 +15,28 @@ Pins:
   - canonical ``"short"`` still counts
   - no-metric published video adds nothing; unpublished metrics do not count
   - missing channel is 404; unauthenticated is 401
+  - a foreign workspace 404s LIST/mutate routes before get_service
+    (PR #196 residual: youtube_admin still session.gets Channel)
 
 Uses an in-memory SQLite DB and FastAPI's TestClient (no real manager.db, no
 network, no live YouTube). Exits non-zero on the first failed assertion.
 """
+import inspect
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.main as main
 from app.config import settings
 from app.db import get_session
 from app.models import (Channel, ChannelMetric, OAuthStatus, Topic, Video,
-                        VideoMetric, VideoStatus)
+                        VideoMetric, VideoStatus, Workspace)
 from app.routers import youtube_admin as yt_admin
+from app.services import youtube
 
 _checks = 0
 
@@ -177,12 +181,18 @@ ok(a["shorts_views"] != b["shorts_views"],
 print("GET /api/channels/{id}/monetization: HTTP contract")
 http_engine = fresh_engine()
 with Session(http_engine) as s:
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Workspace(slug="tenant-b", name="Tenant B"))
+    s.commit()
+    ws_b = s.exec(select(Workspace).where(Workspace.slug == "tenant-b")).one()
     http_ch = make_channel(s, slug="http-ch")
     t_http = make_topic(s, http_ch, name="Empty HTTP", content_format="")
     t_long_http = make_topic(s, http_ch, name="Long HTTP", content_format="long")
     make_published(s, http_ch, t_http, "http-empty", views=15)
     make_published(s, http_ch, t_long_http, "http-long", views=4000)
     http_ch_id = http_ch.id
+    ch_b = make_channel(s, slug="b-ch", workspace_id=ws_b.id)
+    CHANNEL_B_ID = ch_b.id
 
 
 def _override_session():
@@ -216,6 +226,137 @@ try:
 
     r = client.get(f"/api/channels/{http_ch_id}/monetization")
     ok(r.status_code == 401, "monetization still requires auth")
+
+    print("workspace isolation: youtube_admin routes follow require_channel")
+    _orig_mw = settings.multi_workspace
+    settings.multi_workspace = True
+    auth_ow = ("owera", "testpw")
+    auth_b = ("tenant-b", "testpw")
+    yt_calls = []
+    _orig_get = youtube.get_service
+    _orig_fetch = youtube.fetch_channel
+    _orig_brand = youtube.update_branding
+    _orig_resolve = youtube.resolve_channel_id
+    _orig_sub = youtube.subscribe
+    _orig_snap = yt_admin.analytics_loop._snapshot_channel
+
+    def fake_get_service(slug, channel=None, session=None):
+        yt_calls.append(("get_service", slug))
+        return object()
+
+    def fake_fetch(service):
+        yt_calls.append(("fetch_channel",))
+        return {"id": "UC-owera"}
+
+    def fake_branding(service, yt_id, **kw):
+        yt_calls.append(("update_branding", yt_id))
+        return {"ok": True}
+
+    def fake_resolve(service, channel):
+        yt_calls.append(("resolve", channel))
+        return "UC-target"
+
+    def fake_subscribe(service, target):
+        yt_calls.append(("subscribe", target))
+        return {"id": "sub-1"}
+
+    def fake_snapshot(session, ch, now, force=False):
+        yt_calls.append(("snapshot", ch.slug, force))
+        return 0
+
+    youtube.get_service = fake_get_service
+    youtube.fetch_channel = fake_fetch
+    youtube.update_branding = fake_branding
+    youtube.resolve_channel_id = fake_resolve
+    youtube.subscribe = fake_subscribe
+    yt_admin.analytics_loop._snapshot_channel = fake_snapshot
+    try:
+        n_calls = len(yt_calls)
+        r = client.get(f"/api/channels/{http_ch_id}/monetization", auth=auth_b)
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b GET owera monetization → 404 channel not found "
+           f"({r.status_code} {r.text[:80]})")
+        ok("shorts_views" not in r.text,
+           "tenant-b monetization does not leak owera YPP numbers")
+
+        r = client.get(f"/api/channels/{http_ch_id}/metrics", auth=auth_b)
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b GET owera metrics → 404")
+
+        r = client.get(f"/api/channels/{http_ch_id}/youtube", auth=auth_b)
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b GET owera /youtube → 404")
+        ok(len(yt_calls) == n_calls,
+           "tenant-b /youtube never called get_service")
+
+        r = client.put(f"/api/channels/{http_ch_id}/branding", auth=auth_b,
+                       json={"title": "Hijacked"})
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b PUT owera branding → 404")
+        ok(len(yt_calls) == n_calls,
+           "tenant-b branding never called get_service / update_branding")
+
+        r = client.post(f"/api/channels/{http_ch_id}/subscriptions", auth=auth_b,
+                        json={"channel": "@victim"})
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b POST owera subscribe → 404")
+        ok(len(yt_calls) == n_calls,
+           "tenant-b subscribe never called get_service")
+
+        r = client.post(f"/api/channels/{http_ch_id}/video-analytics/refresh",
+                        auth=auth_b)
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b refresh owera video-analytics → 404")
+        ok(len(yt_calls) == n_calls,
+           "tenant-b analytics refresh never snapshot the foreign channel")
+
+        r = client.get(f"/api/channels/{http_ch_id}/monetization", auth=auth_ow)
+        ok(r.status_code == 200 and r.json().get("shorts_views") == 15,
+           "owera GET own monetization still 200")
+
+        r = client.get(f"/api/channels/{CHANNEL_B_ID}/monetization", auth=auth_b)
+        ok(r.status_code == 200,
+           f"tenant-b GET own monetization still 200 ({r.status_code})")
+
+        src_conn = inspect.getsource(yt_admin._connected)
+        src_overview = inspect.getsource(yt_admin.youtube_overview)
+        src_brand = inspect.getsource(yt_admin.update_branding)
+        src_metrics = inspect.getsource(yt_admin.get_metrics)
+        src_monet = inspect.getsource(yt_admin.get_monetization)
+        src_refresh = inspect.getsource(yt_admin.refresh_video_analytics)
+        ok("require_channel" in src_conn and "current_workspace" in src_overview,
+           "_connected uses require_channel; overview injects current_workspace")
+        ok("require_channel" in src_brand or " _connected(" in src_brand,
+           "update_branding goes through _connected (live YouTube mutate)")
+        ok("require_channel" in src_metrics and "current_workspace" in src_metrics,
+           "get_metrics gates through require_channel + current_workspace "
+           "(session.get alone is the cross-tenant leak)")
+        ok("require_channel" in src_monet and "current_workspace" in src_monet,
+           "get_monetization gates through require_channel + current_workspace")
+        ok("require_channel" in src_refresh and "current_workspace" in src_refresh,
+           "refresh_video_analytics gates through require_channel "
+           "(session.get then _snapshot_channel is the leak)")
+        ok("session.get(Channel, channel_id)" not in inspect.getsource(yt_admin),
+           "youtube_admin has no remaining bare session.get(Channel, channel_id)")
+        for fn in (yt_admin.youtube_overview, yt_admin.update_branding,
+                   yt_admin.refresh_metrics, yt_admin.list_subscriptions,
+                   yt_admin.add_subscription, yt_admin.remove_subscription,
+                   yt_admin.list_subscribers):
+            ok("_connected(session, channel_id, ws)" in inspect.getsource(fn),
+               f"{fn.__name__} passes ws into _connected "
+               "(two-arg _connected is the pre-fix leak)")
+        for fn in (yt_admin.video_analytics, yt_admin.video_analytics_by_topic):
+            ok("require_channel" in inspect.getsource(fn)
+               and "current_workspace" in inspect.getsource(fn),
+               f"{fn.__name__} gates through require_channel + current_workspace")
+    finally:
+        youtube.get_service = _orig_get
+        youtube.fetch_channel = _orig_fetch
+        youtube.update_branding = _orig_brand
+        youtube.resolve_channel_id = _orig_resolve
+        youtube.subscribe = _orig_sub
+        yt_admin.analytics_loop._snapshot_channel = _orig_snap
+        settings.multi_workspace = _orig_mw
 finally:
     main.app.dependency_overrides.clear()
     settings.app_password = _orig_pw
