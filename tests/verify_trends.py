@@ -22,6 +22,15 @@ false→0. Create/upsert/PATCH then bind the trend to channel 1 (or store
 0). Adopt ``body.channel_id or t.channel_id`` treats false as missing
 and adopts onto the trend's own channel, and true adopts onto channel 1.
 
+Workspace isolation (backlog #74): LIST/GET/PATCH/ADOPT/upsert went
+through ``session.get`` / a global ``term_norm`` match, so tenant-b
+could read, patch, adopt-onto, and clobber an owera trend. These
+checks pin foreign ids as 404 ``trend not found`` / ``channel not
+found`` (no term leak, no generate_ideas, no topic mint) and that
+upsert-by-term is workspace-scoped. ``generate_ideas`` stub absorbs
+``niche=`` / ``steer_notes=`` from generics-v1 so adopt tests still
+reach the call (same class as verify_shipping_autogen).
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no network,
 no LLM). ``video_gen.generate_ideas`` is stubbed. Exits non-zero on the first
 failed assertion.
@@ -38,7 +47,7 @@ import app.main as main
 from app.config import settings
 from app.db import get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal,
-                        TrendStatus, Video, VideoStatus)
+                        TrendStatus, Video, VideoStatus, Workspace)
 from app.routers import trends as trends_router
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 
@@ -63,6 +72,7 @@ SQLModel.metadata.create_all(engine)
 
 # budget 5 × horizon 2 = 10 seats (matches production).
 with Session(engine) as s:
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED,
                   daily_render_budget=5))
     s.commit()
@@ -118,7 +128,9 @@ calls: list[dict] = []
 
 
 def fake_ideas(topic_name, theme_prompt, existing, n=8, content_format="short",
-               language=None):
+               language=None, **_kw):
+    # **_kw absorbs niche=/steer_notes= from generics-v1 so adopt tests
+    # still reach generate_ideas (same class as verify_shipping_autogen).
     calls.append({
         "topic_name": topic_name,
         "theme_prompt": theme_prompt,
@@ -804,6 +816,164 @@ try:
            "(mode=after would already have coerced true→1)")
         ok("def _reject_bool_channel" in src,
            f"{name} has _reject_bool_channel")
+
+    print("workspace isolation: trend routes follow require_channel / require_trend")
+    # PR #198 residual: trends.py still session.gets Channel / TrendSignal,
+    # so a tenant who knows another workspace's ids can LIST its research,
+    # PATCH it, ADOPT onto its channel (mint a topic + queue renders), and
+    # POST-upsert the same term_norm to clobber the other tenant's row.
+    _orig_mw = settings.multi_workspace
+    settings.multi_workspace = True
+    auth_ow = ("owera", "testpw")
+    auth_b = ("tenant-b", "testpw")
+    try:
+        with Session(engine) as s:
+            s.add(Workspace(slug="tenant-b", name="Tenant B"))
+            s.commit()
+            ws_b = s.exec(select(Workspace).where(Workspace.slug == "tenant-b")).one()
+            s.add(Channel(slug="tb-ch", name="Tenant B Ch", workspace_id=ws_b.id,
+                          oauth_status=OAuthStatus.CONNECTED, daily_render_budget=5))
+            s.commit()
+            ch_tb = s.exec(select(Channel).where(Channel.slug == "tb-ch")).one()
+            s.add(TrendSignal(term="Owera Secret", term_norm="owera secret",
+                              channel_id=1, status=TrendStatus.WATCHING, score=99,
+                              description="must not leak to tenant-b"))
+            s.add(TrendSignal(term="Tenant B Own", term_norm="tenant b own",
+                              channel_id=ch_tb.id, status=TrendStatus.WATCHING, score=70,
+                              description="tenant-b keeps this"))
+            s.commit()
+            owera_tid = s.exec(select(TrendSignal).where(
+                TrendSignal.term_norm == "owera secret")).one().id
+            tb_tid = s.exec(select(TrendSignal).where(
+                TrendSignal.term_norm == "tenant b own")).one().id
+            ch_tb_id = ch_tb.id
+        ok(ch_tb_id != 1, "precondition: tenant-b channel is not owera id 1")
+
+        topics_1_before = rows_on(Topic, 1)
+        videos_1_before = rows_on(Video, 1)
+        calls_iso = len(calls)
+        owera_before = trend_row(owera_tid)
+        ok(owera_before.status == TrendStatus.WATCHING
+           and owera_before.channel_id == 1,
+           "precondition: owera secret trend is watching on channel 1")
+
+        r = client.get(f"/api/trends/{owera_tid}", auth=auth_b)
+        ok(r.status_code == 404 and "trend not found" in r.text,
+           "tenant-b GET owera trend → 404 trend not found "
+           f"({r.status_code} {r.text[:80]})")
+        ok("Owera Secret" not in r.text and "must not leak" not in r.text,
+           "tenant-b GET does not leak the owera term or description")
+
+        r = client.get("/api/trends", auth=auth_b)
+        ok(r.status_code == 200, "tenant-b LIST is 200")
+        listed = r.json()
+        terms = {t.get("term") for t in listed}
+        ok("Owera Secret" not in terms,
+           "tenant-b LIST omits the owera-bound trend")
+        ok("Tenant B Own" in terms,
+           "tenant-b LIST still shows its own bound trend")
+
+        r = client.get("/api/trends", params={"channel_id": 1}, auth=auth_b)
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b LIST ?channel_id=owera → 404 channel not found")
+        ok("Owera Secret" not in r.text,
+           "tenant-b LIST-by-owera-channel does not leak the term")
+
+        r = client.patch(f"/api/trends/{owera_tid}", auth=auth_b,
+                         json={"description": "hijacked"})
+        ok(r.status_code == 404 and "trend not found" in r.text,
+           "tenant-b PATCH owera trend → 404")
+        ok(trend_desc(owera_tid) == "must not leak to tenant-b",
+           "tenant-b PATCH left the owera description untouched")
+
+        r = client.post(f"/api/trends/{owera_tid}/adopt", auth=auth_b,
+                        json={"channel_id": ch_tb_id, "idea_count": 1,
+                              "produce_count": 0})
+        ok(r.status_code == 404 and "trend not found" in r.text,
+           "tenant-b ADOPT owera trend → 404 (must not mint a topic)")
+        ok(len(calls) == calls_iso,
+           "tenant-b ADOPT owera never called generate_ideas")
+        ok(rows_on(Topic, 1) == topics_1_before,
+           "tenant-b ADOPT owera created no topic on channel 1")
+        ok(rows_on(Video, 1) == videos_1_before,
+           "tenant-b ADOPT owera wrote no videos on channel 1")
+        t = trend_row(owera_tid)
+        ok(t.status == TrendStatus.WATCHING and t.adopted_topic_id is None
+           and t.channel_id == 1,
+           "tenant-b ADOPT left the owera trend watching on channel 1")
+
+        r = client.post(f"/api/trends/{tb_tid}/adopt", auth=auth_b,
+                        json={"channel_id": 1, "idea_count": 1, "produce_count": 0})
+        ok(r.status_code == 404 and "channel not found" in r.text,
+           "tenant-b ADOPT own trend onto owera channel → 404 channel not found")
+        ok(len(calls) == calls_iso,
+           "tenant-b ADOPT onto owera channel never called generate_ideas")
+        ok(rows_on(Topic, 1) == topics_1_before,
+           "tenant-b ADOPT onto owera created no topic on channel 1")
+        t = trend_row(tb_tid)
+        ok(t.status == TrendStatus.WATCHING and t.channel_id == ch_tb_id,
+           "tenant-b ADOPT onto owera left its own trend watching on tb-ch")
+
+        owera_id_before = owera_tid
+        r = client.post("/api/trends", auth=auth_b, json={
+            "term": "Owera Secret", "channel_id": ch_tb_id, "score": 1})
+        ok(r.status_code == 201, "tenant-b upsert of the owera term is 201")
+        ok(r.json().get("id") != owera_id_before,
+           "tenant-b upsert did not clobber the owera row "
+           "(global term_norm.first() is the leak)")
+        ok(r.json().get("channel_id") == ch_tb_id,
+           "tenant-b upsert bound the new row to tenant-b's channel")
+        t = trend_row(owera_id_before)
+        ok(t.term == "Owera Secret" and t.channel_id == 1
+           and t.score == 99 and t.status == TrendStatus.WATCHING,
+           "tenant-b upsert left the owera secret trend untouched")
+
+        r = client.get(f"/api/trends/{owera_tid}", auth=auth_ow)
+        ok(r.status_code == 200 and r.json().get("term") == "Owera Secret",
+           "owera GET own trend still 200")
+
+        r = client.get(f"/api/trends/{tb_tid}", auth=auth_b)
+        ok(r.status_code == 200 and r.json().get("term") == "Tenant B Own",
+           "tenant-b GET own trend still 200")
+
+        r = client.post(f"/api/trends/{tb_tid}/adopt", auth=auth_b,
+                        json={"idea_count": 1, "produce_count": 0})
+        ok(r.status_code == 200, "tenant-b ADOPT own trend still 200")
+        ok(r.json().get("ideas") == 1, "tenant-b own adopt seeded one idea")
+        ok(len(calls) == calls_iso + 1,
+           "tenant-b own adopt called generate_ideas once")
+        t = trend_row(tb_tid)
+        ok(t.status == TrendStatus.ADOPTED and t.channel_id == ch_tb_id,
+           "tenant-b own adopt marked the trend adopted on tb-ch")
+
+        r = client.get("/api/trends/99999", auth=auth_ow)
+        ok(r.status_code == 404, "missing trend is still 404")
+        r = client.get(f"/api/trends/{owera_tid}")
+        ok(r.status_code == 401, "GET trend still requires auth")
+
+        src_list = inspect.getsource(trends_router.list_trends)
+        src_get = inspect.getsource(trends_router.get_trend)
+        src_patch = inspect.getsource(trends_router.update_trend)
+        src_upsert = inspect.getsource(trends_router.upsert_trend)
+        src_adopt = inspect.getsource(trends_router.adopt_trend)
+        ok("current_workspace" in src_list and "require_channel" in src_list,
+           "list_trends injects current_workspace and require_channel "
+           "(bare select(TrendSignal) is the LIST leak)")
+        ok("require_trend" in src_get and "current_workspace" in src_get,
+           "get_trend goes through require_trend + current_workspace")
+        ok("require_trend" in src_patch and "current_workspace" in src_patch,
+           "update_trend goes through require_trend + current_workspace")
+        ok("require_channel" in src_upsert and "current_workspace" in src_upsert,
+           "upsert_trend require_channel + current_workspace "
+           "(session.get(Channel) then global term_norm.first() is the clobber)")
+        ok("require_trend" in src_adopt and "require_channel" in src_adopt
+           and "current_workspace" in src_adopt,
+           "adopt_trend require_trend + require_channel + current_workspace "
+           "(session.get then generate_ideas is the mint-on-foreign leak)")
+        ok("require_trend" in inspect.getsource(trends_router),
+           "trends router uses workspace.require_trend")
+    finally:
+        settings.multi_workspace = _orig_mw
 finally:
     trends_router.video_gen.generate_ideas = _orig_ideas
     trends_router.video_gen.channel_language = _orig_lang

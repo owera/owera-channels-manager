@@ -1962,3 +1962,32 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 74. ✅ DONE (PR autoimprove/2026-11-09-trends-workspace) trend routes follow workspace isolation — normal
+- **resolution (2026-11-09):** `workspace.require_trend` is the sibling of
+  `require_video`. LIST / GET / PATCH / POST upsert / ADOPT now go through
+  `current_workspace` + `require_channel` / `require_trend`. Missing and
+  foreign trends both 404 `trend not found` (404 not 403, so existence
+  does not leak); LIST `?channel_id=` of a foreign channel is 404
+  `channel not found` before any rows; upsert-by-`term_norm` is scoped
+  to the workspace so tenant-b cannot clobber an owera row. ADOPT of a
+  foreign trend never calls `generate_ideas` / mints a topic. Own-workspace
+  GET/ADOPT unchanged. Suite: `tests/verify_trends.py` 223 → 261 (stub
+  also absorbs generics-v1 `niche=` / `steer_notes=` so adopt tests still
+  reach `generate_ideas`). Isolated commit; no money-path files.
+  Remaining (not bundled): `profiles.py` still unscoped. Accepted
+  residual: unbound trends (`channel_id is None`) and orphan ids
+  (integer 0) have no tenant, so they stay visible — same class as
+  shared `RenderProfile.channel_id is None`; integer 0 persist is the
+  #57 contract.
+- **why (found 2026-11-08, residual of PR #196 / #198):** topic /
+  playlist / youtube_admin routes were gated; `trends.py` still
+  `session.get` the row, so ADOPT minted a topic on another workspace's
+  channel and global `term_norm.first()` clobbered the other tenant's
+  research.
+- **caution:** normal (`trends.py` + `workspace.require_trend`). Isolated
+  commit + regression tests. `publish_loop.py` / `youtube.py` untouched.
+- **acceptance:** tenant-b GET/PATCH/ADOPT of an owera trend is 404 and
+  writes nothing; LIST omits the owera-bound term; LIST-by-owera-channel
+  is 404; upsert of the same term creates a new row; owera GET and
+  tenant-b own ADOPT still 200; missing still 404; unauth still 401.

@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, Video, Workspace
+from app.models import Channel, TrendSignal, Video, Workspace
 from app.services import spa_google_login
 
 # Basic Auth usernames that map to a different workspace slug (multi_workspace only).
@@ -156,3 +156,28 @@ def require_video(session: Session, ws: Workspace, video_id: int) -> Video:
     if not ch or ch.workspace_id != ws.id:
         raise HTTPException(404, "video not found")
     return v
+
+
+def require_trend(session: Session, ws: Workspace, trend_id: int) -> TrendSignal:
+    """404 if the trend is missing or bound to another workspace.
+
+    Sibling of require_video: a raw session.get(TrendSignal) is how a
+    tenant listed, patched, and adopted another workspace's research
+    (and POST-upsert clobbered it by global term_norm). Unbound trends
+    (channel_id is None) have no tenant — they stay visible, matching
+    shared RenderProfile.channel_id is None.
+    """
+    t = session.get(TrendSignal, trend_id)
+    if not t:
+        raise HTTPException(404, "trend not found")
+    if t.channel_id is None:
+        return t
+    ch = session.get(Channel, t.channel_id)
+    if not ch:
+        # Orphan id (integer 0 / deleted channel) has no tenant — same
+        # as unbound. A missing-channel 404 here blocked PATCH restore
+        # after the documented channel_id=0 persist.
+        return t
+    if ch.workspace_id != ws.id:
+        raise HTTPException(404, "trend not found")
+    return t
