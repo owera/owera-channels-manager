@@ -8,9 +8,10 @@ from sqlmodel import Session, func, select
 
 from app.db import app_settings, get_session
 from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoStatus,
-                        utcnow)
+                        Workspace, utcnow)
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 from app.services import quota, video_gen
+from app.workspace import current_workspace, require_channel, require_trend
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -46,30 +47,46 @@ def _norm(term: str) -> str:
     return " ".join((term or "").strip().lower().split())
 
 
+def _workspace_channel_ids(session: Session, ws: Workspace):
+    return select(Channel.id).where(Channel.workspace_id == ws.id)
+
+
 @router.get("")
 def list_trends(status: str | None = None, channel_id: int | None = None,
-                sort: str = "score", session: Session = Depends(get_session)):
+                sort: str = "score", session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
     """Trends, newest-scored first. Filter by status/channel; sort by score|updated."""
     q = select(TrendSignal)
     if status:
         q = q.where(TrendSignal.status == status)
     if channel_id is not None:
+        require_channel(session, ws, channel_id)
         q = q.where(TrendSignal.channel_id == channel_id)
+    else:
+        q = q.where(
+            (TrendSignal.channel_id.in_(_workspace_channel_ids(session, ws)))
+            | (TrendSignal.channel_id == None)  # noqa: E711
+        )
     order = TrendSignal.updated_at.desc() if sort == "updated" else TrendSignal.score.desc()
     return session.exec(q.order_by(order)).all()
 
 
 @router.post("", status_code=201)
-def upsert_trend(body: TrendCreate, session: Session = Depends(get_session)):
+def upsert_trend(body: TrendCreate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     """Record a researched trend. Upserts by normalized term so re-seeing a trend
     refreshes it (momentum/score/source) instead of creating a duplicate."""
     norm = _norm(body.term)
     if not norm:
         raise HTTPException(400, "term is required")
-    if body.channel_id is not None and not session.get(Channel, body.channel_id):
-        raise HTTPException(404, "channel not found")
+    if body.channel_id is not None:
+        require_channel(session, ws, body.channel_id)
     existing = session.exec(
-        select(TrendSignal).where(TrendSignal.term_norm == norm)).first()
+        select(TrendSignal).where(
+            TrendSignal.term_norm == norm,
+            (TrendSignal.channel_id.in_(_workspace_channel_ids(session, ws)))
+            | (TrendSignal.channel_id == None),  # noqa: E711
+        )).first()
     data = body.model_dump(exclude_unset=True)
     if "content_format" in data:
         data["content_format"] = _canonical_format(data["content_format"])
@@ -98,21 +115,20 @@ def upsert_trend(body: TrendCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/{trend_id}")
-def get_trend(trend_id: int, session: Session = Depends(get_session)):
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
-    return t
+def get_trend(trend_id: int, session: Session = Depends(get_session),
+              ws: Workspace = Depends(current_workspace)):
+    return require_trend(session, ws, trend_id)
 
 
 @router.patch("/{trend_id}")
-def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(get_session)):
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
+def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    t = require_trend(session, ws, trend_id)
     fields = body.model_dump(exclude_unset=True)
     if "content_format" in fields:
         fields["content_format"] = _canonical_format(fields["content_format"])
+    if fields.get("channel_id"):
+        require_channel(session, ws, fields["channel_id"])
     for k, v in fields.items():
         setattr(t, k, v)
     t.updated_at = utcnow()
@@ -124,22 +140,19 @@ def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(ge
 
 @router.post("/{trend_id}/adopt")
 def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
-                session: Session = Depends(get_session)):
+                session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
     """Smart-adopt: create a topic from the trend, seed ideas, and auto-produce a few
     (queued to render). Links the trend → topic so its performance can be tracked."""
     body = body or TrendAdoptBody()
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
+    t = require_trend(session, ws, trend_id)
     if t.status == TrendStatus.ADOPTED and t.adopted_topic_id:
         raise HTTPException(409, f"trend already adopted (topic {t.adopted_topic_id})")
 
     channel_id = body.channel_id or t.channel_id
     if channel_id is None:
         raise HTTPException(400, "no target channel — set the trend's channel_id or pass one")
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_channel(session, ws, channel_id)
 
     # Empty/typed 0 used to coerce to a one-idea adopt before generate.
     # Generate already 400s count<=0; same growth-agent path.

@@ -27,7 +27,7 @@ import app.main as main
 from app.config import settings
 from app.db import get_session
 from app.models import (Channel, OAuthStatus, Topic, TrendSignal, TrendStatus, Video,
-                        VideoStatus)
+                        VideoStatus, Workspace)
 from app.routers import topics as topics_router
 from app.routers import trends as trends_router
 from app.services import review_guard
@@ -63,6 +63,7 @@ ok(review_guard.drop_teaser_ideas([]) == [] and review_guard.drop_teaser_ideas(N
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Channel(slug="owera", name="Owera Software", oauth_status=OAuthStatus.CONNECTED,
                   daily_render_budget=5))
     s.commit()
@@ -86,7 +87,10 @@ def _sess():
 calls = []
 
 
-def fake_ideas(topic_name, theme_prompt, existing, n=8, content_format="short", language=None):
+def fake_ideas(topic_name, theme_prompt, existing, n=8, content_format="short",
+               language=None, **_kw):
+    # **_kw absorbs niche=/steer_notes= from generics-v1 so generate/adopt
+    # tests still reach generate_ideas (same class as verify_trends).
     calls.append(topic_name)
     return ["You clicked and got a teaser · Shipping 5", f"{topic_name} real idea one",
             f"{topic_name} real idea two"][:max(n, 1)]
