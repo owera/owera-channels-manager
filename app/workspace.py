@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, Video, Workspace
+from app.models import Channel, RenderProfile, Video, Workspace
 from app.services import spa_google_login
 
 # Basic Auth usernames that map to a different workspace slug (multi_workspace only).
@@ -156,3 +156,42 @@ def require_video(session: Session, ws: Workspace, video_id: int) -> Video:
     if not ch or ch.workspace_id != ws.id:
         raise HTTPException(404, "video not found")
     return v
+
+
+def require_profile(session: Session, ws: Workspace, profile_id: int) -> RenderProfile:
+    """404 if the profile is missing or bound to another workspace.
+
+    A raw session.get(RenderProfile) is how a tenant read, patched, and
+    deleted another workspace's render profile (voice, prompts, engine).
+    Shared profiles (channel_id is None) have no tenant — they stay
+    visible, which is what the profile editor's per-channel list already
+    shows. An orphan id (integer 0 / deleted channel) has no tenant
+    either, matching the channel_id=0 persist contract.
+    """
+    p = session.get(RenderProfile, profile_id)
+    if not p:
+        raise HTTPException(404, "profile not found")
+    if p.channel_id is None:
+        return p
+    ch = session.get(Channel, p.channel_id)
+    if not ch:
+        return p
+    if ch.workspace_id != ws.id:
+        raise HTTPException(404, "profile not found")
+    return p
+
+
+def profiles_visible_to(ws: Workspace):
+    """Filter: this workspace's profiles, plus shared and orphan rows.
+
+    Orphans (channel_id set, but no Channel row) stay visible so integer
+    0 still appears on the unfiltered list. A profile whose channel
+    belongs to another workspace does not.
+    """
+    own = select(Channel.id).where(Channel.workspace_id == ws.id)
+    any_channel = select(Channel.id)
+    return (
+        (RenderProfile.channel_id == None)  # noqa: E711
+        | (RenderProfile.channel_id.in_(own))
+        | (RenderProfile.channel_id.notin_(any_channel))
+    )

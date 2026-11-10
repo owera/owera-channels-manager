@@ -10,10 +10,19 @@ Integer ids, integer 0, null, and omitted stay as they are. PATCH does
 not accept channel_id (the editor locks scope after create); a bool on
 PATCH must not rebind.
 
+Workspace isolation: LIST/GET/PATCH/DELETE/POST went through session.get,
+so tenant-b could read, rewrite, and delete an owera render profile
+(voice, prompts, engine) and bind a new profile onto owera's channel.
+These checks pin foreign ids as 404 profile/channel not found (no params
+leak, no row change) while shared null and orphan channel_id=0 stay
+visible — they have no tenant.
+
 Uses an in-memory DB and FastAPI's TestClient (no real manager.db, no
 network, lifespan/scheduler never started). Exits non-zero on the first
 failed assertion.
 """
+import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -24,7 +33,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, RenderProfile
+from app.models import Channel, RenderProfile, Workspace
 import app.schemas as schemas
 from app.routers import profiles as profiles_router
 
@@ -53,8 +62,9 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
 SQLModel.metadata.create_all(engine)
 
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A"))
-    s.add(Channel(slug="b", name="B"))
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Channel(slug="a", name="A", workspace_id=1))
+    s.add(Channel(slug="b", name="B", workspace_id=1))
     s.commit()
     ch_b = s.exec(select(Channel).where(Channel.slug == "b")).one()
     ch_b_id = ch_b.id
@@ -74,7 +84,11 @@ def _override_session():
 
 main.app.dependency_overrides[get_session] = _override_session
 _orig_pw = settings.app_password
+_orig_mw = settings.multi_workspace
 settings.app_password = "testpw"
+# Legacy checks resolve the owera workspace. A developer .env with
+# multi_workspace on would treat Basic username "x" as the tenant slug.
+settings.multi_workspace = False
 client = TestClient(main.app)
 auth = ("x", "testpw")
 
@@ -215,5 +229,168 @@ patched = by_name("OnB")
 ok(patched["channel_id"] == ch_b_id and patched["engine"] == "mpt",
    "PATCH integer left channel B and still applied engine")
 
+print("workspace isolation: profile routes follow require_channel / require_profile")
+# A tenant who knows another workspace's ids could LIST/GET the voice
+# and prompts, PATCH them, DELETE the row, and POST a profile onto
+# that channel. Shared null and orphan channel_id=0 have no tenant.
+settings.multi_workspace = True
+auth_ow = ("owera", "testpw")
+auth_b = ("tenant-b", "testpw")
+_SECRET = "owera-profile-secret"
+try:
+    with Session(engine) as s:
+        s.add(Workspace(slug="tenant-b", name="Tenant B"))
+        s.commit()
+        ws_b = s.exec(select(Workspace).where(Workspace.slug == "tenant-b")).one()
+        s.add(Channel(slug="tb-ch", name="Tenant B Ch", workspace_id=ws_b.id))
+        s.commit()
+        ch_tb = s.exec(select(Channel).where(Channel.slug == "tb-ch")).one()
+        ch_tb_id = ch_tb.id
+        on_b = s.exec(select(RenderProfile).where(RenderProfile.name == "OnB")).one()
+        on_b.params_json = json.dumps({"voice_name": _SECRET})
+        s.add(on_b)
+        s.commit()
+        on_b_id = on_b.id
+        shared_id = s.exec(select(RenderProfile).where(
+            RenderProfile.name == "SharedPin")).one().id
+    ok(ch_tb_id != 1 and ch_tb_id != ch_b_id,
+       "precondition: tenant-b channel is neither owera channel")
+
+    def _n_profiles():
+        with Session(engine) as s:
+            return len(list(s.exec(select(RenderProfile)).all()))
+
+    n_before = _n_profiles()
+    r = client.get(f"/api/profiles/{on_b_id}", auth=auth_b)
+    ok(r.status_code == 404 and "profile not found" in r.text,
+       f"tenant-b GET owera profile → 404 profile not found ({r.status_code})")
+    ok(_SECRET not in r.text and "OnB" not in r.text,
+       "tenant-b GET does not leak the owera profile name or voice")
+
+    r = client.get("/api/profiles", auth=auth_b)
+    ok(r.status_code == 200, "tenant-b LIST is 200")
+    listed_b = {p["name"]: p["channel_id"] for p in r.json()}
+    ok("OnB" not in listed_b, "tenant-b LIST omits the owera-bound profile")
+    ok(_SECRET not in r.text, "tenant-b LIST does not leak the owera voice")
+    ok(listed_b.get("SharedPin") is None and "SharedPin" in listed_b,
+       "tenant-b LIST still shows the shared null profile")
+    ok(listed_b.get("ZeroScope") == 0,
+       "tenant-b LIST still shows orphan channel_id=0 (no tenant)")
+
+    r = client.get("/api/profiles", params={"channel_id": ch_b_id}, auth=auth_b)
+    ok(r.status_code == 404 and "channel not found" in r.text,
+       "tenant-b LIST ?channel_id=owera → 404 channel not found")
+    ok(_SECRET not in r.text and "OnB" not in r.text,
+       "tenant-b LIST-by-owera-channel does not leak the profile")
+
+    r = client.patch(f"/api/profiles/{on_b_id}", auth=auth_b,
+                     json={"name": "Hijacked", "params": {"voice_name": "stolen"}})
+    ok(r.status_code == 404 and "profile not found" in r.text,
+       "tenant-b PATCH owera profile → 404")
+    ok(by_name("OnB")["name"] == "OnB"
+       and _SECRET in by_name("OnB")["params_json"],
+       "tenant-b PATCH left the owera name and voice untouched")
+    ok(by_name("Hijacked") is None, "tenant-b PATCH did not rename the profile")
+
+    r = client.delete(f"/api/profiles/{on_b_id}", auth=auth_b)
+    ok(r.status_code == 404 and "profile not found" in r.text,
+       "tenant-b DELETE owera profile → 404")
+    ok(by_name("OnB") is not None and _SECRET in by_name("OnB")["params_json"],
+       "tenant-b DELETE left the owera profile row in place")
+
+    r = client.post("/api/profiles", auth=auth_b, json={
+        "name": "BoundToOwera", "channel_id": ch_b_id})
+    ok(r.status_code == 404 and "channel not found" in r.text,
+       "tenant-b POST onto owera channel → 404 channel not found")
+    ok(by_name("BoundToOwera") is None, "tenant-b POST onto owera wrote no row")
+    ok(_n_profiles() == n_before, "foreign GET/PATCH/DELETE/POST added no profile")
+
+    r = client.post("/api/profiles", auth=auth_b, json={
+        "name": "TbOwn", "channel_id": ch_tb_id, "engine": "hyperframes"})
+    ok(r.status_code == 201 and r.json().get("channel_id") == ch_tb_id,
+       "tenant-b POST onto its own channel is 201")
+    ok(by_name("TbOwn")["channel_id"] == ch_tb_id,
+       "tenant-b own profile persisted on tb-ch")
+
+    r = client.get("/api/profiles", auth=auth_ow)
+    owera_names = {p["name"] for p in r.json()}
+    ok(r.status_code == 200 and "OnB" in owera_names and "TbOwn" not in owera_names,
+       "owera LIST still shows OnB and omits the tenant-b profile")
+    ok(_SECRET in r.text, "owera LIST still carries its own voice")
+
+    r = client.get(f"/api/profiles/{on_b_id}", auth=auth_ow)
+    ok(r.status_code == 200 and r.json().get("name") == "OnB"
+       and _SECRET in r.text,
+       "owera GET own profile still 200 with the voice")
+    r = client.patch(f"/api/profiles/{on_b_id}", auth=auth_ow, json={"engine": "mpt"})
+    ok(r.status_code == 200 and r.json().get("name") == "OnB",
+       "owera PATCH own profile still 200")
+
+    tb_own_id = by_name("TbOwn")["id"]
+    r = client.get(f"/api/profiles/{tb_own_id}", auth=auth_ow)
+    ok(r.status_code == 404 and "profile not found" in r.text and "TbOwn" not in r.text,
+       "owera GET tenant-b profile → 404 (not only tenant-b is walled off)")
+    r = client.delete(f"/api/profiles/{tb_own_id}", auth=auth_ow)
+    ok(r.status_code == 404 and by_name("TbOwn") is not None,
+       "owera DELETE tenant-b profile → 404 and the row stays")
+
+    r = client.get(f"/api/profiles/{shared_id}", auth=auth_b)
+    ok(r.status_code == 200 and r.json().get("name") == "SharedPin"
+       and r.json().get("channel_id") is None,
+       "tenant-b GET shared null profile still 200 (no tenant)")
+
+    r = client.get("/api/profiles", params={"channel_id": ch_tb_id}, auth=auth_b)
+    ok(r.status_code == 200, "tenant-b LIST ?channel_id=own is 200")
+    own_list = {p["name"]: p["channel_id"] for p in r.json()}
+    ok(own_list.get("TbOwn") == ch_tb_id and "SharedPin" in own_list,
+       "tenant-b own-channel list has TbOwn and the shared profile")
+    ok("OnB" not in own_list and "ZeroScope" not in own_list,
+       "tenant-b own-channel list omits owera-bound and orphan-0 profiles")
+    r = client.delete(f"/api/profiles/{tb_own_id}", auth=auth_b)
+    ok(r.status_code == 204 and by_name("TbOwn") is None,
+       "tenant-b DELETE own profile is 204 and removes the row")
+
+    r = client.post("/api/profiles", auth=auth_b, json={
+        "name": "TbZero", "channel_id": 0})
+    ok(r.status_code == 201 and r.json().get("channel_id") == 0,
+       "tenant-b POST channel_id=0 is still 201 (orphan persist)")
+
+    r = client.get("/api/profiles/99999", auth=auth_ow)
+    ok(r.status_code == 404 and "profile not found" in r.text,
+       "missing profile GET is 404 profile not found")
+    r = client.delete("/api/profiles/99999", auth=auth_ow)
+    ok(r.status_code == 404 and "profile not found" in r.text,
+       "missing profile DELETE is 404 (same as GET; a silent 204 hid foreign ids)")
+    r = client.get(f"/api/profiles/{on_b_id}")
+    ok(r.status_code == 401, "GET profile still requires auth")
+
+    src_list = inspect.getsource(profiles_router.list_profiles)
+    src_get = inspect.getsource(profiles_router.get_profile)
+    src_patch = inspect.getsource(profiles_router.update_profile)
+    src_del = inspect.getsource(profiles_router.delete_profile)
+    src_create = inspect.getsource(profiles_router.create_profile)
+    src_scope = inspect.getsource(profiles_router._scope_channel)
+    ok("current_workspace" in src_list and "require_channel" in src_list
+       and "profiles_visible_to" in src_list,
+       "list_profiles uses current_workspace, require_channel, and "
+       "profiles_visible_to (bare select(RenderProfile) is the LIST leak)")
+    ok("require_profile" in src_get and "current_workspace" in src_get,
+       "get_profile goes through require_profile + current_workspace")
+    ok("require_profile" in src_patch and "current_workspace" in src_patch,
+       "update_profile goes through require_profile + current_workspace")
+    ok("require_profile" in src_del and "current_workspace" in src_del,
+       "delete_profile goes through require_profile + current_workspace "
+       "(session.get then delete is the cross-tenant delete)")
+    ok("_scope_channel" in src_create and "current_workspace" in src_create,
+       "create_profile scopes channel_id before insert")
+    ok("require_channel" in src_scope and "session.get(Channel" in src_scope,
+       "_scope_channel require_channel only when the Channel row exists "
+       "(integer 0 must still persist)")
+    ok("require_profile" in inspect.getsource(profiles_router),
+       "profiles router uses workspace.require_profile")
+finally:
+    settings.multi_workspace = _orig_mw
+
 print(f"\nALL {_checks} CHECKS PASSED")
 settings.app_password = _orig_pw
+settings.multi_workspace = _orig_mw

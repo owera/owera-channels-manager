@@ -1962,3 +1962,40 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 75. ✅ DONE (PR autoimprove/2026-11-10-profiles-workspace) profile routes follow workspace isolation — normal
+- **resolution (2026-11-10):** `workspace.require_profile` is the sibling
+  of `require_trend` (that helper lands with PR #199; this branch adds
+  the profile half on `origin/main`). LIST / GET / PATCH / DELETE / POST
+  now go through `current_workspace`. A profile bound to another
+  workspace's channel is 404 `profile not found` (missing and foreign
+  share that body, so the id does not leak). LIST `?channel_id=` of a
+  foreign channel is 404 `channel not found` before any rows. POST onto
+  a foreign channel is 404 and writes nothing. Shared profiles
+  (`channel_id is None`) and orphan ids (integer 0 / deleted channel)
+  stay visible — they have no tenant, same class as the #58 persist
+  contract. DELETE of a missing id was a silent 204 and is now 404;
+  DELETE of your own profile is still 204. Suite:
+  `tests/verify_profiles.py` 55 → 97. Isolated commit; no money-path
+  files.
+  Remaining (not bundled): `media.py` and `thumbnails.py` still
+  `session.get` the video, so a tenant who knows another workspace's
+  video id can stream its file or replace its thumbnail.
+  Accepted residual: a shared profile is still readable and writable by
+  every workspace (that is the shared catalog). `GET ?channel_id=0`
+  is now 404; the unfiltered list still includes orphan 0. The profile
+  editor only sends `?channel_id=` for a real channel.
+- **why (found 2026-11-09, residual of PR #199):** topic / playlist /
+  youtube_admin / trend routes were gated or in flight. `profiles.py`
+  still `session.get` the row, so a tenant could read another
+  workspace's voice and prompts, PATCH them, DELETE the row, and POST
+  a profile onto that channel.
+- **caution:** normal (`profiles.py` + `workspace.require_profile`).
+  Isolated commit + regression tests. `publish_loop.py` / `youtube.py`
+  untouched.
+- **acceptance:** tenant-b GET/PATCH/DELETE of an owera profile is 404
+  and writes nothing; LIST omits it and does not leak the voice;
+  LIST-by-owera-channel and POST onto that channel are 404; owera GET
+  of a tenant-b profile is 404; each side still GET/PATCH/DELETE its
+  own; shared null and integer 0 stay on the unfiltered list; missing
+  GET and DELETE are 404; unauth is still 401.

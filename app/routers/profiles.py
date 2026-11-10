@@ -8,9 +8,10 @@ from sqlmodel import Session, select
 
 from app.config import MPT_DIR, settings
 from app.db import get_session
-from app.models import RenderProfile, utcnow
+from app.models import Channel, RenderProfile, Workspace, utcnow
 from app.schemas import ProfileCreate, ProfileUpdate
 from app.services.mpt_client import DEFAULT_PARAMS, mpt
+from app.workspace import current_workspace, profiles_visible_to, require_channel, require_profile
 
 router = APIRouter(prefix="/api", tags=["profiles"])
 
@@ -18,16 +19,35 @@ _VOICES_JSON = MPT_DIR / "app" / "services" / "data" / "azure_voices.json"
 _FONTS_DIR = MPT_DIR / "resource" / "fonts"
 
 
+def _scope_channel(session: Session, ws: Workspace, channel_id: int | None) -> None:
+    """404 when channel_id names another workspace's channel.
+
+    None stays shared. An id with no Channel row (integer 0) has no
+    tenant and is stored as given — the same persist contract as before.
+    """
+    if channel_id is None:
+        return
+    if session.get(Channel, channel_id) is None:
+        return
+    require_channel(session, ws, channel_id)
+
+
 @router.get("/profiles")
-def list_profiles(channel_id: int | None = None, session: Session = Depends(get_session)):
+def list_profiles(channel_id: int | None = None, session: Session = Depends(get_session),
+                  ws: Workspace = Depends(current_workspace)):
     q = select(RenderProfile)
     if channel_id is not None:
+        require_channel(session, ws, channel_id)
         q = q.where((RenderProfile.channel_id == channel_id) | (RenderProfile.channel_id == None))  # noqa: E711
+    else:
+        q = q.where(profiles_visible_to(ws))
     return session.exec(q.order_by(RenderProfile.id)).all()
 
 
 @router.post("/profiles", status_code=201)
-def create_profile(body: ProfileCreate, session: Session = Depends(get_session)):
+def create_profile(body: ProfileCreate, session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace)):
+    _scope_channel(session, ws, body.channel_id)
     p = RenderProfile(name=body.name, channel_id=body.channel_id,
                       engine=body.engine or "mpt",
                       params_json=json.dumps(body.params or {}))
@@ -38,18 +58,15 @@ def create_profile(body: ProfileCreate, session: Session = Depends(get_session))
 
 
 @router.get("/profiles/{profile_id}")
-def get_profile(profile_id: int, session: Session = Depends(get_session)):
-    p = session.get(RenderProfile, profile_id)
-    if not p:
-        raise HTTPException(404, "profile not found")
-    return p
+def get_profile(profile_id: int, session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
+    return require_profile(session, ws, profile_id)
 
 
 @router.patch("/profiles/{profile_id}")
-def update_profile(profile_id: int, body: ProfileUpdate, session: Session = Depends(get_session)):
-    p = session.get(RenderProfile, profile_id)
-    if not p:
-        raise HTTPException(404, "profile not found")
+def update_profile(profile_id: int, body: ProfileUpdate, session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace)):
+    p = require_profile(session, ws, profile_id)
     if body.name is not None:
         p.name = body.name
     if body.engine is not None:
@@ -64,11 +81,11 @@ def update_profile(profile_id: int, body: ProfileUpdate, session: Session = Depe
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)
-def delete_profile(profile_id: int, session: Session = Depends(get_session)):
-    p = session.get(RenderProfile, profile_id)
-    if p:
-        session.delete(p)
-        session.commit()
+def delete_profile(profile_id: int, session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace)):
+    p = require_profile(session, ws, profile_id)
+    session.delete(p)
+    session.commit()
 
 
 @router.get("/params/font/{name}")
