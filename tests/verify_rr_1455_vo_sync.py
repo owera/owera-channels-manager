@@ -12,9 +12,10 @@ Root cause (VM GATEB_2026-11-09, verified at tip 0eb81153):
      the gate fails (card_enters_early > CARD_ENTER_LEAD_MAX_S 0.3s;
      quote_before_speech: quotes 0 lead).
 Fix: per-brand config settings.vo_sentence_card_brands (default os + rr;
-other tenants' brands unchanged), gate-sourced sync lead (0.3s, quotes 0) on
-those brands, VO-pause closing so the PT pause stays under blank / stale
-budgets, and the RR hook join threshold aligned to the 2.5s first cut.
+other tenants' brands unchanged) + settings.gate_timing_brands (default rr):
+gate-sourced sync lead (0.3s, quotes 0), VO-pause closing so the PT pause
+stays under blank / stale budgets, and the hook join threshold aligned to the
+2.5s first cut. OS boards, markers and preflight stay as at tip.
 Fixture: tests/fixtures/rr1455/vo.json = #1455's real edge-tts pt-BR word
 timings (creation_config.narration_words) + its pinned 15-sentence script.
 """
@@ -83,6 +84,14 @@ with patch.object(settings, "vo_sentence_card_brands", ["os", "acme"]):
 with patch.object(craft, "OS_VO_SENTENCE_CARDS", False):
     ok(not craft.vo_sentence_cards_applies("rr") and not craft.vo_sentence_cards_applies("os"),
        "global kill switch OS_VO_SENTENCE_CARDS=False turns it off everywhere")
+
+ok(list(settings.gate_timing_brands) == ["rr"], "default gate_timing_brands = [rr] (OS timing unchanged)")
+ok(craft.gate_timing_applies("rr") and not craft.gate_timing_applies("os")
+   and not craft.gate_timing_applies("owera"), "gate timing: RR only by default")
+ok(not craft.sync_gate_aligned("os") and craft.hook_join_next_by("os") == craft.HOOK_JOIN_NEXT_BY_S,
+   "OS: legacy sync lead + legacy hook-join threshold")
+with patch.object(settings, "vo_sentence_card_brands", ["os"]):
+    ok(not craft.gate_timing_applies("rr"), "gate timing requires the VO-sentence board too")
 
 # ---------------------------------------------------------------------------
 print("claim 2: sync lead sourced from the Gate B budget")
@@ -162,6 +171,29 @@ ok(float(bj[1]["start"]) <= craft.HOOK_FIRST_CUT_BY_S + 1e-6, f"joined: first cu
 gj = gate(bj, WJ)
 ok(gj["result"] == "PASS", f"joined TTS: craft gate A/B/C PASS ({gj['reasons']})")
 ok(craft.card_timing_hits(bj, WJ, S, duration=round(D - shift, 2)) == [], "joined: card timing clean")
+
+# ---------------------------------------------------------------------------
+print("OS unchanged: legacy marker, no pause closing / CTA stale cap on OS")
+_os = craft.card_sync_marker(_b, W, "short", script=S, brand="os")
+ok(_os == craft.card_sync_marker(_b, W, "short", script=S), "OS card_sync marker = legacy marker (1.1s)")
+ok("gate_aligned" not in _os and all("lead_max" not in n for n in _os["notes"]), "OS marker shape unchanged")
+_pause = [{"type": "hook", "start": 0.0, "dur": 2.3, "text": "Pular a spec não é engenharia."},
+          {"type": "quote", "start": 3.0, "dur": 2.33, "text": "Você pede uma função simples."},
+          {"type": "quote", "start": 5.96, "dur": 2.59, "text": "Ele devolve oitenta linhas de código."},
+          {"type": "cta", "start": 32.45, "dur": 3.0, "text": "Se inscreve · IA"}]
+_p_os = json.loads(json.dumps(_pause))
+_tok = storyboard._OS_VO_CARDS.set(True)
+try:
+    with craft.gate_aligned_sync(False):
+        storyboard._snap_os_cards_to_speech(_p_os, W, S, D)
+    _p_rr = json.loads(json.dumps(_pause))
+    with craft.gate_aligned_sync(True):
+        storyboard._snap_os_cards_to_speech(_p_rr, W, S, D)
+finally:
+    storyboard._OS_VO_CARDS.reset(_tok)
+_hole = lambda b: float(b[2]["start"]) - float(b[1]["start"]) - float(b[1]["dur"]) - storyboard._GAP
+ok(_hole(_p_rr) <= craft.BLANK_GAP_MAX_S + 1e-6 < _hole(_p_os),
+   f"pause closing runs only under gate timing (RR {_hole(_p_rr):.2f}s vs legacy-timed OS {_hole(_p_os):.2f}s)")
 
 # ---------------------------------------------------------------------------
 print("kill switch: RR off settings → LLM template path (old behaviour)")

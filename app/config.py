@@ -173,12 +173,18 @@ class Settings(BaseSettings):
     # --- VO-sentence cards (per brand) ---------------------------------------
     # Brands whose shorts get the deterministic VO-sentence board: one whole
     # spoken sentence per mid card, snapped to speech (enter at the first word,
-    # exit ≤ last word + STALE_CARD_MAX_S), and a card-sync lead capped at the
-    # Gate B budget (craft.CARD_ENTER_LEAD_MAX_S; 0 on quote cards). Brands not
-    # listed keep the LLM compare / term_define / list board and the legacy
-    # 1.1s sync lead. env: MANAGER_VO_SENTENCE_CARD_BRANDS='["os","rr"]'.
+    # exit ≤ last word + STALE_CARD_MAX_S). Brands not
+    # listed keep the LLM compare / term_define / list board.
+    # env: MANAGER_VO_SENTENCE_CARD_BRANDS='["os","rr"]'.
     # Global kill switch: craft.OS_VO_SENTENCE_CARDS = False (RR #1455).
     vo_sentence_card_brands: list[str] = ["os", "rr"]
+    # Of those, brands whose VO-sentence board is timed against the Gate B
+    # budgets: compose sync lead + card_sync marker at CARD_ENTER_LEAD_MAX_S
+    # (0.3s; quotes 0) instead of 1.1s, long-pause closing under the blank /
+    # stale budgets, hook join when the next sentence misses the 2.5s first
+    # cut. Default RR only (PT ≈0.94s pauses, #1455) — OS boards, markers and
+    # preflight stay exactly as before. env: MANAGER_GATE_TIMING_BRANDS='["rr"]'.
+    gate_timing_brands: list[str] = ["rr"]
 
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:

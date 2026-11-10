@@ -423,8 +423,8 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
                     if not used_fallback else None)
             # Card ↔ speech sync notes (CoS 2026-09-30): Gate B fails a card
             # after its own words or leading them by more than 1.1s.
-            # VO-sentence brands (OS + RR) are marked against the Gate B lead
-            # budget (0.3s, quotes 0) instead of 1.1s (RR #1455).
+            # Gate-timing brands (settings.gate_timing_brands, default RR) are
+            # marked against the Gate B lead budget (0.3s, quotes 0), not 1.1s (#1455).
             sync = (craft.card_sync_marker(beats, words, fmt, script=script,
                                            brand=brand or params.get("brand"))
                     if not used_fallback else None)

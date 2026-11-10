@@ -3728,7 +3728,7 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
         exit_at = want if bare is None else max(bare, want)
         if (bare is not None and want - bare >= craft.CARD_PAD_FLOOR_S - 1e-6):
             exit_at = max(exit_at, bare + craft.CARD_PAD_FLOOR_S)
-        if _OS_VO_CARDS.get() and bare is not None:
+        if _OS_VO_CARDS.get() and craft.sync_gate_aligned() and bare is not None:
             # Long pause before the spoken closer (PT ≈0.94s, RR #1455): holding
             # the last mid until the closer leaves it stale (> STALE_CARD_MAX_S
             # after its last word). Only then (an otherwise stale card), exit by
@@ -3899,7 +3899,7 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
             continue
         if c_st + 1e-6 < p_end + _GAP:
             cur["start"] = round(p_end + _GAP, 3)
-    if _OS_VO_CARDS.get():
+    if _OS_VO_CARDS.get() and craft.sync_gate_aligned():
         _close_vo_pauses(beats, words, sources)
     if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
         if not _seat_os_cta(beats[-2], beats[-1], words, duration, sources):
@@ -4332,12 +4332,14 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     _rtok = _RR_CARDS.set(rr_brand)
     # VO-sentence brands (settings.vo_sentence_card_brands, default os + rr;
     # RR since #1455): deterministic one-card-per-sentence board snapped to
-    # speech, and a sync lead capped at the Gate B budget.
+    # speech. Gate-timing brands (settings.gate_timing_brands, default rr):
+    # sync lead at the Gate B budget + PT pause closing; OS keeps tip timing.
     os_vo = (_craft.vo_sentence_cards_applies(brand or th.get("brand"))
              and (content_format or "short") != "long"
              and not teaser)
     _otok = _OS_VO_CARDS.set(os_vo)
-    _sync_gate = _craft.gate_aligned_sync(os_vo)
+    _sync_gate = _craft.gate_aligned_sync(
+        os_vo and _craft.gate_timing_applies(brand or th.get("brand")))
     _sync_gate.__enter__()
     try:
         from app.services import topic_flags

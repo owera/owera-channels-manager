@@ -1200,6 +1200,27 @@ def vo_sentence_card_brands() -> frozenset[str]:
 def vo_sentence_cards_applies(brand: str | None) -> bool:
     """True when ``brand``'s shorts use the deterministic VO-sentence board."""
     return bool(OS_VO_SENTENCE_CARDS) and (brand or "").strip().lower() in vo_sentence_card_brands()
+
+
+GATE_TIMING_BRANDS_DEFAULT = ("rr",)
+
+
+def gate_timing_brands() -> frozenset[str]:
+    """Brands configured for Gate-B-budget timing (settings, else the default)."""
+    try:
+        from app.config import settings
+        raw = getattr(settings, "gate_timing_brands", None)
+    except Exception:  # pragma: no cover
+        raw = None
+    if raw is None:
+        raw = GATE_TIMING_BRANDS_DEFAULT
+    return frozenset(str(b).strip().lower() for b in raw if str(b or "").strip())
+
+
+def gate_timing_applies(brand: str | None) -> bool:
+    """VO-sentence brand whose board is timed against the Gate B budgets
+    (settings.gate_timing_brands, default RR only — OS unchanged)."""
+    return vo_sentence_cards_applies(brand) and (brand or "").strip().lower() in gate_timing_brands()
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
@@ -2906,7 +2927,7 @@ def needs_hook_join(script: str | None, words, brand: str | None,
 def hook_join_next_by(brand: str | None = None) -> float:
     """Latest next-sentence start that still makes the first cut.
 
-    Legacy: HOOK_JOIN_NEXT_BY_S (first cut 2.5s + 1.1s sync lead). VO-sentence
+    Legacy: HOOK_JOIN_NEXT_BY_S (first cut 2.5s + 1.1s sync lead). Gate-timing
     brands (RR #1455): the first-cut card is a sentence quote snapped to its
     first word (lead 0, Gate B quote_before_speech), so the next sentence must
     start by HOOK_FIRST_CUT_BY_S itself — a PT ~0.94s pause after the claim
@@ -2979,7 +3000,7 @@ def hook_pace_hits(board, hook_pace: dict | None) -> list[str]:
 SYNC_V1 = "sync_v1"
 SYNC_LEAD_MAX_S = 1.1
 SYNC_TOL_S = 0.05
-# Gate-aligned sync (VO-sentence brands, RR #1455): the compose aligner and
+# Gate-aligned sync (gate_timing_applies brands, RR #1455): the compose aligner and
 # the card_sync marker use the Gate B budget instead of the legacy 1.1s lead —
 # CARD_ENTER_LEAD_MAX_S (0.3s) for any card, 0 for quote cards
 # (quote_before_speech). Sourced from the gate constants so they can't drift.
@@ -3003,8 +3024,8 @@ class gate_aligned_sync:
 
 
 def sync_gate_aligned(brand: str | None = None) -> bool:
-    """Gate-aligned lead for ``brand`` (VO-sentence brand) or the active block."""
-    if brand is not None and vo_sentence_cards_applies(brand):
+    """Gate-aligned lead for ``brand`` (gate_timing_applies) or the active block."""
+    if brand is not None and gate_timing_applies(brand):
         return True
     return bool(_SYNC_GATE_ALIGNED.get())
 
@@ -3220,7 +3241,7 @@ def card_sync_marker(beats, words, content_format: str | None = "short",
                      script: str | None = None, *, brand: str | None = None) -> dict | None:
     """creation_config["card_sync"] for a new render (None: long / no timings).
 
-    VO-sentence brands (``brand``, or inside gate_aligned_sync) are marked
+    Gate-timing brands (``brand``, or inside gate_aligned_sync) are marked
     against the Gate B lead budget (``gate_aligned``: True; per-note
     ``lead_max``) — 0.3s, 0 on quote cards — not the legacy 1.1s."""
     if (content_format or "short") == "long" or not words:
