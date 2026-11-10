@@ -1,8 +1,8 @@
-# RR sentence pace — sample script + Gate B evidence (PO CM cut, 2026-11-10)
+# RR sentence pace — CMO-corrected sample + Gate B evidence (PO CM cut, 2026-11-10)
 
-Stub LLM output (tests/fixtures/rr_pace/stub_llm_1464_style.txt, #1464 topic) → `worker._generate_script` (brand rr, pace 2.2s/2.5s) → real edge-tts 7.2.8 pt-BR-AntonioNeural (-8%, -2Hz, hook join as in the worker) → `storyboard.compose` brand rr → #201 Gate B (`video_maker_gate` + `card_timing_hits` + `blank_gap_hits`). Reproduced offline by `tests/verify_sentence_pace.py` from `tests/fixtures/rr_pace/sample_vo.json`. No paid LLM calls, no renders.
+CMO voice pass 2026-11-10 FAILed the first sample (echo 'cada valor. Cada valor' / 'a página. Eu abro a página', a dropped 'eu', the list 'contrato, laudo e nota'). This is CMO's corrected 12-sentence script. Pipeline: stub LLM output (`tests/fixtures/rr_pace/stub_llm_1464_style.txt`, the same script with 2 sentences joined by ', e') → `worker._generate_script` (brand rr, pace 2.2s/2.5s), whose post-pass yields exactly the CMO script → real edge-tts 7.2.8 pt-BR-AntonioNeural (-8%, -2Hz, hook join as in the worker) → `storyboard.compose` brand rr → #201 Gate B (`video_maker_gate` + `card_timing_hits` + `blank_gap_hits`). Reproduced offline by `tests/verify_sentence_pace.py` from `tests/fixtures/rr_pace/sample_vo.json`. The post-pass leaves the CMO script unchanged (no change, no WARN). No paid LLM calls, no renders.
 
-## Sample script (for the CMO voice pass)
+## Sample script
 
 ```
 Pedir resumo não é engenharia.
@@ -11,39 +11,35 @@ O detalhe certo fica de fora.
 A multa da cláusula 14 some.
 Ninguém percebe.
 Eu pergunto por campo.
-O modelo devolve cada valor.
-Cada valor volta com a página.
-Eu abro a página.
-Confiro o número na mão.
-Campo sem página é chute.
-Serve pra contrato, laudo e nota.
+Cada valor volta com a sua página.
+Eu vou lá e confiro o número.
+Campo sem página eu trato como chute.
+Serve pra contrato e pra laudo.
 Se inscreve.
 Próxima armadilha de IA.
 ```
 
-## Post-pass changes
+## Post-pass changes (stub → sample)
 
 | # | kind | before (est s) | after (est s) |
 |---|---|---|---|
 | 1 | split | O modelo escolhe sozinho o que importa, e o detalhe certo fica de fora. (4.68) | O modelo escolhe sozinho o que importa. / O detalhe certo fica de fora. (2.5, 1.999) |
 | 2 | split | A multa da cláusula 14 some, e ninguém percebe. (3.585) | A multa da cláusula 14 some. / Ninguém percebe. (2.319, 1.085) |
-| 3 | split | Eu pergunto por campo; o modelo devolve cada valor. (3.374) | Eu pergunto por campo. / O modelo devolve cada valor. (1.433, 1.934) |
-| 5 | split | Eu abro a página e confiro o número na mão. (2.913) | Eu abro a página. / Confiro o número na mão. (1.433, 1.716) |
 
-Dropped words: ['e', 'e', 'e'] (only `FILLER_WORDS` + the split conjunction 'e'). Unsplittable: none.
+Dropped: ['e', 'e'] (split conjunction only). WARNs: none.
 
 ## Duration before / after
 
 | | sentences | est total | real audio | video | longest sentence (real) |
 |---|---|---|---|---|---|
-| before (stub LLM) | 10 | 33.81s | 33.91s | 33.46s | 4.44s |
-| after (post-pass) | 14 | 37.44s | 37.13s | 36.68s | 2.50s |
+| before (stub, 2 joined) | 10 | 31.24s | 31.51s | 31.07s | 4.44s |
+| after (CMO sample) | 12 | 32.75s | 32.95s | 32.50s | 2.38s |
 
-4 splits → +3.22s real audio (≈0.80s per split: the PT full-stop pause ≈0.94s minus the dropped 'e' / comma pause).
+2 splits → +1.44s real audio (≈0.72s per split).
 
 ## Gate B
 
-Result: **{g['result']}** {g['checks']}; reasons: {g['reasons'] or 'none'}; card_timing hits: {g['card_timing_hits'] or 'none'}; blank_gap hits: {g['blank_gap_hits'] or 'none'}; card_sync hits: {g['card_sync_hits'] or 'none'}.
+Result: **PASS** {'A': 'PASS', 'B': 'PASS', 'C': 'PASS'}; reasons: none; card_timing: none; blank_gap: none; card_sync: none. CTA chip lead over spoken 'Se inscreve.': -0.00s (RR max 0.3s).
 
 | sentence | est s | real s |
 |---|---|---|
@@ -53,12 +49,10 @@ Result: **{g['result']}** {g['checks']}; reasons: {g['reasons'] or 'none'}; card
 | A multa da cláusula 14 some. | 2.319 | 2.38 |
 | Ninguém percebe. | 1.085 | 1.24 |
 | Eu pergunto por campo. | 1.433 | 1.44 |
-| O modelo devolve cada valor. | 1.934 | 1.96 |
-| Cada valor volta com a página. | 1.999 | 1.93 |
-| Eu abro a página. | 1.433 | 1.18 |
-| Confiro o número na mão. | 1.716 | 1.50 |
-| Campo sem página é chute. | 1.716 | 1.71 |
-| Serve pra contrato, laudo e nota. | 2.416 | 2.50 |
+| Cada valor volta com a sua página. | 2.173 | 2.25 |
+| Eu vou lá e confiro o número. | 2.064 | 1.81 |
+| Campo sem página eu trato como chute. | 2.282 | 2.36 |
+| Serve pra contrato e pra laudo. | 1.89 | 2.04 |
 | Se inscreve. | 0.976 | 0.90 |
 | Próxima armadilha de IA. | 1.76 | 1.77 |
 
@@ -72,10 +66,12 @@ Board:
 | quote | 8.31 | 2.75 | A multa da cláusula 14 some. |
 | quote | 11.63 | 1.6 | Ninguém percebe. |
 | quote | 13.8 | 1.81 | Eu pergunto por campo. |
-| quote | 16.18 | 2.32 | O modelo devolve cada valor. |
-| quote | 19.08 | 2.3 | Cada valor volta com a página. |
-| quote | 21.94 | 1.55 | Eu abro a página. |
-| quote | 24.06 | 1.86 | Confiro o número na mão. |
-| quote | 26.5 | 2.08 | Campo sem página é chute. |
-| quote | 29.14 | 2.8 | Serve pra contrato, laudo e nota. |
-| cta | 32.51 | 3.78 | Se inscreve · IA |
+| quote | 16.18 | 2.62 | Cada valor volta com a sua página. |
+| quote | 19.38 | 2.17 | Eu vou lá e confiro o número. |
+| quote | 22.12 | 2.73 | Campo sem página eu trato como chute. |
+| quote | 25.42 | 2.49 | Serve pra contrato e pra laudo. |
+| cta | 28.4 | 3.78 | Se inscreve · IA |
+
+## Previous (pre-voice-pass) sample
+
+`tests/fixtures/rr_pace/sample_vo_presplit.json` (first sample, pre-closer sentence 2.50s real) is kept as the CTA-lead regression: chip leads 0.07s (≤0.3s), Gate B PASS.

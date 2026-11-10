@@ -3745,8 +3745,9 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
                 elif hole - budget <= craft.sync_lead_max(cta) + 1e-9:
                     # Long pre-closer sentence (≈2.5s, RR sentence-pace cut) +
                     # PT pause: the mid cap leaves a hole over the blank budget.
-                    # The chip (exempt from card_enters_early, legacy 1.1s lead)
-                    # enters just early enough to close it.
+                    # The chip enters just early enough to close it, never more
+                    # than sync_lead_max(cta) (RR: CTA_ENTER_LEAD_MAX_S 0.3s)
+                    # before the spoken "Se inscreve."
                     exit_at = cap
                     chip_at = cap + _GAP + budget
         last["dur"] = round(max(_MIN_DUR, exit_at - last_st), 3)

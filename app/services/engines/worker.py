@@ -312,10 +312,13 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         # craft.prepare_provided_script) is spoken verbatim — no grok -p rewrite.
         _status(handle, progress=5)
         provided = (params.get("provided_script") or "").strip()
+        pace_post = None
         if provided:
             script = provided
         else:
             script = _generate_script(subject, params)
+            from app.services import sentence_pace as _sp
+            pace_post = _sp.warn_summary(_sp.take_last_report())
         _status(handle, script=script, progress=12)
 
         # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
@@ -397,6 +400,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         cc["script_source"] = "provided" if provided else "generated"
         if hook_join:
             cc["hook_join"] = True
+        if pace_post:
+            # sentence-pace post-pass WARNs (unsplittable / echo / comma list):
+            # visible on the video's creation_config (GET /videos/{id})
+            cc["sentence_pace_post"] = pace_post
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
@@ -822,8 +829,8 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
                         len(over), pace["cap_s"], subject)
             redo = ask(
                 prompt + "\n\nThese sentences take longer than " +
-                f"{pace['cap_s']:.1f}s to say; shorten each (cut filler) or split it into two "
-                "complete sentences, keep everything else:\n" +
+                f"{pace['cap_s']:.1f}s to say; shorten each (cut filler, keep 'eu' and the main "
+                "verb) or split it into two complete sentences, keep everything else:\n" +
                 "\n".join(f"- {h['text']}" for h in over) +
                 "\nReturn ONLY the spoken voiceover.",
                 max_tokens=max_tokens,
@@ -859,14 +866,17 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
             text, subject, brand=params.get("brand"),
             topic_name=params.get("topic_name"),
         )
+    _sp.set_last_report(None)
     if pace:
         # deterministic cap: shorten (filler) / split at natural boundaries;
         # hook (sentence 0) and the series closer are never touched
         text, rep = _sp.enforce(text, pace)
-        if rep["changes"] or rep["unsplittable"]:
-            logger.info("script: sentence pace %s — %d change(s), %d split(s), %d still over "
-                        "%.1fs for %r", pace["key"], len(rep["changes"]), rep["splits"],
-                        len(rep["unsplittable"]), pace["cap_s"], subject)
+        if rep["changes"]:
+            logger.info("script: sentence pace %s — %d change(s), %d split(s) for %r",
+                        pace["key"], len(rep["changes"]), rep["splits"], subject)
+        for w in rep["warnings"]:
+            logger.warning("script: sentence pace %s WARN for %r: %s", pace["key"], subject, w)
+        _sp.set_last_report(rep)
     return text
 
 

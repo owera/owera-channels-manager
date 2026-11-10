@@ -1,6 +1,6 @@
 {
 "title": "Pedir resumo não é engenharia. · IA 235",
-"script": "Pedir resumo não é engenharia. O modelo escolhe sozinho o que importa. O detalhe certo fica de fora. A multa da cláusula 14 some. Ninguém percebe. Eu pergunto por campo. O modelo devolve cada valor. Cada valor volta com a página. Eu abro a página. Confiro o número na mão. Campo sem página é chute. Serve pra contrato, laudo e nota. Se inscreve. Próxima armadilha de IA.",
+"script": "Pedir resumo não é engenharia. O modelo escolhe sozinho o que importa. O detalhe certo fica de fora. A multa da cláusula 14 some. Ninguém percebe. Eu pergunto por campo. Cada valor volta com a sua página. Eu vou lá e confiro o número. Campo sem página eu trato como chute. Serve pra contrato e pra laudo. Se inscreve. Próxima armadilha de IA.",
 "words": [
 {
 "text": "Pedir",
@@ -148,191 +148,172 @@
 "dur": 0.407625
 },
 {
-"text": "O",
-"start": 16.182083,
-"dur": 0.108708
-},
-{
-"text": "modelo",
-"start": 16.304333,
-"dur": 0.529875
-},
-{
-"text": "devolve",
-"start": 16.847833,
-"dur": 0.570666
-},
-{
-"text": "cada",
-"start": 17.432083,
-"dur": 0.27175
-},
-{
-"text": "valor",
-"start": 17.717375,
-"dur": 0.421208
-},
-{
 "text": "Cada",
-"start": 19.076083,
+"start": 16.182083,
 "dur": 0.27175
 },
 {
 "text": "valor",
-"start": 19.361416,
+"start": 16.467375,
 "dur": 0.380416
 },
 {
 "text": "volta",
-"start": 19.755416,
-"dur": 0.380416
+"start": 16.861416,
+"dur": 0.407625
 },
 {
 "text": "com",
-"start": 20.149458,
+"start": 17.282625,
 "dur": 0.190208
 },
 {
 "text": "a",
-"start": 20.35325,
-"dur": 0.067916
-},
-{
-"text": "página",
-"start": 20.434791,
-"dur": 0.570666
-},
-{
-"text": "Eu",
-"start": 21.942916,
-"dur": 0.244583
-},
-{
-"text": "abro",
-"start": 22.201083,
-"dur": 0.285333
-},
-{
-"text": "a",
-"start": 22.5,
+"start": 17.486416,
 "dur": 0.04075
 },
 {
-"text": "página",
-"start": 22.554333,
-"dur": 0.570666
+"text": "sua",
+"start": 17.54075,
+"dur": 0.326083
 },
 {
-"text": "Confiro",
-"start": 24.0625,
+"text": "página",
+"start": 17.880416,
 "dur": 0.557083
 },
 {
+"text": "Eu",
+"start": 19.375,
+"dur": 0.190208
+},
+{
+"text": "vou",
+"start": 19.578791,
+"dur": 0.217375
+},
+{
+"text": "lá",
+"start": 19.809791,
+"dur": 0.258166
+},
+{
+"text": "e",
+"start": 20.081541,
+"dur": 0.067916
+},
+{
+"text": "confiro",
+"start": 20.163041,
+"dur": 0.516291
+},
+{
 "text": "o",
-"start": 24.633166,
-"dur": 0.04075
-},
-{
-"text": "número",
-"start": 24.6875,
-"dur": 0.380416
-},
-{
-"text": "na",
-"start": 25.081541,
-"dur": 0.122291
-},
-{
-"text": "mão",
-"start": 25.217375,
-"dur": 0.339666
-},
-{
-"text": "Campo",
-"start": 26.494583,
-"dur": 0.380416
-},
-{
-"text": "sem",
-"start": 26.888583,
-"dur": 0.27175
-},
-{
-"text": "página",
-"start": 27.173916,
-"dur": 0.448375
-},
-{
-"text": "é",
-"start": 27.635875,
+"start": 20.692916,
 "dur": 0.027166
 },
 {
+"text": "número",
+"start": 20.733708,
+"dur": 0.448375
+},
+{
+"text": "Campo",
+"start": 22.119583,
+"dur": 0.394041
+},
+{
+"text": "sem",
+"start": 22.527166,
+"dur": 0.244583
+},
+{
+"text": "página",
+"start": 22.785333,
+"dur": 0.407625
+},
+{
+"text": "eu",
+"start": 23.206541,
+"dur": 0.108708
+},
+{
+"text": "trato",
+"start": 23.328791,
+"dur": 0.380416
+},
+{
+"text": "como",
+"start": 23.722833,
+"dur": 0.27175
+},
+{
 "text": "chute",
-"start": 27.676625,
-"dur": 0.529875
+"start": 24.008166,
+"dur": 0.475541
 },
 {
 "text": "Serve",
-"start": 29.144041,
+"start": 25.421208,
 "dur": 0.570666
 },
 {
 "text": "pra",
-"start": 29.72825,
-"dur": 0.176625
+"start": 26.005416,
+"dur": 0.163041
 },
 {
 "text": "contrato",
-"start": 29.918458,
-"dur": 0.652166
-},
-{
-"text": "laudo",
-"start": 30.801625,
-"dur": 0.35325
+"start": 26.182083,
+"dur": 0.597833
 },
 {
 "text": "e",
-"start": 31.168458,
+"start": 26.793458,
 "dur": 0.04075
 },
 {
-"text": "nota",
-"start": 31.222833,
-"dur": 0.421208
+"text": "pra",
+"start": 26.847833,
+"dur": 0.163041
+},
+{
+"text": "laudo",
+"start": 27.024458,
+"dur": 0.434791
 },
 {
 "text": "Se",
-"start": 32.581541,
+"start": 28.39675,
 "dur": 0.230958
 },
 {
 "text": "inscreve",
-"start": 32.826083,
+"start": 28.641291,
 "dur": 0.652166
 },
 {
 "text": "Próxima",
-"start": 34.41575,
+"start": 30.230958,
 "dur": 0.516291
 },
 {
 "text": "armadilha",
-"start": 34.945666,
+"start": 30.760875,
 "dur": 0.652166
 },
 {
 "text": "de",
-"start": 35.611416,
+"start": 31.426625,
 "dur": 0.163041
 },
 {
 "text": "IA",
-"start": 35.788041,
-"dur": 0.394
+"start": 31.60325,
+"dur": 0.3938
 }
 ],
-"duration": 36.68,
-"voice": "pt-BR-AntonioNeural (-8%, -2Hz), edge-tts 7.2.8, hook join applied"
+"duration": 32.5,
+"voice": "pt-BR-AntonioNeural (-8%, -2Hz), edge-tts 7.2.8, hook join applied",
+"source": "CMO corrected 12-sentence sample (voice pass 2026-11-10)"
 }

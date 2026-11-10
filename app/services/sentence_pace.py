@@ -30,8 +30,12 @@ parts are enforced, the rest is in the prompt guidance.
 """
 from __future__ import annotations
 
+import logging
 import re
+import threading
 import unicodedata
+
+logger = logging.getLogger(__name__)
 
 # --- estimator (pt-BR-AntonioNeural, rate -8%) ------------------------------
 EST_SYL_S = 0.109      # per spoken syllable
@@ -138,16 +142,27 @@ def target_words(target_s: float) -> int:
     return max(4, int(round(target_s * 3.2)))
 
 
+def target_words_range(target_s: float) -> tuple[int, int]:
+    """Word range for the target (≈ 3.0–3.2 spoken words/s): 2.2s → 6–7."""
+    hi = target_words(target_s)
+    return max(3, min(hi, int(target_s * 3.0))), hi
+
+
 def prompt_guidance(pace: dict) -> str:
     t, c = pace["target_s"], pace["cap_s"]
-    return (f" SENTENCE PACE (hard rule): every spoken sentence after the hook takes about "
-            f"{t:.1f}s to say (~{target_words(t)} words) and NEVER more than {c:.1f}s "
-            f"(~{target_words(c)} words; numbers, 'IA' and 'JSON' count as long words). "
-            "Shorten first: cut filler words. Split only when the sentence really holds two "
-            "ideas, and then into two COMPLETE sentences, each with its own subject and verb — "
-            "never a fragment, never a sentence starting with 'E', and the second must not "
-            "repeat the first one's verb or noun. Never change the opening hook sentence or "
-            "the closing subscribe line (endcard VO).")
+    lo, hi = target_words_range(t)
+    return (f" SENTENCE PACE (hard rule): target {t:.1f}s per spoken sentence after the hook "
+            f"(~{lo}–{hi} palavras), hard cap {c:.1f}s (~{target_words(c)} palavras); numbers, "
+            "'IA' and 'JSON' count heavier than a normal word. "
+            "Only shorten a sentence that is over the cap: cut filler words, but keep the "
+            "first person ('eu') and its main verb. Split only when the sentence really holds "
+            "two ideas, and then into two COMPLETE sentences, each with its own subject and "
+            "verb — never a fragment, never a sentence starting with 'E', and the second must "
+            "not repeat the first one's verb or noun. Never start a sentence with the noun the "
+            "previous sentence ended on ('… cada valor. Cada valor …', '… a página. Eu abro a "
+            "página …'). No comma list of 3 or more items in one spoken sentence (say 'Serve "
+            "pra contrato e pra laudo.', not 'contrato, laudo e nota'). Never change the "
+            "opening hook sentence or the closing subscribe line (endcard VO).")
 
 
 # --- deterministic post-pass ----------------------------------------------------
@@ -242,6 +257,47 @@ def is_echo(first: str, second: str) -> bool:
     return bool(content_words(first) & content_words(second))
 
 
+def _last_content(s: str) -> str | None:
+    for w in reversed(_words(s)):
+        f = _fold(w)
+        if len(f) >= 4 and f not in _STOP and not f.isdigit() and not _verb_like(w):
+            return f[:5]
+    return None
+
+
+ECHO_HEAD_WORDS = 4
+
+
+def boundary_echo(prev: str, nxt: str) -> bool:
+    """CMO anti-echo: ``nxt`` opens (first ECHO_HEAD_WORDS words) with the noun
+    ``prev`` ended on ("… cada valor. Cada valor …", "… a página. Eu abro a página")."""
+    last = _last_content(prev)
+    if not last:
+        return False
+    head = _words(nxt)[:ECHO_HEAD_WORDS]
+    return any(_fold(w)[:5] == last for w in head)
+
+
+def comma_list_items(s: str) -> int:
+    """Items in a spoken comma list ("contrato, laudo e nota" → 3); 0 when none.
+    Middle items are short (≤3 words) and verbless, so a clause chain
+    ("corta ou resume, e você …") is not a list."""
+    body = (s or "").rstrip(".!?…")
+    if ":" in body:
+        body = body.split(":", 1)[1]
+    parts = [x.strip() for x in body.split(",") if x.strip()]
+    if len(parts) < 2:
+        return 0
+    last = re.split(r"\s+(?:e|ou)\s+", parts[-1], maxsplit=1)
+    items = parts[:-1] + [x for x in last if x.strip()]
+    if len(items) < 3:
+        return 0
+    middle = items[1:-1]
+    if any(len(_words(m)) > 3 or any(_verb_like(w) for w in _words(m)) for m in middle):
+        return 0
+    return len(items)
+
+
 def _finish(s: str) -> str:
     s = s.strip().strip(",;:").strip()
     if not s:
@@ -293,70 +349,136 @@ def _candidates(sent: str):
             yield left, conj + " " + right, None
 
 
-def _best_split(sent: str, cap: float):
-    best = None
+def _best_split(sent: str, cap: float, nxt: str | None = None):
+    """Best (score, a, b, dropped) or None; ``echo_only`` = a split existed but
+    every one echoed (CMO: then don't split)."""
+    best, echo_only = None, False
     for left, right, dropped in _candidates(sent):
         a, b = _finish(left), _finish(right)
         if not a or not b or b.split()[0].lower() == "e":
             continue
-        if not (looks_clausal(a) and looks_clausal(b)) or is_echo(a, b):
+        if not (looks_clausal(a) and looks_clausal(b)):
             continue
         if _fold(_words(b)[0]) in _BAD_START:   # second half never opens subordinate
+            continue
+        if is_echo(a, b) or boundary_echo(a, b) or (nxt and boundary_echo(b, nxt)):
+            echo_only = True
             continue
         ea, eb = estimate_spoken_s(a), estimate_spoken_s(b)
         score = (max(ea, eb) > cap + 1e-9, max(ea, eb), abs(ea - eb))
         if best is None or score < best[0]:
             best = (score, a, b, dropped)
-    return best
+    return best, (echo_only and best is None)
 
 
 def enforce(script: str | None, pace: dict) -> tuple[str, dict]:
     """Shorten / split every non-protected sentence estimated over ``cap_s``.
 
-    Returns (script, report). report = {"target_s", "cap_s", "changes": [...],
-    "unsplittable": [...], "splits": n, "dropped": [...]}."""
+    A sentence within the cap is never touched (first person and verb stay).
+    Over the cap: filler drop first, then a split into two clausal halves (no
+    "E…", no echo — inside the pair or with the next sentence). No valid split
+    → the sentence stays exactly as written and is reported. Check-only WARNs:
+    adjacent-sentence echo and comma lists of ≥3 items.
+
+    Returns (script, report). report = {"target_s", "cap_s", "changes", "unsplittable",
+    "echo_blocked", "echo", "lists", "splits", "dropped", "warnings"}."""
     cap = float(pace["cap_s"])
     text = (script or "").strip()
     sents = [x.strip() for x in _SENT_SPLIT_RE.split(text) if x.strip()]
     rep = {"target_s": float(pace["target_s"]), "cap_s": cap, "changes": [],
-           "unsplittable": [], "splits": 0, "dropped": []}
+           "unsplittable": [], "echo_blocked": [], "echo": [], "lists": [],
+           "splits": 0, "dropped": [], "warnings": []}
     out: list[str] = []
     for i, sent in enumerate(sents):
+        nxt = sents[i + 1] if i + 1 < len(sents) else None
         if _is_protected(i, sent) or estimate_spoken_s(sent) <= cap + 1e-9:
             out.append(sent)
             continue
         before = estimate_spoken_s(sent)
         short, dropped = _drop_filler(sent)
-        if dropped:
-            rep["dropped"] += dropped
         if estimate_spoken_s(short) <= cap + 1e-9:
+            rep["dropped"] += dropped
             out.append(short)
             rep["changes"].append({"i": i, "kind": "shorten", "from": sent, "to": [short],
                                    "est_before": before, "est_after": [estimate_spoken_s(short)]})
             continue
-        pieces = _split_rec(short, cap, rep, depth=2)
+        trial = {"splits": 0, "dropped": [], "echo_blocked": False}
+        pieces = _split_rec(short, cap, trial, depth=2, nxt=nxt)
+        if len(pieces) == 1:
+            # unsplittable: leave it exactly as written (no filler drop either)
+            entry = {"i": i, "text": sent, "est": before}
+            rep["unsplittable"].append(entry)
+            if trial["echo_blocked"]:
+                rep["echo_blocked"].append(entry)
+            out.append(sent)
+            continue
+        rep["splits"] += trial["splits"]
+        rep["dropped"] += dropped + trial["dropped"]
         for piece in pieces:
             if estimate_spoken_s(piece) > cap + 1e-9:
                 rep["unsplittable"].append({"i": i, "text": piece, "est": estimate_spoken_s(piece)})
-        if len(pieces) > 1:
-            rep["changes"].append({"i": i, "kind": "split", "from": sent, "to": pieces,
-                                   "est_before": before,
-                                   "est_after": [estimate_spoken_s(p) for p in pieces]})
+        rep["changes"].append({"i": i, "kind": "split", "from": sent, "to": pieces,
+                               "est_before": before,
+                               "est_after": [estimate_spoken_s(p) for p in pieces]})
         out.extend(pieces)
+    for j, s2 in enumerate(out):
+        if j and not _is_protected(j, s2) and boundary_echo(out[j - 1], s2):
+            rep["echo"].append({"i": j, "prev": out[j - 1], "text": s2})
+        n = comma_list_items(s2) if not _is_protected(j, s2) else 0
+        if n >= 3:
+            rep["lists"].append({"i": j, "text": s2, "items": n})
+    rep["warnings"] = warnings_of(rep)
     return " ".join(out), rep
 
 
-def _split_rec(sent: str, cap: float, rep: dict, depth: int) -> list[str]:
+def warnings_of(rep: dict) -> list[str]:
+    """Human-readable WARN lines (job log / creation_config)."""
+    cap = rep.get("cap_s")
+    blocked = {(h["i"], h["text"]) for h in rep.get("echo_blocked") or []}
+    w = [f"over {cap:.1f}s cap (est {h['est']:.2f}s), "
+         + ("split skipped — it would echo" if (h["i"], h["text"]) in blocked else "unsplittable")
+         + f": {h['text']}" for h in rep.get("unsplittable") or []]
+    w += [f"echo (opens with the previous sentence's last noun): {h['prev']} | {h['text']}"
+          for h in rep.get("echo") or []]
+    w += [f"comma list of {h['items']} items: {h['text']}" for h in rep.get("lists") or []]
+    return w
+
+
+def _split_rec(sent: str, cap: float, rep: dict, depth: int, nxt: str | None = None) -> list[str]:
     if depth <= 0 or estimate_spoken_s(sent) <= cap + 1e-9:
         return [sent]
-    best = _best_split(sent, cap)
+    best, echo_only = _best_split(sent, cap, nxt)
     if best is None:
+        if echo_only:
+            rep["echo_blocked"] = True
         return [sent]
     _, a, b, dropped = best
     rep["splits"] += 1
     if dropped:
         rep["dropped"].append(dropped)
-    return _split_rec(a, cap, rep, depth - 1) + _split_rec(b, cap, rep, depth - 1)
+    return _split_rec(a, cap, rep, depth - 1, b) + _split_rec(b, cap, rep, depth - 1, nxt)
+
+
+# Last post-pass report of this thread's _generate_script (None = no pace).
+_LAST = threading.local()
+
+
+def set_last_report(rep: dict | None) -> None:
+    _LAST.report = rep
+
+
+def take_last_report() -> dict | None:
+    rep = getattr(_LAST, "report", None)
+    _LAST.report = None
+    return rep
+
+
+def warn_summary(rep: dict | None) -> dict | None:
+    """creation_config["sentence_pace_post"]: the WARNs + split stats, or None."""
+    if not rep:
+        return None
+    return {"target_s": rep["target_s"], "cap_s": rep["cap_s"], "splits": rep["splits"],
+            "changes": len(rep["changes"]), "warnings": rep.get("warnings") or []}
 
 
 def over_cap(script: str | None, cap: float) -> list[dict]:

@@ -125,8 +125,10 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
               detail=f"compose script (no render): status={v.status} effort={effort}")
     session.commit()
 
+    from app.services import sentence_pace as _sp
     try:
         text = (generate(subject, params) or "").strip()
+        pace_post = _sp.warn_summary(_sp.take_last_report())
     except Exception as e:  # grok.Timeout / nonzero / missing binary
         err = f"{type(e).__name__}: {e}"[:500]
         quota.log(session, kind=JOB_KIND, status="error", video_id=video_id,
@@ -155,7 +157,12 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
     cc = json.loads(v.creation_config) if v.creation_config else {}
     cc["script_composed"] = {"by": "grok", "effort": effort,
                              "at": utcnow().isoformat(), "no_render": True}
+    if pace_post:
+        cc["sentence_pace_post"] = pace_post
+    else:
+        cc.pop("sentence_pace_post", None)
     v.creation_config = json.dumps(cc)
+    pace_warn = (pace_post or {}).get("warnings") or []
     v.updated_at = utcnow()
     hook = v.error if (v.error or "").startswith("provided script") else None
     session.add(v)
@@ -163,9 +170,11 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
               channel_id=channel_id,
               detail=f"script composed ({len(text.split())} words, effort={effort}); "
                      f"saved as provided script, no render slot used"
-                     + (f"; {hook}" if hook else ""))
+                     + (f"; {hook}" if hook else "")
+                     + (f"; WARN sentence pace: {' | '.join(pace_warn)}"[:1200] if pace_warn else ""))
     session.commit()
-    return {"ok": True, "words": len(text.split()), "hook_warning": hook}
+    return {"ok": True, "words": len(text.split()), "hook_warning": hook,
+            "sentence_pace_warnings": pace_warn}
 
 
 def start_background(bind, video_id: int, *, force: bool = False) -> threading.Thread:
