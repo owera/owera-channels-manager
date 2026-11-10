@@ -223,6 +223,19 @@ LLM_BOARD = {"beats": [
 
 
 def compose(brand):
+    # LLM template board path (RR before #1455 / brands off
+    # settings.vo_sentence_card_brands): pin RR to it for this end-to-end.
+    # The RR VO-sentence path is covered by tests/verify_rr_1455_vo_sync.py.
+    from app.config import settings as _s
+    saved = _s.vo_sentence_card_brands
+    _s.vo_sentence_card_brands = ["os"]
+    try:
+        return _compose_llm(brand)
+    finally:
+        _s.vo_sentence_card_brands = saved
+
+
+def _compose_llm(brand):
     return storyboard.compose(subject=SUBJECT, script=S, words=WORDS, duration=FX["duration"],
                               resolution="1080x1920", width=1080, height=1920, topic_id=None,
                               content_format="short", allowed_types=ALLOWED, language="pt",

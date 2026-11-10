@@ -169,7 +169,7 @@ def evaluate(
     brand = params.get("brand")
     sources = params.get("on_screen_allow")
     hook_pace = craft.hook_pace_marker(beats, words, brand, fmt)
-    card_sync = craft.card_sync_marker(beats, words, fmt, script=vo)
+    card_sync = craft.card_sync_marker(beats, words, fmt, script=vo, brand=brand)
     hits = preflight_hits(
         beats, brand=brand, topic_id=topic_id, hook_pace=hook_pace,
         card_sync=card_sync, words=words, script=vo, duration=duration,

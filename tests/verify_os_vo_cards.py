@@ -5,8 +5,8 @@ Run: PYTHONPATH=. .venv/bin/python tests/verify_os_vo_cards.py
 OS-brand shorts: mid cards are one whole VO sentence (or #96 strong-clause
 units when a sentence exceeds the mid cap). No compare / term_define /
 list / isolated-term. Kill switch craft.OS_VO_SENTENCE_CARDS = False
-restores the LLM path (post-filter still converts banned cards). RR
-unchanged. Literal quotes enter at the first spoken word, hold the whole
+restores the LLM path (post-filter still converts banned cards). RR uses
+the same path by default (settings.vo_sentence_card_brands, #1455). Literal quotes enter at the first spoken word, hold the whole
 span (mid-cap exception), exit last word + QUOTE_HOLD_TAIL_S.
 """
 import inspect
@@ -131,8 +131,15 @@ finally:
 ok(calls, "kill switch False calls the LLM on OS")
 
 
-print("RR unchanged (still calls LLM)")
+print("RR on the VO-sentence path by default (#1455); dropped from settings → LLM path")
+from app.config import settings as _settings
+ok(craft.vo_sentence_cards_applies("rr") and craft.vo_sentence_cards_applies("os"),
+   "default vo_sentence_card_brands covers os + rr")
+ok(not craft.vo_sentence_cards_applies("owera") and not craft.vo_sentence_cards_applies(None),
+   "other brands (other tenants) keep the LLM template path")
 rr_calls = []
+_saved_brands = _settings.vo_sentence_card_brands
+_settings.vo_sentence_card_brands = ["os"]
 rr_script = "Chat sem fim não é engenharia. Eu fecho o fio. Subscribe — next IA trap."
 rr_w, rr_d = words_of(rr_script)
 storyboard.compose(
@@ -144,7 +151,15 @@ storyboard.compose(
         {"type": "quote", "cue": "Eu fecho", "text": "Eu fecho o fio."},
         {"type": "cta", "cue": "Subscribe", "text": "Se inscreve · IA"}]})),
     brand="rr")
-ok(rr_calls, "RR compose still uses the LLM")
+_settings.vo_sentence_card_brands = _saved_brands
+ok(rr_calls, "RR dropped from settings.vo_sentence_card_brands → compose uses the LLM")
+rr_calls.clear()
+storyboard.compose(
+    subject="Chat sem fim não é engenharia. · IA 1", script=rr_script, words=rr_w,
+    duration=rr_d, resolution="portrait", width=1080, height=1920, topic_id=3,
+    content_format="short", language="Portuguese",
+    llm=lambda *a, **k: (rr_calls.append(1) or "{}"), brand="rr")
+ok(not rr_calls, "RR default: deterministic VO-sentence board (no LLM)")
 
 
 print("Gate B: OS template / literal / stale / quote-before-speech / allowlist")

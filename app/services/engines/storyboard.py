@@ -2335,7 +2335,6 @@ def _sync_solve_once(beats, v, duration: float, hook_max: float,
     and card i+1 (too far apart → needs a card; too close → drop one)."""
     from app.services import craft
     n = len(beats)
-    lead = craft.SYNC_LEAD_MAX_S
     D = float(duration)
     inf = float("inf")
     A = []
@@ -2345,6 +2344,8 @@ def _sync_solve_once(beats, v, duration: float, hook_max: float,
             continue
         lo, hi = 0.0, D - _MIN_DUR
         if v[i] is not None:
+            # legacy 1.1s; Gate B budget (0.3s, quotes 0) on VO-sentence brands
+            lead = craft.sync_lead_max(b)
             lo, hi = max(lo, float(v[i]) - lead), min(hi, float(v[i]))
         if i == n - 1 and (b.get("type") or "") == "cta":
             # the endcard cap wins over its own VO start: when the Subscribe
@@ -2602,7 +2603,6 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
                   content_end: float | None, banned: set, script: str | None = None):
     """One DP pass. Returns the new board (list of beat dicts, re-timed) or None."""
     from app.services import craft
-    lead = craft.SYNC_LEAD_MAX_S
     D = float(duration)
     toks, tstart, tsent = [], [], []
     for w in words or []:
@@ -2696,7 +2696,7 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
         vc = tstart[pc]
     c_lo = max(0.0, D - _ENDCARD_MAX)
     if vc is not None:
-        c_lo = max(c_lo, vc - lead)
+        c_lo = max(c_lo, vc - craft.sync_lead_max(cta))
     if content_end is not None:
         c_lo = max(c_lo, min(float(content_end), D - _MIN_DUR))
     c_hi = max(c_lo, vc if vc is not None else D - _MIN_DUR)
@@ -2754,7 +2754,7 @@ def _sync_dp_once(beats, words, duration: float, hook_max: float,
                 if not craft.is_continuation_card(n["beat"], prev_beat, script, pos=n["pos"],
                                                   prev_pos=prev_pos, prev_len=pl, whole=whole_dp):
                     return None
-        lo = max(n["v"] - lead, prev[1] + dmin(prev_beat), 0.0)
+        lo = max(n["v"] - craft.sync_lead_max(n["beat"]), prev[1] + dmin(prev_beat), 0.0)
         hi = min(n["v"], prev[2] + dmax(prev_beat), D - _MIN_DUR)
         return (lo, hi) if lo <= hi + 1e-9 else None
 
@@ -2975,7 +2975,7 @@ def _guard_whole_cards(beats, script, words=None, slips=None, timed: bool = Fals
                 new = sent
                 if timed:
                     t_s, c = s_first.get(s), float(b.get("start") or 0.0)
-                    if t_s is None or not (c - 1e-3 <= t_s <= c + craft.SYNC_LEAD_MAX_S + 1e-3):
+                    if t_s is None or not (c - 1e-3 <= t_s <= c + craft.sync_lead_max(b) + 1e-3):
                         new = None
         if new is not None:
             b["text"] = new
@@ -3728,6 +3728,17 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
         exit_at = want if bare is None else max(bare, want)
         if (bare is not None and want - bare >= craft.CARD_PAD_FLOOR_S - 1e-6):
             exit_at = max(exit_at, bare + craft.CARD_PAD_FLOOR_S)
+        if _OS_VO_CARDS.get() and bare is not None:
+            # Long pause before the spoken closer (PT ≈0.94s, RR #1455): holding
+            # the last mid until the closer leaves it stale (> STALE_CARD_MAX_S
+            # after its last word). Only then (an otherwise stale card), exit by
+            # last word + stale budget − _VO_EDGE when the hole that leaves
+            # before the chip stays within the blank budget.
+            cap = max(bare + craft.CARD_PAD_FLOOR_S,
+                      min(bare + craft.STALE_CARD_MAX_S - _VO_EDGE, last_st + _mid_max()))
+            if (exit_at > bare + craft.STALE_CARD_MAX_S + 1e-6 and exit_at > cap + 1e-6
+                    and want - cap - _GAP <= craft.BLANK_GAP_MAX_S - _VO_EDGE + 1e-9):
+                exit_at = cap
         last["dur"] = round(max(_MIN_DUR, exit_at - last_st), 3)
         last_end = last_st + float(last["dur"])
         cta["start"] = round(max(want, last_end), 3)
@@ -3740,6 +3751,44 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
             return False
         cta["start"] = round(last_end, 3)
     return True
+
+
+# Safety margin under the Gate B budgets (blank_gap / stale_card) when the
+# VO-sentence snap stretches a card into a long inter-sentence pause.
+_VO_EDGE = 0.05
+
+
+def _close_vo_pauses(beats, words, sources=None) -> None:
+    """VO-sentence boards: a long TTS pause between two mid cards (PT ≈0.94s,
+    RR #1455) leaves a blank hole > BLANK_GAP_MAX_S after the 0.3s tail. Stretch
+    the earlier card into the pause just enough to bring the hole under the
+    blank budget, never past last word + STALE_CARD_MAX_S nor the mid cap
+    (both minus _VO_EDGE). The next card keeps its first-word start."""
+    from app.services import craft
+    for i in range(1, len(beats) - 1):
+        prev, cur = beats[i], beats[i + 1]
+        if (prev.get("type") or "") in ("hook",) or (prev.get("type") or "") in craft.CTA_TYPES:
+            continue
+        if (cur.get("type") or "") in craft.CTA_TYPES:
+            continue   # _seat_os_cta owns the last mid → chip joint
+        try:
+            p_st = float(prev.get("start") or 0)
+            p_end = p_st + float(prev.get("dur") or 0)
+            c_st = float(cur.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        hole = c_st - p_end - _GAP
+        if hole <= craft.BLANK_GAP_MAX_S - _VO_EDGE + 1e-9:
+            continue
+        span = _spoken_span_of(prev, words, sources)
+        if not span:
+            continue
+        want = c_st - _GAP - (craft.BLANK_GAP_MAX_S - _VO_EDGE)
+        cap = min(float(span[1]) + craft.STALE_CARD_MAX_S - _VO_EDGE,
+                  p_st + _mid_max(), c_st - _GAP)
+        new_end = min(max(p_end, want), cap)
+        if new_end > p_end + 1e-6:
+            prev["dur"] = round(new_end - p_st, 3)
 
 
 def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
@@ -3850,6 +3899,8 @@ def _snap_os_cards_to_speech(beats, words, script=None, duration=None,
             continue
         if c_st + 1e-6 < p_end + _GAP:
             cur["start"] = round(p_end + _GAP, 3)
+    if _OS_VO_CARDS.get():
+        _close_vo_pauses(beats, words, sources)
     if len(beats) >= 2 and (beats[-1].get("type") or "") in craft.CTA_TYPES:
         if not _seat_os_cta(beats[-2], beats[-1], words, duration, sources):
             return False
@@ -4279,11 +4330,15 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     _wtok = _WHOLE_CARDS.set(_craft.card_vo_whole_applies(brand or th.get("brand"))
                              and (content_format or "short") != "long")
     _rtok = _RR_CARDS.set(rr_brand)
-    os_vo = (_craft.OS_VO_SENTENCE_CARDS
-             and (brand or th.get("brand") or "") == "os"
+    # VO-sentence brands (settings.vo_sentence_card_brands, default os + rr;
+    # RR since #1455): deterministic one-card-per-sentence board snapped to
+    # speech, and a sync lead capped at the Gate B budget.
+    os_vo = (_craft.vo_sentence_cards_applies(brand or th.get("brand"))
              and (content_format or "short") != "long"
              and not teaser)
     _otok = _OS_VO_CARDS.set(os_vo)
+    _sync_gate = _craft.gate_aligned_sync(os_vo)
+    _sync_gate.__enter__()
     try:
         from app.services import topic_flags
         literal = topic_flags.has(topic_flags.LITERAL_CARDS, topic_id)
@@ -4299,13 +4354,15 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         # RR whole-sentence cards: fragment repairs are generator slips too
         whole = _WHOLE_CARDS.get()
         slips: list | None = [] if (literal or whole) else None
-        # OS mid cards: one whole VO sentence (or strong-clause units) as a
-        # text card. Kill switch craft.OS_VO_SENTENCE_CARDS = False restores
-        # the LLM compare/term_define/list/isolated-term path. RR unchanged.
+        # VO-sentence mid cards (OS + RR by default): one whole VO sentence
+        # (or strong-clause units) as a text card. Kill switch
+        # craft.OS_VO_SENTENCE_CARDS = False (or dropping the brand from
+        # settings.vo_sentence_card_brands) restores the LLM
+        # compare/term_define/list/isolated-term path.
         if os_vo:
             beats = _os_vo_sentence_beats(subject=subject, script=script, title=title)
             if not beats:
-                logger.info("storyboard: OS VO-sentence board empty for %r — falling back", subject)
+                logger.info("storyboard: VO-sentence board empty for %r — falling back", subject)
                 return None
         else:
             system = _system_prompt(allowed, product_teaser=teaser, rr=rr_brand,
@@ -4463,7 +4520,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
             _cap_os_hook(beats, words, script)
             _drop_os_term_cards(beats, sources)
         os_brand = (brand or th.get("brand") or "") == "os"
-        if (os_brand or literal) and not teaser:
+        if (os_brand or os_vo or literal) and not teaser:
             _plain_os_literal_mids(beats, script, sources, os=os_brand,
                                    literal=literal, slips=slips)
             if os_brand and not os_vo:
@@ -4475,7 +4532,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
             if os_vo:
                 _os_cover_spoken_holes(beats, script, words, slips)
             _fill_blank_gaps(beats, script, words, slips)
-            if os_brand and not _clamp_os_cta_to_duration(beats, duration):
+            if (os_brand or os_vo) and not _clamp_os_cta_to_duration(beats, duration):
                 logger.info("storyboard: OS CTA cannot fit in %.2fs — fail closed",
                             float(duration or 0))
                 return None
@@ -4485,6 +4542,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         return build_index_html(beats, th, resolution, width, height, duration,
                                 content_format=content_format, slips=slips)
     finally:
+        _sync_gate.__exit__(None, None, None)
         _OS_VO_CARDS.reset(_otok)
         _RR_CARDS.reset(_rtok)
         _WHOLE_CARDS.reset(_wtok)

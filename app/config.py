@@ -170,6 +170,16 @@ class Settings(BaseSettings):
     # "storyboard" = new typed-beat path; "legacy" = old clip-array path (kill switch).
     composition_version: str = "storyboard"
 
+    # --- VO-sentence cards (per brand) ---------------------------------------
+    # Brands whose shorts get the deterministic VO-sentence board: one whole
+    # spoken sentence per mid card, snapped to speech (enter at the first word,
+    # exit ≤ last word + STALE_CARD_MAX_S), and a card-sync lead capped at the
+    # Gate B budget (craft.CARD_ENTER_LEAD_MAX_S; 0 on quote cards). Brands not
+    # listed keep the LLM compare / term_define / list board and the legacy
+    # 1.1s sync lead. env: MANAGER_VO_SENTENCE_CARD_BRANDS='["os","rr"]'.
+    # Global kill switch: craft.OS_VO_SENTENCE_CARDS = False (RR #1455).
+    vo_sentence_card_brands: list[str] = ["os", "rr"]
+
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:
     # MANAGER_TOPIC_FLAGS as a JSON object, e.g.
