@@ -223,6 +223,12 @@ ok("Se inscreve. Próxima armadilha de IA." in _llm_calls[0]["prompt"]
    "RR short prompt names the PT endcard VO+chip")
 
 # RR sentence pace (CoS 2026-10-03): ≤ ~3.9s per spoken sentence, soft.
+# Legacy path = a channel with no settings.sentence_pace entry; RR has one
+# since the PO CM cut (2.2s / 2.5s, tests/verify_sentence_pace.py), so these
+# pins run with the per-channel config emptied.
+from app.config import settings as _sp_settings
+_sp_saved = _sp_settings.sentence_pace
+_sp_settings.sentence_pace = {}
 _sp_long = ("Você lotou a VRAM. " + "E o modelo que você baixou ontem à noite pra rodar local no "
             "notebook novo da empresa travou tudo de novo. " + " ".join(["Isso pesa."] * 20))
 _sp_short = ("Você lotou a VRAM. O modelo travou tudo de novo. Foi o notebook novo. "
@@ -257,6 +263,7 @@ with patch.object(worker, "_llm", side_effect=_sp_llm([_sp_long])):
     sp_os = worker._generate_script("Memory died · Agent memory 2", {"content_format": "short", "brand": "os"})
 ok(len(_llm_calls) == 1 and "~3.9s spoken" not in _llm_calls[0]["prompt"],
    "OS / non-RR scripts: no sentence-pace rule, no extra ask")
+_sp_settings.sentence_pace = _sp_saved
 
 _llm_calls.clear()
 with patch.object(worker, "_llm", side_effect=_in_band_short):

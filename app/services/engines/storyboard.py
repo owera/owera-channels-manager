@@ -3722,6 +3722,7 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
     exit_floor = _spoken_exit_min_end(last, words, sources, with_tail=False)
     cta_sp = craft.spoken_span(cta.get("cue") or "", words)
     want = float(cta_sp[0]) if cta_sp else None
+    chip_at = None
     if want is not None:
         if duration is not None and want + _MIN_DUR > float(duration) + 1e-9:
             return False
@@ -3736,12 +3737,21 @@ def _seat_os_cta(last, cta, words, duration, sources=None) -> bool:
             # before the chip stays within the blank budget.
             cap = max(bare + craft.CARD_PAD_FLOOR_S,
                       min(bare + craft.STALE_CARD_MAX_S - _VO_EDGE, last_st + _mid_max()))
-            if (exit_at > bare + craft.STALE_CARD_MAX_S + 1e-6 and exit_at > cap + 1e-6
-                    and want - cap - _GAP <= craft.BLANK_GAP_MAX_S - _VO_EDGE + 1e-9):
-                exit_at = cap
+            budget = craft.BLANK_GAP_MAX_S - _VO_EDGE
+            if exit_at > bare + craft.STALE_CARD_MAX_S + 1e-6 and exit_at > cap + 1e-6:
+                hole = want - cap - _GAP
+                if hole <= budget + 1e-9:
+                    exit_at = cap
+                elif hole - budget <= craft.sync_lead_max(cta) + 1e-9:
+                    # Long pre-closer sentence (≈2.5s, RR sentence-pace cut) +
+                    # PT pause: the mid cap leaves a hole over the blank budget.
+                    # The chip (exempt from card_enters_early, legacy 1.1s lead)
+                    # enters just early enough to close it.
+                    exit_at = cap
+                    chip_at = cap + _GAP + budget
         last["dur"] = round(max(_MIN_DUR, exit_at - last_st), 3)
         last_end = last_st + float(last["dur"])
-        cta["start"] = round(max(want, last_end), 3)
+        cta["start"] = round(max(chip_at if chip_at is not None else want, last_end), 3)
         return True
     if exit_floor is not None and last_end < exit_floor - 1e-6:
         last["dur"] = round(max(_MIN_DUR, exit_floor - last_st), 3)

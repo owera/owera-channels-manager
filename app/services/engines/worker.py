@@ -772,12 +772,19 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
     from app.services import craft
     rr_short = ((params.get("content_format") or "short") != "long"
                 and (params.get("brand") or "") in craft.HOOK_PACE_BRANDS)
-    if rr_short:
+    # Per-channel sentence pace (settings.sentence_pace; RR 2.2s target / 2.5s
+    # cap): prompt guidance + a deterministic post-pass. No entry → unchanged.
+    from app.services import sentence_pace as _sp
+    pace = _sp.pace_for(params)
+    if pace:
+        prompt += _sp.prompt_guidance(pace)
+    elif rr_short:
         # RR sentence pace (soft): one card per sentence fits when a sentence
         # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
         prompt += (f" Keep EVERY spoken sentence short: at most about {craft.SENTENCE_MAX_WORDS} "
                    f"words (~{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken) — split a long sentence "
                    "into two instead of chaining clauses.")
+    if rr_short:
         prompt += (" Endcard as the LAST spoken lines, exactly: "
                    "'Se inscreve. Próxima armadilha de IA.' "
                    "On-screen chip: 'Se inscreve · IA'. Do NOT use the English "
@@ -807,7 +814,25 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         if retry:
             text = retry
 
-    if rr_short:
+    if pace:
+        over = _sp.over_cap(text, pace["cap_s"])
+        if over:
+            # one rewrite ask; kept only when it has fewer over-cap sentences
+            logger.info("script: %d sentence(s) over the %.1fs cap for %r — asking once for a rewrite",
+                        len(over), pace["cap_s"], subject)
+            redo = ask(
+                prompt + "\n\nThese sentences take longer than " +
+                f"{pace['cap_s']:.1f}s to say; shorten each (cut filler) or split it into two "
+                "complete sentences, keep everything else:\n" +
+                "\n".join(f"- {h['text']}" for h in over) +
+                "\nReturn ONLY the spoken voiceover.",
+                max_tokens=max_tokens,
+            ).strip()
+            redo = _strip_script_preamble(re.sub(r"^[\"'`]+|[\"'`]+$", "", redo).strip())
+            if redo and lo <= len(redo.split()) <= hi and len(
+                    _sp.over_cap(redo, pace["cap_s"])) < len(over):
+                text = redo
+    elif rr_short:
         long_ = craft.long_spoken_sentences(text)
         if long_:
             # one soft rewrite ask; kept only when it has fewer long sentences
@@ -834,6 +859,14 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
             text, subject, brand=params.get("brand"),
             topic_name=params.get("topic_name"),
         )
+    if pace:
+        # deterministic cap: shorten (filler) / split at natural boundaries;
+        # hook (sentence 0) and the series closer are never touched
+        text, rep = _sp.enforce(text, pace)
+        if rep["changes"] or rep["unsplittable"]:
+            logger.info("script: sentence pace %s — %d change(s), %d split(s), %d still over "
+                        "%.1fs for %r", pace["key"], len(rep["changes"]), rep["splits"],
+                        len(rep["unsplittable"]), pace["cap_s"], subject)
     return text
 
 
