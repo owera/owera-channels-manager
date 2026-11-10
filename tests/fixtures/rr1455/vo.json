@@ -1,0 +1,382 @@
+{
+ "source": "RR #1455 render 2026-11-09 (creation_config.narration_words, edge-tts pt-BR)",
+ "video_id": 1455,
+ "brand": "rr",
+ "title": "Pular a spec não é engenharia. · IA 234",
+ "script": "Pular a spec não é engenharia. Você pede uma função simples. Ele devolve oitenta linhas de código. Cada linha decide algo por você. E o caso vazio fica esquecido. Por isso eu peço a spec primeiro. Ela define entrada e saída. Traz casos de borda e testes. Eu leio e corrijo a spec. Só depois de aprovar vem o código. O teste que roda é o que aprovei. Se inscreve. Próxima armadilha de IA.",
+ "duration": 36.55,
+ "words": [
+  {
+   "text": "Pular",
+   "start": 0.054333,
+   "dur": 0.35325
+  },
+  {
+   "text": "a",
+   "start": 0.421208,
+   "dur": 0.027166
+  },
+  {
+   "text": "spec",
+   "start": 0.461958,
+   "dur": 0.502708
+  },
+  {
+   "text": "não",
+   "start": 0.97825,
+   "dur": 0.230958
+  },
+  {
+   "text": "é",
+   "start": 1.222833,
+   "dur": 0.081541
+  },
+  {
+   "text": "engenharia",
+   "start": 1.317916,
+   "dur": 0.747291
+  },
+  {
+   "text": "Você",
+   "start": 3.002708,
+   "dur": 0.35325
+  },
+  {
+   "text": "pede",
+   "start": 3.369583,
+   "dur": 0.366833
+  },
+  {
+   "text": "uma",
+   "start": 3.75,
+   "dur": 0.135875
+  },
+  {
+   "text": "função",
+   "start": 3.899458,
+   "dur": 0.448375
+  },
+  {
+   "text": "simples",
+   "start": 4.361416,
+   "dur": 0.66575
+  },
+  {
+   "text": "Ele",
+   "start": 5.964666,
+   "dur": 0.203791
+  },
+  {
+   "text": "devolve",
+   "start": 6.182083,
+   "dur": 0.543458
+  },
+  {
+   "text": "oitenta",
+   "start": 6.739125,
+   "dur": 0.475541
+  },
+  {
+   "text": "linhas",
+   "start": 7.22825,
+   "dur": 0.366833
+  },
+  {
+   "text": "de",
+   "start": 7.608708,
+   "dur": 0.122291
+  },
+  {
+   "text": "código",
+   "start": 7.744583,
+   "dur": 0.502708
+  },
+  {
+   "text": "Cada",
+   "start": 9.184791,
+   "dur": 0.285333
+  },
+  {
+   "text": "linha",
+   "start": 9.483708,
+   "dur": 0.285333
+  },
+  {
+   "text": "decide",
+   "start": 9.782625,
+   "dur": 0.489125
+  },
+  {
+   "text": "algo",
+   "start": 10.285333,
+   "dur": 0.3125
+  },
+  {
+   "text": "por",
+   "start": 10.611416,
+   "dur": 0.149458
+  },
+  {
+   "text": "você",
+   "start": 10.774458,
+   "dur": 0.489125
+  },
+  {
+   "text": "E",
+   "start": 12.201083,
+   "dur": 0.135875
+  },
+  {
+   "text": "o",
+   "start": 12.350541,
+   "dur": 0.081541
+  },
+  {
+   "text": "caso",
+   "start": 12.445666,
+   "dur": 0.35325
+  },
+  {
+   "text": "vazio",
+   "start": 12.8125,
+   "dur": 0.448375
+  },
+  {
+   "text": "fica",
+   "start": 13.274458,
+   "dur": 0.27175
+  },
+  {
+   "text": "esquecido",
+   "start": 13.559791,
+   "dur": 0.706541
+  },
+  {
+   "text": "Por",
+   "start": 15.203791,
+   "dur": 0.203791
+  },
+  {
+   "text": "isso",
+   "start": 15.421208,
+   "dur": 0.27175
+  },
+  {
+   "text": "eu",
+   "start": 15.706541,
+   "dur": 0.095125
+  },
+  {
+   "text": "peço",
+   "start": 15.815208,
+   "dur": 0.35325
+  },
+  {
+   "text": "a",
+   "start": 16.182083,
+   "dur": 0.027166
+  },
+  {
+   "text": "spec",
+   "start": 16.222833,
+   "dur": 0.448375
+  },
+  {
+   "text": "primeiro",
+   "start": 16.684791,
+   "dur": 0.475541
+  },
+  {
+   "text": "Ela",
+   "start": 18.097833,
+   "dur": 0.244583
+  },
+  {
+   "text": "define",
+   "start": 18.355958,
+   "dur": 0.366833
+  },
+  {
+   "text": "entrada",
+   "start": 18.736416,
+   "dur": 0.461958
+  },
+  {
+   "text": "e",
+   "start": 19.211958,
+   "dur": 0.04075
+  },
+  {
+   "text": "saída",
+   "start": 19.266291,
+   "dur": 0.570666
+  },
+  {
+   "text": "Traz",
+   "start": 20.774458,
+   "dur": 0.326083
+  },
+  {
+   "text": "casos",
+   "start": 21.114125,
+   "dur": 0.448375
+  },
+  {
+   "text": "de",
+   "start": 21.576083,
+   "dur": 0.095125
+  },
+  {
+   "text": "borda",
+   "start": 21.684791,
+   "dur": 0.380416
+  },
+  {
+   "text": "e",
+   "start": 22.078791,
+   "dur": 0.067916
+  },
+  {
+   "text": "testes",
+   "start": 22.160333,
+   "dur": 0.638583
+  },
+  {
+   "text": "Eu",
+   "start": 23.736416,
+   "dur": 0.190208
+  },
+  {
+   "text": "leio",
+   "start": 23.940208,
+   "dur": 0.366833
+  },
+  {
+   "text": "e",
+   "start": 24.320666,
+   "dur": 0.04075
+  },
+  {
+   "text": "corrijo",
+   "start": 24.375,
+   "dur": 0.502708
+  },
+  {
+   "text": "a",
+   "start": 24.891291,
+   "dur": 0.027166
+  },
+  {
+   "text": "spec",
+   "start": 24.932083,
+   "dur": 0.557083
+  },
+  {
+   "text": "Só",
+   "start": 26.426625,
+   "dur": 0.27175
+  },
+  {
+   "text": "depois",
+   "start": 26.711958,
+   "dur": 0.461958
+  },
+  {
+   "text": "de",
+   "start": 27.1875,
+   "dur": 0.054333
+  },
+  {
+   "text": "aprovar",
+   "start": 27.255416,
+   "dur": 0.489125
+  },
+  {
+   "text": "vem",
+   "start": 27.758166,
+   "dur": 0.217375
+  },
+  {
+   "text": "o",
+   "start": 27.989125,
+   "dur": 0.067916
+  },
+  {
+   "text": "código",
+   "start": 28.070666,
+   "dur": 0.502708
+  },
+  {
+   "text": "O",
+   "start": 29.510875,
+   "dur": 0.176625
+  },
+  {
+   "text": "teste",
+   "start": 29.701083,
+   "dur": 0.448375
+  },
+  {
+   "text": "que",
+   "start": 30.163041,
+   "dur": 0.122291
+  },
+  {
+   "text": "roda",
+   "start": 30.298916,
+   "dur": 0.394041
+  },
+  {
+   "text": "é",
+   "start": 30.706541,
+   "dur": 0.054333
+  },
+  {
+   "text": "o",
+   "start": 30.774458,
+   "dur": 0.054333
+  },
+  {
+   "text": "que",
+   "start": 30.842375,
+   "dur": 0.095125
+  },
+  {
+   "text": "aprovei",
+   "start": 30.951083,
+   "dur": 0.557083
+  },
+  {
+   "text": "Se",
+   "start": 32.445666,
+   "dur": 0.230958
+  },
+  {
+   "text": "inscreve",
+   "start": 32.690208,
+   "dur": 0.652166
+  },
+  {
+   "text": "Próxima",
+   "start": 34.279875,
+   "dur": 0.516291
+  },
+  {
+   "text": "armadilha",
+   "start": 34.809791,
+   "dur": 0.652166
+  },
+  {
+   "text": "de",
+   "start": 35.475541,
+   "dur": 0.163041
+  },
+  {
+   "text": "IA",
+   "start": 35.652166,
+   "dur": 0.3938
+  }
+ ],
+ "topic_id": 4,
+ "on_screen_allow": null
+}

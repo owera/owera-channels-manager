@@ -1524,7 +1524,20 @@ ok(craft.needs_hook_join(_js, _late, "rr"), "RR, next sentence at 3.70s > 3.6s �
 ok(not craft.needs_hook_join(_js, _late, "os"), "OS is out of scope (no join)")
 ok(not craft.needs_hook_join(_js, _late, "rr", "long"), "longs never join")
 _ontime = _wl(_js, step=0.55, gaps={5: 0.30})
-ok(not craft.needs_hook_join(_js, _ontime, "rr"), "next sentence by 3.6s → no join")
+ok(craft.hook_join_next_by("rr") == craft.HOOK_FIRST_CUT_BY_S == 2.5,
+   "RR (VO-sentence brand): next sentence must start by the 2.5s first cut (quote lead 0)")
+ok(craft.needs_hook_join(_js, _ontime, "rr"), "RR VO-sentence: next sentence at 3.05s > 2.5s → join (#1455)")
+from app.config import settings as _hj_settings
+_hj_saved = _hj_settings.vo_sentence_card_brands
+_hj_settings.vo_sentence_card_brands = ["os"]
+try:
+    ok(craft.hook_join_next_by("rr") == craft.HOOK_JOIN_NEXT_BY_S == 3.6,
+       "RR off the VO-sentence path: legacy 2.5s + 1.1s lead")
+    ok(not craft.needs_hook_join(_js, _ontime, "rr"), "legacy: next sentence by 3.6s → no join")
+finally:
+    _hj_settings.vo_sentence_card_brands = _hj_saved
+_early = _wl(_js, step=0.4, gaps={5: 0.05})   # next word at 2.05s
+ok(not craft.needs_hook_join(_js, _early, "rr"), "RR: next sentence by 2.5s → no join")
 _orig_kill = craft.HOOK_JOIN_ENABLED
 craft.HOOK_JOIN_ENABLED = False
 ok(not craft.needs_hook_join(_js, _late, "rr"), "kill switch HOOK_JOIN_ENABLED=False disables the join")

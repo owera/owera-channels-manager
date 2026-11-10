@@ -1175,10 +1175,52 @@ BEAT_GAP_S = 0.12
 # END_TAIL_S is the composer tail after the last spoken word — the endcard
 # is stretched to that video end; this check is leftover after the card.
 BLANK_GAP_MAX_S = 0.5
-# OS mid cards: one whole VO sentence (or its strong-clause units) as a text
-# card. Kill switch: False restores the LLM compare/term_define/list/isolated
-# template path on OS. RR is unchanged either way.
+# VO-sentence mid cards: one whole VO sentence (or its strong-clause units)
+# as a text card, snapped to speech. Applies to the brands in
+# settings.vo_sentence_card_brands (default os + rr; RR since #1455 — the
+# LLM template board chained fixed 2.80s holds and failed Gate B card sync).
+# Kill switch: False restores the LLM compare/term_define/list/isolated
+# template path on every brand.
 OS_VO_SENTENCE_CARDS = True
+VO_SENTENCE_CARD_BRANDS_DEFAULT = ("os", "rr")
+
+
+def vo_sentence_card_brands() -> frozenset[str]:
+    """Brands configured for VO-sentence cards (settings, else the default)."""
+    try:
+        from app.config import settings
+        raw = getattr(settings, "vo_sentence_card_brands", None)
+    except Exception:  # pragma: no cover - settings import never fails in app
+        raw = None
+    if raw is None:
+        raw = VO_SENTENCE_CARD_BRANDS_DEFAULT
+    return frozenset(str(b).strip().lower() for b in raw if str(b or "").strip())
+
+
+def vo_sentence_cards_applies(brand: str | None) -> bool:
+    """True when ``brand``'s shorts use the deterministic VO-sentence board."""
+    return bool(OS_VO_SENTENCE_CARDS) and (brand or "").strip().lower() in vo_sentence_card_brands()
+
+
+GATE_TIMING_BRANDS_DEFAULT = ("rr",)
+
+
+def gate_timing_brands() -> frozenset[str]:
+    """Brands configured for Gate-B-budget timing (settings, else the default)."""
+    try:
+        from app.config import settings
+        raw = getattr(settings, "gate_timing_brands", None)
+    except Exception:  # pragma: no cover
+        raw = None
+    if raw is None:
+        raw = GATE_TIMING_BRANDS_DEFAULT
+    return frozenset(str(b).strip().lower() for b in raw if str(b or "").strip())
+
+
+def gate_timing_applies(brand: str | None) -> bool:
+    """VO-sentence brand whose board is timed against the Gate B budgets
+    (settings.gate_timing_brands, default RR only — OS unchanged)."""
+    return vo_sentence_cards_applies(brand) and (brand or "").strip().lower() in gate_timing_brands()
 # Literal quote hold tail (CMO): enter at first spoken word, hold the
 # whole spoken span (mid-cap exception), exit last word + this.
 QUOTE_HOLD_TAIL_S = 0.3
@@ -2879,7 +2921,20 @@ def needs_hook_join(script: str | None, words, brand: str | None,
     if (brand or "") not in HOOK_PACE_BRANDS or hook_join_text(script) is None:
         return False
     nxt = next_speech_start(first_sentence(script), words)
-    return nxt is not None and nxt > HOOK_JOIN_NEXT_BY_S + 1e-6
+    return nxt is not None and nxt > hook_join_next_by(brand) + 1e-6
+
+
+def hook_join_next_by(brand: str | None = None) -> float:
+    """Latest next-sentence start that still makes the first cut.
+
+    Legacy: HOOK_JOIN_NEXT_BY_S (first cut 2.5s + 1.1s sync lead). Gate-timing
+    brands (RR #1455): the first-cut card is a sentence quote snapped to its
+    first word (lead 0, Gate B quote_before_speech), so the next sentence must
+    start by HOOK_FIRST_CUT_BY_S itself — a PT ~0.94s pause after the claim
+    otherwise forces a first cut at ~3.0s or a card that enters early."""
+    if sync_gate_aligned(brand):
+        return round(HOOK_FIRST_CUT_BY_S + sync_lead_max("quote", aligned=True), 3)
+    return HOOK_JOIN_NEXT_BY_S
 
 
 def claim_spoken_end(claim: str | None, words) -> float | None:
@@ -2945,6 +3000,63 @@ def hook_pace_hits(board, hook_pace: dict | None) -> list[str]:
 SYNC_V1 = "sync_v1"
 SYNC_LEAD_MAX_S = 1.1
 SYNC_TOL_S = 0.05
+# Gate-aligned sync (gate_timing_applies brands, RR #1455): the compose aligner and
+# the card_sync marker use the Gate B budget instead of the legacy 1.1s lead —
+# CARD_ENTER_LEAD_MAX_S (0.3s) for any card, 0 for quote cards
+# (quote_before_speech). Sourced from the gate constants so they can't drift.
+_SYNC_GATE_ALIGNED = __import__("contextvars").ContextVar("sync_gate_aligned", default=False)
+
+
+class gate_aligned_sync:
+    """Context manager: within the block, sync_lead_max() returns the Gate B
+    lead budget (``on`` False = legacy 1.1s)."""
+
+    def __init__(self, on: bool = True):
+        self.on = bool(on)
+        self._tok = None
+
+    def __enter__(self):
+        self._tok = _SYNC_GATE_ALIGNED.set(self.on)
+        return self
+
+    def __exit__(self, *exc):
+        _SYNC_GATE_ALIGNED.reset(self._tok)
+
+
+def sync_gate_aligned(brand: str | None = None) -> bool:
+    """Gate-aligned lead for ``brand`` (gate_timing_applies) or the active block."""
+    if brand is not None and gate_timing_applies(brand):
+        return True
+    return bool(_SYNC_GATE_ALIGNED.get())
+
+
+def sync_lead_max(beat=None, *, aligned: bool | None = None) -> float:
+    """Max lead a card may have over its first spoken word.
+
+    Legacy (aligned False): SYNC_LEAD_MAX_S (1.1s). Gate-aligned: the Gate B
+    card_enters_early budget (min(SYNC_LEAD_MAX_S, CARD_ENTER_LEAD_MAX_S)),
+    0 for a quote / quote-like card (quote_before_speech: must enter on its
+    first word); the CTA chip (exempt from card_enters_early) keeps 1.1s.
+    """
+    if aligned is None:
+        aligned = bool(_SYNC_GATE_ALIGNED.get())
+    if not aligned:
+        return SYNC_LEAD_MAX_S
+    if isinstance(beat, str):
+        typ = beat
+    elif isinstance(beat, dict):
+        typ = beat.get("type") or ""
+    else:
+        typ = ""
+    if typ in CTA_TYPES:
+        # the endcard chip is exempt from card_enters_early (its window is set
+        # by the endcard cap / content_end), so it keeps the legacy lead
+        return SYNC_LEAD_MAX_S
+    if typ == "quote":
+        return 0.0
+    if isinstance(beat, dict) and quote_like_text(beat):
+        return 0.0
+    return min(SYNC_LEAD_MAX_S, CARD_ENTER_LEAD_MAX_S)
 _SYNC_TOK_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -3060,7 +3172,8 @@ def endcard_vo_content_end(words, script: str | None) -> float | None:
     return None
 
 
-def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
+def card_sync_notes(beats, words, script: str | None = None, *,
+                    aligned: bool | None = None) -> list[dict]:
     """Per-card sync note (index, type, start, speech_start, lead, status).
     With ``script``, the endcard also gets ``content_end`` (end of the last
     word before the Subscribe line) and status "straddle" when it cuts in
@@ -3070,14 +3183,19 @@ def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
     matches = _card_speech_matches(board, words)
     c_end = endcard_vo_content_end(words, script) if script else None
     no_words = not any(isinstance(w, dict) for w in (words or []))
+    if aligned is None:
+        aligned = bool(_SYNC_GATE_ALIGNED.get())
     notes = []
     for i, b in enumerate(board):
         if i == 0 and (b.get("type") or "") == "hook":
             continue
         st = _cue_start(b)
         sp, alts = matches[i]
+        lmax = sync_lead_max(b, aligned=aligned)
         note = {"i": i, "type": b.get("type") or "?", "start": round(st, 3),
                 "speech_start": None if sp is None else round(sp, 3)}
+        if aligned:
+            note["lead_max"] = lmax
         last_cta = i == len(board) - 1 and (b.get("type") or "") in CTA_TYPES
         if sp is None:
             # measurement (CoS 2026-10-03): the card's words aren't in the
@@ -3087,14 +3205,14 @@ def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
         else:
             # lead from unrounded times (no rounding flips at the 0.05 edge)
             lead = float(sp) - st
-            status = _sync_status(lead)
+            status = _sync_status(lead, lmax)
             if status == "late" and last_cta and _hold(b) >= CTA_BEAT_MAX_S - SYNC_TOL_S:
                 # the endcard already starts as early as its cap allows
                 status = "late_capped"
             if status in ("late", "early") and len(alts) > 1:
                 # repeated phrase: the in-order matcher took one occurrence,
                 # but the card sits on another one of its own words
-                ok = [a for a in alts if _sync_status(float(a) - st) == "ok"]
+                ok = [a for a in alts if _sync_status(float(a) - st, lmax) == "ok"]
                 if ok:
                     note.update(measured=round(sp, 3), measured_status=status,
                                 kind="measurement", why="repeated_phrase")
@@ -3113,18 +3231,27 @@ def card_sync_notes(beats, words, script: str | None = None) -> list[dict]:
     return notes
 
 
-def _sync_status(lead: float) -> str:
+def _sync_status(lead: float, lead_max: float | None = None) -> str:
+    lm = SYNC_LEAD_MAX_S if lead_max is None else float(lead_max)
     return ("late" if lead < -SYNC_TOL_S - 1e-9 else
-            "early" if lead > SYNC_LEAD_MAX_S + SYNC_TOL_S + 1e-9 else "ok")
+            "early" if lead > lm + SYNC_TOL_S + 1e-9 else "ok")
 
 
 def card_sync_marker(beats, words, content_format: str | None = "short",
-                     script: str | None = None) -> dict | None:
-    """creation_config["card_sync"] for a new render (None: long / no timings)."""
+                     script: str | None = None, *, brand: str | None = None) -> dict | None:
+    """creation_config["card_sync"] for a new render (None: long / no timings).
+
+    Gate-timing brands (``brand``, or inside gate_aligned_sync) are marked
+    against the Gate B lead budget (``gate_aligned``: True; per-note
+    ``lead_max``) — 0.3s, 0 on quote cards — not the legacy 1.1s."""
     if (content_format or "short") == "long" or not words:
         return None
-    return {"version": SYNC_V1, "lead_max": SYNC_LEAD_MAX_S,
-            "notes": card_sync_notes(beats, words, script)}
+    aligned = sync_gate_aligned(brand)
+    out = {"version": SYNC_V1, "lead_max": sync_lead_max(aligned=aligned),
+           "notes": card_sync_notes(beats, words, script, aligned=aligned)}
+    if aligned:
+        out["gate_aligned"] = True
+    return out
 
 
 def card_sync_hits(card_sync: dict | None) -> list[str]:
@@ -3141,8 +3268,9 @@ def card_sync_hits(card_sync: dict | None) -> list[str]:
             hits.append(f"card {n.get('i')} ({n.get('type')}) at {st:.2f}s appears "
                         f"{-float(lead):.2f}s AFTER its speech ({sp:.2f}s)")
         elif n.get("status") == "early":
+            lm = n.get("lead_max", card_sync.get("lead_max", SYNC_LEAD_MAX_S))
             hits.append(f"card {n.get('i')} ({n.get('type')}) at {st:.2f}s leads its "
-                        f"speech ({sp:.2f}s) by {float(lead):.2f}s (max {SYNC_LEAD_MAX_S:.1f}s)")
+                        f"speech ({sp:.2f}s) by {float(lead):.2f}s (max {float(lm):.1f}s)")
         elif n.get("status") == "straddle":
             hits.append(f"endcard at {st:.2f}s cuts in before the last content "
                         f"sentence ends ({float(n.get('content_end') or 0):.2f}s)")
@@ -4098,8 +4226,9 @@ def gate_check_kinds(board, *, hook_pace: dict | None = None,
                 e["why"] = n["why"]
             lead = n.get("lead")
             if n["kind"] == "real" and isinstance(lead, (int, float)):
+                lm = float(n.get("lead_max", card_sync.get("lead_max", SYNC_LEAD_MAX_S)))
                 over = (-SYNC_TOL_S - lead) if n.get("status") == "late" else (
-                    lead - SYNC_LEAD_MAX_S - SYNC_TOL_S)
+                    lead - lm - SYNC_TOL_S)
                 if n.get("status") in ("late", "early") and over <= EDGE_S:
                     e["edge"] = True
             out.append(e)
@@ -6361,7 +6490,7 @@ def card_vo_marker(beats, script: str | None,
     if (content_format or "short") == "long":
         return None
     whole = card_vo_whole_applies(brand)
-    cover = whole and (brand or "") == "os" and OS_VO_SENTENCE_CARDS
+    cover = whole and vo_sentence_cards_applies(brand)
     return {"version": CARD_VO_V1, "source": "card_source_text+vo_script",
             "continuation": CARD_VO_ALLOW_CONTINUATION,
             **({"whole_sentence": True} if whole else {}),

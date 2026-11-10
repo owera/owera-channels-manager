@@ -51,6 +51,12 @@ from app.services.thumbnail import _THUMB_PALETTE
 # These pins cover the LLM compose path. OS VO-sentence cards skip the LLM;
 # that generator is tested in verify_os_vo_cards.py (kill switch on).
 craft.OS_VO_SENTENCE_CARDS = False
+# RR joined the VO-sentence path in #1455 (settings.vo_sentence_card_brands).
+# The RR pins below cover the LLM template board (still the path for every
+# brand not configured, and RR's per-brand kill switch): keep RR on it here.
+# The RR VO-sentence board is tested in verify_rr_1455_vo_sync.py.
+from app.config import settings as _settings  # noqa: E402
+_settings.vo_sentence_card_brands = ["os"]
 
 PHASE_A = ["hook", "statement", "stat", "compare", "list", "term_define", "quote", "cta"]
 _checks = 0
