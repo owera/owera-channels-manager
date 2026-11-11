@@ -21,5 +21,8 @@ dependencies = [
     "itsdangerous>=2.2.0",
 ]
 
+[dependency-groups]
+dev = ["stripe>=11.0.0"]
+
 [tool.uv]
 package = false
