@@ -4,7 +4,6 @@ Run: PYTHONPATH=. uv run python tests/verify_stripe_webhook.py
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -29,8 +28,17 @@ from app.db import get_session
 from app.models import StripeEvent, Workspace
 
 _checks = 0
-TEST_SECRET = "whsec_" + base64.b64encode(b"test_signing_secret_32bytes!!").decode("ascii")
+TEST_SECRET = "whsec_test_signing_secret_for_hmac_key"
 _SENT: list[dict] = []
+
+
+def stripe_sign_payload(payload: bytes, secret: str, ts: int | None = None) -> tuple[int, str]:
+    """Stripe-compatible v1 signature (independent of app.services.stripe_verify)."""
+    if ts is None:
+        ts = int(time.time())
+    signed = f"{ts}.{payload.decode('utf-8')}".encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
+    return ts, sig
 
 
 def ok(cond, msg):
@@ -42,13 +50,11 @@ def ok(cond, msg):
     print("  ok:", msg)
 
 
-def sign_body(payload: bytes, secret: str = TEST_SECRET, ts: int | None = None) -> str:
-    if ts is None:
-        ts = int(time.time())
-    signed = f"{ts}.{payload.decode('utf-8')}".encode("utf-8")
-    key = base64.b64decode(secret[6:])
-    sig = hmac.new(key, signed, hashlib.sha256).hexdigest()
-    return f"t={ts},v1={sig}"
+def sign_header(payload: bytes, secret: str = TEST_SECRET, ts: int | None = None, *, extra_v1: str | None = None) -> str:
+    ts_i, sig = stripe_sign_payload(payload, secret, ts=ts)
+    if extra_v1:
+        return f"t={ts_i},v1={extra_v1},v1={sig}"
+    return f"t={ts_i},v1={sig}"
 
 
 def checkout_event(
@@ -78,7 +84,7 @@ def post_event(client: TestClient, event: dict, secret: str = TEST_SECRET, sig: 
     if sig is not None:
         headers["Stripe-Signature"] = sig
     elif secret:
-        headers["Stripe-Signature"] = sign_body(body, secret)
+        headers["Stripe-Signature"] = sign_header(body, secret)
     return client.post("/api/stripe/webhook", content=body, headers=headers)
 
 
@@ -117,6 +123,45 @@ r = post_event(client, checkout_event("evt_unconfigured", email="buyer@example.c
 ok(r.status_code == 503, "secret unset returns 503")
 
 settings.stripe_webhook_secret = TEST_SECRET
+
+from app.services import stripe_verify
+
+# --- unit: correct key material (full whsec_ string, not base64 body) ---
+_probe = {"id": "evt_unit", "type": "ping"}
+_probe_bytes = json.dumps(_probe).encode("utf-8")
+_ts, _sig = stripe_sign_payload(_probe_bytes, TEST_SECRET)
+_unit_hdr = f"t={_ts},v1={_sig}"
+parsed = stripe_verify.construct_event(_probe_bytes, _unit_hdr, TEST_SECRET)
+ok(parsed["id"] == "evt_unit", "construct_event accepts Stripe-style HMAC key")
+try:
+    import stripe as stripe_sdk
+
+    stripe_sdk.WebhookSignature.verify_header(
+        _probe_bytes.decode("utf-8"),
+        _unit_hdr,
+        TEST_SECRET,
+        tolerance=300,
+    )
+    ok(True, "official stripe package agrees with our signature")
+except ImportError:
+    print("  skip: stripe package not installed (uv sync --group dev)")
+except Exception as e:
+    ok(False, f"official stripe package verify_header failed: {e}")
+
+# --- timestamp tolerance ---
+_stale_ts = int(time.time()) - 301
+_stale_hdr = sign_header(_probe_bytes, TEST_SECRET, ts=_stale_ts)
+try:
+    stripe_verify.construct_event(_probe_bytes, _stale_hdr, TEST_SECRET)
+    ok(False, "stale timestamp should raise")
+except stripe_verify.SignatureVerificationError:
+    ok(True, "timestamp outside 300s rejected")
+
+# --- multiple v1 signatures: first wrong, second correct ---
+_bad_sig = "0" * 64
+_good_hdr = sign_header(_probe_bytes, TEST_SECRET, extra_v1=_bad_sig)
+parsed2 = stripe_verify.construct_event(_probe_bytes, _good_hdr, TEST_SECRET)
+ok(parsed2["id"] == "evt_unit", "accepts when any v1 matches")
 
 # --- bad / missing signature → 400 ---
 body = json.dumps(checkout_event("evt_bad", email="x@y.com")).encode()

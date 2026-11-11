@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -15,12 +14,6 @@ class WebhookNotConfigured(Exception):
 
 class SignatureVerificationError(Exception):
     pass
-
-
-def _secret_bytes(secret: str) -> bytes:
-    if secret.startswith("whsec_"):
-        return base64.b64decode(secret[6:])
-    return secret.encode("utf-8")
 
 
 def construct_event(
@@ -64,7 +57,7 @@ def construct_event(
         raise SignatureVerificationError("payload not utf-8") from e
 
     signed_payload = f"{timestamp}.{body}".encode("utf-8")
-    expected = hmac.new(_secret_bytes(secret), signed_payload, hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
     if not any(hmac.compare_digest(expected, sig) for sig in signatures):
         raise SignatureVerificationError("signature mismatch")
 
