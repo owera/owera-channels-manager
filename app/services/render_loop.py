@@ -515,7 +515,10 @@ def _rebalance_queued_mix(session: Session) -> None:
     - **No approved long** + no long in flight + queue full of shorts + a
       promotable long draft exists + **headroom == 0** (midnight, budget
       reset, queue still full) → demote one queued short so `_auto_produce`
-      can pick the long. Does NOT fire when headroom < 0 (render budget
+      can pick the long — only when `_auto_produce` will really have the slot
+      this tick (held queued rows count against its headroom; breaker closed)
+      and the long draft is eligible (unheld, subject guard passes); otherwise
+      the short stays queued (#1474). Does NOT fire when headroom < 0 (render budget
       already spent, typical 14:00 after the day's long publishes) — that
       drained the whole short queue one tick at a time on ch2 2026-08-22.
 
@@ -582,14 +585,20 @@ def _rebalance_queued_mix(session: Session) -> None:
         ).one()
         if in_flight_longs > 0 or not shorts:
             continue
-        long_drafts = session.exec(
-            select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
-            .where(Video.channel_id == ch.id,
-                   Video.status == VideoStatus.DRAFT,
-                   Topic.active == True,  # noqa: E712
-                   Topic.weight > 0,
-                   Topic.content_format == "long")
-        ).one()
+        # Eligible long = one _auto_produce would actually queue: an unheld DRAFT
+        # long on an active weight>0 topic whose subject passes the pre-produce
+        # guard (checked without side effects). Held rows never count.
+        long_drafts = sum(
+            1 for v in session.exec(
+                select(Video).join(Topic, Topic.id == Video.topic_id)
+                .where(Video.channel_id == ch.id,
+                       Video.status == VideoStatus.DRAFT,
+                       Video.held.is_not(True),
+                       Topic.active == True,  # noqa: E712
+                       Topic.weight > 0,
+                       Topic.content_format == "long")
+            ).all()
+            if not subject_guard_reason(v.subject))
         if long_drafts < 1:
             continue
         rendering = session.exec(
@@ -609,6 +618,21 @@ def _rebalance_queued_mix(session: Session) -> None:
         # (1037, 1036, 1035, 1034, 1029) while rendered_today=5. Midnight
         # recovered 1L+4S, but the afternoon queue was emptied for nothing.
         if headroom != 0:
+            continue
+        # #1474 / #1328: only demote when the freed slot really goes to the long
+        # THIS tick. _auto_produce counts every QUEUED/RENDERING row — held ones
+        # included — so a held queued row (ch1 #1473, 2026-11-11) leaves it with
+        # no headroom after the demote: the short snapped back to DRAFT on every
+        # unhold/produce and the long never queued (slot idled). Same for an
+        # open auto-produce breaker. No eligible taker → keep the short queued.
+        produce_active = session.exec(
+            select(func.count(Video.id)).where(
+                Video.channel_id == ch.id,
+                Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)))
+        ).one()
+        produce_headroom_after = (ch.daily_render_budget - quota.rendered_today(session, ch.id)
+                                  - (produce_active - 1))
+        if produce_headroom_after <= 0 or _render_breaker_reason(session, ch):
             continue
         v = shorts[-1]  # newest (queued is position, id)
         v.status = VideoStatus.DRAFT
