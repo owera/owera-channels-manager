@@ -61,8 +61,19 @@ class Workspace(SQLModel, table=True):
     daily_youtube_quota_cap: int = 9000
     subscription_status: str = "trialing"
     onboarding_complete: bool = False
+    owner_email: Optional[str] = Field(default=None, index=True)
+    stripe_customer_id: Optional[str] = Field(default=None, index=True)
+    stripe_subscription_id: Optional[str] = Field(default=None, index=True)
+    welcome_email_sent: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class StripeEvent(SQLModel, table=True):
+    """Processed Stripe webhook events (idempotency by event id)."""
+    id: str = Field(primary_key=True, max_length=255)
+    event_type: str = Field(index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class OAuthPending(SQLModel, table=True):

@@ -40,7 +40,27 @@ def workspace_for_email(email: str) -> str | None:
     key = normalized_email(email)
     if not key:
         return None
-    return _SPA_EMAIL_WORKSPACE.get(key)
+    slug = _SPA_EMAIL_WORKSPACE.get(key)
+    if slug:
+        return slug
+    return _workspace_slug_from_owner_email(key)
+
+
+def _workspace_slug_from_owner_email(key: str) -> str | None:
+    """Stripe-provisioned buyers: workspace.owner_email → slug (not workspace id 1)."""
+    try:
+        from sqlmodel import Session, select
+
+        from app.db import engine
+        from app.models import Workspace
+
+        with Session(engine) as session:
+            ws = session.exec(select(Workspace).where(Workspace.owner_email == key)).first()
+            if ws and ws.id != 1:
+                return ws.slug
+    except Exception:
+        return None
+    return None
 
 
 def spa_session_identity(request: Request) -> tuple[str, str] | None:

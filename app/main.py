@@ -20,7 +20,7 @@ from app.db import get_session, init_db
 from app.models import Channel, OAuthStatus, Video, VideoStatus
 from app.routers import (channels, features, media, music, onboarding, platform_oauth,
                          playlists, profiles, queue, settings as settings_router, spa_auth,
-                         thumbnails, topics, trends, videos, youtube_admin)
+                         stripe_webhook, thumbnails, topics, trends, videos, youtube_admin)
 from app.services import spa_google_login
 from app.services import render_loop, scheduler
 
@@ -85,6 +85,7 @@ def routed_path(request: Request) -> str:
 _OAUTH_CALLBACK_PATH = re.compile(r"/api/channels/[0-9]{1,18}/oauth/callback")
 _PLATFORM_OAUTH_CALLBACK = "/api/oauth/google/callback"
 _SPA_AUTH_PREFIX = "/api/auth/"
+_STRIPE_WEBHOOK_PATH = "/api/stripe/webhook"
 
 
 def _basic_password_ok(request: Request) -> bool:
@@ -123,6 +124,8 @@ async def basic_auth(request: Request, call_next):
         return await call_next(request)
     if spa_login and path.startswith(_SPA_AUTH_PREFIX):
         return await call_next(request)
+    if path == _STRIPE_WEBHOOK_PATH:
+        return await call_next(request)
     if spa_login and not path.startswith("/api"):
         return await call_next(request)
 
@@ -156,9 +159,9 @@ if settings.spa_google_login:
         https_only=settings.session_cookie_secure,
     )
 
-for r in (channels, features, onboarding, platform_oauth, spa_auth, playlists, profiles,
-          topics, videos, queue, media, settings_router, youtube_admin, trends, music,
-          thumbnails):
+for r in (channels, features, onboarding, platform_oauth, spa_auth, stripe_webhook,
+          playlists, profiles, topics, videos, queue, media, settings_router, youtube_admin,
+          trends, music, thumbnails):
     app.include_router(r.router)
 
 

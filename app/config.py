@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # http://localhost:7070 — so reconnects started from the portal work too.
     public_base_url: str = ""
 
+    # Stripe subscription provisioning (env: MANAGER_STRIPE_WEBHOOK_SECRET).
+    # Signing secret from Stripe Dashboard → Webhooks (whsec_…). Empty = route returns 503.
+    stripe_webhook_secret: str = ""
+
+    # Resend transactional email (env: MANAGER_RESEND_API_KEY). Welcome mail after checkout.
+    resend_api_key: str = ""
+
     # Optional alert webhook (env: MANAGER_ALERT_WEBHOOK_URL). When a channel's
     # OAuth token flips CONNECTED -> EXPIRED, app/services/notify.py POSTs a JSON
     # payload (Slack "text" + Discord "content" keys) here, on top of the ERROR

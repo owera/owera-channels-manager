@@ -69,6 +69,10 @@ def _add_missing_columns() -> None:
         "settings": [("topic_autogen_enabled", "BOOLEAN DEFAULT 0"),
                      ("topic_autogen_min_pending", "INTEGER DEFAULT 3"),
                      ("topic_autogen_target", "INTEGER DEFAULT 6")],
+        "workspace": [("owner_email", "VARCHAR"),
+                      ("stripe_customer_id", "VARCHAR"),
+                      ("stripe_subscription_id", "VARCHAR"),
+                      ("welcome_email_sent", "BOOLEAN DEFAULT 0")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
