@@ -1,0 +1,338 @@
+{
+"title": "Pedir resumo não é engenharia. · IA 235",
+"script": "Pedir resumo não é engenharia. O modelo escolhe sozinho o que importa. O detalhe certo fica de fora. A multa da cláusula 14 some. Ninguém percebe. Eu pergunto por campo. O modelo devolve cada valor. Cada valor volta com a página. Eu abro a página. Confiro o número na mão. Campo sem página é chute. Serve pra contrato, laudo e nota. Se inscreve. Próxima armadilha de IA.",
+"words": [
+{
+"text": "Pedir",
+"start": 0.054333,
+"dur": 0.326083
+},
+{
+"text": "resumo",
+"start": 0.394041,
+"dur": 0.516291
+},
+{
+"text": "não",
+"start": 0.923916,
+"dur": 0.203791
+},
+{
+"text": "é",
+"start": 1.141291,
+"dur": 0.081541
+},
+{
+"text": "engenharia",
+"start": 1.236416,
+"dur": 0.625
+},
+{
+"text": "O",
+"start": 2.1875,
+"dur": 0.054333
+},
+{
+"text": "modelo",
+"start": 2.255416,
+"dur": 0.434791
+},
+{
+"text": "escolhe",
+"start": 2.703791,
+"dur": 0.448375
+},
+{
+"text": "sozinho",
+"start": 3.16575,
+"dur": 0.543458
+},
+{
+"text": "o",
+"start": 3.722833,
+"dur": 0.04075
+},
+{
+"text": "que",
+"start": 3.777166,
+"dur": 0.095125
+},
+{
+"text": "importa",
+"start": 3.885875,
+"dur": 0.58425
+},
+{
+"text": "O",
+"start": 5.407625,
+"dur": 0.122291
+},
+{
+"text": "detalhe",
+"start": 5.543458,
+"dur": 0.489125
+},
+{
+"text": "certo",
+"start": 6.046208,
+"dur": 0.475541
+},
+{
+"text": "fica",
+"start": 6.535333,
+"dur": 0.27175
+},
+{
+"text": "de",
+"start": 6.820666,
+"dur": 0.122291
+},
+{
+"text": "fora",
+"start": 6.956541,
+"dur": 0.421208
+},
+{
+"text": "A",
+"start": 8.315208,
+"dur": 0.122291
+},
+{
+"text": "multa",
+"start": 8.451083,
+"dur": 0.380416
+},
+{
+"text": "da",
+"start": 8.845125,
+"dur": 0.108708
+},
+{
+"text": "cláusula",
+"start": 8.967375,
+"dur": 0.570666
+},
+{
+"text": "14 some",
+"start": 9.551625,
+"dur": 1.141291
+},
+{
+"text": "Ninguém",
+"start": 11.630416,
+"dur": 0.557083
+},
+{
+"text": "percebe",
+"start": 12.201083,
+"dur": 0.66575
+},
+{
+"text": "Eu",
+"start": 13.804333,
+"dur": 0.203791
+},
+{
+"text": "pergunto",
+"start": 14.02175,
+"dur": 0.597833
+},
+{
+"text": "por",
+"start": 14.633166,
+"dur": 0.190208
+},
+{
+"text": "campo",
+"start": 14.836958,
+"dur": 0.407625
+},
+{
+"text": "O",
+"start": 16.182083,
+"dur": 0.108708
+},
+{
+"text": "modelo",
+"start": 16.304333,
+"dur": 0.529875
+},
+{
+"text": "devolve",
+"start": 16.847833,
+"dur": 0.570666
+},
+{
+"text": "cada",
+"start": 17.432083,
+"dur": 0.27175
+},
+{
+"text": "valor",
+"start": 17.717375,
+"dur": 0.421208
+},
+{
+"text": "Cada",
+"start": 19.076083,
+"dur": 0.27175
+},
+{
+"text": "valor",
+"start": 19.361416,
+"dur": 0.380416
+},
+{
+"text": "volta",
+"start": 19.755416,
+"dur": 0.380416
+},
+{
+"text": "com",
+"start": 20.149458,
+"dur": 0.190208
+},
+{
+"text": "a",
+"start": 20.35325,
+"dur": 0.067916
+},
+{
+"text": "página",
+"start": 20.434791,
+"dur": 0.570666
+},
+{
+"text": "Eu",
+"start": 21.942916,
+"dur": 0.244583
+},
+{
+"text": "abro",
+"start": 22.201083,
+"dur": 0.285333
+},
+{
+"text": "a",
+"start": 22.5,
+"dur": 0.04075
+},
+{
+"text": "página",
+"start": 22.554333,
+"dur": 0.570666
+},
+{
+"text": "Confiro",
+"start": 24.0625,
+"dur": 0.557083
+},
+{
+"text": "o",
+"start": 24.633166,
+"dur": 0.04075
+},
+{
+"text": "número",
+"start": 24.6875,
+"dur": 0.380416
+},
+{
+"text": "na",
+"start": 25.081541,
+"dur": 0.122291
+},
+{
+"text": "mão",
+"start": 25.217375,
+"dur": 0.339666
+},
+{
+"text": "Campo",
+"start": 26.494583,
+"dur": 0.380416
+},
+{
+"text": "sem",
+"start": 26.888583,
+"dur": 0.27175
+},
+{
+"text": "página",
+"start": 27.173916,
+"dur": 0.448375
+},
+{
+"text": "é",
+"start": 27.635875,
+"dur": 0.027166
+},
+{
+"text": "chute",
+"start": 27.676625,
+"dur": 0.529875
+},
+{
+"text": "Serve",
+"start": 29.144041,
+"dur": 0.570666
+},
+{
+"text": "pra",
+"start": 29.72825,
+"dur": 0.176625
+},
+{
+"text": "contrato",
+"start": 29.918458,
+"dur": 0.652166
+},
+{
+"text": "laudo",
+"start": 30.801625,
+"dur": 0.35325
+},
+{
+"text": "e",
+"start": 31.168458,
+"dur": 0.04075
+},
+{
+"text": "nota",
+"start": 31.222833,
+"dur": 0.421208
+},
+{
+"text": "Se",
+"start": 32.581541,
+"dur": 0.230958
+},
+{
+"text": "inscreve",
+"start": 32.826083,
+"dur": 0.652166
+},
+{
+"text": "Próxima",
+"start": 34.41575,
+"dur": 0.516291
+},
+{
+"text": "armadilha",
+"start": 34.945666,
+"dur": 0.652166
+},
+{
+"text": "de",
+"start": 35.611416,
+"dur": 0.163041
+},
+{
+"text": "IA",
+"start": 35.788041,
+"dur": 0.394
+}
+],
+"duration": 36.68,
+"voice": "pt-BR-AntonioNeural (-8%, -2Hz), edge-tts 7.2.8, hook join applied"
+}

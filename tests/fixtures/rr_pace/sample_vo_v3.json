@@ -1,0 +1,349 @@
+{
+ "title": "Pedir um sim não é engenharia. · IA 236",
+ "script": "Pedir um sim não é engenharia. O modelo concorda sem pensar. Eu perguntei se o fluxo estava certo. A resposta veio rápida e vazia. Um aceite bonito não valida a regra. Então eu monto o caso que quebra. Eu rodo o teste antes do merge. Se tudo passa, eu desconfio. Se quebra, eu guardo a falha. Eu confio no teste que recusa. Se inscreve. Próxima armadilha de IA.",
+ "words": [
+  {
+   "text": "Pedir",
+   "start": 0.054333,
+   "dur": 0.339666
+  },
+  {
+   "text": "um",
+   "start": 0.407625,
+   "dur": 0.095125
+  },
+  {
+   "text": "sim",
+   "start": 0.516291,
+   "dur": 0.285333
+  },
+  {
+   "text": "não",
+   "start": 0.815208,
+   "dur": 0.190208
+  },
+  {
+   "text": "é",
+   "start": 1.019041,
+   "dur": 0.067916
+  },
+  {
+   "text": "engenharia",
+   "start": 1.100541,
+   "dur": 0.66575
+  },
+  {
+   "text": "O",
+   "start": 2.092375,
+   "dur": 0.054333
+  },
+  {
+   "text": "modelo",
+   "start": 2.160333,
+   "dur": 0.461958
+  },
+  {
+   "text": "concorda",
+   "start": 2.635875,
+   "dur": 0.597833
+  },
+  {
+   "text": "sem",
+   "start": 3.247291,
+   "dur": 0.27175
+  },
+  {
+   "text": "pensar",
+   "start": 3.532625,
+   "dur": 0.489125
+  },
+  {
+   "text": "Eu",
+   "start": 4.95925,
+   "dur": 0.203791
+  },
+  {
+   "text": "perguntei",
+   "start": 5.176625,
+   "dur": 0.638583
+  },
+  {
+   "text": "se",
+   "start": 5.828791,
+   "dur": 0.122291
+  },
+  {
+   "text": "o",
+   "start": 5.964666,
+   "dur": 0.04075
+  },
+  {
+   "text": "fluxo",
+   "start": 6.019041,
+   "dur": 0.448375
+  },
+  {
+   "text": "estava",
+   "start": 6.480958,
+   "dur": 0.366833
+  },
+  {
+   "text": "certo",
+   "start": 6.861416,
+   "dur": 0.516291
+  },
+  {
+   "text": "A",
+   "start": 8.315208,
+   "dur": 0.122291
+  },
+  {
+   "text": "resposta",
+   "start": 8.451083,
+   "dur": 0.679333
+  },
+  {
+   "text": "veio",
+   "start": 9.144041,
+   "dur": 0.27175
+  },
+  {
+   "text": "rápida",
+   "start": 9.429333,
+   "dur": 0.434791
+  },
+  {
+   "text": "e",
+   "start": 9.877708,
+   "dur": 0.04075
+  },
+  {
+   "text": "vazia",
+   "start": 9.932083,
+   "dur": 0.58425
+  },
+  {
+   "text": "Um",
+   "start": 11.453791,
+   "dur": 0.190208
+  },
+  {
+   "text": "aceite",
+   "start": 11.657625,
+   "dur": 0.434791
+  },
+  {
+   "text": "bonito",
+   "start": 12.105958,
+   "dur": 0.489125
+  },
+  {
+   "text": "não",
+   "start": 12.608708,
+   "dur": 0.176625
+  },
+  {
+   "text": "valida",
+   "start": 12.798916,
+   "dur": 0.421208
+  },
+  {
+   "text": "a",
+   "start": 13.233708,
+   "dur": 0.027166
+  },
+  {
+   "text": "regra",
+   "start": 13.274458,
+   "dur": 0.461958
+  },
+  {
+   "text": "Então",
+   "start": 14.673916,
+   "dur": 0.502708
+  },
+  {
+   "text": "eu",
+   "start": 15.190208,
+   "dur": 0.081541
+  },
+  {
+   "text": "monto",
+   "start": 15.285333,
+   "dur": 0.35325
+  },
+  {
+   "text": "o",
+   "start": 15.652166,
+   "dur": 0.054333
+  },
+  {
+   "text": "caso",
+   "start": 15.720125,
+   "dur": 0.394041
+  },
+  {
+   "text": "que",
+   "start": 16.127708,
+   "dur": 0.135875
+  },
+  {
+   "text": "quebra",
+   "start": 16.277166,
+   "dur": 0.434791
+  },
+  {
+   "text": "Eu",
+   "start": 17.649458,
+   "dur": 0.217375
+  },
+  {
+   "text": "rodo",
+   "start": 17.880416,
+   "dur": 0.35325
+  },
+  {
+   "text": "o",
+   "start": 18.247291,
+   "dur": 0.054333
+  },
+  {
+   "text": "teste",
+   "start": 18.315208,
+   "dur": 0.434791
+  },
+  {
+   "text": "antes",
+   "start": 18.763583,
+   "dur": 0.380416
+  },
+  {
+   "text": "do",
+   "start": 19.157625,
+   "dur": 0.122291
+  },
+  {
+   "text": "merge",
+   "start": 19.293458,
+   "dur": 0.502708
+  },
+  {
+   "text": "Se",
+   "start": 20.733708,
+   "dur": 0.285333
+  },
+  {
+   "text": "tudo",
+   "start": 21.032625,
+   "dur": 0.326083
+  },
+  {
+   "text": "passa",
+   "start": 21.372291,
+   "dur": 0.489125
+  },
+  {
+   "text": "eu",
+   "start": 22.038041,
+   "dur": 0.149458
+  },
+  {
+   "text": "desconfio",
+   "start": 22.201083,
+   "dur": 0.760875
+  },
+  {
+   "text": "Se",
+   "start": 23.899458,
+   "dur": 0.285333
+  },
+  {
+   "text": "quebra",
+   "start": 24.198375,
+   "dur": 0.448375
+  },
+  {
+   "text": "eu",
+   "start": 24.850541,
+   "dur": 0.135875
+  },
+  {
+   "text": "guardo",
+   "start": 25.0,
+   "dur": 0.421208
+  },
+  {
+   "text": "a",
+   "start": 25.434791,
+   "dur": 0.054333
+  },
+  {
+   "text": "falha",
+   "start": 25.502708,
+   "dur": 0.421208
+  },
+  {
+   "text": "Eu",
+   "start": 26.861416,
+   "dur": 0.176625
+  },
+  {
+   "text": "confio",
+   "start": 27.051625,
+   "dur": 0.516291
+  },
+  {
+   "text": "no",
+   "start": 27.581541,
+   "dur": 0.135875
+  },
+  {
+   "text": "teste",
+   "start": 27.730958,
+   "dur": 0.421208
+  },
+  {
+   "text": "que",
+   "start": 28.16575,
+   "dur": 0.095125
+  },
+  {
+   "text": "recusa",
+   "start": 28.274458,
+   "dur": 0.597833
+  },
+  {
+   "text": "Se",
+   "start": 29.809791,
+   "dur": 0.230958
+  },
+  {
+   "text": "inscreve",
+   "start": 30.054333,
+   "dur": 0.652166
+  },
+  {
+   "text": "Próxima",
+   "start": 31.644041,
+   "dur": 0.516291
+  },
+  {
+   "text": "armadilha",
+   "start": 32.173916,
+   "dur": 0.652166
+  },
+  {
+   "text": "de",
+   "start": 32.839666,
+   "dur": 0.163041
+  },
+  {
+   "text": "IA",
+   "start": 33.016291,
+   "dur": 0.3937
+  }
+ ],
+ "duration": 33.91,
+ "voice": "pt-BR-AntonioNeural (-8%, -2Hz), edge-tts 7.2.8, hook join applied",
+ "source": "CMO final v3 wording (2026-11-11)"
+}

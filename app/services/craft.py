@@ -1235,6 +1235,8 @@ CARD_PAD_FLOOR_S = 0.20
 SENTENCE_SPOKEN_MAX_S = 3.0
 # Card may lead its first spoken word by at most this. > 0.3s = card_enters_early.
 CARD_ENTER_LEAD_MAX_S = 0.3
+# Gate-aligned (RR) CTA chip: max lead over its spoken closer (CMO 2026-11-10).
+CTA_ENTER_LEAD_MAX_S = 0.3
 # Code / command cards are read, not just heard. A 0.50s flash of
 # "Found 5." is unreadable on a 9:16 short. Floor = 1.2s: ~4 words at
 # 200 wpm, the shortest hold that still registers as a CLI/log line.
@@ -3036,7 +3038,7 @@ def sync_lead_max(beat=None, *, aligned: bool | None = None) -> float:
     Legacy (aligned False): SYNC_LEAD_MAX_S (1.1s). Gate-aligned: the Gate B
     card_enters_early budget (min(SYNC_LEAD_MAX_S, CARD_ENTER_LEAD_MAX_S)),
     0 for a quote / quote-like card (quote_before_speech: must enter on its
-    first word); the CTA chip (exempt from card_enters_early) keeps 1.1s.
+    first word); the CTA chip (exempt from card_enters_early) CTA_ENTER_LEAD_MAX_S.
     """
     if aligned is None:
         aligned = bool(_SYNC_GATE_ALIGNED.get())
@@ -3050,8 +3052,10 @@ def sync_lead_max(beat=None, *, aligned: bool | None = None) -> float:
         typ = ""
     if typ in CTA_TYPES:
         # the endcard chip is exempt from card_enters_early (its window is set
-        # by the endcard cap / content_end), so it keeps the legacy lead
-        return SYNC_LEAD_MAX_S
+        # by the endcard cap / content_end); gate-aligned (RR) boards cap its
+        # lead over the spoken "Se inscreve." at CTA_ENTER_LEAD_MAX_S (CMO
+        # voice pass 2026-11-10; was the legacy 1.1s)
+        return CTA_ENTER_LEAD_MAX_S
     if typ == "quote":
         return 0.0
     if isinstance(beat, dict) and quote_like_text(beat):

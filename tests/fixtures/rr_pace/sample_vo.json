@@ -1,0 +1,319 @@
+{
+"title": "Pedir resumo não é engenharia. · IA 235",
+"script": "Pedir resumo não é engenharia. O modelo escolhe sozinho o que importa. O detalhe certo fica de fora. A multa da cláusula 14 some. Ninguém percebe. Eu pergunto por campo. Cada valor volta com a sua página. Eu vou lá e confiro o número. Campo sem página eu trato como chute. Serve pra contrato e pra laudo. Se inscreve. Próxima armadilha de IA.",
+"words": [
+{
+"text": "Pedir",
+"start": 0.054333,
+"dur": 0.326083
+},
+{
+"text": "resumo",
+"start": 0.394041,
+"dur": 0.516291
+},
+{
+"text": "não",
+"start": 0.923916,
+"dur": 0.203791
+},
+{
+"text": "é",
+"start": 1.141291,
+"dur": 0.081541
+},
+{
+"text": "engenharia",
+"start": 1.236416,
+"dur": 0.625
+},
+{
+"text": "O",
+"start": 2.1875,
+"dur": 0.054333
+},
+{
+"text": "modelo",
+"start": 2.255416,
+"dur": 0.434791
+},
+{
+"text": "escolhe",
+"start": 2.703791,
+"dur": 0.448375
+},
+{
+"text": "sozinho",
+"start": 3.16575,
+"dur": 0.543458
+},
+{
+"text": "o",
+"start": 3.722833,
+"dur": 0.04075
+},
+{
+"text": "que",
+"start": 3.777166,
+"dur": 0.095125
+},
+{
+"text": "importa",
+"start": 3.885875,
+"dur": 0.58425
+},
+{
+"text": "O",
+"start": 5.407625,
+"dur": 0.122291
+},
+{
+"text": "detalhe",
+"start": 5.543458,
+"dur": 0.489125
+},
+{
+"text": "certo",
+"start": 6.046208,
+"dur": 0.475541
+},
+{
+"text": "fica",
+"start": 6.535333,
+"dur": 0.27175
+},
+{
+"text": "de",
+"start": 6.820666,
+"dur": 0.122291
+},
+{
+"text": "fora",
+"start": 6.956541,
+"dur": 0.421208
+},
+{
+"text": "A",
+"start": 8.315208,
+"dur": 0.122291
+},
+{
+"text": "multa",
+"start": 8.451083,
+"dur": 0.380416
+},
+{
+"text": "da",
+"start": 8.845125,
+"dur": 0.108708
+},
+{
+"text": "cláusula",
+"start": 8.967375,
+"dur": 0.570666
+},
+{
+"text": "14 some",
+"start": 9.551625,
+"dur": 1.141291
+},
+{
+"text": "Ninguém",
+"start": 11.630416,
+"dur": 0.557083
+},
+{
+"text": "percebe",
+"start": 12.201083,
+"dur": 0.66575
+},
+{
+"text": "Eu",
+"start": 13.804333,
+"dur": 0.203791
+},
+{
+"text": "pergunto",
+"start": 14.02175,
+"dur": 0.597833
+},
+{
+"text": "por",
+"start": 14.633166,
+"dur": 0.190208
+},
+{
+"text": "campo",
+"start": 14.836958,
+"dur": 0.407625
+},
+{
+"text": "Cada",
+"start": 16.182083,
+"dur": 0.27175
+},
+{
+"text": "valor",
+"start": 16.467375,
+"dur": 0.380416
+},
+{
+"text": "volta",
+"start": 16.861416,
+"dur": 0.407625
+},
+{
+"text": "com",
+"start": 17.282625,
+"dur": 0.190208
+},
+{
+"text": "a",
+"start": 17.486416,
+"dur": 0.04075
+},
+{
+"text": "sua",
+"start": 17.54075,
+"dur": 0.326083
+},
+{
+"text": "página",
+"start": 17.880416,
+"dur": 0.557083
+},
+{
+"text": "Eu",
+"start": 19.375,
+"dur": 0.190208
+},
+{
+"text": "vou",
+"start": 19.578791,
+"dur": 0.217375
+},
+{
+"text": "lá",
+"start": 19.809791,
+"dur": 0.258166
+},
+{
+"text": "e",
+"start": 20.081541,
+"dur": 0.067916
+},
+{
+"text": "confiro",
+"start": 20.163041,
+"dur": 0.516291
+},
+{
+"text": "o",
+"start": 20.692916,
+"dur": 0.027166
+},
+{
+"text": "número",
+"start": 20.733708,
+"dur": 0.448375
+},
+{
+"text": "Campo",
+"start": 22.119583,
+"dur": 0.394041
+},
+{
+"text": "sem",
+"start": 22.527166,
+"dur": 0.244583
+},
+{
+"text": "página",
+"start": 22.785333,
+"dur": 0.407625
+},
+{
+"text": "eu",
+"start": 23.206541,
+"dur": 0.108708
+},
+{
+"text": "trato",
+"start": 23.328791,
+"dur": 0.380416
+},
+{
+"text": "como",
+"start": 23.722833,
+"dur": 0.27175
+},
+{
+"text": "chute",
+"start": 24.008166,
+"dur": 0.475541
+},
+{
+"text": "Serve",
+"start": 25.421208,
+"dur": 0.570666
+},
+{
+"text": "pra",
+"start": 26.005416,
+"dur": 0.163041
+},
+{
+"text": "contrato",
+"start": 26.182083,
+"dur": 0.597833
+},
+{
+"text": "e",
+"start": 26.793458,
+"dur": 0.04075
+},
+{
+"text": "pra",
+"start": 26.847833,
+"dur": 0.163041
+},
+{
+"text": "laudo",
+"start": 27.024458,
+"dur": 0.434791
+},
+{
+"text": "Se",
+"start": 28.39675,
+"dur": 0.230958
+},
+{
+"text": "inscreve",
+"start": 28.641291,
+"dur": 0.652166
+},
+{
+"text": "Próxima",
+"start": 30.230958,
+"dur": 0.516291
+},
+{
+"text": "armadilha",
+"start": 30.760875,
+"dur": 0.652166
+},
+{
+"text": "de",
+"start": 31.426625,
+"dur": 0.163041
+},
+{
+"text": "IA",
+"start": 31.60325,
+"dur": 0.3938
+}
+],
+"duration": 32.5,
+"voice": "pt-BR-AntonioNeural (-8%, -2Hz), edge-tts 7.2.8, hook join applied",
+"source": "CMO corrected 12-sentence sample (voice pass 2026-11-10)"
+}

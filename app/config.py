@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     # preflight stay exactly as before. env: MANAGER_GATE_TIMING_BRANDS='["rr"]'.
     gate_timing_brands: list[str] = ["rr"]
 
+    # --- Spoken-sentence pace for generated short scripts (per channel) ---------
+    # key -> {"target_s": prompt target, "cap_s": deterministic hard cap} (seconds
+    # spoken, first→last word; app/services/sentence_pace.py estimator). Key
+    # lookup order: "channel:<id>", channel slug, brand. A channel with no entry
+    # keeps the generator exactly as before (OS). PO CM cut 10 Nov 2026: RR
+    # 2.2s / 2.5s. env: MANAGER_SENTENCE_PACE='{"rr":{"target_s":2.2,"cap_s":2.5}}'.
+    sentence_pace: dict[str, dict[str, float]] = {"rr": {"target_s": 2.2, "cap_s": 2.5}}
+
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:
     # MANAGER_TOPIC_FLAGS as a JSON object, e.g.

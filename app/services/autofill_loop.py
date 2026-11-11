@@ -82,6 +82,7 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
             topic.name, topic.theme_prompt, list(existing), batch, topic.content_format,
             language=video_gen.channel_language(session, topic.channel_id),
             niche=_niche,
+            **video_gen.idea_pace_kwargs(session, topic.channel_id, topic.content_format),
         )
         hp = video_gen.idea_hook_kwargs(session, topic.channel_id, topic.content_format)
         if hp and ideas:
@@ -93,6 +94,7 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
                     list(existing) + list(ideas), batch, topic.content_format,
                     language=video_gen.channel_language(session, topic.channel_id),
                     niche=_niche,
+                    **video_gen.idea_pace_kwargs(session, topic.channel_id, topic.content_format),
                 ))
     except Exception as e:
         logger.info("autofill skipped for topic '%s': %s", topic.name, e)

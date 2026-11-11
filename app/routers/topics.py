@@ -211,6 +211,7 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
             language=video_gen.channel_language(session, t.channel_id),
             niche=niche,
             steer_notes=steer_notes,
+            **video_gen.idea_pace_kwargs(session, t.channel_id, t.content_format),
         )
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
@@ -224,6 +225,7 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
                 t.content_format, language=video_gen.channel_language(session, t.channel_id),
                 niche=niche,
                 steer_notes=steer_notes,
+                **video_gen.idea_pace_kwargs(session, t.channel_id, t.content_format),
             ))
     ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.finalize_draft_subjects(ideas)

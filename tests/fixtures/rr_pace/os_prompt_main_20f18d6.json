@@ -1,0 +1,16 @@
+{
+"subject": "Skipping the spec is not engineering · AI 12",
+"params": {
+"content_format": "short",
+"brand": "os",
+"voice_name": "en-US-AndrewNeural-Male"
+},
+"reply": "Skipping the spec is not engineering. The model guesses what you meant, and you ship the guess without reading it, and nobody notices for a very long time until the bill arrives and the whole team has to stop. Skipping the spec is not engineering. The model guesses what you meant, and you ship the guess without reading it, and nobody notices for a very long time until the bill arrives and the whole team has to stop. Subscribe — next agent trap.",
+"calls": [
+[
+"Write a punchy voiceover script for a vertical short-form video titled \"Skipping the spec is not engineering · AI 12\". About 70-100 words, 2 short paragraphs. Open with ONE SHORT sentence — at most about 10 words — that lands the viewer's pain, doubt, or question up front, so they feel 'yes, that's exactly my problem' in the first two seconds. Do NOT wind up with a multi-clause scenario or a pile of setup details before the pain: the first sentence must hit the pain directly, then stop. Forbidden openers: 'In this video', 'Today', 'Welcome', 'Here's how'. After that hook, give the honest verdict or concrete insight — take a clear position, don't hedge. Close with one tight, memorable builder/confiança line that crystallises the lesson, THEN the series endcard as the LAST spoken line, exactly: 'Subscribe — next {series} {noun}.' (≤8 words; noun = trap|receipt|bill|drop). On-screen chip is '· {series}', not a Follow ask. Subscribe is FORBIDDEN in the mid-short / body / miolo (no Subscribe text or ask before that last line). FORBIDDEN anywhere: Follow, Follow tomorrow, Siga, Siga-amanhã, 'follow for more', waitlist, owera.com, Owera Cloud-as-product, 'part 2 coming', SMY, Instagram, LinkedIn. The FIRST sentence is the title hook — keep it short (≤10 words). If the title has a dollar stake like $79, say $79 as numerals in the script — NEVER expand to seventy-nine dollars. Conversational, concrete, no filler, no headings, no stage directions, no emojis. Return ONLY the spoken words. HARD RULE: write the entire script in English, regardless of the title's language — this channel narrates exclusively in English.",
+null
+]
+],
+"out": "Skipping the spec is not engineering. The model guesses what you meant, and you ship the guess without reading it, and nobody notices for a very long time until the bill arrives and the whole team has to stop. Skipping the spec is not engineering. The model guesses what you meant, and you ship the guess without reading it, and nobody notices for a very long time until the bill arrives and the whole team has to stop. Subscribe — next memory trap."
+}

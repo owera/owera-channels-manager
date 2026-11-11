@@ -312,10 +312,13 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         # craft.prepare_provided_script) is spoken verbatim — no grok -p rewrite.
         _status(handle, progress=5)
         provided = (params.get("provided_script") or "").strip()
+        pace_post = None
         if provided:
             script = provided
         else:
             script = _generate_script(subject, params)
+            from app.services import sentence_pace as _sp
+            pace_post = _sp.warn_summary(_sp.take_last_report())
         _status(handle, script=script, progress=12)
 
         # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
@@ -397,6 +400,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         cc["script_source"] = "provided" if provided else "generated"
         if hook_join:
             cc["hook_join"] = True
+        if pace_post:
+            # sentence-pace post-pass WARNs (unsplittable / echo / comma list):
+            # visible on the video's creation_config (GET /videos/{id})
+            cc["sentence_pace_post"] = pace_post
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
@@ -772,12 +779,19 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
     from app.services import craft
     rr_short = ((params.get("content_format") or "short") != "long"
                 and (params.get("brand") or "") in craft.HOOK_PACE_BRANDS)
-    if rr_short:
+    # Per-channel sentence pace (settings.sentence_pace; RR 2.2s target / 2.5s
+    # cap): prompt guidance + a deterministic post-pass. No entry → unchanged.
+    from app.services import sentence_pace as _sp
+    pace = _sp.pace_for(params)
+    if pace:
+        prompt += _sp.prompt_guidance(pace) + _sp.voice_guidance(pace)
+    elif rr_short:
         # RR sentence pace (soft): one card per sentence fits when a sentence
         # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
         prompt += (f" Keep EVERY spoken sentence short: at most about {craft.SENTENCE_MAX_WORDS} "
                    f"words (~{craft.SENTENCE_SPOKEN_SOFT_S:.1f}s spoken) — split a long sentence "
                    "into two instead of chaining clauses.")
+    if rr_short:
         prompt += (" Endcard as the LAST spoken lines, exactly: "
                    "'Se inscreve. Próxima armadilha de IA.' "
                    "On-screen chip: 'Se inscreve · IA'. Do NOT use the English "
@@ -807,7 +821,25 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
         if retry:
             text = retry
 
-    if rr_short:
+    if pace:
+        over = _sp.over_cap(text, pace["cap_s"])
+        if over:
+            # one rewrite ask; kept only when it has fewer over-cap sentences
+            logger.info("script: %d sentence(s) over the %.1fs cap for %r — asking once for a rewrite",
+                        len(over), pace["cap_s"], subject)
+            redo = ask(
+                prompt + "\n\nThese sentences take longer than " +
+                f"{pace['cap_s']:.1f}s to say; shorten each (cut filler, keep 'eu' and the main "
+                "verb) or split it into two complete sentences, keep everything else:\n" +
+                "\n".join(f"- {h['text']}" for h in over) +
+                "\nReturn ONLY the spoken voiceover.",
+                max_tokens=max_tokens,
+            ).strip()
+            redo = _strip_script_preamble(re.sub(r"^[\"'`]+|[\"'`]+$", "", redo).strip())
+            if redo and lo <= len(redo.split()) <= hi and len(
+                    _sp.over_cap(redo, pace["cap_s"])) < len(over):
+                text = redo
+    elif rr_short:
         long_ = craft.long_spoken_sentences(text)
         if long_:
             # one soft rewrite ask; kept only when it has fewer long sentences
@@ -834,6 +866,17 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
             text, subject, brand=params.get("brand"),
             topic_name=params.get("topic_name"),
         )
+    _sp.set_last_report(None)
+    if pace:
+        # deterministic cap: shorten (filler) / split at natural boundaries;
+        # hook (sentence 0) and the series closer are never touched
+        text, rep = _sp.enforce(text, pace)
+        if rep["changes"]:
+            logger.info("script: sentence pace %s — %d change(s), %d split(s) for %r",
+                        pace["key"], len(rep["changes"]), rep["splits"], subject)
+        for w in rep["warnings"]:
+            logger.warning("script: sentence pace %s WARN for %r: %s", pace["key"], subject, w)
+        _sp.set_last_report(rep)
     return text
 
 

@@ -275,6 +275,9 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         if provided and isinstance(cc, dict):
             cc = {**cc, "script_source": _craft.SCRIPT_SOURCE_PROVIDED,
                   "script_edits": prior_cc.get("script_edits") or []}
+            if prior_cc.get("sentence_pace_post") and "sentence_pace_post" not in cc:
+                # compose-time sentence-pace WARNs stay visible after the render
+                cc["sentence_pace_post"] = prior_cc["sentence_pace_post"]
         video.creation_config = json.dumps(cc)
     # A new render never inherits the VM's Gate B PASS of the previous artifact
     # (engines without a task creation_config keep the old blob, vm_pass included).
