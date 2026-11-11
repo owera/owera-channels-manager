@@ -1962,3 +1962,28 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 77. ✅ DONE (PR autoimprove/2026-11-11-thumbnails-workspace) Thumbnail POST/DELETE follow workspace isolation — normal
+- **resolution (2026-11-11):** `_thumb_target` calls `require_video`
+  before the publishing/published 409. A foreign id is 404
+  `video not found` and writes no file and no `thumbnail_set` JobRun.
+  A foreign publishing video is that same 404, not a 409 that would
+  leak "already uploading". The owner of a publishing video still gets
+  409. With `multi_workspace` off, every caller is owera, so a video
+  parked on another workspace still cannot be written. Suite:
+  `tests/verify_provided_thumb.py` 89 → 121. A `session.get` mutant
+  dies on the flag-off foreign POST; a 409-before-workspace mutant
+  dies on the foreign publishing POST; a guard that runs only when the
+  flag is on dies on the flag-off POST.
+- **why (PR #200 residual, write side):** `thumbnails.py` loaded the
+  video with `session.get`, so a tenant who knows another workspace's
+  video id can replace or clear that thumbnail. `GET /video` and
+  `/thumb` are the read side (open PR #203), not this change.
+- **caution:** normal (`thumbnails.py` only). Not a publish/oauth path.
+  If this conflicts with #203, keep this file's `verify_provided_thumb.py`
+  seed: it includes the owera pin #203 adds, plus the tenant-b videos.
+  #203's new assertions live in `verify_media.py`, not in this suite.
+- **acceptance:** foreign POST/DELETE are 404 and leave the bytes; the
+  owner's POST is 200 and the owner's DELETE clears; own publishing
+  stays 409; unauthenticated POST is 401. A video whose channel row is
+  gone 404s, the same as other `require_video` routes.
