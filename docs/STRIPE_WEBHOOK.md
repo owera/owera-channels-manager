@@ -9,7 +9,7 @@ Paid sign-ups via [Payment Link](https://buy.stripe.com/4gMeVc81u18Kg9GcIK5EY00)
 | `MANAGER_STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_…`) from Stripe Dashboard → Developers → Webhooks |
 | `MANAGER_RESEND_API_KEY` | Resend API key for the one-time welcome email (optional; logs a warning if unset) |
 
-Load via `manager/.env` (same as other `MANAGER_*` settings). Do not commit secrets.
+Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do not commit secrets.
 
 ## Endpoint
 

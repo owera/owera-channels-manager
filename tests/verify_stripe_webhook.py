@@ -175,6 +175,21 @@ r = client.post(
 )
 ok(r.status_code == 400, "bad signature 400")
 
+# current timestamp + wrong-length / non-hex v1 must 400 (not 500 from compare_digest)
+_now = int(time.time())
+r = client.post(
+    "/api/stripe/webhook",
+    content=body,
+    headers={"Stripe-Signature": f"t={_now},v1=deadbeef"},
+)
+ok(r.status_code == 400, "wrong-length v1 at current ts returns 400")
+r = client.post(
+    "/api/stripe/webhook",
+    content=body,
+    headers={"Stripe-Signature": f"t={_now},v1=not-valid-hex-and-also-wrong-len"},
+)
+ok(r.status_code == 400, "non-hex wrong-length v1 at current ts returns 400")
+
 # --- valid signature → 200 + provision ---
 settings.resend_api_key = "re_test_key"
 _SENT.clear()

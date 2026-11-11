@@ -58,7 +58,16 @@ def construct_event(
 
     signed_payload = f"{timestamp}.{body}".encode("utf-8")
     expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
-    if not any(hmac.compare_digest(expected, sig) for sig in signatures):
+    def _v1_matches(sig: str) -> bool:
+        # compare_digest raises ValueError when lengths differ; a short/non-hex
+        # v1 must be a 400, not a 500.
+        if len(sig) != len(expected):
+            return False
+        try:
+            return hmac.compare_digest(expected, sig)
+        except (ValueError, TypeError):
+            return False
+    if not any(_v1_matches(sig) for sig in signatures):
         raise SignatureVerificationError("signature mismatch")
 
     try:
