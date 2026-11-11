@@ -28,7 +28,7 @@ The hook (sentence 0: title = hook = frame0 = thumb) and the series closer
 a *grammatically* complete sentence is not decidable here — the checkable
 parts are enforced, the rest is in the prompt guidance.
 
-Check-only WARNs (never rewrite): hook estimated over the cap (``hook pace:``;
+Check-only WARNs (never rewrite): hook estimated over the target (``hook pace:``;
 the hook is never touched), and the CMO voice rules of 2026-11-11 — a content
 keyword in more than ``KEYWORD_MAX_SENTENCES`` sentences outside the hook,
 more than ``MAX_SENTENCES`` sentences or an estimated total over
@@ -192,7 +192,7 @@ def voice_guidance(pace: dict) -> str:
 
 def title_guidance(pace: dict) -> str:
     """RR title prompt: the title head is the spoken hook (= frame0 = thumbnail)."""
-    c = pace["cap_s"]
+    c = pace["target_s"]   # = the hook-pace WARN threshold (PO CM 2026-11-11)
     return (f"\nHOOK LENGTH: the title before '·' is spoken as the opening hook and is also "
             f"frame0 and the thumbnail — aim for it to be spoken in {c:.1f}s or less "
             f"(~{target_words(c)} palavras; numbers and 'IA' count heavier).")
@@ -460,7 +460,7 @@ def enforce(script: str | None, pace: dict) -> tuple[str, dict]:
         n = comma_list_items(s2) if not _is_protected(j, s2) else 0
         if n >= 3:
             rep["lists"].append({"i": j, "text": s2, "items": n})
-    rep.update(voice_checks(out, cap))
+    rep.update(voice_checks(out, cap, hook_max=float(pace["target_s"])))
     rep["warnings"] = warnings_of(rep)
     return " ".join(out), rep
 
@@ -492,14 +492,21 @@ def keyword_stems(s: str) -> set[str]:
     return out
 
 
-def voice_checks(sents: list[str], cap: float) -> dict:
-    """Check-only CMO voice rules + hook pace on the final sentences."""
+# the RR first cut lands ≈ this long after the hook's spoken end (joined PT
+# pause), so a 2.5s first-cut limit means a hook of ≈ target_s (2.2s)
+HOOK_FIRST_CUT_LAG_S = 0.3
+
+
+def voice_checks(sents: list[str], cap: float, hook_max: float | None = None) -> dict:
+    """Check-only CMO voice rules + hook pace on the final sentences. The hook
+    WARNs over ``hook_max`` (= target_s, PO CM 2026-11-11; default cap)."""
+    hook_max = cap if hook_max is None else hook_max
     res = {"hook": None, "keywords": [], "length": None, "bare_1sg": []}
     if not sents:
         return res
     h_est = estimate_spoken_s(sents[0])
-    if h_est > cap + 1e-9:
-        res["hook"] = {"text": sents[0], "est": h_est}
+    if h_est > hook_max + 1e-9:
+        res["hook"] = {"text": sents[0], "est": h_est, "max_s": hook_max}
     body = [(i, s) for i, s in enumerate(sents) if i and not _is_protected(i, s)]
     seen: dict[str, list[int]] = {}
     for i, s in body:
@@ -538,7 +545,8 @@ def warnings_of(rep: dict) -> list[str]:
     w += [f"bare first-person verb (say 'Eu …'): {h['text']}" for h in rep.get("bare_1sg") or []]
     hk = rep.get("hook")
     if hk:
-        w.append(f"hook pace: est {hk['est']:.2f}s over the {cap:.1f}s cap — hook kept as written "
+        w.append(f"hook pace: est {hk['est']:.2f}s over the {hk['max_s']:.1f}s target — first cut lands "
+                 f"≈{HOOK_FIRST_CUT_LAG_S:.1f}s later (RR max 2.5s); hook kept as written "
                  f"(shorter title head): {hk['text']}")
     return w
 

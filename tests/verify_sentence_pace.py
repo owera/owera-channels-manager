@@ -330,14 +330,24 @@ CALL2_HOOK = "Pedir um sim não é engenharia."              # real grok call 2:
 e1, e2 = sp.estimate_spoken_s(CALL1_HOOK), sp.estimate_spoken_s(CALL2_HOOK)
 print(f"  est: call-1 hook {e1:.3f}s, call-2 hook {e2:.3f}s (cap 2.5s)")
 ok(e1 == 2.391 and e2 == 1.89, "estimator unchanged (call-1 hook 2.391s, call-2 hook 1.89s)")
-for hook, want in ((CALL1_HOOK, e1 > 2.5), (CALL2_HOOK, False)):
+# PO CM 2026-11-11: the hook WARNs over target_s (2.2s, config), not cap_s —
+# the first cut lands ≈0.3s after the hook, so the 2.5s first-cut limit means ≈2.2s.
+ok(sp.pace_for(RR)["target_s"] == 2.2, "hook threshold = target_s from config (2.2s)")
+PROBE_FAIL = ["Perguntar se está certo não é engenharia.", "Perguntar se tá certo não é engenharia."]   # Gate B FAIL (first cut 2.80 / 2.75s)
+PROBE_PASS = ["Pedir um sim não é engenharia.", "Pedir confirmação não é engenharia.",            # Gate B PASS (first cut 2.17 / 2.49s)
+              "Pedir aval não é engenharia.", "Pedir resumo não é engenharia."]                    # (2.08 / 2.19s)
+for hook, want in [(h, True) for h in PROBE_FAIL] + [(h, False) for h in PROBE_PASS]:
     o_h, c_h = gen(hook + " · IA 236", RR, hook + " O modelo concorda sem pensar. Eu rodo o teste antes. " + CLOSER)
     rep_h = sp.take_last_report()
     hw = sp.hook_warnings(rep_h["warnings"])
     ok(sents(o_h)[0] == hook, f"hook unchanged: {hook!r}")
-    ok(bool(hw) == want, f"{hook!r}: hook WARN {'yes' if want else 'no'} (est {sp.estimate_spoken_s(hook):.2f}s vs cap 2.5s)")
-# NOTE (PO): the call-1 hook estimates 2.391s ≤ 2.5s although real TTS spoke it
-# in 2.51s (first cut 2.80s) — at cap_s the estimator does not flag it.
+    ok(bool(hw) == want, f"{hook!r}: hook WARN {'yes' if want else 'no'} (est {sp.estimate_spoken_s(hook):.2f}s vs target 2.2s)")
+    if want:
+        ok(hw[0] == f"hook pace: est {sp.estimate_spoken_s(hook):.2f}s over the 2.2s target — first cut lands ≈0.3s later "
+                    f"(RR max 2.5s); hook kept as written (shorter title head): {hook}", f"WARN text: {hw[0]!r}")
+with patch.object(settings, "sentence_pace", {"rr": {"target_s": 2.4, "cap_s": 2.5}}):
+    gen(CALL1_HOOK + " · IA 236", RR, CALL1_HOOK + " O modelo concorda sem pensar. " + CLOSER)
+    ok(not sp.hook_warnings(sp.take_last_report()["warnings"]), "threshold follows the configured target (2.4s → call-1 2.39s passes)")
 LONG = "Pedir resumo pro modelo sem os campos não é engenharia."
 ok(sp.estimate_spoken_s(LONG) > 2.5, f"synthetic long hook est {sp.estimate_spoken_s(LONG):.2f}s > 2.5s")
 h = _H(); worker.logger.addHandler(h)
@@ -345,7 +355,7 @@ o_l, _ = gen(LONG + " · IA 237", RR, LONG + " O modelo concorda sem pensar. " +
 worker.logger.removeHandler(h)
 rep_l = sp.take_last_report()
 hw = sp.hook_warnings(rep_l["warnings"])
-ok(sents(o_l)[0] == LONG and len(hw) == 1 and hw[0].startswith("hook pace: est ") and "hook kept as written" in hw[0],
+ok(sents(o_l)[0] == LONG and len(hw) == 1 and hw[0].startswith("hook pace: est ") and "over the 2.2s target" in hw[0] and "hook kept as written" in hw[0],
    f"over-cap hook → one WARN, hook text unchanged: {hw[0] if hw else None!r}")
 ok(any(r.levelno == logging.WARNING and r.name == "manager.worker" and "hook pace:" in r.getMessage() for r in h.recs),
    "hook WARN logged on manager.worker at WARNING")
@@ -367,7 +377,7 @@ gen(LONG.replace("Pedir resumo pro modelo", "Asking the model for a summary") + 
     "Asking the model for a summary without the fields is not engineering. Subscribe — next agent trap.")
 ok(sp.take_last_report() is None, "OS: no hook WARN (no report at all)")
 
-print("RR title prompt: hook length line (settings.sentence_pace cap)")
+print("RR title prompt: hook length line (settings.sentence_pace target = the hook WARN threshold)")
 from app.services import video_gen
 def idea_prompt(**kw):
     got = []
@@ -376,10 +386,10 @@ def idea_prompt(**kw):
     return got[0]
 RRP = {"content_format": "short", "brand": "rr", "channel_id": 2, "channel_slug": "rr"}
 p_rr = idea_prompt(pace_params=RRP)
-ok(sp.title_guidance(sp.pace_for(RRP)) in p_rr and "aim for it to be spoken in 2.5s or less" in p_rr
+ok(sp.title_guidance(sp.pace_for(RRP)) in p_rr and "aim for it to be spoken in 2.2s or less" in p_rr
    and "frame0 and the thumbnail" in p_rr, "RR title prompt pins the ≤2.5s hook line")
 with patch.object(settings, "sentence_pace", {"rr": {"target_s": 2.0, "cap_s": 2.3}}):
-    ok("spoken in 2.3s or less" in idea_prompt(pace_params=RRP), "line reuses the configured cap (2.3s)")
+    ok("spoken in 2.0s or less" in idea_prompt(pace_params=RRP), "line reuses the configured target (2.0s)")
 p_os = idea_prompt()
 ok(p_os == idea_prompt(pace_params={"content_format": "short", "brand": "os", "channel_id": 1, "channel_slug": "os"})
    and "HOOK LENGTH" not in p_os, "OS title prompt byte-identical (no pace entry → no line)")
@@ -426,8 +436,31 @@ ok(o_v2 == V2, "CMO v2 sample: post-pass leaves it unchanged")
 ok(not r_v2["keywords"] and r_v2["length"] is None and not r_v2["bare_1sg"] and r_v2["hook"] is None,
    "CMO v2 sample: no keyword / length / bare-1sg / hook WARN")
 ok(len(sents(V2)) == 12 and sp.estimated_total_s(V2) <= 35, f"v2: 12 sentences, est {sp.estimated_total_s(V2)}s ≤ 35s")
-# open with PO/CMO (estimator + echo rule unchanged by this change):
-print("  v2 pre-existing WARNs:", r_v2["warnings"])
+ok(len(r_v2["warnings"]) == 2 and r_v2["unsplittable"] and r_v2["echo"], "v2 (superseded): the 2.59s-est sentence + 'caso' echo WARNs (why CMO rewrote it)")
+print("CMO final v3 sample (tests/fixtures/rr_pace/sample_script_v3.txt)")
+V3 = (FXD / "sample_script_v3.txt").read_text().strip()
+o_v3, r_v3 = sp.enforce(V3, P)
+ok(o_v3 == V3 and not r_v3["changes"], "v3: post-pass leaves it unchanged")
+ok(r_v3["warnings"] == [] and r_v3["hook"] is None and not r_v3["echo"] and not r_v3["keywords"],
+   "v3: zero WARNs (no hook WARN at 2.2s, no echo, no keyword, no length, no bare 1sg)")
+ok(len(sents(V3)) == 12 and sp.estimated_total_s(V3) <= 35, f"v3: 12 sentences, est {sp.estimated_total_s(V3)}s ≤ 35s")
+F3 = json.loads((FXD / "sample_vo_v3.json").read_text())
+ok(F3["script"] == V3, "sample_vo_v3.json = real edge-tts words of the v3 sample (hook join)")
+h3 = storyboard.compose(subject=F3["title"], script=V3, words=F3["words"], duration=F3["duration"], resolution="portrait",
+                        width=1080, height=1920, topic_id=None, content_format="short", language="Portuguese",
+                        llm=lambda *a, **k: (_ for _ in ()).throw(AssertionError("llm")), brand="rr", title=F3["title"], topic_name="IA")
+b3 = craft.beats_from_html(h3); W3 = F3["words"]
+g3 = craft.video_maker_gate(b3, content_format="short", used_fallback=False, beat_timing=craft.BEAT_TIMING_CURRENT,
+                            hook_pace=craft.hook_pace_marker(b3, W3, "rr", "short"),
+                            card_sync=craft.card_sync_marker(b3, W3, "short", script=V3, brand="rr"),
+                            card_text=craft.card_text_marker(b3, V3, W3, brand="rr"), card_vo=craft.card_vo_marker(b3, V3, brand="rr"))
+ok(g3["result"] == "PASS" and not craft.card_timing_hits(b3, W3, V3, duration=F3["duration"]) and not craft.blank_gap_hits(b3, F3["duration"]),
+   f"v3 real TTS: Gate B {g3['result']} {g3['checks']}, card_timing + blank_gap clean")
+mx3 = max(craft.sentence_spans(V3, W3).values())
+c3 = [x for x in b3 if x["type"] in craft.CTA_TYPES][0]
+ld3 = craft.spoken_span("Se inscreve.", W3)[0] - float(c3["start"])
+ok(mx3 <= 2.5 and float(b3[1]["start"]) <= 2.5 and -craft.SYNC_TOL_S <= ld3 <= 0.3 + 1e-6,
+   f"v3: longest {mx3:.2f}s ≤ 2.5s, first cut {float(b3[1]['start']):.2f}s ≤ 2.5s, CTA lead {ld3:.2f}s ≤ 0.3s")
 ok(sp.bare_first_person("Rodo o teste.") and sp.bare_first_person("Testei tudo.") and not sp.bare_first_person("Lei nova.")
    and not sp.bare_first_person("Eu perguntei.") and not sp.bare_first_person("Uso de IA cresce.")
    and not sp.bare_first_person("Caso raro."), "bare-1sg check: low false positives")
