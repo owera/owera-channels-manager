@@ -16,6 +16,7 @@ first failed assertion.
 from __future__ import annotations
 
 import atexit
+import inspect
 import json
 import os
 import shutil
@@ -32,7 +33,8 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, Workspace
+from app.routers import thumbnails as thumb_router
 from app.services import provided_thumb as pt
 from app.services import publish_loop, render_loop, youtube
 
@@ -117,17 +119,42 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
+    # id 1 / slug owera is the legacy default. Channel 2 is a spacer so
+    # tenant-b's channel id is not equal to its workspace id.
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Workspace(id=2, slug="tenant-b", name="Tenant B"))
+    s.commit()
+    s.add(Channel(id=1, slug="a", name="A", oauth_status=OAuthStatus.CONNECTED,
+                  workspace_id=1))
+    s.add(Channel(id=2, slug="a-extra", name="A2", oauth_status=OAuthStatus.CONNECTED,
+                  workspace_id=1))
+    s.add(Channel(id=3, slug="tb", name="TB", oauth_status=OAuthStatus.CONNECTED,
+                  workspace_id=2))
     s.commit()
     s.add(Topic(channel_id=1, name="S", theme_prompt="x", content_format="short"))
     s.add(Topic(channel_id=1, name="L", theme_prompt="x", content_format="long"))
+    s.add(Topic(channel_id=3, name="TB-S", theme_prompt="x", content_format="short"))
     s.commit()
+    tb_topic = s.exec(select(Topic).where(Topic.name == "TB-S")).one()
     for st in (VideoStatus.DRAFT, VideoStatus.QUEUED, VideoStatus.RENDERING,
                VideoStatus.RENDERED, VideoStatus.REVIEW, VideoStatus.APPROVED,
                VideoStatus.PUBLISHING, VideoStatus.PUBLISHED):
         s.add(Video(channel_id=1, topic_id=1, subject=f"v-{st}", status=st,
                     creation_config=json.dumps({"engine": "hf", "script_source": "provided"})))
+    cc = json.dumps({"engine": "hf", "script_source": "provided"})
+    s.add(Video(channel_id=3, topic_id=tb_topic.id, subject="tb-queued",
+                status=VideoStatus.QUEUED, creation_config=cc))
+    s.add(Video(channel_id=3, topic_id=tb_topic.id, subject="tb-publishing",
+                status=VideoStatus.PUBLISHING, creation_config=cc))
     s.commit()
+    tb_ch = s.get(Channel, 3)
+    TB_QUEUED = s.exec(select(Video).where(Video.subject == "tb-queued")).one().id
+    TB_PUB = s.exec(select(Video).where(Video.subject == "tb-publishing")).one().id
+    ok(tb_ch is not None and tb_ch.id == 3 and tb_ch.workspace_id == 2
+       and tb_ch.id != tb_ch.workspace_id and TB_QUEUED not in range(1, 9)
+       and TB_PUB not in range(1, 9),
+       "precondition: tenant videos sit on channel 3 / workspace 2, "
+       "not on the owera status ids")
 IDS = {st: i + 1 for i, st in enumerate(
     ("draft", "queued", "rendering", "rendered", "review", "approved", "publishing", "published"))}
 
@@ -139,8 +166,13 @@ def _override_session():
 
 main.app.dependency_overrides[get_session] = _override_session
 _orig_pw = settings.app_password
+_orig_mw = settings.multi_workspace
 settings.app_password = "testpw"
+# Legacy checks resolve the owera workspace. A developer .env with
+# multi_workspace on would treat Basic username "x" as the tenant slug.
+settings.multi_workspace = False
 atexit.register(setattr, settings, "app_password", _orig_pw)
+atexit.register(setattr, settings, "multi_workspace", _orig_mw)
 client = TestClient(main.app)
 auth = ("x", "testpw")
 
@@ -337,6 +369,120 @@ try:
        "thumb_path kept and still provided after a wholesale cc replace")
     ok(json.loads(pt.carry_marker(v, v.creation_config)).get("thumb_source") == "provided",
        "carry_marker restores the informational marker (as finalize does)")
+
+    print("workspace isolation: thumbnail POST/DELETE")
+    auth_ow = ("owera", "testpw")
+    auth_b = ("tenant-b", "testpw")
+
+    def n_thumb_runs():
+        with Session(engine) as s:
+            return len(list(s.exec(select(JobRun).where(JobRun.kind == "thumbnail_set"))))
+
+    def post_as(auth_pair, vid):
+        return client.post(
+            f"/api/videos/{vid}/thumbnail", auth=auth_pair,
+            files={"file": ("t.png", PORTRAIT_PNG, "image/png")})
+
+    def delete_as(auth_pair, vid):
+        return client.delete(f"/api/videos/{vid}/thumbnail", auth=auth_pair)
+
+    # Flag off: every authenticated caller is owera, whatever the Basic
+    # username is. A guard that runs only when the flag is on would let
+    # this write land.
+    settings.multi_workspace = False
+    flag_off_runs = n_thumb_runs()
+    r = post_as(("x", "testpw"), TB_QUEUED)
+    ok(r.status_code == 404 and "video not found" in r.text,
+       "flag-off POST onto a tenant video is 404 (caller is owera)")
+    ok(vid_row(TB_QUEUED).thumb_path is None
+       and not (_STORE / "videos" / str(TB_QUEUED)).exists(),
+       "flag-off POST wrote no tenant thumbnail")
+    ok(n_thumb_runs() == flag_off_runs, "flag-off POST wrote no JobRun")
+    r = delete_as(("tenant-b", "testpw"), TB_QUEUED)
+    ok(r.status_code == 404 and "video not found" in r.text,
+       "flag-off DELETE of a tenant video is 404 (username is not the tenant)")
+    ok(n_thumb_runs() == flag_off_runs, "flag-off DELETE wrote no JobRun")
+
+    settings.multi_workspace = True
+    owera_queued = IDS["queued"]
+    before_runs = n_thumb_runs()
+    before_path = vid_row(owera_queued).thumb_path
+    # Status gating already stored a provided file on this id. Compare bytes,
+    # not "directory absent": a foreign write must not replace that file.
+    before_bytes = Path(before_path).read_bytes()
+    r = post_as(auth_b, owera_queued)
+    ok(r.status_code == 404 and "video not found" in r.text,
+       "tenant-b POST onto owera video is 404 video not found")
+    ok(vid_row(owera_queued).thumb_path == before_path,
+       "tenant-b POST left the owera thumb_path")
+    ok(Path(before_path).is_file() and Path(before_path).read_bytes() == before_bytes,
+       "tenant-b POST did not replace the owera thumbnail bytes")
+    ok(n_thumb_runs() == before_runs, "tenant-b POST wrote no thumbnail_set JobRun")
+
+    r = delete_as(auth_b, owera_queued)
+    ok(r.status_code == 404 and "video not found" in r.text
+       and vid_row(owera_queued).thumb_path == before_path
+       and Path(before_path).read_bytes() == before_bytes,
+       "tenant-b DELETE owera video is 404 and leaves the thumbnail")
+    ok(n_thumb_runs() == before_runs, "tenant-b DELETE wrote no JobRun")
+
+    r = post_as(auth_ow, TB_QUEUED)
+    ok(r.status_code == 404 and "video not found" in r.text,
+       "owera POST onto tenant video is 404 (both directions)")
+    ok(vid_row(TB_QUEUED).thumb_path is None, "owera POST left the tenant thumb unset")
+    ok(not (_STORE / "videos" / str(TB_QUEUED)).exists(),
+       "owera POST created no tenant thumbnail directory")
+    ok(n_thumb_runs() == before_runs, "owera POST wrote no JobRun")
+
+    r = post_as(auth_b, TB_QUEUED)
+    ok(r.status_code == 200 and r.json().get("thumb_source") == "provided",
+       "tenant-b POST onto its own video is 200")
+    own_path = vid_row(TB_QUEUED).thumb_path
+    ok(own_path and Path(own_path).is_file() and Path(own_path).read_bytes() == PORTRAIT_PNG,
+       "tenant-b own thumbnail file is the PNG")
+    ok(n_thumb_runs() == before_runs + 1, "tenant-b own POST wrote one JobRun")
+
+    r = delete_as(auth_ow, TB_QUEUED)
+    ok(r.status_code == 404 and vid_row(TB_QUEUED).thumb_path == own_path
+       and Path(own_path).is_file(),
+       "owera DELETE tenant thumbnail is 404 and the file stays")
+    ok(n_thumb_runs() == before_runs + 1, "owera DELETE wrote no JobRun")
+
+    r = post_as(auth_ow, TB_PUB)
+    ok(r.status_code == 404 and "video not found" in r.text
+       and "cannot change" not in r.text,
+       "owera POST on a tenant publishing video is 404, not the 409 status leak")
+    ok(vid_row(TB_PUB).status == VideoStatus.PUBLISHING
+       and vid_row(TB_PUB).thumb_path is None,
+       "tenant publishing row stayed publishing with no thumb")
+
+    r = post_as(auth_b, TB_PUB)
+    ok(r.status_code == 409 and "cannot change" in r.text,
+       "tenant-b POST on its own publishing video is still 409")
+    ok(vid_row(TB_PUB).thumb_path is None, "own 409 wrote no thumb_path")
+
+    r = delete_as(auth_b, TB_QUEUED)
+    ok(r.status_code == 200 and r.json().get("cleared") is True
+       and vid_row(TB_QUEUED).thumb_path is None,
+       "tenant-b DELETE own thumbnail still clears")
+    ok(not Path(own_path).exists(), "tenant-b DELETE removed its own file")
+
+    r = client.post(
+        f"/api/videos/{TB_QUEUED}/thumbnail",
+        files={"file": ("t.png", PORTRAIT_PNG, "image/png")})
+    ok(r.status_code == 401, "thumbnail POST on a tenant id still requires auth")
+    ok(vid_row(TB_QUEUED).thumb_path is None, "unauth POST wrote nothing")
+
+    src_tgt = inspect.getsource(thumb_router._thumb_target)
+    src_set = inspect.getsource(thumb_router.set_provided_thumbnail)
+    src_del = inspect.getsource(thumb_router.clear_provided_thumbnail)
+    ok("require_video" in src_tgt and "session.get" not in src_tgt,
+       "_thumb_target uses require_video (session.get is the cross-tenant write)")
+    ok("current_workspace" in src_set and "_thumb_target(session, ws," in src_set,
+       "POST thumbnail scopes the workspace before storing")
+    ok("current_workspace" in src_del and "_thumb_target(session, ws," in src_del,
+       "DELETE thumbnail scopes the workspace before clearing")
+    settings.multi_workspace = False
 finally:
     main.app.dependency_overrides.pop(get_session, None)
 
