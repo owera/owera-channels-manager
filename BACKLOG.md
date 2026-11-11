@@ -1962,3 +1962,24 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 76. ✅ DONE (PR autoimprove/2026-11-11-media-workspace) Review media routes follow workspace isolation — normal
+- **resolution (2026-11-11):** `GET /api/videos/{id}/video` and `/thumb`
+  go through `require_video`. A foreign id is the same 404 as a missing
+  id (stream: `video not found`; thumb: empty body) and the file bytes
+  are not returned. With `multi_workspace` on, the other tenant still
+  streams its own file, including a Range request. Flag off, the caller
+  is owera, so a video parked on another workspace still does not stream.
+  Suite: `tests/verify_media.py` 37 → 57. `verify_provided_thumb.py`
+  stays 89: it seeds workspace `owera` and pins `multi_workspace` off so
+  `GET /thumb` still resolves under username `x`. A `session.get` mutant
+  on both routes dies on the flag-off foreign video check; a thumb-only
+  `session.get` dies on the empty-404 check.
+- **why (PR #200 residual):** `media.py` still `session.get` the video, so
+  a tenant who knows another workspace's video id can stream the mp4 and
+  the thumbnail.
+- **caution:** normal (`media.py` only). Not a publish/oauth path.
+- **acceptance:** foreign id does not return the file; own id still does,
+  with Range; unauth still 401. Next, not in this change:
+  `app/routers/thumbnails.py` still `session.get` the video, so a tenant
+  can replace another workspace's thumbnail.
