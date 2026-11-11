@@ -171,7 +171,10 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
               detail=f"script composed ({len(text.split())} words, effort={effort}); "
                      f"saved as provided script, no render slot used"
                      + (f"; {hook}" if hook else "")
-                     + (f"; WARN sentence pace: {' | '.join(pace_warn)}"[:1200] if pace_warn else ""))
+                     + (f"; WARN sentence pace: {' | '.join(_sp.pace_warnings(pace_warn))}"[:1200]
+                        if _sp.pace_warnings(pace_warn) else "")
+                     + (f"; WARN hook pace: {' | '.join(w[len('hook pace: '):] for w in _sp.hook_warnings(pace_warn))}"[:600]
+                        if _sp.hook_warnings(pace_warn) else ""))
     session.commit()
     return {"ok": True, "words": len(text.split()), "hook_warning": hook,
             "sentence_pace_warnings": pace_warn}

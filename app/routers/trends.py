@@ -196,7 +196,8 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
         ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
                                          idea_count, fmt,
                                          language=video_gen.channel_language(session, ch.id),
-                                         niche=_niche)
+                                         niche=_niche,
+                                         **video_gen.idea_pace_kwargs(session, ch.id, fmt))
     except Exception as e:
         raise HTTPException(502, f"idea generation failed: {e}")
     hp = video_gen.idea_hook_kwargs(session, ch.id, fmt)
@@ -208,6 +209,7 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
                 topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
                 language=video_gen.channel_language(session, ch.id),
                 niche=_niche,
+                **video_gen.idea_pace_kwargs(session, ch.id, fmt),
             ))
     ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.finalize_draft_subjects(ideas)

@@ -1,0 +1,1 @@
+Pedir um sim não é engenharia. O modelo concorda sem pensar. Eu perguntei se o fluxo estava certo. A resposta veio rápida e vazia. Um aceite bonito não valida a regra. Então eu monto o caso que quebra. Eu rodo esse caso antes do merge. Se tudo passa, eu desconfio do teste. Se quebra, eu guardo a falha. Eu confio no teste que recusa. Se inscreve. Próxima armadilha de IA.

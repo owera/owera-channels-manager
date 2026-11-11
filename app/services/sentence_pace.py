@@ -27,6 +27,13 @@ The hook (sentence 0: title = hook = frame0 = thumb) and the series closer
 ("Se inscreve. Próxima armadilha de IA.") are never touched. Whether a half is
 a *grammatically* complete sentence is not decidable here — the checkable
 parts are enforced, the rest is in the prompt guidance.
+
+Check-only WARNs (never rewrite): hook estimated over the cap (``hook pace:``;
+the hook is never touched), and the CMO voice rules of 2026-11-11 — a content
+keyword in more than ``KEYWORD_MAX_SENTENCES`` sentences outside the hook,
+more than ``MAX_SENTENCES`` sentences or an estimated total over
+``MAX_TOTAL_S``, and a sentence opening on a bare first-person verb
+("Perguntei …" without "Eu").
 """
 from __future__ import annotations
 
@@ -163,6 +170,32 @@ def prompt_guidance(pace: dict) -> str:
             "página …'). No comma list of 3 or more items in one spoken sentence (say 'Serve "
             "pra contrato e pra laudo.', not 'contrato, laudo e nota'). Never change the "
             "opening hook sentence or the closing subscribe line (endcard VO).")
+
+
+# CMO voice pass 2026-11-11 (RR): rules for the script prompt + cheap WARNs.
+KEYWORD_MAX_SENTENCES = 2
+MAX_SENTENCES = 12          # including the closer
+MAX_TOTAL_S = 35.0          # estimated_total_s
+
+
+def voice_guidance(pace: dict) -> str:
+    """CMO voice rules (RR script prompt; same per-channel lookup as the pace)."""
+    return (f" VOICE (hard rules): outside the hook, the same keyword may appear in at most "
+            f"{KEYWORD_MAX_SENTENCES} sentences — use another word or drop it. No metaphor or "
+            "aphorism (not 'é teatro', not 'como recibo'): say literally what happens. Always "
+            "say the first-person subject: 'Eu perguntei', never a bare 'Perguntei'. Use "
+            "'ele'/'ela' only when it means the previous sentence's subject; otherwise repeat "
+            "the noun or say 'tudo'. Order: the problem, then one concrete example, then the "
+            f"method, then the check. At most {MAX_SENTENCES} sentences including the closer, "
+            f"about {MAX_TOTAL_S:.0f}s spoken in total or less.")
+
+
+def title_guidance(pace: dict) -> str:
+    """RR title prompt: the title head is the spoken hook (= frame0 = thumbnail)."""
+    c = pace["cap_s"]
+    return (f"\nHOOK LENGTH: the title before '·' is spoken as the opening hook and is also "
+            f"frame0 and the thumbnail — aim for it to be spoken in {c:.1f}s or less "
+            f"(~{target_words(c)} palavras; numbers and 'IA' count heavier).")
 
 
 # --- deterministic post-pass ----------------------------------------------------
@@ -427,12 +460,66 @@ def enforce(script: str | None, pace: dict) -> tuple[str, dict]:
         n = comma_list_items(s2) if not _is_protected(j, s2) else 0
         if n >= 3:
             rep["lists"].append({"i": j, "text": s2, "items": n})
+    rep.update(voice_checks(out, cap))
     rep["warnings"] = warnings_of(rep)
     return " ".join(out), rep
 
 
+# sentence-initial first-person verb without "Eu" (CMO rule c). Preterite
+# "-ei" (≥5 letters: not "lei"/"rei") or a listed present-tense 1sg verb that
+# is not also a common sentence-initial noun ("Uso", "Salvo", "Caso" are out).
+_BARE_1SG = frozenset(_fold(w) for w in (
+    "pergunto confiro abro rodo corrijo aprovo deixo vejo lembro fecho monto guardo "
+    "confio peço leio testo mando reviso checo escrevo trato desconfio recuso").split())
+_PRET_1SG_RE = re.compile(r"^[a-z]{3,}ei$")
+
+
+def bare_first_person(s: str) -> bool:
+    ws = _words(s)
+    if not ws:
+        return False
+    f = _fold(ws[0])
+    return f in _BARE_1SG or bool(_PRET_1SG_RE.match(f))
+
+
+def keyword_stems(s: str) -> set[str]:
+    """Folded non-verb content words (≥3 letters, not a stop word), 5-letter stems."""
+    out = set()
+    for w in _words(s):
+        f = _fold(w)
+        if len(f) >= 3 and f not in _STOP and not f.isdigit() and not _verb_like(w):
+            out.add(f[:5])
+    return out
+
+
+def voice_checks(sents: list[str], cap: float) -> dict:
+    """Check-only CMO voice rules + hook pace on the final sentences."""
+    res = {"hook": None, "keywords": [], "length": None, "bare_1sg": []}
+    if not sents:
+        return res
+    h_est = estimate_spoken_s(sents[0])
+    if h_est > cap + 1e-9:
+        res["hook"] = {"text": sents[0], "est": h_est}
+    body = [(i, s) for i, s in enumerate(sents) if i and not _is_protected(i, s)]
+    seen: dict[str, list[int]] = {}
+    for i, s in body:
+        for k in keyword_stems(s):
+            seen.setdefault(k, []).append(i)
+        if bare_first_person(s):
+            res["bare_1sg"].append({"i": i, "text": s})
+    for k in sorted(seen, key=lambda k: (-len(seen[k]), seen[k][0])):
+        if len(seen[k]) > KEYWORD_MAX_SENTENCES:
+            word = next(w for w in _words(sents[seen[k][0]]) if _fold(w)[:5] == k)
+            res["keywords"].append({"word": word.lower(), "stem": k, "sentences": seen[k]})
+    total = estimated_total_s(" ".join(sents))
+    if len(sents) > MAX_SENTENCES or total > MAX_TOTAL_S + 1e-9:
+        res["length"] = {"sentences": len(sents), "est_total_s": total}
+    return res
+
+
 def warnings_of(rep: dict) -> list[str]:
-    """Human-readable WARN lines (job log / creation_config)."""
+    """Human-readable WARN lines (job log / creation_config). Hook-pace lines
+    start with ``hook pace:`` (job detail shows them as ``WARN hook pace``)."""
     cap = rep.get("cap_s")
     blocked = {(h["i"], h["text"]) for h in rep.get("echo_blocked") or []}
     w = [f"over {cap:.1f}s cap (est {h['est']:.2f}s), "
@@ -441,7 +528,27 @@ def warnings_of(rep: dict) -> list[str]:
     w += [f"echo (opens with the previous sentence's last noun): {h['prev']} | {h['text']}"
           for h in rep.get("echo") or []]
     w += [f"comma list of {h['items']} items: {h['text']}" for h in rep.get("lists") or []]
+    w += [f"keyword '{h['word']}' in {len(h['sentences'])} sentences (max {KEYWORD_MAX_SENTENCES} "
+          f"outside the hook): sentences {', '.join(str(i + 1) for i in h['sentences'])}"
+          for h in rep.get("keywords") or []]
+    ln = rep.get("length")
+    if ln:
+        w.append(f"script length: {ln['sentences']} sentences (max {MAX_SENTENCES}), "
+                 f"est {ln['est_total_s']:.1f}s total (max {MAX_TOTAL_S:.0f}s)")
+    w += [f"bare first-person verb (say 'Eu …'): {h['text']}" for h in rep.get("bare_1sg") or []]
+    hk = rep.get("hook")
+    if hk:
+        w.append(f"hook pace: est {hk['est']:.2f}s over the {cap:.1f}s cap — hook kept as written "
+                 f"(shorter title head): {hk['text']}")
     return w
+
+
+def hook_warnings(warnings: list[str] | None) -> list[str]:
+    return [w for w in warnings or [] if w.startswith("hook pace:")]
+
+
+def pace_warnings(warnings: list[str] | None) -> list[str]:
+    return [w for w in warnings or [] if not w.startswith("hook pace:")]
 
 
 def _split_rec(sent: str, cap: float, rep: dict, depth: int, nxt: str | None = None) -> list[str]:

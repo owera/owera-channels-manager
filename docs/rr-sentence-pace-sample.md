@@ -75,3 +75,51 @@ Board:
 ## Previous (pre-voice-pass) sample
 
 `tests/fixtures/rr_pace/sample_vo_presplit.json` (first sample, pre-closer sentence 2.50s real) is kept as the CTA-lead regression: chip leads 0.07s (≤0.3s), Gate B PASS.
+
+## 2026-11-11 — real grok run, RR hook-pace WARN, CMO voice rules v2
+
+### Real generation (2 offline `grok -p` calls, Rodrigo yes via CoS; no live writes)
+
+`_generate_script` (compose seam, effort medium) on claw0 scratch dir; replayed on the box through the post-pass + real edge-tts + Gate B.
+
+| call | subject | post-pass | longest real | audio | first cut | Gate B |
+|---|---|---|---|---|---|---|
+| 1 | Perguntar se está certo não é engenharia. · IA 236 | unchanged, no WARN | 2.51s (hook) | 43.73s | 2.80s (joined) | FAIL B: RR hook pace |
+| 2 | Pedir um sim não é engenharia. · IA 236 | unchanged, no WARN | 2.28s | 38.88s | 2.08s (joined) | PASS A/B/C, CTA lead 0.00s |
+
+Call-2's raw script is `tests/fixtures/rr_pace/real_grok_call2_raw.txt`. CMO's voice pass FAILed it ('sim' ×4, 'é teatro' / 'como recibo', bare 'Perguntei', 'ele', 14 sentences).
+
+### Hook-pace WARN (RR, check-only)
+
+- Title prompt (`video_gen.generate_ideas`, RR via `idea_pace_kwargs` → `sentence_pace.pace_for`): `HOOK LENGTH: … aim for it to be spoken in {cap_s}s or less`. OS prompt byte-identical.
+- Post-pass: hook (sentence 0) estimated over `cap_s` → WARN `hook pace: est X.XXs over the 2.5s cap — hook kept as written (shorter title head): <hook>`; job detail `; WARN hook pace: …`; same `creation_config.sentence_pace_post.warnings` / `sentence_pace_warnings` / `manager.worker` WARNING paths. The hook is never rewritten.
+- **Gap (open, PO):** the estimator puts the call-1 hook at **2.391s** (real 2.51s, first cut 2.80s), so at `cap_s` = 2.5s it does **not** WARN. Estimator unchanged. Proposal: threshold the hook at `target_s` (2.2s) — first cut ≈ hook + ~0.3s join pause, so the 2.5s first-cut limit means a hook ≲ 2.2s. On the 6 probed heads that separates every Gate B fail (est 2.28 / 2.39) from every pass (est ≤ 2.04).
+
+### CMO voice rules v2 (RR prompt + check-only WARNs)
+
+Prompt (`sentence_pace.voice_guidance`): keyword in ≤2 sentences outside the hook; no metaphor/aphorism; explicit 'Eu'; 'ele/ela' only for the previous subject; problem → example → method → check; ≤12 sentences incl. closer, ≈35s. WARNs (never rewrite): keyword stem in >2 sentences outside hook/closer; >12 sentences or est total >35s; sentence opening on a bare 1st-person verb ('-ei' preterite ≥5 letters or a listed present 1sg). Metaphor, 'ele/ela' and order are prompt-only (no reliable cheap check).
+
+Call-2 raw → WARN `keyword 'sim' in 4 sentences`, `script length: 14 sentences (max 12), est 38.6s total`, `bare first-person verb: Perguntei se o fluxo estava certo.`
+
+### CMO v2 sample (`tests/fixtures/rr_pace/sample_script_v2.txt`)
+
+Post-pass: unchanged, no new-rule WARN, but **2 pre-existing WARNs**: `over 2.5s cap (est 2.59s), unsplittable: Se tudo passa, eu desconfio do teste.` and `echo: Então eu monto o caso que quebra. | Eu rodo esse caso antes do merge.`
+
+Real edge-tts (hook join on; s2 2.867s → 2.092s): audio 35.04s, video 34.59s, est 34.38s. Gate B **FAIL** {'A': 'PASS', 'B': 'FAIL', 'C': 'PASS'}: ['[B] Blank gap: FAIL — beat[8]→beat[9] hole at 23.94s of 0.64s (0.52s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).']. CTA lead 0.0s.
+
+| # | sentence | est s | real s |
+|---|---|---|---|
+| 0 | Pedir um sim não é engenharia. | 1.89 | 1.712 |
+| 1 | O modelo concorda sem pensar. | 1.825 | 1.929 |
+| 2 | Eu perguntei se o fluxo estava certo. | 2.282 | 2.418 |
+| 3 | A resposta veio rápida e vazia. | 1.999 | 2.201 |
+| 4 | Um aceite bonito não valida a regra. | 2.391 | 2.283 |
+| 5 | Então eu monto o caso que quebra. | 2.064 | 2.038 |
+| 6 | Eu rodo esse caso antes do merge. | 2.173 | 2.242 |
+| 7 | Se tudo passa, eu desconfio do teste. | 2.59 | 2.812 |
+| 8 | Se quebra, eu guardo a falha. | 2.198 | 2.024 |
+| 9 | Eu confio no teste que recusa. | 1.89 | 2.011 |
+| 10 | Se inscreve. | 0.976 | 0.897 |
+| 11 | Próxima armadilha de IA. | 1.76 | 1.767 |
+
+'Se tudo passa, eu desconfio do teste.' speaks in 2.81s, the board splits it at the comma and leaves a 0.64s hole (0.02s over the blank-gap limit). Offline probe (TTS only): **'Se tudo passa, eu desconfio.'** → 2.23s real, Gate B PASS A/B/C, only the 'caso' echo WARN left; 'Se passa, eu desconfio do teste.' → 2.54s, still FAIL. Text choice is CMO's.

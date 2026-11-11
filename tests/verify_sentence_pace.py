@@ -324,4 +324,115 @@ g2 = craft.video_maker_gate(b2, content_format="short", used_fallback=False, bea
 ok(0.0 < lead2 <= 0.3 + 1e-6 and g2["result"] == "PASS",
    f"2.50s pre-closer sentence: chip leads {lead2:.2f}s (≤0.3s), Gate B {g2['result']}")
 
+print("RR hook pace WARN (title = hook = frame0 = thumb; check-only, never rewritten)")
+CALL1_HOOK = "Perguntar se está certo não é engenharia."   # real grok call 1 (2026-11-11): 2.51s real, first cut 2.80s
+CALL2_HOOK = "Pedir um sim não é engenharia."              # real grok call 2: 1.75s real, first cut 2.08s
+e1, e2 = sp.estimate_spoken_s(CALL1_HOOK), sp.estimate_spoken_s(CALL2_HOOK)
+print(f"  est: call-1 hook {e1:.3f}s, call-2 hook {e2:.3f}s (cap 2.5s)")
+ok(e1 == 2.391 and e2 == 1.89, "estimator unchanged (call-1 hook 2.391s, call-2 hook 1.89s)")
+for hook, want in ((CALL1_HOOK, e1 > 2.5), (CALL2_HOOK, False)):
+    o_h, c_h = gen(hook + " · IA 236", RR, hook + " O modelo concorda sem pensar. Eu rodo o teste antes. " + CLOSER)
+    rep_h = sp.take_last_report()
+    hw = sp.hook_warnings(rep_h["warnings"])
+    ok(sents(o_h)[0] == hook, f"hook unchanged: {hook!r}")
+    ok(bool(hw) == want, f"{hook!r}: hook WARN {'yes' if want else 'no'} (est {sp.estimate_spoken_s(hook):.2f}s vs cap 2.5s)")
+# NOTE (PO): the call-1 hook estimates 2.391s ≤ 2.5s although real TTS spoke it
+# in 2.51s (first cut 2.80s) — at cap_s the estimator does not flag it.
+LONG = "Pedir resumo pro modelo sem os campos não é engenharia."
+ok(sp.estimate_spoken_s(LONG) > 2.5, f"synthetic long hook est {sp.estimate_spoken_s(LONG):.2f}s > 2.5s")
+h = _H(); worker.logger.addHandler(h)
+o_l, _ = gen(LONG + " · IA 237", RR, LONG + " O modelo concorda sem pensar. " + CLOSER)
+worker.logger.removeHandler(h)
+rep_l = sp.take_last_report()
+hw = sp.hook_warnings(rep_l["warnings"])
+ok(sents(o_l)[0] == LONG and len(hw) == 1 and hw[0].startswith("hook pace: est ") and "hook kept as written" in hw[0],
+   f"over-cap hook → one WARN, hook text unchanged: {hw[0] if hw else None!r}")
+ok(any(r.levelno == logging.WARNING and r.name == "manager.worker" and "hook pace:" in r.getMessage() for r in h.recs),
+   "hook WARN logged on manager.worker at WARNING")
+with Session(eng) as s:
+    v3 = Video(channel_id=ch_id, topic_id=tp_id, subject=LONG + " · IA 237", status=VideoStatus.DRAFT)
+    s.add(v3); s.commit(); s.refresh(v3)
+    with patch.object(script_compose, "build_params", return_value=prm), \
+            patch.object(worker, "_llm_compose", side_effect=lambda *a, **k: LONG + " O modelo concorda sem pensar. " + CLOSER):
+        res3 = script_compose.compose_into(s, v3.id)
+    r3 = s.exec(select(JobRun).where(JobRun.video_id == v3.id, JobRun.status == "success")).all()
+    cc3 = json.loads(s.get(Video, v3.id).creation_config)
+ok("; WARN hook pace: est " in r3[0].detail and "WARN sentence pace" not in r3[0].detail,
+   "JobRun detail: '; WARN hook pace: …' (no sentence-pace WARN on this script)")
+ok(any(w.startswith("hook pace:") for w in cc3["sentence_pace_post"]["warnings"]),
+   "creation_config.sentence_pace_post.warnings carries the hook WARN")
+ok(any(w.startswith("hook pace:") for w in res3["sentence_pace_warnings"]),
+   "compose-script response sentence_pace_warnings carries the hook WARN (before render)")
+gen(LONG.replace("Pedir resumo pro modelo", "Asking the model for a summary") + " · AI 4", OS,
+    "Asking the model for a summary without the fields is not engineering. Subscribe — next agent trap.")
+ok(sp.take_last_report() is None, "OS: no hook WARN (no report at all)")
+
+print("RR title prompt: hook length line (settings.sentence_pace cap)")
+from app.services import video_gen
+def idea_prompt(**kw):
+    got = []
+    with patch.object(video_gen, "complete", side_effect=lambda p, **k: got.append(p) or ""):
+        video_gen.generate_ideas("IA", None, [], 4, "short", language="Brazilian Portuguese", **kw)
+    return got[0]
+RRP = {"content_format": "short", "brand": "rr", "channel_id": 2, "channel_slug": "rr"}
+p_rr = idea_prompt(pace_params=RRP)
+ok(sp.title_guidance(sp.pace_for(RRP)) in p_rr and "aim for it to be spoken in 2.5s or less" in p_rr
+   and "frame0 and the thumbnail" in p_rr, "RR title prompt pins the ≤2.5s hook line")
+with patch.object(settings, "sentence_pace", {"rr": {"target_s": 2.0, "cap_s": 2.3}}):
+    ok("spoken in 2.3s or less" in idea_prompt(pace_params=RRP), "line reuses the configured cap (2.3s)")
+p_os = idea_prompt()
+ok(p_os == idea_prompt(pace_params={"content_format": "short", "brand": "os", "channel_id": 1, "channel_slug": "os"})
+   and "HOOK LENGTH" not in p_os, "OS title prompt byte-identical (no pace entry → no line)")
+ok("HOOK LENGTH" not in idea_prompt(pace_params={**RRP, "content_format": "long"}), "long-form: no line")
+with Session(eng) as s:
+    ws_id = s.get(Channel, ch_id).workspace_id
+    os_ch = Channel(name="Owera Software", slug="owera-software", workspace_id=ws_id)
+    rr_ch = Channel(name="Rodrigo Recio", slug="rodrigo-recio", workspace_id=ws_id)
+    s.add(os_ch); s.add(rr_ch); s.commit(); s.refresh(os_ch); s.refresh(rr_ch)
+    kw_rr = video_gen.idea_pace_kwargs(s, rr_ch.id, "short")
+    ok(kw_rr.get("pace_params", {}).get("brand") == "rr" and sp.pace_for(kw_rr["pace_params"])["key"] == "rr",
+       "idea_pace_kwargs: RR channel → pace_params (brand lookup)")
+    ok(video_gen.idea_pace_kwargs(s, os_ch.id, "short") == {} and video_gen.idea_pace_kwargs(s, ch_id, "long") == {},
+       "idea_pace_kwargs: OS / long → {} (call unchanged)")
+import inspect as _insp
+from app.routers import topics as _topics, trends as _trends
+from app.services import autofill_loop as _af
+for mod in (_topics, _trends, _af):
+    ok(_insp.getsource(mod).count("idea_pace_kwargs(") == 2, f"{mod.__name__}: generate_ideas + hook regen pass idea_pace_kwargs")
+
+print("CMO voice rules 2026-11-11 (prompt + check-only WARNs)")
+out_v, calls_v = gen(TITLE, RR, STUB)
+VG = sp.voice_guidance(sp.pace_for(RR))
+ok(VG in calls_v[0], "RR prompt carries the voice rules verbatim")
+for phrase in ("the same keyword may appear in at most 2 sentences",
+               "No metaphor or aphorism (not 'é teatro', not 'como recibo'): say literally what happens",
+               "'Eu perguntei', never a bare 'Perguntei'",
+               "Use 'ele'/'ela' only when it means the previous sentence's subject; otherwise repeat the noun or say 'tudo'",
+               "Order: the problem, then one concrete example, then the method, then the check",
+               "At most 12 sentences including the closer, about 35s spoken in total or less"):
+    ok(phrase in calls_v[0], f"RR prompt pins: {phrase[:60]!r}…")
+ok(all("VOICE (hard rules)" not in c for c in c_os), "OS: no voice rules")
+RAW2 = " ".join((FXD / "real_grok_call2_raw.txt").read_text().split())
+o_r2, r_r2 = sp.enforce(RAW2, P)
+ok(o_r2 == RAW2, "real call-2 script: post-pass leaves the text as written (WARNs never rewrite)")
+ok([k["word"] for k in r_r2["keywords"]] == ["sim"] and len(r_r2["keywords"][0]["sentences"]) == 4,
+   f"call-2: keyword WARN for 'sim' (4 sentences): {[w for w in r_r2['warnings'] if w.startswith('keyword')]}")
+ok(r_r2["length"] == {"sentences": 14, "est_total_s": 38.6} and any("14 sentences (max 12)" in w for w in r_r2["warnings"]),
+   "call-2: 14 sentences flagged (max 12; est 38.6s > 35s)")
+ok([b["text"] for b in r_r2["bare_1sg"]] == ["Perguntei se o fluxo estava certo."], "call-2: bare 'Perguntei' flagged")
+V2 = (FXD / "sample_script_v2.txt").read_text().strip()
+o_v2, r_v2 = sp.enforce(V2, P)
+ok(o_v2 == V2, "CMO v2 sample: post-pass leaves it unchanged")
+ok(not r_v2["keywords"] and r_v2["length"] is None and not r_v2["bare_1sg"] and r_v2["hook"] is None,
+   "CMO v2 sample: no keyword / length / bare-1sg / hook WARN")
+ok(len(sents(V2)) == 12 and sp.estimated_total_s(V2) <= 35, f"v2: 12 sentences, est {sp.estimated_total_s(V2)}s ≤ 35s")
+# open with PO/CMO (estimator + echo rule unchanged by this change):
+print("  v2 pre-existing WARNs:", r_v2["warnings"])
+ok(sp.bare_first_person("Rodo o teste.") and sp.bare_first_person("Testei tudo.") and not sp.bare_first_person("Lei nova.")
+   and not sp.bare_first_person("Eu perguntei.") and not sp.bare_first_person("Uso de IA cresce.")
+   and not sp.bare_first_person("Caso raro."), "bare-1sg check: low false positives")
+for f in ("sample_script.txt", "stub_llm_1464_style.txt"):
+    _o, _r = sp.enforce(" ".join((FXD / f).read_text().split()), P)
+    ok(not _r["warnings"], f"{f}: still no WARN")
+
 print(f"ALL {_checks} CHECKS PASSED")

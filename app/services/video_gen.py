@@ -285,6 +285,23 @@ def idea_hook_kwargs(session, channel_id: int | None, content_format: str | None
     return {"hook_voice": channel_voice(session, channel_id)}
 
 
+def idea_pace_kwargs(session, channel_id: int | None, content_format: str | None) -> dict:
+    """{"pace_params": {...}} when the channel has a sentence-pace entry
+    (settings.sentence_pace, same lookup as the script post-pass — RR), else {}
+    so the title prompt of every other channel (OS) stays byte-identical."""
+    from app.models import Channel
+    from app.services import sentence_pace as _sp
+    from app.services.engines import theme
+
+    if (content_format or "short") == "long" or not channel_id:
+        return {}
+    ch = session.get(Channel, channel_id)
+    params = {"content_format": "short", "channel_id": channel_id,
+              "channel_slug": getattr(ch, "slug", None),
+              "brand": theme.infer_brand(channel_id, getattr(ch, "slug", None), getattr(ch, "name", None))}
+    return {"pace_params": params} if _sp.pace_for(params) else {}
+
+
 def channel_language_code(session, channel_id: int | None) -> str | None:
     """BCP-47 code of a channel's default render-profile voice (None if unknown)."""
     import json
@@ -417,7 +434,8 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
                    n: int = 8, content_format: str = "short",
                    language: str | None = None,
                    niche: str | None = None,
-                   steer_notes: str | None = None) -> list[str]:
+                   steer_notes: str | None = None,
+                   pace_params: dict | None = None) -> list[str]:
 
     avoid = "\n".join(f"- {s}" for s in existing[-60:])
     guidance = f"\nExtra guidance for this theme: {theme_prompt}" if theme_prompt else ""
@@ -433,6 +451,13 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
     agent_memory = _is_agent_memory(topic_name, theme_prompt)
     if agent_memory:
         craft_rule += f"\n{AGENT_MEMORY_SPREAD}"
+    if pace_params and content_format != "long":
+        # RR: the title head is the spoken hook (= frame0 = thumbnail) — aim
+        # for the sentence-pace cap (settings.sentence_pace). No entry → no line.
+        from app.services import sentence_pace as _sp
+        _pace = _sp.pace_for(pace_params)
+        if _pace:
+            craft_rule += _sp.title_guidance(_pace)
     if content_format == "long":
         prompt = (
             f"Generate {n} distinct, compelling ideas for in-depth long-form YouTube videos, "

@@ -784,7 +784,7 @@ def _generate_script(subject: str, params: dict, *, llm=None) -> str:
     from app.services import sentence_pace as _sp
     pace = _sp.pace_for(params)
     if pace:
-        prompt += _sp.prompt_guidance(pace)
+        prompt += _sp.prompt_guidance(pace) + _sp.voice_guidance(pace)
     elif rr_short:
         # RR sentence pace (soft): one card per sentence fits when a sentence
         # is spoken within ~3.9s (2.8s card hold + 1.1s lead).
