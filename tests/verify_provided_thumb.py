@@ -32,7 +32,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, Workspace
 from app.services import provided_thumb as pt
 from app.services import publish_loop, render_loop, youtube
 
@@ -117,7 +117,11 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
+    # GET /thumb now resolves the caller workspace. id 1 / slug owera is
+    # the legacy default; Channel.workspace_id defaults to 1.
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED,
+                  workspace_id=1))
     s.commit()
     s.add(Topic(channel_id=1, name="S", theme_prompt="x", content_format="short"))
     s.add(Topic(channel_id=1, name="L", theme_prompt="x", content_format="long"))
@@ -139,8 +143,13 @@ def _override_session():
 
 main.app.dependency_overrides[get_session] = _override_session
 _orig_pw = settings.app_password
+_orig_mw = settings.multi_workspace
 settings.app_password = "testpw"
+# GET /thumb goes through current_workspace. Username "x" is the owera
+# workspace only while multi_workspace is off (a developer .env leaves it on).
+settings.multi_workspace = False
 atexit.register(setattr, settings, "app_password", _orig_pw)
+atexit.register(setattr, settings, "multi_workspace", _orig_mw)
 client = TestClient(main.app)
 auth = ("x", "testpw")
 
