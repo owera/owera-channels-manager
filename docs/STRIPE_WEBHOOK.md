@@ -22,7 +22,9 @@ Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do 
 
 | Event | Action |
 |-------|--------|
-| `checkout.session.completed` | Find/create workspace for buyer email (`customer_details.email` or `customer_email`); set `subscription_status=active`; store Stripe customer/subscription ids; send welcome email once |
+| `checkout.session.completed` | Find/create workspace for buyer email (`customer_details.email` or `customer_email`); set `subscription_status=active`; store Stripe customer/subscription ids; send welcome email once. Skipped when `payment_status` is `unpaid` (delayed method: no workspace, no email). A missing `payment_status` still provisions. `no_payment_required` provisions. |
+| `checkout.session.async_payment_succeeded` | Same provisioning as a collected checkout, once the delayed payment succeeds |
+| `checkout.session.async_payment_failed` | Ignored (`200`). No workspace, no email |
 | `customer.subscription.created` / `.updated` | Sync plan status from Stripe (`active`/`trialing` → `active`; `past_due`/`unpaid`/`canceled`/`incomplete_expired` mapped accordingly) |
 | `customer.subscription.deleted` | Set `subscription_status=canceled` (data retained) |
 | `invoice.payment_failed` | Set `subscription_status=past_due` |

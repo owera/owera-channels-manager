@@ -299,4 +299,123 @@ with Session(engine) as s:
 with Session(engine) as s:
     ok(s.get(StripeEvent, "evt_checkout_1") is not None, "StripeEvent row recorded")
 
+# --- unpaid checkout must not provision; delayed success must ---
+# Stripe sends checkout.session.completed with payment_status=unpaid for a
+# delayed method, then checkout.session.async_payment_succeeded once the
+# invoice is collected. Fulfillment is the paid (or no_payment_required)
+# signal, not the completed event by itself.
+def _session_event(event_id, event_type, email, *, payment_status, customer, subscription):
+    return {
+        "id": event_id,
+        "type": event_type,
+        "data": {"object": {
+            "id": "cs_" + event_id,
+            "customer": customer,
+            "subscription": subscription,
+            "payment_status": payment_status,
+            "customer_details": {"email": email},
+        }},
+    }
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    unpaid = _session_event(
+        "evt_gina_unpaid", "checkout.session.completed", "gina@buyer.com",
+        payment_status="unpaid", customer="cus_gina", subscription="sub_gina_pending",
+    )
+    ok(post_event(client, unpaid).status_code == 200, "unpaid checkout is 200")
+ok(len(_SENT) == 0, "unpaid checkout sends no welcome email")
+with Session(engine) as s:
+    gina = s.exec(select(Workspace).where(Workspace.owner_email == "gina@buyer.com")).first()
+    ok(gina is None, "unpaid checkout does not create a workspace")
+    ok(s.get(StripeEvent, "evt_gina_unpaid") is not None,
+       "unpaid checkout is recorded so Stripe will not retry it")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    delayed = _session_event(
+        "evt_gina_paid_later", "checkout.session.async_payment_succeeded", "gina@buyer.com",
+        payment_status="paid", customer="cus_gina", subscription="sub_gina",
+    )
+    ok(post_event(client, delayed).status_code == 200, "async_payment_succeeded after unpaid is 200")
+ok(len(_SENT) == 1 and _SENT[0]["to"] == ["gina@buyer.com"],
+   "async_payment_succeeded sends one welcome email")
+with Session(engine) as s:
+    gina = s.exec(select(Workspace).where(Workspace.owner_email == "gina@buyer.com")).one()
+    ok(gina.id != 1, "delayed checkout workspace is not owera")
+    ok(gina.subscription_status == "active", "async_payment_succeeded sets active")
+    ok(gina.stripe_subscription_id == "sub_gina", "async_payment_succeeded stores the subscription id")
+    ok(gina.welcome_email_sent is True, "async_payment_succeeded marks the welcome email sent")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    frank_paid = _session_event(
+        "evt_frank_paid", "checkout.session.completed", "frank@buyer.com",
+        payment_status="paid", customer="cus_frank", subscription="sub_frank",
+    )
+    ok(post_event(client, frank_paid).status_code == 200, "paid checkout is 200")
+with Session(engine) as s:
+    frank = s.exec(select(Workspace).where(Workspace.owner_email == "frank@buyer.com")).one()
+    ok(frank.subscription_status == "active", "paid checkout sets active")
+    ok(frank.stripe_subscription_id == "sub_frank", "paid checkout stores the subscription id")
+    frank_id = frank.id
+ok(len(_SENT) == 1, "paid checkout sends one welcome email")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    frank_unpaid = _session_event(
+        "evt_frank_unpaid", "checkout.session.completed", "frank@buyer.com",
+        payment_status="unpaid", customer="cus_frank", subscription="sub_frank_pending",
+    )
+    ok(post_event(client, frank_unpaid).status_code == 200, "unpaid resubscribe checkout is 200")
+ok(len(_SENT) == 0, "unpaid resubscribe sends no welcome email")
+with Session(engine) as s:
+    frank = s.get(Workspace, frank_id)
+    ok(frank.subscription_status == "active", "unpaid resubscribe leaves the workspace active")
+    ok(frank.stripe_subscription_id == "sub_frank",
+       "unpaid resubscribe does not replace the subscription id")
+    ok(len(s.exec(select(Workspace).where(Workspace.owner_email == "frank@buyer.com")).all()) == 1,
+       "unpaid resubscribe does not create a second workspace")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    frank_later = _session_event(
+        "evt_frank_later", "checkout.session.async_payment_succeeded", "frank@buyer.com",
+        payment_status="paid", customer="cus_frank", subscription="sub_frank_new",
+    )
+    ok(post_event(client, frank_later).status_code == 200, "async resubscribe success is 200")
+ok(len(_SENT) == 0, "async resubscribe does not send a second welcome email")
+with Session(engine) as s:
+    frank = s.get(Workspace, frank_id)
+    ok(frank.subscription_status == "active", "async resubscribe leaves the workspace active")
+    ok(frank.stripe_subscription_id == "sub_frank_new",
+       "async resubscribe stores the new subscription id")
+    ok(len(s.exec(select(Workspace).where(Workspace.owner_email == "frank@buyer.com")).all()) == 1,
+       "async resubscribe does not create a second workspace")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    failed_delay = _session_event(
+        "evt_ira_failed", "checkout.session.async_payment_failed", "ira@buyer.com",
+        payment_status="unpaid", customer="cus_ira", subscription="sub_ira",
+    )
+    ok(post_event(client, failed_delay).status_code == 200, "async_payment_failed is 200")
+ok(len(_SENT) == 0, "async_payment_failed sends no welcome email")
+with Session(engine) as s:
+    ira = s.exec(select(Workspace).where(Workspace.owner_email == "ira@buyer.com")).first()
+    ok(ira is None, "async_payment_failed does not create a workspace")
+
+_SENT.clear()
+with patch("httpx.post", side_effect=_capture_resend):
+    free = _session_event(
+        "evt_henry_free", "checkout.session.completed", "henry@buyer.com",
+        payment_status="no_payment_required", customer="cus_henry", subscription="sub_henry",
+    )
+    ok(post_event(client, free).status_code == 200, "no_payment_required checkout is 200")
+with Session(engine) as s:
+    henry = s.exec(select(Workspace).where(Workspace.owner_email == "henry@buyer.com")).one()
+    ok(henry.subscription_status == "active", "no_payment_required checkout sets active")
+    ok(henry.stripe_subscription_id == "sub_henry", "no_payment_required checkout stores the subscription id")
+ok(len(_SENT) == 1, "no_payment_required checkout sends one welcome email")
+
 print(f"\nALL {_checks} CHECKS PASSED")
