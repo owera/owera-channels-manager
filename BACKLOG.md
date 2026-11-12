@@ -1962,3 +1962,32 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 73. ✅ DONE (PR autoimprove/2026-11-12-stripe-unpaid-checkout) unpaid checkout must not provision a workspace — normal
+- **resolution (2026-11-12):** `checkout.session.completed` with
+  `payment_status=unpaid` returns before any workspace write or welcome
+  email. The event is still recorded, so Stripe does not retry it.
+  `checkout.session.async_payment_succeeded` uses the same provision path
+  once the delayed payment is collected. `async_payment_failed` stays
+  ignored. A missing `payment_status` still provisions (the field is
+  optional in our older fixtures). `paid` and `no_payment_required`
+  still provision. An unpaid session does not replace the subscription
+  id on a workspace that is already active. Suite:
+  `tests/verify_stripe_webhook.py` 32 → 63. Pre-fix the new pin failed
+  (`unpaid checkout sends no welcome email`; the log showed the welcome
+  email queued).
+- **why:** Stripe's fulfillment contract is to provision only when
+  `payment_status` is not `unpaid`, and to listen for
+  `checkout.session.async_payment_succeeded` for delayed methods. The
+  handler treated every `checkout.session.completed` as paid, so a
+  delayed method created an active workspace and sent the welcome email
+  before the invoice was collected, and a later unpaid session could
+  rebind an existing workspace to the pending subscription id.
+- **approach:** skip provision when the status is `unpaid`; route
+  `async_payment_succeeded` through the same handler.
+- **caution:** normal (`stripe_provision.py` only; not a publish/oauth path).
+- **acceptance:** unpaid checkout creates nothing and sends no email;
+  the later async success creates one active workspace and one email;
+  unpaid resubscribe does not replace the stored subscription id;
+  async failure creates nothing; `paid` and `no_payment_required` still
+  provision.

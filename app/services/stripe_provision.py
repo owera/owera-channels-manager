@@ -93,7 +93,26 @@ def _checkout_email(obj: dict[str, Any]) -> str | None:
     return spa_google_login.normalized_email(str(email or "")) or None
 
 
+def _checkout_collected(data_object: dict[str, Any]) -> bool:
+    """False only when Stripe says this checkout has not been paid yet.
+
+    ``payment_status=unpaid`` means the session completed on a delayed
+    method and the invoice is not collected. Provisioning then waits for
+    ``checkout.session.async_payment_succeeded``. A missing status still
+    provisions, so a payload that omits the field is not dropped.
+    ``no_payment_required`` (trial or a 100% coupon) is collected.
+    """
+    status = str(data_object.get("payment_status") or "").strip().lower()
+    return status != "unpaid"
+
+
 def handle_checkout_completed(session: Session, data_object: dict[str, Any]) -> None:
+    if not _checkout_collected(data_object):
+        logger.info(
+            "skipping checkout provision; payment_status=%s",
+            data_object.get("payment_status"),
+        )
+        return
     email = _checkout_email(data_object)
     customer_id = (data_object.get("customer") or "") or None
     subscription_id = (data_object.get("subscription") or "") or None
@@ -201,7 +220,10 @@ def dispatch_event(session: Session, event: dict[str, Any]) -> None:
     data = event.get("data") or {}
     obj = data.get("object") or {}
 
-    if ev_type == "checkout.session.completed":
+    if ev_type in (
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+    ):
         handle_checkout_completed(session, obj)
     elif ev_type in (
         "customer.subscription.created",
