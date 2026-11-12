@@ -77,6 +77,28 @@ def _find_workspace(
     return None
 
 
+def _subscription_event_applies(ws: Workspace, subscription_id: str | None) -> bool:
+    """False when this event is for a subscription the workspace no longer uses.
+
+    Checkout binds the row to the latest subscription id. A delayed
+    invoice or subscription event for the previous id still carries the
+    same customer, and ``_find_workspace`` falls through to that customer
+    when the old id no longer matches. Applying it would cancel or mark
+    past_due the subscription the buyer just started. An event with no
+    subscription id, or a workspace that has none yet, still applies so
+    the first ``subscription.updated`` can bind the id.
+    """
+    bound = (ws.stripe_subscription_id or "") or None
+    event_sub = (subscription_id or "") or None
+    if event_sub and bound and bound != event_sub:
+        logger.info(
+            "ignoring stripe subscription event sub=%s; workspace %s is bound to %s",
+            event_sub, ws.id, bound,
+        )
+        return False
+    return True
+
+
 def record_event_idempotent(session: Session, event_id: str, event_type: str) -> bool:
     """Insert StripeEvent row. Returns True if this is the first time we see event_id."""
     existing = session.get(StripeEvent, event_id)
@@ -154,6 +176,17 @@ def _sync_subscription_fields(session: Session, sub: dict[str, Any]) -> None:
     )
     if not ws or ws.id == OWERA_WORKSPACE_ID:
         return
+    if not _subscription_event_applies(ws, subscription_id):
+        return
+    # A delayed past_due/unpaid/canceled update must not un-cancel. A real
+    # reactivation is subscription.updated with status active (or trialing,
+    # which maps to active) on this same subscription id.
+    if ws.subscription_status == "canceled" and status != "active":
+        logger.info(
+            "ignoring stripe subscription status %s; workspace %s is canceled",
+            status, ws.id,
+        )
+        return
     if customer_id:
         ws.stripe_customer_id = customer_id
     if subscription_id:
@@ -174,6 +207,8 @@ def handle_subscription_deleted(session: Session, sub: dict[str, Any]) -> None:
     )
     if not ws or ws.id == OWERA_WORKSPACE_ID:
         return
+    if not _subscription_event_applies(ws, subscription_id):
+        return
     ws.subscription_status = "canceled"
     ws.updated_at = utcnow()
     session.add(ws)
@@ -189,6 +224,15 @@ def handle_payment_failed(session: Session, invoice: dict[str, Any]) -> None:
         owner_email=None,
     )
     if not ws or ws.id == OWERA_WORKSPACE_ID:
+        return
+    if not _subscription_event_applies(ws, subscription_id):
+        return
+    # The failing invoice for a subscription we already deleted can be
+    # delivered after customer.subscription.deleted. past_due would un-cancel.
+    if ws.subscription_status == "canceled":
+        logger.info(
+            "ignoring invoice.payment_failed; workspace %s is canceled", ws.id,
+        )
         return
     ws.subscription_status = "past_due"
     ws.updated_at = utcnow()
