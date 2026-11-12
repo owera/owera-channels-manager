@@ -1962,3 +1962,31 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 72. ✅ DONE (PR autoimprove/2026-11-12-stripe-stale-sub) stale Stripe events must not rewrite the current subscription — normal
+- **resolution (2026-11-12):** `invoice.payment_failed`, `customer.subscription.deleted`,
+  and `customer.subscription.updated` / `.created` no-op when the event's
+  subscription id is not the one stored on the workspace (customer-id
+  fallback was applying a previous subscription to the buyer who just
+  resubscribed). A `payment_failed` or a non-`active` subscription update
+  also no-ops once the workspace is `canceled`, so a late invoice cannot
+  un-cancel. `subscription.updated` with `active` (trialing maps to active)
+  on that same id still reactivates. Checkout is unchanged: it is the
+  resubscribe path and may replace the stored subscription id. Suite:
+  `tests/verify_stripe_webhook.py` 32 → 67. Pre-fix the new cancel pin
+  failed (`late payment_failed / past_due update does not un-cancel`).
+- **why:** the webhook shipped in #206 looks the workspace up by
+  subscription id, then by customer id. After checkout binds `sub_new`,
+  a delayed `invoice.payment_failed` or `customer.subscription.deleted`
+  for `sub_old` misses the id and matches the customer, marking the new
+  plan past_due or canceled. The same fall-through un-canceled a
+  workspace when the failing invoice arrived after `subscription.deleted`.
+- **approach:** ignore the event when both ids are set and they differ;
+  ignore `payment_failed` and non-active subscription updates when status
+  is already `canceled`.
+- **caution:** normal (`stripe_provision.py` only; not a publish/oauth path).
+- **acceptance:** a late event for the previous subscription id leaves the
+  new subscription active and still bound to it; `payment_failed` on the
+  bound id still sets past_due; a late failure after cancel stays canceled;
+  `subscription.updated` active on that same id reactivates; a workspace
+  with no subscription id yet still accepts the first `subscription.updated`.

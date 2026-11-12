@@ -236,7 +236,10 @@ with Session(engine) as s:
     count = len(s.exec(select(Workspace).where(Workspace.stripe_subscription_id == "sub_test")).all())
     ok(count == 1, "same subscription does not create second workspace")
 
-# --- deleted + payment_failed keep data, mark inactive ---
+# --- payment_failed marks past_due; a later cancel sticks ---
+# A delayed invoice.payment_failed (or subscription.updated past_due) for the
+# same id must not un-cancel. Stripe delivers those independently of
+# customer.subscription.deleted.
 with Session(engine) as s:
     prov = Workspace(
         slug="bob-ws",
@@ -251,6 +254,18 @@ with Session(engine) as s:
     s.refresh(prov)
     bob_id = prov.id
 
+fail_event = {
+    "id": "evt_inv_fail",
+    "type": "invoice.payment_failed",
+    "data": {"object": {"subscription": "sub_bob", "customer": "cus_bob"}},
+}
+r5 = post_event(client, fail_event)
+ok(r5.status_code == 200, "invoice.payment_failed 200")
+with Session(engine) as s:
+    bob = s.get(Workspace, bob_id)
+    ok(bob is not None and bob.subscription_status == "past_due", "payment_failed → past_due")
+    ok(bob.stripe_subscription_id == "sub_bob", "payment_failed keeps the subscription id")
+
 del_event = {
     "id": "evt_sub_del",
     "type": "customer.subscription.deleted",
@@ -261,17 +276,146 @@ ok(r4.status_code == 200, "subscription.deleted 200")
 with Session(engine) as s:
     bob = s.get(Workspace, bob_id)
     ok(bob is not None and bob.subscription_status == "canceled", "deleted → canceled, row kept")
+    ok(bob.owner_email == "bob@buyer.com", "deleted keeps the buyer email")
 
-fail_event = {
-    "id": "evt_inv_fail",
+late_fail = {
+    "id": "evt_inv_fail_after_cancel",
     "type": "invoice.payment_failed",
     "data": {"object": {"subscription": "sub_bob", "customer": "cus_bob"}},
 }
-r5 = post_event(client, fail_event)
-ok(r5.status_code == 200, "invoice.payment_failed 200")
+ok(post_event(client, late_fail).status_code == 200, "late payment_failed after cancel is 200")
+late_upd = {
+    "id": "evt_sub_upd_after_cancel",
+    "type": "customer.subscription.updated",
+    "data": {"object": {"id": "sub_bob", "customer": "cus_bob", "status": "past_due"}},
+}
+ok(post_event(client, late_upd).status_code == 200, "late subscription.updated past_due after cancel is 200")
 with Session(engine) as s:
     bob = s.get(Workspace, bob_id)
-    ok(bob.subscription_status == "past_due", "payment_failed → past_due")
+    ok(bob.subscription_status == "canceled",
+       "late payment_failed / past_due update does not un-cancel")
+
+reactivate = {
+    "id": "evt_sub_reactivate",
+    "type": "customer.subscription.updated",
+    "data": {"object": {"id": "sub_bob", "customer": "cus_bob", "status": "active"}},
+}
+ok(post_event(client, reactivate).status_code == 200, "same-subscription reactivation is 200")
+with Session(engine) as s:
+    bob = s.get(Workspace, bob_id)
+    ok(bob.subscription_status == "active", "subscription.updated active reactivates a cancel")
+    ok(bob.stripe_subscription_id == "sub_bob", "reactivation keeps the same subscription id")
+
+# Checkout is the resubscribe path: it may replace the stored subscription id
+# even after a cancel. A late invoice for the previous id must not undo that.
+ok(post_event(client, {
+    "id": "evt_bob_del_again",
+    "type": "customer.subscription.deleted",
+    "data": {"object": {"id": "sub_bob", "customer": "cus_bob", "status": "canceled"}},
+}).status_code == 200, "delete before resubscribe checkout is 200")
+with patch("httpx.post", side_effect=_capture_resend):
+    ok(post_event(client, checkout_event(
+        "evt_bob_resub", email="bob@buyer.com", customer="cus_bob", subscription="sub_bob_new",
+    )).status_code == 200, "checkout resubscribe after cancel is 200")
+with Session(engine) as s:
+    bob = s.get(Workspace, bob_id)
+    ok(bob.subscription_status == "active", "checkout resubscribe sets active")
+    ok(bob.stripe_subscription_id == "sub_bob_new", "checkout resubscribe stores the new subscription id")
+    ok(bob.owner_email == "bob@buyer.com", "checkout resubscribe keeps the same workspace")
+ok(post_event(client, {
+    "id": "evt_bob_old_fail",
+    "type": "invoice.payment_failed",
+    "data": {"object": {"subscription": "sub_bob", "customer": "cus_bob"}},
+}).status_code == 200, "old-subscription payment_failed after checkout resubscribe is 200")
+with Session(engine) as s:
+    bob = s.get(Workspace, bob_id)
+    ok(bob.subscription_status == "active",
+       "old-subscription payment_failed does not mark the resubscribed workspace past_due")
+    ok(bob.stripe_subscription_id == "sub_bob_new",
+       "old-subscription payment_failed does not restore the previous subscription id")
+
+# --- resubscribe: events for the previous subscription id must not clobber ---
+# checkout binds the workspace to sub_new. A delayed payment_failed / deleted /
+# updated for sub_old still carries cus_dave, and lookup falls through to the
+# customer when the old id no longer matches.
+with patch("httpx.post", side_effect=_capture_resend):
+    ok(post_event(client, checkout_event(
+        "evt_dave_old", email="dave@buyer.com", customer="cus_dave", subscription="sub_dave_old",
+    )).status_code == 200, "dave first checkout 200")
+    ok(post_event(client, checkout_event(
+        "evt_dave_new", email="dave@buyer.com", customer="cus_dave", subscription="sub_dave_new",
+    )).status_code == 200, "dave resubscribe checkout 200")
+with Session(engine) as s:
+    daves = s.exec(select(Workspace).where(Workspace.owner_email == "dave@buyer.com")).all()
+    ok(len(daves) == 1, "resubscribe does not create a second workspace")
+    ok(daves[0].id != 1, "dave workspace is not owera")
+    ok(daves[0].stripe_subscription_id == "sub_dave_new", "resubscribe stores the new subscription id")
+    ok(daves[0].subscription_status == "active", "resubscribe leaves the workspace active")
+    dave_id = daves[0].id
+
+stale_fail = {
+    "id": "evt_dave_old_fail",
+    "type": "invoice.payment_failed",
+    "data": {"object": {"subscription": "sub_dave_old", "customer": "cus_dave"}},
+}
+stale_del = {
+    "id": "evt_dave_old_del",
+    "type": "customer.subscription.deleted",
+    "data": {"object": {"id": "sub_dave_old", "customer": "cus_dave", "status": "canceled"}},
+}
+stale_upd = {
+    "id": "evt_dave_old_upd",
+    "type": "customer.subscription.updated",
+    "data": {"object": {"id": "sub_dave_old", "customer": "cus_dave", "status": "unpaid"}},
+}
+ok(post_event(client, stale_fail).status_code == 200, "stale payment_failed for old sub is 200")
+ok(post_event(client, stale_del).status_code == 200, "stale subscription.deleted for old sub is 200")
+ok(post_event(client, stale_upd).status_code == 200, "stale subscription.updated for old sub is 200")
+with Session(engine) as s:
+    dave = s.get(Workspace, dave_id)
+    ok(dave.subscription_status == "active",
+       "old-subscription events do not mark the new subscription past_due or canceled")
+    ok(dave.stripe_subscription_id == "sub_dave_new",
+       "old-subscription events do not rebind the stored subscription id")
+
+current_fail = {
+    "id": "evt_dave_new_fail",
+    "type": "invoice.payment_failed",
+    "data": {"object": {"subscription": "sub_dave_new", "customer": "cus_dave"}},
+}
+ok(post_event(client, current_fail).status_code == 200, "current-subscription payment_failed is 200")
+with Session(engine) as s:
+    dave = s.get(Workspace, dave_id)
+    ok(dave.subscription_status == "past_due",
+       "payment_failed for the bound subscription still marks past_due")
+
+# --- first bind: checkout without a subscription id, then subscription.updated ---
+with patch("httpx.post", side_effect=_capture_resend):
+    erin = {
+        "id": "evt_erin_checkout",
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "customer": "cus_erin",
+            "customer_details": {"email": "erin@buyer.com"},
+        }},
+    }
+    ok(post_event(client, erin).status_code == 200, "checkout without subscription id is 200")
+with Session(engine) as s:
+    erin_ws = s.exec(select(Workspace).where(Workspace.owner_email == "erin@buyer.com")).one()
+    ok(erin_ws.stripe_subscription_id is None, "checkout without subscription leaves the id unset")
+    ok(erin_ws.subscription_status == "active", "checkout without subscription is still active")
+    erin_id = erin_ws.id
+erin_upd = {
+    "id": "evt_erin_upd",
+    "type": "customer.subscription.updated",
+    "data": {"object": {"id": "sub_erin", "customer": "cus_erin", "status": "trialing"}},
+}
+ok(post_event(client, erin_upd).status_code == 200, "first subscription.updated binds the id")
+with Session(engine) as s:
+    erin_ws = s.get(Workspace, erin_id)
+    ok(erin_ws.stripe_subscription_id == "sub_erin",
+       "subscription.updated stores the id when the workspace had none")
+    ok(erin_ws.subscription_status == "active", "trialing maps to active on first bind")
 
 # --- unknown type → 200 ---
 unk = {"id": "evt_unknown", "type": "customer.created", "data": {"object": {}}}

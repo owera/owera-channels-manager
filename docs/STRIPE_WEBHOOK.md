@@ -23,9 +23,9 @@ Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do 
 | Event | Action |
 |-------|--------|
 | `checkout.session.completed` | Find/create workspace for buyer email (`customer_details.email` or `customer_email`); set `subscription_status=active`; store Stripe customer/subscription ids; send welcome email once |
-| `customer.subscription.created` / `.updated` | Sync plan status from Stripe (`active`/`trialing` → `active`; `past_due`/`unpaid`/`canceled`/`incomplete_expired` mapped accordingly) |
-| `customer.subscription.deleted` | Set `subscription_status=canceled` (data retained) |
-| `invoice.payment_failed` | Set `subscription_status=past_due` |
+| `customer.subscription.created` / `.updated` | Sync plan status from Stripe (`active`/`trialing` → `active`; `past_due`/`unpaid`/`canceled`/`incomplete_expired` mapped accordingly). Ignored when the event's subscription id is not the one stored on the workspace, and a non-`active` status does not un-cancel. `active` on that same id reactivates. |
+| `customer.subscription.deleted` | Set `subscription_status=canceled` (data retained). Ignored when the event's subscription id is not the one stored on the workspace. |
+| `invoice.payment_failed` | Set `subscription_status=past_due`, unless the workspace is already `canceled` or the invoice's subscription id is not the one stored. |
 | Other types | Ignored (`200`) |
 
 Idempotency: `StripeEvent` table (unique Stripe `event.id`). Replays and duplicate deliveries are no-ops.
