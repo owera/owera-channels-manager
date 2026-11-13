@@ -19,7 +19,8 @@ class MPTEngine:
         # on its native ``video_script`` field (render_loop sets both).
         # on_screen_allow / on_screen (literal_cards overrides) feed the storyboard only.
         params = {k: v for k, v in params.items()
-                  if k not in ("content_format", "provided_script", "on_screen_allow", "on_screen")}
+                  if k not in ("content_format", "provided_script", "on_screen_allow", "on_screen",
+                                "workspace_id")}
         return mpt.submit(params)
 
     def poll(self, handle: str) -> dict:

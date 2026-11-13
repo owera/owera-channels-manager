@@ -84,8 +84,12 @@ def complete(
     timeout: int | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    call_type: str | None = None,
 ) -> str:
     """Run ``grok -p`` and return stdout text.
+
+    Guarded: the caller must have bound an Owera-internal workspace with
+    ``llm_guard.scope(workspace_id, call_type)``; otherwise ``LLMBlocked``.
 
     ``max_tokens`` is accepted so callers of the old ``_llm(prompt, system, max_tokens)``
     seam keep their signature; grok 1.0.5 ``-p`` has no equivalent flag and it is ignored.
@@ -100,6 +104,10 @@ def complete(
     callers (``video_gen.generate_ideas``, ``metadata._llm_fallback``) use
     ``settings.grok_effort_ideas`` (default "low", env MANAGER_GROK_EFFORT_IDEAS).
     """
+    # Hard guard (choke point): refuse before building/spawning anything when the
+    # bound workspace is not Owera-internal. Raises LLMBlocked (a GrokCLIError).
+    from app.services import llm_guard
+    llm_guard.require(call_type)
     model = model if model is not None else (settings.grok_model or None)
     cmd = build_cmd(prompt, system, model=model, reasoning_effort=reasoning_effort)
     cwd = scratch_dir()

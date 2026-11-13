@@ -10,7 +10,7 @@ from app.db import app_settings, get_session
 from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoStatus,
                         utcnow)
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
-from app.services import quota, video_gen
+from app.services import llm_guard, quota, video_gen
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -192,25 +192,28 @@ def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
 
     # 2. Seed ideas; auto-produce the first `produce_count` (QUEUED), rest as DRAFT.
     _niche = (ch.niche or "").strip() or None
-    try:
-        ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
-                                         idea_count, fmt,
-                                         language=video_gen.channel_language(session, ch.id),
-                                         niche=_niche,
-                                         **video_gen.idea_pace_kwargs(session, ch.id, fmt))
-    except Exception as e:
-        raise HTTPException(502, f"idea generation failed: {e}")
-    hp = video_gen.idea_hook_kwargs(session, ch.id, fmt)
-    if hp and ideas:
-        # RR #47: drafts are born passing hook pace (one regeneration)
-        ideas = video_gen.enforce_hook_pace(
-            ideas, idea_count, hook_voice=hp["hook_voice"],
-            regen=lambda extra: video_gen.generate_ideas(
-                topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
-                language=video_gen.channel_language(session, ch.id),
-                niche=_niche,
-                **video_gen.idea_pace_kwargs(session, ch.id, fmt),
-            ))
+    with llm_guard.scope(ch.workspace_id, "ideas"):
+        try:
+            ideas = video_gen.generate_ideas(topic.name, topic.theme_prompt, [],
+                                             idea_count, fmt,
+                                             language=video_gen.channel_language(session, ch.id),
+                                             niche=_niche,
+                                             **video_gen.idea_pace_kwargs(session, ch.id, fmt))
+        except llm_guard.LLMBlocked as e:
+            raise HTTPException(403, str(e))
+        except Exception as e:
+            raise HTTPException(502, f"idea generation failed: {e}")
+        hp = video_gen.idea_hook_kwargs(session, ch.id, fmt)
+        if hp and ideas:
+            # RR #47: drafts are born passing hook pace (one regeneration)
+            ideas = video_gen.enforce_hook_pace(
+                ideas, idea_count, hook_voice=hp["hook_voice"],
+                regen=lambda extra: video_gen.generate_ideas(
+                    topic.name, (topic.theme_prompt or "") + extra, list(ideas), idea_count, fmt,
+                    language=video_gen.channel_language(session, ch.id),
+                    niche=_niche,
+                    **video_gen.idea_pace_kwargs(session, ch.id, fmt),
+                ))
     ideas = review_guard.drop_teaser_ideas(ideas)
     ideas = video_gen.finalize_draft_subjects(ideas)
     mx_v = session.exec(

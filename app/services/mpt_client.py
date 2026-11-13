@@ -64,7 +64,12 @@ class MPTClient:
             return False
 
     def submit(self, params: dict) -> str:
-        """POST /videos -> task_id."""
+        """POST /videos -> task_id.
+
+        MPT runs its own LLM (script / search terms) on the subject we send:
+        guarded like ``llm.complete`` (raises ``llm_guard.LLMBlocked``)."""
+        from app.services import llm_guard
+        llm_guard.require("mpt_render")
         with self._client() as c:
             r = c.post("/videos", json=params)
             r.raise_for_status()
@@ -83,7 +88,11 @@ class MPTClient:
 
     def social_metadata(self, subject: str, script: str, platform: str = "youtube_shorts",
                         language: str = "en-US") -> Optional[dict]:
-        """POST /social-metadata -> {title, caption, hashtags} or None on failure."""
+        """POST /social-metadata -> {title, caption, hashtags} or None on failure.
+
+        LLM on the MPT side: guarded first (``LLMBlocked`` propagates, not None)."""
+        from app.services import llm_guard
+        llm_guard.require("mpt_social_metadata")
         try:
             with self._client() as c:
                 r = c.post("/social-metadata", json={

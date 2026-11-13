@@ -33,6 +33,11 @@ from app.config import settings
 from app.services import llm, metadata, video_gen
 from app.services.engines import worker
 
+# llm_guard (tests/verify_llm_guard.py covers the guard): these plumbing checks run
+# as Owera workspace 1 so the guard lets the stubbed grok / MPT calls through.
+from app.services import llm_guard as _llm_guard  # noqa: E402
+_llm_guard.bind(1, "test")
+
 _checks = 0
 
 

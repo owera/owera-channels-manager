@@ -303,6 +303,11 @@ def _status(handle: str, **fields) -> None:
 # --------------------------------------------------------------------------- pipeline
 
 def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
+    # llm_guard: bind the channel's workspace (render_loop sets
+    # params["workspace_id"]) for every LLM step of this job; none → each step is
+    # refused (fail closed) and the job ends STATE_FAILED (not transient).
+    from app.services import llm_guard as _llm_guard
+    _guard_tok = _llm_guard.bind(params.get("workspace_id"), "render")
     try:
         aspect = params.get("video_aspect") or "9:16"
         resolution, width, height = _ASPECTS.get(aspect, _ASPECTS["9:16"])
@@ -408,6 +413,8 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
         _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
+    finally:
+        _llm_guard.unbind(_guard_tok)
 
 
 def _creation_config(subject, params, html, script, duration, resolution, bgm, used_fallback,

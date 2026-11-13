@@ -67,7 +67,17 @@ OUT_ROOT = Path(__file__).resolve().parent / ".rubric_review"
 
 
 def _render_subject(entry: dict, out_dir: Path) -> dict:
-    """Run one golden subject through the full pipeline; return a manifest dict."""
+    """Run one golden subject through the full pipeline; return a manifest dict.
+
+    llm_guard: every LLM step runs scoped to the golden channel's workspace (read
+    from the DB). A channel outside the Owera allowlist is refused (fail closed)."""
+    from app.services import llm_guard
+    channel_id = 1 if entry["id"].startswith("ch1") else 2
+    with llm_guard.scope(llm_guard.workspace_of_channel(channel_id), "rubric_review"):
+        return _render_subject_scoped(entry, out_dir)
+
+
+def _render_subject_scoped(entry: dict, out_dir: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     # Clear stale per-beat frames from any prior render into this label dir. Beat count
     # varies run-to-run, so leftover b{i}_{type}.png files (e.g. an old b9_cta) would not

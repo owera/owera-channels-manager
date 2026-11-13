@@ -17,7 +17,7 @@ from pathlib import Path
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
-from app.services import craft, metadata, quota, thumbnail, video_gen, youtube
+from app.services import craft, llm_guard, metadata, quota, thumbnail, video_gen, youtube
 from app.services.youtube import (NeedsConnect, QuotaExceeded, UploadStalled,
                                   QUOTA_COMMENT_INSERT, QUOTA_PLAYLISTITEM_INSERT,
                                   QUOTA_THUMBNAIL_SET, QUOTA_UPLOAD)
@@ -320,13 +320,16 @@ def _set_custom_thumbnail(session: Session, service, channel: Channel,
         # thumbnail use the short-form hook prompt.
         topic = session.get(Topic, video.topic_id)
         content_format = "long" if topic and topic.content_format == "long" else "short"
-        png = thumbnail.make_thumbnail_png(
-            video.subject, video.title, out_png,
-            topic_id=video.topic_id or 0,
-            content_format=content_format,
-            brand=craft.brand_of(channel.slug, channel.name, channel_id=channel.id),
-            # Split-card thumb only when frame0 was rendered with it (frame0 ≡ thumb).
-            frame0_split=bool(craft._as_dict(video.creation_config).get("frame0_split")))
+        # llm_guard: the hook LLM is refused outside Owera workspaces; the
+        # thumbnail then uses the deterministic spoken-claim fallback.
+        with llm_guard.scope(channel.workspace_id, "thumbnail"):
+            png = thumbnail.make_thumbnail_png(
+                video.subject, video.title, out_png,
+                topic_id=video.topic_id or 0,
+                content_format=content_format,
+                brand=craft.brand_of(channel.slug, channel.name, channel_id=channel.id),
+                # Split-card thumb only when frame0 was rendered with it (frame0 ≡ thumb).
+                frame0_split=bool(craft._as_dict(video.creation_config).get("frame0_split")))
         if not png:
             quota.log(session, kind="thumbnail", status="error", video_id=video.id,
                       channel_id=channel.id, detail="thumbnail generation failed")

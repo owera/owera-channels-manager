@@ -83,6 +83,20 @@ if ! curl -sf -o /dev/null -u "agent:$MANAGER_APP_PASSWORD" http://127.0.0.1:707
   log "note: manager not reachable on :7070 — items needing a live /verify may be skipped by the agent"
 fi
 
+# --- LLM hard guard (CTO/CoS 2026-11-13, docs/LLM_GUARD.md) — fail closed --
+# No Google-sourced data from a non-Owera workspace may reach the consumer grok
+# session. Blocked → no run, exit 0 (not an outage), event in $LOG.
+if [ ! -r "$REPO/run/llm-guard.sh" ]; then
+  log "LLM guard: run/llm-guard.sh missing — refusing to run (fail closed)"
+  exit 1
+fi
+. "$REPO/run/llm-guard.sh"
+if ! llm_guard_preflight code_agent; then
+  log "LLM guard: blocked (external workspace holds channel data) — skipping run"
+  alert "llm_blocked_external_google_data — code-agent skipped" 0
+  exit 0
+fi
+
 # --- Run ------------------------------------------------------------------
 log "starting code-agent sprint"
 # { } is not a subshell — STATUS set inside remains visible after the group.
