@@ -357,6 +357,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             topic_name=params.get("topic_name"),
             on_screen_allow=params.get("on_screen_allow"), on_screen=params.get("on_screen"),
             title=params.get("title"),
+            provided=bool(provided),
         )
         used_fallback = False
         if not _looks_valid(html):
@@ -968,7 +969,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
                           language: str | None = None, brand: str | None = None,
                           provided_thumb: bool = False, topic_name: str | None = None,
                           on_screen_allow=None, on_screen=None,
-                          title: str | None = None) -> str:
+                          title: str | None = None, provided: bool = False) -> str:
     """Build the composition index.html. Default path is the typed word-synced
     storyboard (storyboard.compose); ``MANAGER_COMPOSITION_VERSION=legacy`` reverts to
     the old clip-array path below as a kill switch. Returns "" on generic failure so
@@ -986,7 +987,7 @@ def _generate_composition(subject: str, script: str, words: list[dict], resoluti
             language=language, llm=_llm_compose, brand=brand,
             provided_thumb=provided_thumb, topic_name=topic_name,
             on_screen_allow=on_screen_allow, on_screen=on_screen,
-            title=title,
+            title=title, provided=provided,
         )
         return html or ""
     except Exception as e:

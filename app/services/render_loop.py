@@ -159,7 +159,8 @@ def _gate_b_preflight_block(session: Session, video: Video, channel: Channel,
     if not vo or not _gbp.applies(video.topic_id, content_format=params.get("content_format")):
         return False
     try:
-        hits = _gbp.evaluate(script=vo, subject=video.subject, params=params)
+        hits = _gbp.evaluate(script=vo, subject=video.subject, params=params,
+                             provided=bool((provided_script or "").strip()))
     except Exception as e:
         logger.info("gate B preflight skipped for video %s: %s", video.id, e)
         return False

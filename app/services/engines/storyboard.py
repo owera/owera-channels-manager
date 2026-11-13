@@ -4319,7 +4319,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
                    topic_id=None, content_format="short", allowed_types=None, language=None,
             llm, brand=None, channel_id=None, channel_slug=None,
             provided_thumb=False, topic_name=None, on_screen_allow=None,
-            on_screen=None, title=None) -> str | None:
+            on_screen=None, title=None, provided=False) -> str | None:
     """Generate a composition index.html via the typed-storyboard path.
 
     Returns the HTML string, or None on failure (the caller then uses the deterministic
@@ -4345,9 +4345,15 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
     # RR since #1455): deterministic one-card-per-sentence board snapped to
     # speech. Gate-timing brands (settings.gate_timing_brands, default rr):
     # sync lead at the Gate B budget + PT pause closing; OS keeps tip timing.
+    # A provided (verbatim, pinned) script is never re-cut by the LLM board:
+    # Shipping teasers with script_source=provided also get the deterministic
+    # VO-sentence board (#1477: the LLM turned "It's an AI attendant for
+    # small businesses." into a list card, dropped 3 sentences, and the
+    # teaser path skipped the OS speech snap).
+    vo_teaser = teaser and bool(provided)
     os_vo = (_craft.vo_sentence_cards_applies(brand or th.get("brand"))
              and (content_format or "short") != "long"
-             and not teaser)
+             and (not teaser or vo_teaser))
     _otok = _OS_VO_CARDS.set(os_vo)
     _sync_gate = _craft.gate_aligned_sync(
         os_vo and _craft.gate_timing_applies(brand or th.get("brand")))
@@ -4440,7 +4446,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
         if literal:
             on_screen = list(on_screen or []) + _allowlist_as_on_screen(script, sources)
             _apply_literal_cards(beats, script, sources, on_screen, allowed, slips)
-        if teaser:
+        if teaser and not os_vo:
             _replace_fabricated_cli(beats, script)
             _soft_product_card(beats, script)
         _cap_statements(beats, content_format, os_vo=os_vo)
@@ -4533,7 +4539,7 @@ def _compose_board(*, subject, script, words, duration, resolution, width, heigh
             _cap_os_hook(beats, words, script)
             _drop_os_term_cards(beats, sources)
         os_brand = (brand or th.get("brand") or "") == "os"
-        if (os_brand or os_vo or literal) and not teaser:
+        if (os_brand or os_vo or literal) and (not teaser or os_vo):
             _plain_os_literal_mids(beats, script, sources, os=os_brand,
                                    literal=literal, slips=slips)
             if os_brand and not os_vo:

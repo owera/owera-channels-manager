@@ -121,7 +121,8 @@ def _spoken_words_and_duration(script: str, params: dict) -> tuple[list[dict] | 
     return words, duration
 
 
-def _compose_board(script: str, subject: str, params: dict, words, duration: float):
+def _compose_board(script: str, subject: str, params: dict, words, duration: float,
+                   *, provided: bool = False):
     from app.services.engines import worker, storyboard
     from app.services.video_gen import language_from_voice
 
@@ -139,6 +140,7 @@ def _compose_board(script: str, subject: str, params: dict, words, duration: flo
         on_screen_allow=params.get("on_screen_allow"),
         on_screen=params.get("on_screen"),
         title=params.get("title"),
+        provided=provided,
     )
     if not html or not worker._looks_valid(html):
         return None
@@ -150,6 +152,7 @@ def evaluate(
     script: str,
     subject: str,
     params: dict,
+    provided: bool = False,
 ) -> list[dict[str, str]] | None:
     """Run preflight. None = PASS or skipped (fail-open); else list of hits."""
     topic_id = params.get("topic_id")
@@ -162,7 +165,7 @@ def evaluate(
     words, duration = _spoken_words_and_duration(vo, params)
     if not words or duration is None:
         return None
-    beats = _compose_board(vo, subject, params, words, duration)
+    beats = _compose_board(vo, subject, params, words, duration, provided=provided)
     if not beats:
         logger.info("gate B preflight: compose skipped for topic %s", topic_id)
         return None
