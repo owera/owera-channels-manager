@@ -1962,3 +1962,27 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 79. ✅ DONE (PR autoimprove/2026-11-13-delete-video-404) DELETE /api/videos/{id} uses one 404 for a missing id and a foreign id — normal
+- **resolution (2026-11-13):** `delete_video` calls `require_video`
+  before it writes the audit `JobRun` or removes the row. A missing id
+  used to fall through to 204, while a foreign id was already 404, so
+  the status said whether the id existed. Both are now `video not
+  found`, and neither writes a `JobRun`. An id in the caller's
+  workspace still returns 204 and still logs the pre-delete status,
+  subject, and YouTube id. Suite: `tests/verify_video_delete.py` was
+  red on main (no `Workspace` row, so the route 404'd before delete);
+  with the owera workspace seeded it is `ALL 10 CHECKS PASSED` (was 8
+  checks, and the missing-id pin was 204). Two mutants killed: the old
+  204 fallthrough, and a missing-id 404 whose detail is not `video not
+  found`.
+- **why (found 2026-11-13 with the audit-log isolation pass):** topics
+  already closed this oracle. Delete was the remaining video route that
+  did not use `require_video`.
+- **caution:** normal (`videos.py` delete only). Not a publish/oauth
+  path. A second delete of an id that is already gone is now 404, not
+  a silent 204.
+- **acceptance:** owera delete of its own video is 204, the row is
+  gone, and one delete `JobRun` records status, subject, and yt id.
+  A foreign id and a missing id are the same 404, the foreign row
+  stays, and no extra `JobRun` is written.

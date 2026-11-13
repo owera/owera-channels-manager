@@ -550,20 +550,17 @@ def set_script(video_id: int, body: VideoScriptSet,
 @router.delete("/{video_id}", status_code=204)
 def delete_video(video_id: int, session: Session = Depends(get_session),
                  ws: Workspace = Depends(current_workspace)):
-    v = session.get(Video, video_id)
-    if v:
-        ch = session.get(Channel, v.channel_id)
-        if not ch or ch.workspace_id != ws.id:
-            raise HTTPException(404, "video not found")
-    if v:
-        # Deletion is the one lifecycle exit with no other trace (the row itself is
-        # the record) — log it so bulk deletes are visible in /api/runs.
-        quota.log(session, kind="delete", status="success", video_id=video_id,
-                  channel_id=v.channel_id,
-                  detail=f"deleted: status={v.status} subject={v.subject!r} "
-                         f"yt={v.yt_video_id or '-'}")
-        session.delete(v)
-        session.commit()
+    # Missing and foreign ids share this 404, so the status cannot say
+    # which one was absent.
+    v = require_video(session, ws, video_id)
+    # Deletion is the one lifecycle exit with no other trace (the row itself is
+    # the record) — log it so bulk deletes are visible in /api/runs.
+    quota.log(session, kind="delete", status="success", video_id=video_id,
+              channel_id=v.channel_id,
+              detail=f"deleted: status={v.status} subject={v.subject!r} "
+                     f"yt={v.yt_video_id or '-'}")
+    session.delete(v)
+    session.commit()
 
 
 def _set_status(session, video_id, new, **fields):
