@@ -9,7 +9,7 @@ cost from the price table and from cost_in_usd_ticks; monthly cap reached → bl
 no cap → blocked, unreadable ledger → blocked; missing key → clear error; timeout →
 "grok.Timeout" (transient, like the CLI); HTTP 4xx/5xx → GrokCLIError, one attempt
 (no in-client retry, like the CLI); the (B) guard still applies in api mode; agent
-exec plan (cli unchanged / api isolated GROK_HOME + budget row).
+exec plan (always the CLI, also with backend=api); XAI_DATA_RETENTION_ACK gate.
 """
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def api_env(**over):
     vals = {"llm_backend": "api", "xai_api_key": SecretStr(FAKE_KEY),
             "llm_monthly_usd_cap": 10.0, "llm_usage_path": str(USAGE),
             "grok_model": "grok-4.7", "llm_price_table_json": "",
-            "xai_zdr_confirmed": True, "llm_agent_api_stateless_verified": True}
+            "xai_data_retention_ack": "30d_no_training"}
     vals.update(over)
     return [patch.object(settings, k, v) for k, v in vals.items()]
 
@@ -156,6 +156,8 @@ ok(body["model"] == "grok-4.7" and body["input"] == PROMPT and body["instruction
    and body["reasoning"] == {"effort": "medium"} and body["store"] is False,
    "body: model grok-4.7, input, instructions=system, reasoning.effort, store=false")
 r = rows()[-1]
+ok(r["data_retention"] == "30d_no_training" and r["effort"] == "medium"
+   and r["effort_requested"] == "medium", "usage row: data_retention + effort sent/requested")
 ok(r["call_type"] == "storyboard_compose" and r["workspace_id"] == 1 and r["model"] == "grok-4.7"
    and r["input_tokens"] == 1000 and r["cached_input_tokens"] == 200
    and r["output_tokens"] == 100 and r["reasoning_tokens"] == 400 and r["ts"].endswith("+00:00"),
@@ -172,7 +174,7 @@ ok(all(FAKE_KEY not in l and "SECRET-PROMPT" not in l for l in cap.lines),
 ok(set(body) <= {"model", "input", "instructions", "reasoning", "store"}
    and "previous_response_id" not in body and "conversation" not in body
    and "background" not in body and body["store"] is False and isinstance(body["input"], str),
-   "ZDR: stateless payload — store=false explicit, no previous_response_id/conversation/background")
+   "stateless payload — store=false explicit, no previous_response_id/conversation/background")
 for bad in ({"model": "m", "input": "x", "store": True},
             {"model": "m", "input": "x", "store": False, "previous_response_id": "r0"},
             {"model": "m", "input": "x"},
@@ -187,47 +189,69 @@ ok(use and "model=grok-4.7" in use[-1] and "input_tokens=1000" in use[-1]
    and "output_tokens=100" in use[-1] and "call_type=storyboard_compose" in use[-1]
    and "workspace_id=1" in use[-1], "per-call log line: model + usage (no content)")
 
-print("ZDR boot check")
-with _Multi(api_env(xai_zdr_confirmed=False)), \
-        patch.object(llm, "_http_client", side_effect=AssertionError("no HTTP without ZDR")):
-    try:
-        llm.boot_check()
-        ok(False, "boot must refuse api without ZDR")
-    except llm.LLMZDRNotConfirmed as e:
-        ok("XAI_ZDR_CONFIRMED=1" in str(e), "boot_check: api without XAI_ZDR_CONFIRMED=1 → clear error")
-    try:
-        with llm_guard.scope(1, "ideas"):
-            llm.complete("x")
-        ok(False, "call must refuse without ZDR")
-    except llm.LLMZDRNotConfirmed:
-        ok(True, "per-call: api without ZDR refused too (no HTTP)")
-    with patch.object(llm_guard, "agent_preflight", return_value=True):
+print("data retention ack (XAI_DATA_RETENTION_ACK) boot check")
+for bad in ("", "  ", "1", "yes", "ZDR=1", "30d", "training"):
+    with _Multi(api_env(xai_data_retention_ack=bad)), \
+            patch.object(llm, "_http_client", side_effect=AssertionError("no HTTP without ack")):
         try:
-            llm.agent_exec_plan("growth_agent", ["grok"])
-            ok(False, "agent must refuse without ZDR")
-        except llm.LLMZDRNotConfirmed:
-            ok(True, "agent-exec: api without ZDR refused")
-with _Multi(api_env()):
+            llm.boot_check()
+            ok(False, f"boot must refuse api with ack={bad!r}")
+        except llm.LLMRetentionNotAcknowledged as e:
+            ok("XAI_DATA_RETENTION_ACK=zdr|30d_no_training" in str(e),
+               f"boot_check: api + ack={bad!r} → refuse with a clear error")
+        try:
+            with llm_guard.scope(1, "ideas"):
+                llm.complete("x")
+            ok(False, "call must refuse without a valid ack")
+        except llm.LLMRetentionNotAcknowledged:
+            ok(True, f"per-call: api + ack={bad!r} refused too (no HTTP)")
+for good in ("zdr", "30d_no_training", " 30D_NO_TRAINING "):
+    cap.lines.clear()
+    with _Multi(api_env(xai_data_retention_ack=good)):
+        llm.boot_check()
+    want = good.strip().lower()
+    ok(any("llm backend=xai-api" in l and f"data_retention={want}" in l for l in cap.lines),
+       f"boot_check passes with ack={good!r} and logs data_retention={want}")
+with patch.object(settings, "xai_data_retention_ack", ""):
     llm.boot_check()
-    ok(True, "boot_check passes with api + XAI_ZDR_CONFIRMED=1")
-with patch.object(settings, "xai_zdr_confirmed", False):
-    llm.boot_check()
-    ok(True, "boot_check is a no-op in cli mode (default)")
+    ok(True, "boot_check is a no-op in cli mode (default), ack not required")
+with patch.dict(os.environ, {"XAI_DATA_RETENTION_ACK": "30d_no_training"}):
+    ok(Settings().xai_data_retention_ack == "30d_no_training", "env XAI_DATA_RETENTION_ACK is read")
+ok(not hasattr(Settings(), "xai_zdr_confirmed")
+   and not hasattr(Settings(), "llm_agent_api_stateless_verified")
+   and not hasattr(Settings(), "llm_agent_run_usd_estimate"),
+   "XAI_ZDR_CONFIRMED / agent-api settings removed")
 with patch.dict(os.environ, {"XAI_ZDR_CONFIRMED": "1"}):
-    ok(Settings().xai_zdr_confirmed is True, "env XAI_ZDR_CONFIRMED=1 is read")
-ok(Settings().xai_zdr_confirmed is False or os.environ.get("XAI_ZDR_CONFIRMED"),
-   "default: ZDR not confirmed")
+    with _Multi(api_env(xai_data_retention_ack="")):
+        try:
+            llm.boot_check()
+            ok(False, "XAI_ZDR_CONFIRMED=1 must not satisfy the gate")
+        except llm.LLMRetentionNotAcknowledged:
+            ok(True, "legacy XAI_ZDR_CONFIRMED=1 alone does not unlock api mode")
 import inspect  # noqa: E402
 import app.main as _main  # noqa: E402
 _ls = inspect.getsource(_main.lifespan)
-ok(_ls.index("boot_check()") < _ls.index("ensure_dirs()"), "app lifespan runs the ZDR boot check first")
-with _Multi(api_env(llm_agent_api_stateless_verified=False)), \
-        patch.object(llm_guard, "agent_preflight", return_value=True):
-    try:
-        llm.agent_exec_plan("growth_agent", ["grok"])
-        ok(False, "unverified agent statelessness must refuse")
-    except llm.LLMConfigError as e:
-        ok("STATELESS_VERIFIED" in str(e), "api agents refused until CLI statelessness is verified")
+ok(_ls.index("boot_check()") < _ls.index("ensure_dirs()"), "app lifespan runs the retention boot check first")
+
+# effort: CLI vocabulary → API reasoning.effort; --reasoning-effort never on the wire
+print("effort mapping (cli flag → api reasoning.effort)")
+for req_e, want in (("low", "low"), ("none", "low"), ("minimal", "low"), ("medium", "medium"),
+                    ("high", "high"), ("xhigh", "xhigh"), ("max", "xhigh"), ("bogus", None)):
+    with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_resp_ok)):
+        with llm_guard.scope(1, "ideas"):
+            llm.complete("x", reasoning_effort=req_e)
+    b = json.loads(seen[-1].content)
+    ok(b.get("reasoning") == ({"effort": want} if want else None)
+       and "reasoning_effort" not in b and "--reasoning-effort" not in seen[-1].content.decode(),
+       f"api: effort {req_e!r} → {want!r}")
+with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_resp_ok)):
+    with llm_guard.scope(1, "ideas"):
+        llm.complete("x", reasoning_effort=settings.grok_effort_ideas)
+ok(json.loads(seen[-1].content).get("reasoning") == {"effort": "low"},
+   "api: #224 light-call default (MANAGER_GROK_EFFORT_IDEAS=low) → reasoning.effort low")
+_cli_argv = llm.build_cmd("p", reasoning_effort="low")
+ok("--reasoning-effort" in _cli_argv and _cli_argv[-1] == "p",
+   "cli: --reasoning-effort flag stays on the CLI path (#224)")
 
 # model mapping: CLI default (empty) → llm_api_default_model
 with _Multi(api_env(grok_model="")), patch.object(llm, "_http_client",
@@ -370,38 +394,45 @@ with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_wi
 ok(len(seen) == n_before, "no HTTP for blocked workspaces")
 
 # ------------------------------------------------------------------ agents
-print("headless agents through the same client (agent-exec)")
+print("headless agents: always the Grok CLI (agent-exec), also with LLM_BACKEND=api")
 cmd = ["grok", "--prompt-file", "p.md"]
-with patch.object(llm_guard, "agent_preflight", return_value=True):
+with patch.object(llm_guard, "agent_preflight", return_value=True), \
+        patch.dict(os.environ, {"XAI_API_KEY": FAKE_KEY, "GROK_API_KEY": "g-fake"}):
     argv, env = llm.agent_exec_plan("growth_agent", cmd)
-    ok(argv == cmd and env.get("GROK_HOME") == os.environ.get("GROK_HOME"),
-       "cli: command unchanged, consumer session")
-    with _Multi(api_env(storage_dir=str(tmp))):
-        n = len(rows())
-        argv, env = llm.agent_exec_plan("growth_agent", cmd)
-        home = Path(env["GROK_HOME"])
-        conf = (home / "config.toml").read_text()
-        ok(argv == cmd and env["XAI_API_KEY"] == FAKE_KEY and home == tmp / "grok-api-home",
-           "api: isolated GROK_HOME + XAI_API_KEY in the child env")
-        ok('base_url = "https://api.x.ai/v1"' in conf and 'env_key = "XAI_API_KEY"' in conf
-           and FAKE_KEY not in conf and 'model = "grok-4.7"' in conf,
-           "api: generated config binds grok-4.7 to api.x.ai via env_key (no key on disk)")
-        r = rows()[-1]
-        ok(len(rows()) == n + 1 and r["call_type"] == "growth_agent"
-           and r["cost_usd"] == settings.llm_agent_run_usd_estimate,
-           "api: one usage row per agent run, charged the per-run estimate")
-    with _Multi(api_env(storage_dir=str(tmp), llm_monthly_usd_cap=0.0)):
-        try:
-            llm.agent_exec_plan("growth_agent", cmd)
-            ok(False, "agent without cap must block")
-        except llm.LLMBudgetExceeded:
-            ok(True, "api: agent run blocked without a cap")
+    ok(argv == cmd and env.get("GROK_HOME") == os.environ.get("GROK_HOME")
+       and "XAI_API_KEY" not in env and "GROK_API_KEY" not in env,
+       "cli: command unchanged, consumer session, API keys stripped")
+    for ct in ("growth_agent", "code_agent", "run_check"):
+        with _Multi(api_env(storage_dir=str(tmp), llm_monthly_usd_cap=0.0,
+                            xai_data_retention_ack="")):
+            n = len(rows())
+            argv, env = llm.agent_exec_plan(ct, cmd)   # no cap, no ack: still not refused
+            ok(argv == cmd and "XAI_API_KEY" not in env and "GROK_API_KEY" not in env
+               and env.get("GROK_HOME") == os.environ.get("GROK_HOME")
+               and not (tmp / "grok-api-home").exists() and len(rows()) == n,
+               f"api: {ct} stays on the CLI (no refusal, no API key, no GROK_HOME, no ledger row)")
+    # end to end: backend=api, agent-exec execs the CLI subprocess
+    with _Multi(api_env()), patch.object(os, "execvpe") as _ex, \
+            patch.object(llm, "_http_client", side_effect=AssertionError("agents never POST")):
+        rc = llm.main(["agent-exec", "growth_agent", "--", "grok", "--prompt-file", "p.md"])
+    ok(rc == 0 and _ex.call_count == 1 and _ex.call_args[0][0] == "grok"
+       and _ex.call_args[0][1] == ["grok", "--prompt-file", "p.md"]
+       and "XAI_API_KEY" not in _ex.call_args[0][2],
+       "api: agent-exec execs the grok CLI subprocess (no HTTP, no key in env)")
+ok(not hasattr(llm, "_write_agent_grok_home") and "STATELESS_VERIFIED" not in inspect.getsource(llm),
+   "agent api path (GROK_HOME, STATELESS_VERIFIED refusal) removed")
 with patch.object(llm_guard, "agent_preflight", return_value=False):
     try:
         llm.agent_exec_plan("code_agent", cmd)
         ok(False, "agent preflight block must raise")
     except llm_guard.LLMBlocked:
         ok(True, "agent-exec re-checks the (B) guard")
+    with _Multi(api_env()):
+        try:
+            llm.agent_exec_plan("growth_agent", cmd)
+            ok(False, "agent preflight block must raise in api mode too")
+        except llm_guard.LLMBlocked:
+            ok(True, "agent-exec re-checks the (B) guard in api mode")
 ok(llm.main(["agent-exec", "x"]) == 2, "agent-exec usage error → 2")
 with patch.object(llm_guard, "agent_preflight", return_value=False):
     ok(llm.main(["agent-exec", "run_check", "--", "grok", "-p", "x"]) == 3,

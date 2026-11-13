@@ -193,28 +193,62 @@ DEFAULT_PRICES: dict[str, dict[str, float]] = {
 BUDGET_EVENT = "llm_budget_blocked"
 
 
-class LLMZDRNotConfirmed(GrokCLIError):
-    """LLM_BACKEND=api without XAI_ZDR_CONFIRMED=1 (Enterprise DPA). Not transient."""
+class LLMRetentionNotAcknowledged(GrokCLIError):
+    """LLM_BACKEND=api without a valid XAI_DATA_RETENTION_ACK. Not transient."""
 
 
-ZDR_MESSAGE = ("LLM_BACKEND=api requires XAI_ZDR_CONFIRMED=1 in the manager .env: the "
-               "xAI Enterprise DPA requires Zero Data Retention on the org. Confirm ZDR "
-               "in the xAI console, then set it, or set LLM_BACKEND=cli.")
+# Allowed values of XAI_DATA_RETENTION_ACK (an explicit statement by the operator of
+# what the xAI account behind XAI_API_KEY retains — never inferred):
+#   zdr              the org has Zero Data Retention enabled;
+#   30d_no_training  standard API retention (30 days), prompts not used for training.
+RETENTION_ACK_VALUES = ("zdr", "30d_no_training")
+
+RETENTION_MESSAGE = ("LLM_BACKEND=api requires XAI_DATA_RETENTION_ACK=zdr|30d_no_training "
+                     "in the manager .env: state what the xAI account behind XAI_API_KEY "
+                     "retains (zdr only if ZDR is on for the org), or set LLM_BACKEND=cli.")
 
 
-def require_zdr() -> None:
-    if backend() == "api" and not bool(getattr(settings, "xai_zdr_confirmed", False)):
-        raise LLMZDRNotConfirmed(ZDR_MESSAGE)
+def data_retention() -> str:
+    """The acknowledged retention value ("" when unset/invalid)."""
+    v = (getattr(settings, "xai_data_retention_ack", "") or "").strip().lower()
+    return v if v in RETENTION_ACK_VALUES else ""
+
+
+def require_retention_ack() -> str:
+    """Fail closed in api mode: empty or unknown XAI_DATA_RETENTION_ACK raises."""
+    v = data_retention()
+    if backend() == "api" and not v:
+        raise LLMRetentionNotAcknowledged(RETENTION_MESSAGE)
+    return v
 
 
 def boot_check() -> None:
-    """Called from the app lifespan: refuse to start in api mode without ZDR."""
+    """Called from the app lifespan: refuse to start in api mode without a valid
+    retention acknowledgement; log the acknowledged value."""
     if backend() == "api":
-        require_zdr()
-        logger.info("llm backend=xai-api zdr_confirmed=1 base=%s", settings.llm_api_base_url)
+        v = require_retention_ack()
+        logger.info("llm backend=xai-api data_retention=%s base=%s (agent runs stay on "
+                    "grok-cli)", v, settings.llm_api_base_url)
 
 
-# Stateless requests only (ZDR): these keys are the whole allowed request body.
+# CLI effort vocabulary (grok 1.0.77: none|minimal|low|medium|high|xhigh|max) → xAI
+# Responses API ``reasoning.effort`` (grok-4.5/4.6/4.7: low|medium|high|xhigh;
+# reasoning cannot be disabled). Unknown values are dropped (API default "high").
+_API_EFFORT = {"none": "low", "minimal": "low", "low": "low", "medium": "medium",
+               "high": "high", "xhigh": "xhigh", "max": "xhigh"}
+
+
+def api_effort(reasoning_effort: str | None) -> str | None:
+    if not reasoning_effort:
+        return None
+    v = _API_EFFORT.get(reasoning_effort.strip().lower())
+    if v is None:
+        logger.warning("llm backend=xai-api unknown reasoning_effort=%r: not sent "
+                       "(API default)", reasoning_effort)
+    return v
+
+
+# Stateless requests only: these keys are the whole allowed request body.
 # No previous_response_id / conversation / background / store=true, ever.
 _ALLOWED_BODY_KEYS = frozenset({"model", "input", "instructions", "reasoning", "store"})
 
@@ -372,7 +406,7 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
 
     import httpx
 
-    require_zdr()
+    retention = require_retention_ack()
     mdl = api_model(model)
     if mdl not in price_table():
         raise LLMConfigError(f"no price for model {mdl!r}: add it to MANAGER_LLM_PRICE_TABLE_JSON")
@@ -382,15 +416,17 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
                   "store": False}
     if system and system.strip():
         body["instructions"] = system.strip()
-    if reasoning_effort:
-        body["reasoning"] = {"effort": reasoning_effort}
-    _assert_stateless(body)   # ZDR: store=false explicit, no previous_response_id/conversation
+    effort = api_effort(reasoning_effort)
+    if effort:
+        body["reasoning"] = {"effort": effort}
+    _assert_stateless(body)   # store=false explicit, no previous_response_id/conversation
     logger.info("llm backend=xai-api model=%s effort=%s prompt_chars=%d call_type=%s "
-                "workspace_id=%s", mdl, reasoning_effort or "default",
-                len(build_prompt(prompt, system)), call_type, workspace_id)
+                "workspace_id=%s data_retention=%s", mdl, effort or "default",
+                len(build_prompt(prompt, system)), call_type, workspace_id, retention)
     row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "backend": "api", "model": mdl, "call_type": call_type,
-           "workspace_id": workspace_id, "effort": reasoning_effort or None}
+           "workspace_id": workspace_id, "effort": effort,
+           "effort_requested": reasoning_effort or None, "data_retention": retention}
     t0 = time.monotonic()
     try:
         with _http_client(timeout) as c:
@@ -453,66 +489,25 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
 
 # --------------------------------------------------------------------------- agents
 #
-# Headless grok agents (run/growth-agent.sh, code-agent.sh, run-check.sh) are the
-# growth agent's analytics path. They exec through this module too:
-#   python -m app.services.llm agent-exec <call_type> -- grok --prompt-file ... 
-# cli: guard preflight, then exec the command unchanged (consumer session).
-# api: guard preflight + key + budget; one usage row per run charged at
-#      settings.llm_agent_run_usd_estimate; exec grok with an isolated GROK_HOME
-#      whose config binds the model to the xAI API (env_key XAI_API_KEY), so the
-#      session token in ~/.grok/auth.json is never used.
-
-def agent_grok_home():
-    from pathlib import Path
-    return Path(settings.storage_dir) / "grok-api-home"
-
-
-def _write_agent_grok_home(mdl: str):
-    home = agent_grok_home()
-    home.mkdir(parents=True, exist_ok=True)
-    base = settings.llm_api_base_url.rstrip("/")
-    (home / "config.toml").write_text(
-        "# Generated by app/services/llm.py (LLM_BACKEND=api). No secret here:\n"
-        "# the key is read from the XAI_API_KEY env var at request time.\n"
-        f'[model.cm-xai-api]\nmodel = "{mdl}"\nbase_url = "{base}"\n'
-        'env_key = "XAI_API_KEY"\napi_backend = "responses"\n\n'
-        '[models]\ndefault = "cm-xai-api"\n', encoding="utf-8")
-    return home
-
+# Headless grok agents (run/growth-agent.sh, code-agent.sh, run-check.sh) exec
+# through this module:
+#   python -m app.services.llm agent-exec <call_type> -- grok --prompt-file ...
+# Guard preflight, then exec the command unchanged on the Grok CLI (consumer
+# ``grok login`` session) in BOTH backends: LLM_BACKEND=api moves only
+# ``complete()`` to the xAI API (CTO, 2026-11-13). API keys are stripped from the
+# child env so the CLI can never silently bill XAI_API_KEY outside the cap/ledger.
 
 def agent_exec_plan(call_type: str, cmd: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Return (argv, env) for an agent run, or raise (guard / budget / config)."""
-    from datetime import datetime, timezone
-
+    """Return (argv, env) for an agent run (always the CLI), or raise (guard)."""
     from app.services import llm_guard
     if not cmd:
         raise LLMConfigError("agent-exec: no command")
     if not llm_guard.agent_preflight(call_type):
         raise llm_guard.LLMBlocked("external", call_type)
-    env = os.environ.copy()
-    if backend() != "api":
-        return cmd, env
-    require_zdr()
-    if not bool(getattr(settings, "llm_agent_api_stateless_verified", False)):
-        raise LLMConfigError(
-            "agent-exec in api mode: the Grok CLI's request shape (store / "
-            "previous_response_id) is not verified stateless for ZDR; set "
-            "MANAGER_LLM_AGENT_API_STATELESS_VERIFIED=1 only after the CTO verifies it")
-    mdl = api_model(settings.grok_model or None)
-    if mdl not in price_table():
-        raise LLMConfigError(f"no price for model {mdl!r}")
-    key = _api_key()
-    check_budget(call_type, "agents")
-    est = float(getattr(settings, "llm_agent_run_usd_estimate", 1.0) or 1.0)
-    record_usage({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                  "backend": "api", "model": mdl, "call_type": call_type,
-                  "workspace_id": "agents", "status": "agent_run_started",
-                  "cost_usd_estimated": est, "cost_usd_reported": None, "cost_usd": est})
-    home = _write_agent_grok_home(mdl)
-    env["GROK_HOME"] = str(home)
-    env["XAI_API_KEY"] = key
-    env.pop("GROK_API_KEY", None)
-    return cmd, env
+    if backend() == "api":
+        logger.info("llm agent-exec call_type=%s backend=grok-cli (LLM_BACKEND=api applies "
+                    "to complete() only)", call_type)
+    return cmd, _child_env()
 
 
 def main(argv: list[str] | None = None) -> int:

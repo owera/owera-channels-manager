@@ -138,39 +138,38 @@ class Settings(BaseSettings):
     llm_internal_workspace_ids: str = "1"     # env: MANAGER_LLM_INTERNAL_WORKSPACE_IDS
     # LLM backend (docs/LLM_BACKEND.md). "cli" (default) = Grok CLI `grok -p` on the
     # consumer `grok login` session — unchanged behavior. "api" = xAI API
-    # (Enterprise ToS) POST {llm_api_base_url}/responses with XAI_API_KEY, usage
-    # JSONL + monthly USD cap (fail closed). Anything else = cli.
+    # POST {llm_api_base_url}/responses with XAI_API_KEY for llm.complete() only,
+    # usage JSONL + monthly USD cap (fail closed). Headless agent runs (growth /
+    # code / run-check) stay on the CLI in BOTH modes. Anything else = cli.
     llm_backend: str = Field(default="cli", validation_alias=AliasChoices(
         "MANAGER_LLM_BACKEND", "LLM_BACKEND"))
     # Never logged / never in errors; SecretStr keeps it out of repr(settings).
     xai_api_key: SecretStr = Field(default=SecretStr(""), validation_alias=AliasChoices(
         "XAI_API_KEY", "MANAGER_XAI_API_KEY"))
     llm_api_base_url: str = "https://api.x.ai/v1"   # env: MANAGER_LLM_API_BASE_URL
-    # Enterprise DPA requires Zero Data Retention on the xAI org. The api backend
-    # refuses to boot / call unless the operator confirms ZDR is on: XAI_ZDR_CONFIRMED=1.
-    xai_zdr_confirmed: bool = Field(default=False, validation_alias=AliasChoices(
-        "XAI_ZDR_CONFIRMED", "MANAGER_XAI_ZDR_CONFIRMED"))
-    # Headless grok agents in api mode: the Grok CLI's own request shape (store /
-    # previous_response_id) is not under our control, so they are refused until the
-    # CTO verifies the CLI sends stateless requests on the API-key path.
-    llm_agent_api_stateless_verified: bool = False  # env: MANAGER_LLM_AGENT_API_STATELESS_VERIFIED
+    # Explicit data-retention acknowledgement for the xAI account behind XAI_API_KEY
+    # (replaces the old XAI_ZDR_CONFIRMED gate). Allowed: "zdr" (org has Zero Data
+    # Retention) | "30d_no_training" (standard 30-day retention, no training — the
+    # account Rodrigo approved on 2026-11-13). With LLM_BACKEND=api an empty or any
+    # other value refuses boot and every call (fail closed). The value is logged at
+    # boot and written as ``data_retention`` on every llm_usage JSONL row.
+    xai_data_retention_ack: str = Field(default="", validation_alias=AliasChoices(
+        "XAI_DATA_RETENTION_ACK", "MANAGER_XAI_DATA_RETENTION_ACK"))
     # Model the api backend uses when the CLI would use its own default (grok_model
     # empty). Live claw0 pins MANAGER_GROK_MODEL=grok-4.7, which maps 1:1.
     llm_api_default_model: str = "grok-4.7"   # env: MANAGER_LLM_API_DEFAULT_MODEL
     # Monthly (UTC calendar month) spend cap in USD for the api backend. 0/unset in
-    # api mode → every call blocked (fail closed).
+    # api mode → every call blocked (fail closed). Reference value: 150 (the xAI
+    # account limit is USD 250 shared with Grok Bot + Cursor).
     llm_monthly_usd_cap: float = Field(default=0.0, validation_alias=AliasChoices(
         "MANAGER_LLM_MONTHLY_USD_CAP", "LLM_MONTHLY_USD_CAP"))
-    # One JSON line per api call / agent run: tokens, model, call type, workspace,
+    # One JSON line per api complete() call: tokens, model, call type, workspace,
     # UTC ts, cost — never prompt/response content. Empty = storage_dir/llm-usage.jsonl.
     llm_usage_path: str = ""                  # env: MANAGER_LLM_USAGE_PATH
     # JSON override of the price table (USD per 1M tokens), e.g.
     # {"grok-4.7": {"input": 2.0, "cached_input": 0.5, "output": 6.0,
     #  "long_threshold": 200000, "long_input": 4.0, "long_cached_input": 1.0, "long_output": 12.0}}
     llm_price_table_json: str = ""            # env: MANAGER_LLM_PRICE_TABLE_JSON
-    # Headless grok agents (growth / code / run-check) on the api backend: usage per
-    # run isn't returned to us, so each run is charged this estimate against the cap.
-    llm_agent_run_usd_estimate: float = 1.0   # env: MANAGER_LLM_AGENT_RUN_USD_ESTIMATE
     # edge-tts NoAudioReceived is an upstream flake (2026-09-26 21:00-21:53 BRT: 4 of
     # 8 en-US calls, then clean). Retry in-process before failing the whole render so
     # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).

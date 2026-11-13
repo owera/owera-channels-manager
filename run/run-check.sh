@@ -74,7 +74,7 @@ log "starting daily check"
 # { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) run-check ================"
-  # LLM client (app/services/llm.py agent-exec): guard + backend (cli / xAI API + cap).
+  # LLM client (app/services/llm.py agent-exec): guard preflight; agents always run on the Grok CLI.
   freeze_run_with_watchdog env PYTHONPATH="$REPO" "$REPO/.venv/bin/python" -m app.services.llm \
     agent-exec run_check -- grok --prompt-file "$REPO/run/run-check-prompt.md" \
     --permission-mode bypassPermissions \

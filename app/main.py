@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO,
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_dotenv_into_env()
-    # (M) ZDR boot check: LLM_BACKEND=api without XAI_ZDR_CONFIRMED=1 refuses to start.
+    # LLM_BACKEND=api without XAI_DATA_RETENTION_ACK=zdr|30d_no_training refuses to start.
     from app.services import llm as _llm
     _llm.boot_check()
     ensure_dirs()
