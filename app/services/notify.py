@@ -155,6 +155,12 @@ def _stamp_access_lost(channel: Channel, new_status: str, error: str | None) -> 
     if error and INVALID_GRANT in str(error):
         channel.access_lost_at = utcnow()
         channel.access_lost_reason = INVALID_GRANT
+    elif new_status in (OAuthStatus.EXPIRED, OAuthStatus.DISCONNECTED):
+        # P3b: any EXPIRED/DISCONNECTED flip also starts the clock (the token is
+        # unusable even when the refresh error was not invalid_grant). ERROR
+        # (a failed consent) does not: it never had working access.
+        channel.access_lost_at = utcnow()
+        channel.access_lost_reason = new_status
 
 
 def _apply_user_purge_clock(channel: Channel, reason: str, now) -> None:

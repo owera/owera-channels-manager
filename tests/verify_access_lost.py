@@ -157,7 +157,8 @@ mk_channel(2)
 with Session(eng) as s:
     notify.mark_dead_committed(s, s.get(Channel, 2), "token missing/expired — reconnect required",
                                status=OAuthStatus.EXPIRED)
-ok(get(2).access_lost_at is None, "generic expiry without invalid_grant does not start the clock (P3b)")
+ok(get(2).access_lost_at is not None and get(2).access_lost_reason == "expired",
+   "P3b: generic EXPIRED flip (no invalid_grant) also starts the clock")
 
 first_stamp = get(1).access_lost_at
 with Session(eng) as s:
@@ -245,7 +246,10 @@ ok(youtube_purge.tick(now=T30 + timedelta(days=40)) == 0, "re-run is a no-op (id
 with Session(eng) as s:
     notify.mark_connected(s, s.get(Channel, 10), {"id": "UC10", "title": "Buyer YT"})
     s.add(ChannelMetric(channel_id=10, subscriber_count=9)); s.commit()
-ok(youtube_purge.tick(now=T30 + timedelta(days=90)) == 0, "reconnected channel is not purged")
+youtube_purge.tick(now=T30 + timedelta(days=90))
+with Session(eng) as s:
+    ok(s.exec(select(ChannelMetric).where(ChannelMetric.channel_id == 10)).first() is not None,
+       "reconnected channel is not purged")
 
 # ======================= P3: 7-day fake clock (3 triggers) =================
 print("P3: 7-day purge — disconnect, deletion request, workspace close")

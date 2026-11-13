@@ -18,7 +18,11 @@ Clock: ``Channel.access_lost_at`` (naive UTC), stamped by
 - ``notify.mark_workspace_closed`` — workspace closed (reason
   "workspace_closed", 7 days);
 - ``notify.mark_dead`` — a refresh that failed with ``invalid_grant``
-  (revoked / expired at Google; reason "invalid_grant", 30 days).
+  (revoked / expired at Google; reason "invalid_grant", 30 days), or any
+  other EXPIRED/DISCONNECTED flip (P3b; reason "expired"/"disconnected",
+  30 days);
+- ``backfill_lost_access`` (each tick) — channels already dead before this
+  existed: clock starts at the first tick after deploy (P3b, 30 days).
 A reconnect (``notify.mark_connected``) clears it and cancels the purge.
 
 The scheduler runs ``tick`` every 6 h. A channel is purged once
@@ -123,12 +127,47 @@ def purge_channel(session: Session, channel: Channel, now: datetime | None = Non
     return counts
 
 
+def backfill_lost_access(session: Session, now: datetime | None = None) -> int:
+    """P3b: channels that were already dead before access_lost_at existed get a
+    clock starting now (conservative: the full 30 days from this deploy).
+
+    Covers EXPIRED channels, and DISCONNECTED channels that still hold YouTube
+    metrics (a never-connected onboarding channel has none and is skipped).
+    Idempotent: only rows with access_lost_at NULL are touched. Commits."""
+    now = _naive(now or utcnow())
+    rows = session.exec(
+        select(Channel).where(
+            Channel.access_lost_at == None,  # noqa: E711
+            Channel.oauth_status.in_([OAuthStatus.EXPIRED, OAuthStatus.DISCONNECTED]),
+        )
+    ).all()
+    n = 0
+    for ch in rows:
+        if ch.oauth_status == OAuthStatus.DISCONNECTED:
+            has_data = (
+                session.exec(select(ChannelMetric.id).where(ChannelMetric.channel_id == ch.id)).first()
+                or session.exec(select(VideoMetric.id).where(VideoMetric.channel_id == ch.id)).first()
+                or session.get(OAuthCredential, ch.id) is not None
+            )
+            if not has_data:
+                continue
+        ch.access_lost_at = now
+        ch.access_lost_reason = f"{ch.oauth_status}_backfill"
+        session.add(ch)
+        n += 1
+    if n:
+        session.commit()
+        logger.info("purge clock backfilled for %d already-dead channel(s)", n)
+    return n
+
+
 def tick(now: datetime | None = None) -> int:
     """Scheduler entry point. Returns how many channels were purged."""
     from app.db import session_scope
 
     n = 0
     with session_scope() as session:
+        backfill_lost_access(session, now)
         for ch in due_channels(session, now):
             try:
                 purge_channel(session, ch, now)
