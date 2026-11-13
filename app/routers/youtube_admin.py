@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db import get_session
 from app.models import Channel, ChannelMetric, Topic, Video, VideoMetric, VideoStatus
 from app.schemas import BrandingUpdate, SubscribeBody
@@ -35,6 +36,19 @@ def _connected(session: Session, channel_id: int):
         # without one.
         notify.mark_dead_committed(session, ch, str(e))
         raise HTTPException(409, f"channel not connected: {e}")
+
+
+def _require_subscriptions_feature() -> None:
+    """404 unless MANAGER_YOUTUBE_SUBSCRIPTIONS_ADMIN is on (default OFF, global).
+
+    Subscriptions management and the recent-subscribers list are outside the
+    verified Google OAuth use case (PO CM cut C2). Runs before the handler, so
+    no YouTube call is made and no quota is spent while the flag is off."""
+    if not settings.youtube_subscriptions_admin:
+        raise HTTPException(404, "not available")
+
+
+_SUBS_GATE = [Depends(_require_subscriptions_feature)]
 
 
 # ---- Overview & branding -------------------------------------------------
@@ -100,7 +114,7 @@ def refresh_metrics(channel_id: int, session: Session = Depends(get_session)):
 
 # ---- Subscriptions -------------------------------------------------------
 
-@router.get("/subscriptions")
+@router.get("/subscriptions", dependencies=_SUBS_GATE)
 def list_subscriptions(channel_id: int, session: Session = Depends(get_session)):
     """Channels this account follows."""
     _ch, service = _connected(session, channel_id)
@@ -110,7 +124,7 @@ def list_subscriptions(channel_id: int, session: Session = Depends(get_session))
         raise HTTPException(502, f"could not list subscriptions: {e}")
 
 
-@router.post("/subscriptions", status_code=201)
+@router.post("/subscriptions", status_code=201, dependencies=_SUBS_GATE)
 def add_subscription(channel_id: int, body: SubscribeBody,
                      session: Session = Depends(get_session)):
     _ch, service = _connected(session, channel_id)
@@ -125,7 +139,7 @@ def add_subscription(channel_id: int, body: SubscribeBody,
     return result
 
 
-@router.delete("/subscriptions/{sub_id}", status_code=204)
+@router.delete("/subscriptions/{sub_id}", status_code=204, dependencies=_SUBS_GATE)
 def remove_subscription(channel_id: int, sub_id: str,
                         session: Session = Depends(get_session)):
     _ch, service = _connected(session, channel_id)
@@ -138,7 +152,7 @@ def remove_subscription(channel_id: int, sub_id: str,
     session.commit()
 
 
-@router.get("/subscribers")
+@router.get("/subscribers", dependencies=_SUBS_GATE)
 def list_subscribers(channel_id: int, session: Session = Depends(get_session)):
     """Recent subscribers to this channel (read-only)."""
     _ch, service = _connected(session, channel_id)

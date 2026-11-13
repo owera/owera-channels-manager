@@ -276,6 +276,7 @@ export interface ManagerFeatures {
   google_web_oauth: boolean;
   multi_workspace: boolean;
   spa_google_login: boolean;
+  youtube_subscriptions_admin?: boolean;
 }
 
 export interface AuthMe {
