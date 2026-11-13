@@ -1,0 +1,2459 @@
+{
+ "1316": {
+  "id": 1316,
+  "topic_id": 28,
+  "topic_name": "Agentic Coding com Claude Code",
+  "title": "O agente editou um arquivo que eu não pedi. · Claude Code 9",
+  "subject": "O agente editou um arquivo que eu não pedi. · Claude Code 9",
+  "created_at": "2026-09-22 16:30:00.602947",
+  "script": "O agente editou um arquivo que eu não pedi. O Claude Code grava fora do pedido. Eu pedi o rótulo do botão. O CSS mudou sem o meu aceite. Eu cito o caminho exato do arquivo. Eu proíbo qualquer edição em outro lugar. Eu abro o diff antes de aceitar. Eu rejeito a linha extra que sobrou. Eu só aplico o que eu revisei. Subscribe — next Claude Code trap.",
+  "cc_script": "O agente editou um arquivo que eu não pedi. O Claude Code grava fora do pedido. Eu pedi o rótulo do botão. O CSS mudou sem o meu aceite. Eu cito o caminho exato do arquivo. Eu proíbo qualquer edição em outro lugar. Eu abro o diff antes de aceitar. Eu rejeito a linha extra que sobrou. Eu só aplico o que eu revisei. Subscribe — next Claude Code trap.",
+  "words": [
+   {
+    "text": "O",
+    "start": 0.054333,
+    "dur": 0.122291
+   },
+   {
+    "text": "agente",
+    "start": 0.190208,
+    "dur": 0.448375
+   },
+   {
+    "text": "editou",
+    "start": 0.652166,
+    "dur": 0.285333
+   },
+   {
+    "text": "um",
+    "start": 0.951083,
+    "dur": 0.122291
+   },
+   {
+    "text": "arquivo",
+    "start": 1.086958,
+    "dur": 0.516291
+   },
+   {
+    "text": "que",
+    "start": 1.616833,
+    "dur": 0.081541
+   },
+   {
+    "text": "eu",
+    "start": 1.711958,
+    "dur": 0.081541
+   },
+   {
+    "text": "não",
+    "start": 1.807083,
+    "dur": 0.176625
+   },
+   {
+    "text": "pedi",
+    "start": 1.997291,
+    "dur": 0.421208
+   },
+   {
+    "text": "O",
+    "start": 2.8125,
+    "dur": 0.122291
+   },
+   {
+    "text": "Claude",
+    "start": 2.948375,
+    "dur": 0.380416
+   },
+   {
+    "text": "Code",
+    "start": 3.342375,
+    "dur": 0.298916
+   },
+   {
+    "text": "grava",
+    "start": 3.654875,
+    "dur": 0.407625
+   },
+   {
+    "text": "fora",
+    "start": 4.076083,
+    "dur": 0.3125
+   },
+   {
+    "text": "do",
+    "start": 4.402166,
+    "dur": 0.095125
+   },
+   {
+    "text": "pedido",
+    "start": 4.510875,
+    "dur": 0.502708
+   },
+   {
+    "text": "Eu",
+    "start": 5.951083,
+    "dur": 0.244583
+   },
+   {
+    "text": "pedi",
+    "start": 6.20925,
+    "dur": 0.298916
+   },
+   {
+    "text": "o",
+    "start": 6.52175,
+    "dur": 0.067916
+   },
+   {
+    "text": "rótulo",
+    "start": 6.60325,
+    "dur": 0.502708
+   },
+   {
+    "text": "do",
+    "start": 7.119583,
+    "dur": 0.108708
+   },
+   {
+    "text": "botão",
+    "start": 7.241833,
+    "dur": 0.543458
+   },
+   {
+    "text": "O",
+    "start": 8.722833,
+    "dur": 0.108708
+   },
+   {
+    "text": "CSS",
+    "start": 8.845125,
+    "dur": 0.991833
+   },
+   {
+    "text": "mudou",
+    "start": 9.850541,
+    "dur": 0.394041
+   },
+   {
+    "text": "sem",
+    "start": 10.258166,
+    "dur": 0.326083
+   },
+   {
+    "text": "o",
+    "start": 10.597833,
+    "dur": 0.04075
+   },
+   {
+    "text": "meu",
+    "start": 10.652166,
+    "dur": 0.190208
+   },
+   {
+    "text": "aceite",
+    "start": 10.855958,
+    "dur": 0.557083
+   },
+   {
+    "text": "Eu",
+    "start": 12.350541,
+    "dur": 0.190208
+   },
+   {
+    "text": "cito",
+    "start": 12.554333,
+    "dur": 0.366833
+   },
+   {
+    "text": "o",
+    "start": 12.934791,
+    "dur": 0.027166
+   },
+   {
+    "text": "caminho",
+    "start": 12.975541,
+    "dur": 0.434791
+   },
+   {
+    "text": "exato",
+    "start": 13.423916,
+    "dur": 0.461958
+   },
+   {
+    "text": "do",
+    "start": 13.899458,
+    "dur": 0.081541
+   },
+   {
+    "text": "arquivo",
+    "start": 13.994583,
+    "dur": 0.557083
+   },
+   {
+    "text": "Eu",
+    "start": 15.489125,
+    "dur": 0.176625
+   },
+   {
+    "text": "proíbo",
+    "start": 15.679333,
+    "dur": 0.502708
+   },
+   {
+    "text": "qualquer",
+    "start": 16.195666,
+    "dur": 0.434791
+   },
+   {
+    "text": "edição",
+    "start": 16.644041,
+    "dur": 0.516291
+   },
+   {
+    "text": "em",
+    "start": 17.173916,
+    "dur": 0.108708
+   },
+   {
+    "text": "outro",
+    "start": 17.296208,
+    "dur": 0.298916
+   },
+   {
+    "text": "lugar",
+    "start": 17.608708,
+    "dur": 0.394041
+   },
+   {
+    "text": "Eu",
+    "start": 18.940208,
+    "dur": 0.244583
+   },
+   {
+    "text": "abro",
+    "start": 19.198375,
+    "dur": 0.3125
+   },
+   {
+    "text": "o",
+    "start": 19.524458,
+    "dur": 0.04075
+   },
+   {
+    "text": "diff",
+    "start": 19.578791,
+    "dur": 0.326083
+   },
+   {
+    "text": "antes",
+    "start": 19.918458,
+    "dur": 0.326083
+   },
+   {
+    "text": "de",
+    "start": 20.258166,
+    "dur": 0.067916
+   },
+   {
+    "text": "aceitar",
+    "start": 20.339666,
+    "dur": 0.529875
+   },
+   {
+    "text": "Eu",
+    "start": 21.807083,
+    "dur": 0.163041
+   },
+   {
+    "text": "rejeito",
+    "start": 21.983708,
+    "dur": 0.543458
+   },
+   {
+    "text": "a",
+    "start": 22.54075,
+    "dur": 0.04075
+   },
+   {
+    "text": "linha",
+    "start": 22.595125,
+    "dur": 0.27175
+   },
+   {
+    "text": "extra",
+    "start": 22.880416,
+    "dur": 0.407625
+   },
+   {
+    "text": "que",
+    "start": 23.301625,
+    "dur": 0.108708
+   },
+   {
+    "text": "sobrou",
+    "start": 23.423916,
+    "dur": 0.516291
+   },
+   {
+    "text": "Eu",
+    "start": 24.877708,
+    "dur": 0.203791
+   },
+   {
+    "text": "só",
+    "start": 25.095125,
+    "dur": 0.244583
+   },
+   {
+    "text": "aplico",
+    "start": 25.35325,
+    "dur": 0.543458
+   },
+   {
+    "text": "o",
+    "start": 25.910333,
+    "dur": 0.054333
+   },
+   {
+    "text": "que",
+    "start": 25.97825,
+    "dur": 0.081541
+   },
+   {
+    "text": "eu",
+    "start": 26.073375,
+    "dur": 0.081541
+   },
+   {
+    "text": "revisei",
+    "start": 26.168458,
+    "dur": 0.570666
+   },
+   {
+    "text": "Subscribe",
+    "start": 27.676625,
+    "dur": 0.855958
+   },
+   {
+    "text": "next",
+    "start": 28.79075,
+    "dur": 0.529875
+   },
+   {
+    "text": "Claude",
+    "start": 29.33425,
+    "dur": 0.394041
+   },
+   {
+    "text": "Code",
+    "start": 29.741833,
+    "dur": 0.380416
+   },
+   {
+    "text": "trap",
+    "start": 30.135875,
+    "dur": 0.461958
+   }
+  ],
+  "duration": 31.1,
+  "hook_join": true,
+  "voice": "pt-BR-AntonioNeural",
+  "recorded_beats": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 2.692,
+    "cue": "O agente editou um arquivo que eu não pedi.",
+    "text": "O agente editou um arquivo que eu não pedi.",
+    "object": "AGENTE",
+    "emoji": ""
+   },
+   {
+    "type": "quote",
+    "start": 2.812,
+    "dur": 2.569,
+    "cue": "O Claude Code grava fora do pedido.",
+    "text": "O Claude Code grava fora do pedido.",
+    "emoji": "",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 5.951,
+    "dur": 2.202,
+    "cue": "Eu pedi o rótulo do botão.",
+    "text": "Eu pedi o rótulo do botão.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 8.723,
+    "dur": 2.99,
+    "cue": "O CSS mudou sem o meu aceite.",
+    "text": "O CSS mudou sem o meu aceite.",
+    "attribution": "",
+    "plain": true,
+    "cap_extended_spoken": true
+   },
+   {
+    "type": "quote",
+    "start": 12.351,
+    "dur": 2.568,
+    "cue": "Eu cito o caminho exato do arquivo.",
+    "text": "Eu cito o caminho exato do arquivo.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 15.489,
+    "dur": 2.814,
+    "cue": "Eu proíbo qualquer edição em outro lugar.",
+    "text": "Eu proíbo qualquer edição em outro lugar.",
+    "attribution": "",
+    "plain": true,
+    "cap_extended_spoken": true
+   },
+   {
+    "type": "quote",
+    "start": 18.94,
+    "dur": 2.297,
+    "cue": "Eu abro o diff antes de aceitar.",
+    "text": "Eu abro o diff antes de aceitar.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 21.807,
+    "dur": 2.501,
+    "cue": "Eu rejeito a linha extra que sobrou.",
+    "text": "Eu rejeito a linha extra que sobrou.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 24.878,
+    "dur": 2.311,
+    "cue": "Eu só aplico o que eu revisei.",
+    "text": "Eu só aplico o que eu revisei.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "cta",
+    "start": 27.677,
+    "dur": 3.423,
+    "cue": "Subscribe — next Claude Code trap.",
+    "text": "Subscribe · Claude Code",
+    "sub": "same series"
+   }
+  ],
+  "recorded_hook_pace": {
+   "version": "rr_v1",
+   "claim_words": 9,
+   "claim_spoken_end": 2.418,
+   "claim_match": "exact"
+  },
+  "recorded_gate": [
+   "[B] Blank gap: FAIL — beat[3]→beat[4] hole at 11.71s of 0.64s (0.52s beyond 0.12s fade; max 0.50s extra); beat[5]→beat[6] hole at 18.30s of 0.64s (0.52s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).",
+   "[B] RR hook pace: FAIL — claim 9 words (max 8); first cut at 2.81s (max 2.5s). RR claim ≤8 words, fully spoken by 3.0s, first cut by 2.5s (shorter title head / opening line)."
+  ],
+  "sentence_pace_post": {
+   "target_s": 2.2,
+   "cap_s": 2.5,
+   "splits": 0,
+   "changes": 0,
+   "warnings": [
+    "hook pace: est 2.74s over the 2.2s target — first cut lands ≈0.3s later (RR max 2.5s); hook kept as written (shorter title head): O agente editou um arquivo que eu não pedi."
+   ]
+  }
+ },
+ "1431": {
+  "id": 1431,
+  "topic_id": 27,
+  "topic_name": "Rodar IA local em 2026 (Ollama, VRAM, quantização)",
+  "title": "Na bateria o 14B fez 12. Na tomada, 46. · Local 73",
+  "subject": "Na bateria o 14B fez 12. Na tomada, 46. · Local 73",
+  "created_at": "2026-10-04 02:36:32.396569",
+  "script": "Na bateria o 14B fez 12. Na tomada, 46. Eu achei que o modelo era fraco. A máquina limitou a potência da placa. Eu repeti a mesma prova na tomada. O resultado passou a 46. Eu fixei o perfil em alto desempenho. Eu deixei o cabo de força ligado. Eu li a frequência da placa. A leitura ficou no máximo. Eu confio no teste feito na tomada. Subscribe — next Local trap.",
+  "cc_script": "Na bateria o 14B fez 12. Na tomada, 46. Eu achei que o modelo era fraco. A máquina limitou a potência da placa. Eu repeti a mesma prova na tomada. O resultado passou a 46. Eu fixei o perfil em alto desempenho. Eu deixei o cabo de força ligado. Eu li a frequência da placa. A leitura ficou no máximo. Eu confio no teste feito na tomada. Subscribe — next Local trap.",
+  "words": [
+   {
+    "text": "Na",
+    "start": 0.054333,
+    "dur": 0.176625
+   },
+   {
+    "text": "bateria",
+    "start": 0.244583,
+    "dur": 0.407625
+   },
+   {
+    "text": "o",
+    "start": 0.66575,
+    "dur": 0.027166
+   },
+   {
+    "text": "14B",
+    "start": 0.706541,
+    "dur": 0.7880419
+   },
+   {
+    "text": "fez",
+    "start": 1.508166,
+    "dur": 0.27175
+   },
+   {
+    "text": "12",
+    "start": 1.793458,
+    "dur": 0.407625
+   },
+   {
+    "text": "Na",
+    "start": 2.432083,
+    "dur": 0.163041
+   },
+   {
+    "text": "tomada",
+    "start": 2.608708,
+    "dur": 0.489125
+   },
+   {
+    "text": "46",
+    "start": 3.328791,
+    "dur": 1.046208
+   },
+   {
+    "text": "Eu",
+    "start": 5.3125,
+    "dur": 0.217375
+   },
+   {
+    "text": "achei",
+    "start": 5.543458,
+    "dur": 0.326083
+   },
+   {
+    "text": "que",
+    "start": 5.883166,
+    "dur": 0.081541
+   },
+   {
+    "text": "o",
+    "start": 5.97825,
+    "dur": 0.013583
+   },
+   {
+    "text": "modelo",
+    "start": 6.005416,
+    "dur": 0.489125
+   },
+   {
+    "text": "era",
+    "start": 6.508166,
+    "dur": 0.190208
+   },
+   {
+    "text": "fraco",
+    "start": 6.711958,
+    "dur": 0.475541
+   },
+   {
+    "text": "A",
+    "start": 8.125,
+    "dur": 0.108708
+   },
+   {
+    "text": "máquina",
+    "start": 8.247291,
+    "dur": 0.448375
+   },
+   {
+    "text": "limitou",
+    "start": 8.70925,
+    "dur": 0.448375
+   },
+   {
+    "text": "a",
+    "start": 9.171208,
+    "dur": 0.054333
+   },
+   {
+    "text": "potência",
+    "start": 9.239125,
+    "dur": 0.557083
+   },
+   {
+    "text": "da",
+    "start": 9.809791,
+    "dur": 0.122291
+   },
+   {
+    "text": "placa",
+    "start": 9.945666,
+    "dur": 0.421208
+   },
+   {
+    "text": "Eu",
+    "start": 11.304333,
+    "dur": 0.176625
+   },
+   {
+    "text": "repeti",
+    "start": 11.494583,
+    "dur": 0.434791
+   },
+   {
+    "text": "a",
+    "start": 11.942916,
+    "dur": 0.081541
+   },
+   {
+    "text": "mesma",
+    "start": 12.038041,
+    "dur": 0.434791
+   },
+   {
+    "text": "prova",
+    "start": 12.486416,
+    "dur": 0.3125
+   },
+   {
+    "text": "na",
+    "start": 12.8125,
+    "dur": 0.108708
+   },
+   {
+    "text": "tomada",
+    "start": 12.934791,
+    "dur": 0.516291
+   },
+   {
+    "text": "O",
+    "start": 14.388583,
+    "dur": 0.095125
+   },
+   {
+    "text": "resultado",
+    "start": 14.497291,
+    "dur": 0.706541
+   },
+   {
+    "text": "passou",
+    "start": 15.217375,
+    "dur": 0.434791
+   },
+   {
+    "text": "a",
+    "start": 15.66575,
+    "dur": 0.054333
+   },
+   {
+    "text": "46",
+    "start": 15.733708,
+    "dur": 1.0461669
+   },
+   {
+    "text": "Eu",
+    "start": 17.717375,
+    "dur": 0.190208
+   },
+   {
+    "text": "fixei",
+    "start": 17.921208,
+    "dur": 0.516291
+   },
+   {
+    "text": "o",
+    "start": 18.451083,
+    "dur": 0.054333
+   },
+   {
+    "text": "perfil",
+    "start": 18.519041,
+    "dur": 0.502708
+   },
+   {
+    "text": "em",
+    "start": 19.035333,
+    "dur": 0.135875
+   },
+   {
+    "text": "alto",
+    "start": 19.184791,
+    "dur": 0.326083
+   },
+   {
+    "text": "desempenho",
+    "start": 19.524458,
+    "dur": 0.652166
+   },
+   {
+    "text": "Eu",
+    "start": 21.114125,
+    "dur": 0.217375
+   },
+   {
+    "text": "deixei",
+    "start": 21.345125,
+    "dur": 0.394041
+   },
+   {
+    "text": "o",
+    "start": 21.752708,
+    "dur": 0.067916
+   },
+   {
+    "text": "cabo",
+    "start": 21.83425,
+    "dur": 0.35325
+   },
+   {
+    "text": "de",
+    "start": 22.201083,
+    "dur": 0.095125
+   },
+   {
+    "text": "força",
+    "start": 22.309791,
+    "dur": 0.380416
+   },
+   {
+    "text": "ligado",
+    "start": 22.703791,
+    "dur": 0.543458
+   },
+   {
+    "text": "Eu",
+    "start": 24.184791,
+    "dur": 0.203791
+   },
+   {
+    "text": "li",
+    "start": 24.402166,
+    "dur": 0.27175
+   },
+   {
+    "text": "a",
+    "start": 24.6875,
+    "dur": 0.095125
+   },
+   {
+    "text": "frequência",
+    "start": 24.796208,
+    "dur": 0.557083
+   },
+   {
+    "text": "da",
+    "start": 25.366833,
+    "dur": 0.122291
+   },
+   {
+    "text": "placa",
+    "start": 25.502708,
+    "dur": 0.434791
+   },
+   {
+    "text": "A",
+    "start": 26.875,
+    "dur": 0.095125
+   },
+   {
+    "text": "leitura",
+    "start": 26.983708,
+    "dur": 0.58425
+   },
+   {
+    "text": "ficou",
+    "start": 27.581541,
+    "dur": 0.339666
+   },
+   {
+    "text": "no",
+    "start": 27.934791,
+    "dur": 0.108708
+   },
+   {
+    "text": "máximo",
+    "start": 28.057083,
+    "dur": 0.557083
+   },
+   {
+    "text": "Eu",
+    "start": 29.551625,
+    "dur": 0.176625
+   },
+   {
+    "text": "confio",
+    "start": 29.741833,
+    "dur": 0.489125
+   },
+   {
+    "text": "no",
+    "start": 30.244583,
+    "dur": 0.122291
+   },
+   {
+    "text": "teste",
+    "start": 30.380416,
+    "dur": 0.380416
+   },
+   {
+    "text": "feito",
+    "start": 30.774458,
+    "dur": 0.35325
+   },
+   {
+    "text": "na",
+    "start": 31.141291,
+    "dur": 0.108708
+   },
+   {
+    "text": "tomada",
+    "start": 31.263583,
+    "dur": 0.502708
+   },
+   {
+    "text": "Subscribe",
+    "start": 32.703791,
+    "dur": 0.842375
+   },
+   {
+    "text": "next",
+    "start": 33.858708,
+    "dur": 0.502708
+   },
+   {
+    "text": "Local",
+    "start": 34.375,
+    "dur": 0.394041
+   },
+   {
+    "text": "trap",
+    "start": 34.782625,
+    "dur": 0.475541
+   }
+  ],
+  "duration": 35.76,
+  "hook_join": true,
+  "voice": "pt-BR-AntonioNeural",
+  "recorded_beats": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 4.875,
+    "cue": "Na bateria o 14B fez 12. Na tomada, 46.",
+    "text": "Na bateria o 14B fez 12. Na tomada, 46.",
+    "object": "BATERIA",
+    "emoji": ""
+   },
+   {
+    "type": "quote",
+    "start": 5.312,
+    "dur": 2.243,
+    "cue": "Eu achei que o modelo era fraco.",
+    "text": "Eu achei que o modelo era fraco.",
+    "emoji": "",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 8.125,
+    "dur": 2.609,
+    "cue": "A máquina limitou a potência da placa.",
+    "text": "A máquina limitou a potência da placa.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 11.304,
+    "dur": 2.515,
+    "cue": "Eu repeti a mesma prova na tomada.",
+    "text": "Eu repeti a mesma prova na tomada.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 14.389,
+    "dur": 2.758,
+    "cue": "O resultado passou a 46.",
+    "text": "O resultado passou a 46.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 17.717,
+    "dur": 2.8,
+    "cue": "Eu fixei o perfil em alto desempenho.",
+    "text": "Eu fixei o perfil em alto desempenho.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 21.114,
+    "dur": 2.501,
+    "cue": "Eu deixei o cabo de força ligado.",
+    "text": "Eu deixei o cabo de força ligado.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 24.185,
+    "dur": 2.12,
+    "cue": "Eu li a frequência da placa.",
+    "text": "Eu li a frequência da placa.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 26.875,
+    "dur": 2.107,
+    "cue": "A leitura ficou no máximo.",
+    "text": "A leitura ficou no máximo.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 29.552,
+    "dur": 2.664,
+    "cue": "Eu confio no teste feito na tomada.",
+    "text": "Eu confio no teste feito na tomada.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "cta",
+    "start": 32.704,
+    "dur": 3.056,
+    "cue": "Subscribe — next Local trap.",
+    "text": "Subscribe · Local",
+    "sub": "same series"
+   }
+  ],
+  "recorded_hook_pace": {
+   "version": "rr_v1",
+   "claim_words": 9,
+   "claim_spoken_end": 4.375,
+   "claim_match": "exact"
+  },
+  "recorded_gate": [
+   "[B] RR hook pace: FAIL — claim 9 words (max 8); claim spoken by 4.38s (max 3.0s); first cut at 5.31s (max 2.5s). RR claim ≤8 words, fully spoken by 3.0s, first cut by 2.5s (shorter title head / opening line)."
+  ],
+  "sentence_pace_post": {
+   "target_s": 2.2,
+   "cap_s": 2.5,
+   "splits": 0,
+   "changes": 0,
+   "warnings": [
+    "keyword 'tomada' in 3 sentences (max 2 outside the hook): sentences 2, 5, 11",
+    "script length: 12 sentences (max 12), est 36.0s total (max 35s)",
+    "hook pace: est 2.60s over the 2.2s target — first cut lands ≈0.3s later (RR max 2.5s); hook kept as written (shorter title head): Na bateria o 14B fez 12."
+   ]
+  }
+ },
+ "1433": {
+  "id": 1433,
+  "topic_id": 4,
+  "topic_name": "IA",
+  "title": "O Defender escaneia o GGUF a cada load, não é engenharia. · IA 228",
+  "subject": "O Defender escaneia o GGUF a cada load, não é engenharia. · IA 228",
+  "created_at": "2026-10-05 02:33:42.321073",
+  "script": "O Defender escaneia o GGUF a cada load, não é engenharia. O Defender lê o GGUF inteiro. A leitura não vê a execução. Eu troco um peso e o scan passa. O texto sai com o peso errado. Eu baixo o hash publicado. Eu só aceito o binário da origem. Eu comparo os dois antes do load. Eu descarto o arquivo diferente. Eu carrego só com o hash igual. Se inscreve. Próxima armadilha de IA.",
+  "cc_script": "O Defender escaneia o GGUF a cada load, não é engenharia. O Defender lê o GGUF inteiro. A leitura não vê a execução. Eu troco um peso e o scan passa. O texto sai com o peso errado. Eu baixo o hash publicado. Eu só aceito o binário da origem. Eu comparo os dois antes do load. Eu descarto o arquivo diferente. Eu carrego só com o hash igual. Se inscreve. Próxima armadilha de IA.",
+  "words": [
+   {
+    "text": "O",
+    "start": 0.054333,
+    "dur": 0.122291
+   },
+   {
+    "text": "Defender",
+    "start": 0.190208,
+    "dur": 0.516291
+   },
+   {
+    "text": "escaneia",
+    "start": 0.720125,
+    "dur": 0.516291
+   },
+   {
+    "text": "o",
+    "start": 1.25,
+    "dur": 0.027166
+   },
+   {
+    "text": "GGUF",
+    "start": 1.29075,
+    "dur": 0.35325
+   },
+   {
+    "text": "a",
+    "start": 1.657625,
+    "dur": 0.067916
+   },
+   {
+    "text": "cada",
+    "start": 1.739125,
+    "dur": 0.258166
+   },
+   {
+    "text": "load",
+    "start": 2.010875,
+    "dur": 0.394041
+   },
+   {
+    "text": "não",
+    "start": 2.663041,
+    "dur": 0.244583
+   },
+   {
+    "text": "é",
+    "start": 2.921208,
+    "dur": 0.067916
+   },
+   {
+    "text": "engenharia",
+    "start": 3.002708,
+    "dur": 0.679333
+   },
+   {
+    "text": "O",
+    "start": 3.994583,
+    "dur": 0.081541
+   },
+   {
+    "text": "Defender",
+    "start": 4.089666,
+    "dur": 0.570666
+   },
+   {
+    "text": "lê",
+    "start": 4.673916,
+    "dur": 0.163041
+   },
+   {
+    "text": "o",
+    "start": 4.850541,
+    "dur": 0.067916
+   },
+   {
+    "text": "GGUF",
+    "start": 4.932083,
+    "dur": 0.366833
+   },
+   {
+    "text": "inteiro",
+    "start": 5.3125,
+    "dur": 0.475541
+   },
+   {
+    "text": "A",
+    "start": 6.725541,
+    "dur": 0.108708
+   },
+   {
+    "text": "leitura",
+    "start": 6.847833,
+    "dur": 0.557083
+   },
+   {
+    "text": "não",
+    "start": 7.418458,
+    "dur": 0.244583
+   },
+   {
+    "text": "vê",
+    "start": 7.676625,
+    "dur": 0.203791
+   },
+   {
+    "text": "a",
+    "start": 7.894041,
+    "dur": 0.095125
+   },
+   {
+    "text": "execução",
+    "start": 8.002708,
+    "dur": 0.692916
+   },
+   {
+    "text": "Eu",
+    "start": 9.633166,
+    "dur": 0.203791
+   },
+   {
+    "text": "troco",
+    "start": 9.850541,
+    "dur": 0.366833
+   },
+   {
+    "text": "um",
+    "start": 10.230958,
+    "dur": 0.122291
+   },
+   {
+    "text": "peso",
+    "start": 10.366833,
+    "dur": 0.434791
+   },
+   {
+    "text": "e",
+    "start": 10.815208,
+    "dur": 0.04075
+   },
+   {
+    "text": "o",
+    "start": 10.869583,
+    "dur": 0.054333
+   },
+   {
+    "text": "scan",
+    "start": 10.9375,
+    "dur": 0.326083
+   },
+   {
+    "text": "passa",
+    "start": 11.277166,
+    "dur": 0.475541
+   },
+   {
+    "text": "O",
+    "start": 12.690208,
+    "dur": 0.163041
+   },
+   {
+    "text": "texto",
+    "start": 12.866833,
+    "dur": 0.434791
+   },
+   {
+    "text": "sai",
+    "start": 13.315208,
+    "dur": 0.27175
+   },
+   {
+    "text": "com",
+    "start": 13.600541,
+    "dur": 0.176625
+   },
+   {
+    "text": "o",
+    "start": 13.79075,
+    "dur": 0.054333
+   },
+   {
+    "text": "peso",
+    "start": 13.858708,
+    "dur": 0.339666
+   },
+   {
+    "text": "errado",
+    "start": 14.211958,
+    "dur": 0.434791
+   },
+   {
+    "text": "Eu",
+    "start": 15.58425,
+    "dur": 0.203791
+   },
+   {
+    "text": "baixo",
+    "start": 15.801625,
+    "dur": 0.461958
+   },
+   {
+    "text": "o",
+    "start": 16.277166,
+    "dur": 0.027166
+   },
+   {
+    "text": "hash",
+    "start": 16.317916,
+    "dur": 0.27175
+   },
+   {
+    "text": "publicado",
+    "start": 16.60325,
+    "dur": 0.692916
+   },
+   {
+    "text": "Eu",
+    "start": 18.233708,
+    "dur": 0.176625
+   },
+   {
+    "text": "só",
+    "start": 18.423916,
+    "dur": 0.230958
+   },
+   {
+    "text": "aceito",
+    "start": 18.668458,
+    "dur": 0.434791
+   },
+   {
+    "text": "o",
+    "start": 19.116833,
+    "dur": 0.027166
+   },
+   {
+    "text": "binário",
+    "start": 19.157625,
+    "dur": 0.434791
+   },
+   {
+    "text": "da",
+    "start": 19.605958,
+    "dur": 0.095125
+   },
+   {
+    "text": "origem",
+    "start": 19.714666,
+    "dur": 0.516291
+   },
+   {
+    "text": "Eu",
+    "start": 21.168458,
+    "dur": 0.190208
+   },
+   {
+    "text": "comparo",
+    "start": 21.372291,
+    "dur": 0.434791
+   },
+   {
+    "text": "os",
+    "start": 21.820666,
+    "dur": 0.095125
+   },
+   {
+    "text": "dois",
+    "start": 21.929333,
+    "dur": 0.230958
+   },
+   {
+    "text": "antes",
+    "start": 22.173916,
+    "dur": 0.434791
+   },
+   {
+    "text": "do",
+    "start": 22.622291,
+    "dur": 0.122291
+   },
+   {
+    "text": "load",
+    "start": 22.758166,
+    "dur": 0.461958
+   },
+   {
+    "text": "Eu",
+    "start": 24.157625,
+    "dur": 0.176625
+   },
+   {
+    "text": "descarto",
+    "start": 24.347833,
+    "dur": 0.625
+   },
+   {
+    "text": "o",
+    "start": 24.986416,
+    "dur": 0.067916
+   },
+   {
+    "text": "arquivo",
+    "start": 25.067916,
+    "dur": 0.461958
+   },
+   {
+    "text": "diferente",
+    "start": 25.543458,
+    "dur": 0.638583
+   },
+   {
+    "text": "Eu",
+    "start": 27.119583,
+    "dur": 0.190208
+   },
+   {
+    "text": "carrego",
+    "start": 27.323375,
+    "dur": 0.543458
+   },
+   {
+    "text": "só",
+    "start": 27.880416,
+    "dur": 0.258166
+   },
+   {
+    "text": "com",
+    "start": 28.152166,
+    "dur": 0.190208
+   },
+   {
+    "text": "o",
+    "start": 28.355958,
+    "dur": 0.027166
+   },
+   {
+    "text": "hash",
+    "start": 28.39675,
+    "dur": 0.3125
+   },
+   {
+    "text": "igual",
+    "start": 28.722833,
+    "dur": 0.380416
+   },
+   {
+    "text": "Se",
+    "start": 30.04075,
+    "dur": 0.230958
+   },
+   {
+    "text": "inscreve",
+    "start": 30.285333,
+    "dur": 0.652166
+   },
+   {
+    "text": "Próxima",
+    "start": 31.875,
+    "dur": 0.516291
+   },
+   {
+    "text": "armadilha",
+    "start": 32.404875,
+    "dur": 0.652166
+   },
+   {
+    "text": "de",
+    "start": 33.070666,
+    "dur": 0.163041
+   },
+   {
+    "text": "IA",
+    "start": 33.247291,
+    "dur": 0.3937
+   }
+  ],
+  "duration": 34.14,
+  "hook_join": true,
+  "voice": "pt-BR-AntonioNeural",
+  "recorded_beats": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 3.882,
+    "cue": "O Defender escaneia o GGUF a cada load, não é engenharia.",
+    "text": "O Defender escaneia o GGUF a cada load, não é engenharia.",
+    "object": "DEFENDER",
+    "emoji": ""
+   },
+   {
+    "type": "quote",
+    "start": 3.995,
+    "dur": 2.161,
+    "cue": "O Defender lê o GGUF inteiro.",
+    "text": "O Defender lê o GGUF inteiro.",
+    "emoji": "",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 6.726,
+    "dur": 2.337,
+    "cue": "A leitura não vê a execução.",
+    "text": "A leitura não vê a execução.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 9.633,
+    "dur": 2.487,
+    "cue": "Eu troco um peso e o scan passa.",
+    "text": "Eu troco um peso e o scan passa.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 12.69,
+    "dur": 2.324,
+    "cue": "O texto sai com o peso errado.",
+    "text": "O texto sai com o peso errado.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 15.584,
+    "dur": 2.08,
+    "cue": "Eu baixo o hash publicado.",
+    "text": "Eu baixo o hash publicado.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 18.234,
+    "dur": 2.364,
+    "cue": "Eu só aceito o binário da origem.",
+    "text": "Eu só aceito o binário da origem.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 21.168,
+    "dur": 2.42,
+    "cue": "Eu comparo os dois antes do load.",
+    "text": "Eu comparo os dois antes do load.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 24.158,
+    "dur": 2.392,
+    "cue": "Eu descarto o arquivo diferente.",
+    "text": "Eu descarto o arquivo diferente.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 27.12,
+    "dur": 2.433,
+    "cue": "Eu carrego só com o hash igual.",
+    "text": "Eu carrego só com o hash igual.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "cta",
+    "start": 30.041,
+    "dur": 3.78,
+    "cue": "Se inscreve. Próxima armadilha de IA.",
+    "text": "Se inscreve · IA",
+    "sub": ""
+   }
+  ],
+  "recorded_hook_pace": {
+   "version": "rr_v1",
+   "claim_words": 11,
+   "claim_spoken_end": 3.682,
+   "claim_match": "exact"
+  },
+  "recorded_gate": [
+   "[B] RR hook pace: FAIL — claim 11 words (max 8); claim spoken by 3.68s (max 3.0s); first cut at 4.00s (max 2.5s). RR claim ≤8 words, fully spoken by 3.0s, first cut by 2.5s (shorter title head / opening line)."
+  ],
+  "sentence_pace_post": {
+   "target_s": 2.2,
+   "cap_s": 2.5,
+   "splits": 0,
+   "changes": 0,
+   "warnings": [
+    "script length: 12 sentences (max 12), est 35.4s total (max 35s)",
+    "hook pace: est 3.94s over the 2.2s target — first cut lands ≈0.3s later (RR max 2.5s); hook kept as written (shorter title head): O Defender escaneia o GGUF a cada load, não é engenharia."
+   ]
+  }
+ },
+ "1434": {
+  "id": 1434,
+  "topic_id": 4,
+  "topic_name": "IA",
+  "title": "num_ctx 2048 corta o prompt, não é engenharia. · IA 229",
+  "subject": "num_ctx 2048 corta o prompt, não é engenharia. · IA 229",
+  "created_at": "2026-10-05 02:33:42.321371",
+  "script": "num_ctx 2048 corta o prompt, não é engenharia. Ctx 2048 só corta. Eu coloquei a instrução no topo. O contrato veio longo demais pro limite. O modelo leu só o trecho final. Eu contei os tokens com o contador. Eu aumentei o ctx para caber tudo. Eu reenviei o contrato por completo. A instrução chegou inteira no teste. Eu meço o arquivo antes do envio. Se inscreve. Próxima armadilha de IA.",
+  "cc_script": "num_ctx 2048 corta o prompt, não é engenharia. Ctx 2048 só corta. Eu coloquei a instrução no topo. O contrato veio longo demais pro limite. O modelo leu só o trecho final. Eu contei os tokens com o contador. Eu aumentei o ctx para caber tudo. Eu reenviei o contrato por completo. A instrução chegou inteira no teste. Eu meço o arquivo antes do envio. Se inscreve. Próxima armadilha de IA.",
+  "words": [
+   {
+    "text": "num_ctx",
+    "start": 0.054333,
+    "dur": 0.8157
+   },
+   {
+    "text": "2048 corta",
+    "start": 0.883166,
+    "dur": 1.37225
+   },
+   {
+    "text": "o",
+    "start": 2.269041,
+    "dur": 0.027166
+   },
+   {
+    "text": "prompt",
+    "start": 2.309791,
+    "dur": 0.475541
+   },
+   {
+    "text": "não",
+    "start": 3.016291,
+    "dur": 0.27175
+   },
+   {
+    "text": "é",
+    "start": 3.301625,
+    "dur": 0.067916
+   },
+   {
+    "text": "engenharia",
+    "start": 3.383166,
+    "dur": 0.692916
+   },
+   {
+    "text": "Ctx",
+    "start": 4.347833,
+    "dur": 0.570666
+   },
+   {
+    "text": "2048 só",
+    "start": 4.932083,
+    "dur": 1.304333
+   },
+   {
+    "text": "corta",
+    "start": 6.25,
+    "dur": 0.475541
+   },
+   {
+    "text": "Eu",
+    "start": 7.663041,
+    "dur": 0.176625
+   },
+   {
+    "text": "coloquei",
+    "start": 7.85325,
+    "dur": 0.516291
+   },
+   {
+    "text": "a",
+    "start": 8.383166,
+    "dur": 0.054333
+   },
+   {
+    "text": "instrução",
+    "start": 8.451083,
+    "dur": 0.597833
+   },
+   {
+    "text": "no",
+    "start": 9.0625,
+    "dur": 0.149458
+   },
+   {
+    "text": "topo",
+    "start": 9.225541,
+    "dur": 0.407625
+   },
+   {
+    "text": "O",
+    "start": 10.570666,
+    "dur": 0.108708
+   },
+   {
+    "text": "contrato",
+    "start": 10.692916,
+    "dur": 0.638583
+   },
+   {
+    "text": "veio",
+    "start": 11.345125,
+    "dur": 0.285333
+   },
+   {
+    "text": "longo",
+    "start": 11.644041,
+    "dur": 0.380416
+   },
+   {
+    "text": "demais",
+    "start": 12.038041,
+    "dur": 0.407625
+   },
+   {
+    "text": "pro",
+    "start": 12.45925,
+    "dur": 0.163041
+   },
+   {
+    "text": "limite",
+    "start": 12.635875,
+    "dur": 0.570666
+   },
+   {
+    "text": "O",
+    "start": 14.144041,
+    "dur": 0.108708
+   },
+   {
+    "text": "modelo",
+    "start": 14.266291,
+    "dur": 0.543458
+   },
+   {
+    "text": "leu",
+    "start": 14.823375,
+    "dur": 0.230958
+   },
+   {
+    "text": "só",
+    "start": 15.067916,
+    "dur": 0.190208
+   },
+   {
+    "text": "o",
+    "start": 15.27175,
+    "dur": 0.067916
+   },
+   {
+    "text": "trecho",
+    "start": 15.35325,
+    "dur": 0.394041
+   },
+   {
+    "text": "final",
+    "start": 15.760875,
+    "dur": 0.434791
+   },
+   {
+    "text": "Eu",
+    "start": 17.133166,
+    "dur": 0.176625
+   },
+   {
+    "text": "contei",
+    "start": 17.323375,
+    "dur": 0.475541
+   },
+   {
+    "text": "os",
+    "start": 17.8125,
+    "dur": 0.135875
+   },
+   {
+    "text": "tokens",
+    "start": 17.961958,
+    "dur": 0.475541
+   },
+   {
+    "text": "com",
+    "start": 18.451083,
+    "dur": 0.149458
+   },
+   {
+    "text": "o",
+    "start": 18.614125,
+    "dur": 0.04075
+   },
+   {
+    "text": "contador",
+    "start": 18.668458,
+    "dur": 0.543458
+   },
+   {
+    "text": "Eu",
+    "start": 20.149458,
+    "dur": 0.217375
+   },
+   {
+    "text": "aumentei",
+    "start": 20.380416,
+    "dur": 0.489125
+   },
+   {
+    "text": "o",
+    "start": 20.883166,
+    "dur": 0.04075
+   },
+   {
+    "text": "ctx",
+    "start": 20.9375,
+    "dur": 0.679333
+   },
+   {
+    "text": "para",
+    "start": 21.630416,
+    "dur": 0.203791
+   },
+   {
+    "text": "caber",
+    "start": 21.847833,
+    "dur": 0.380416
+   },
+   {
+    "text": "tudo",
+    "start": 22.241833,
+    "dur": 0.394041
+   },
+   {
+    "text": "Eu",
+    "start": 23.573375,
+    "dur": 0.176625
+   },
+   {
+    "text": "reenviei",
+    "start": 23.763583,
+    "dur": 0.570666
+   },
+   {
+    "text": "o",
+    "start": 24.347833,
+    "dur": 0.054333
+   },
+   {
+    "text": "contrato",
+    "start": 24.41575,
+    "dur": 0.597833
+   },
+   {
+    "text": "por",
+    "start": 25.027166,
+    "dur": 0.135875
+   },
+   {
+    "text": "completo",
+    "start": 25.176625,
+    "dur": 0.652166
+   },
+   {
+    "text": "A",
+    "start": 26.766291,
+    "dur": 0.095125
+   },
+   {
+    "text": "instrução",
+    "start": 26.875,
+    "dur": 0.66575
+   },
+   {
+    "text": "chegou",
+    "start": 27.554333,
+    "dur": 0.394041
+   },
+   {
+    "text": "inteira",
+    "start": 27.961958,
+    "dur": 0.489125
+   },
+   {
+    "text": "no",
+    "start": 28.464666,
+    "dur": 0.135875
+   },
+   {
+    "text": "teste",
+    "start": 28.614125,
+    "dur": 0.516291
+   },
+   {
+    "text": "Eu",
+    "start": 30.067916,
+    "dur": 0.217375
+   },
+   {
+    "text": "meço",
+    "start": 30.298916,
+    "dur": 0.421208
+   },
+   {
+    "text": "o",
+    "start": 30.733708,
+    "dur": 0.054333
+   },
+   {
+    "text": "arquivo",
+    "start": 30.801625,
+    "dur": 0.557083
+   },
+   {
+    "text": "antes",
+    "start": 31.372291,
+    "dur": 0.35325
+   },
+   {
+    "text": "do",
+    "start": 31.739125,
+    "dur": 0.095125
+   },
+   {
+    "text": "envio",
+    "start": 31.847833,
+    "dur": 0.502708
+   },
+   {
+    "text": "Se",
+    "start": 33.288041,
+    "dur": 0.230958
+   },
+   {
+    "text": "inscreve",
+    "start": 33.532625,
+    "dur": 0.652166
+   },
+   {
+    "text": "Próxima",
+    "start": 35.122291,
+    "dur": 0.516291
+   },
+   {
+    "text": "armadilha",
+    "start": 35.652166,
+    "dur": 0.652166
+   },
+   {
+    "text": "de",
+    "start": 36.317916,
+    "dur": 0.163041
+   },
+   {
+    "text": "IA",
+    "start": 36.494583,
+    "dur": 0.3944
+   }
+  ],
+  "duration": 37.39,
+  "hook_join": true,
+  "voice": "pt-BR-AntonioNeural",
+  "recorded_beats": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 4.276,
+    "cue": "num_ctx 2048 corta o prompt, não é engenharia.",
+    "text": "num_ctx 2048 corta o prompt, não é engenharia.",
+    "object": "TERMINAL",
+    "emoji": ""
+   },
+   {
+    "type": "quote",
+    "start": 4.348,
+    "dur": 2.745,
+    "cue": "Ctx 2048 só corta.",
+    "text": "Ctx 2048 só corta.",
+    "emoji": "",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 7.663,
+    "dur": 2.338,
+    "cue": "Eu coloquei a instrução no topo.",
+    "text": "Eu coloquei a instrução no topo.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 10.571,
+    "dur": 2.936,
+    "cue": "O contrato veio longo demais pro limite.",
+    "text": "O contrato veio longo demais pro limite.",
+    "attribution": "",
+    "plain": true,
+    "cap_extended_spoken": true
+   },
+   {
+    "type": "quote",
+    "start": 14.144,
+    "dur": 2.419,
+    "cue": "O modelo leu só o trecho final.",
+    "text": "O modelo leu só o trecho final.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 17.133,
+    "dur": 2.446,
+    "cue": "Eu contei os tokens com o contador.",
+    "text": "Eu contei os tokens com o contador.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 20.149,
+    "dur": 2.787,
+    "cue": "Eu aumentei o ctx para caber tudo.",
+    "text": "Eu aumentei o ctx para caber tudo.",
+    "attribution": "",
+    "plain": true,
+    "cap_extended_spoken": true
+   },
+   {
+    "type": "quote",
+    "start": 23.573,
+    "dur": 2.623,
+    "cue": "Eu reenviei o contrato por completo.",
+    "text": "Eu reenviei o contrato por completo.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 26.766,
+    "dur": 2.732,
+    "cue": "A instrução chegou inteira no teste.",
+    "text": "A instrução chegou inteira no teste.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 30.068,
+    "dur": 2.733,
+    "cue": "Eu meço o arquivo antes do envio.",
+    "text": "Eu meço o arquivo antes do envio.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "cta",
+    "start": 33.288,
+    "dur": 3.78,
+    "cue": "Se inscreve. Próxima armadilha de IA.",
+    "text": "Se inscreve · IA",
+    "sub": ""
+   }
+  ],
+  "recorded_hook_pace": {
+   "version": "rr_v1",
+   "claim_words": 8,
+   "claim_spoken_end": 4.076,
+   "claim_match": "exact"
+  },
+  "recorded_gate": [
+   "[B] Blank gap: FAIL — beat[3]→beat[4] hole at 13.51s of 0.64s (0.52s beyond 0.12s fade; max 0.50s extra); beat[6]→beat[7] hole at 22.94s of 0.64s (0.52s beyond 0.12s fade; max 0.50s extra). A card owns its hold + the 0.12s inter-beat fade; a hole longer than 0.5s beyond that fade is a blank screen (OS and RR).",
+   "[B] RR hook pace: FAIL — claim spoken by 4.08s (max 3.0s); first cut at 4.35s (max 2.5s). RR claim ≤8 words, fully spoken by 3.0s, first cut by 2.5s (shorter title head / opening line)."
+  ],
+  "sentence_pace_post": {
+   "target_s": 2.2,
+   "cap_s": 2.5,
+   "splits": 0,
+   "changes": 0,
+   "warnings": [
+    "script length: 12 sentences (max 12), est 36.1s total (max 35s)",
+    "hook pace: est 3.91s over the 2.2s target — first cut lands ≈0.3s later (RR max 2.5s); hook kept as written (shorter title head): num_ctx 2048 corta o prompt, não é engenharia."
+   ]
+  }
+ },
+ "1435": {
+  "id": 1435,
+  "topic_id": 4,
+  "topic_name": "IA",
+  "title": "Quantizar sem imatrix estraga o Q4, não é engenharia. · IA 230",
+  "subject": "Quantizar sem imatrix estraga o Q4, não é engenharia. · IA 230",
+  "created_at": "2026-10-05 02:33:42.321490",
+  "script": "Quantizar sem imatrix estraga o Q4, não é engenharia. Eu vejo um erro grave no arquivo. O meu Q4 piorou no teste. Q5 teve perplexidade menor. Eu gero a imatrix com dados reais. Eu uso textos curtos do meu domínio. Eu refaço o Q4 com imatrix. Eu meço a perplexidade no fim. Eu só aceito um número mais baixo. Eu só subo o que passou na prova. Se inscreve. Próxima armadilha de IA.",
+  "cc_script": "Quantizar sem imatrix estraga o Q4, não é engenharia. Eu vejo um erro grave no arquivo. O meu Q4 piorou no teste. Q5 teve perplexidade menor. Eu gero a imatrix com dados reais. Eu uso textos curtos do meu domínio. Eu refaço o Q4 com imatrix. Eu meço a perplexidade no fim. Eu só aceito um número mais baixo. Eu só subo o que passou na prova. Se inscreve. Próxima armadilha de IA.",
+  "words": [
+   {
+    "text": "Quantizar",
+    "start": 0.054333,
+    "dur": 0.625
+   },
+   {
+    "text": "sem",
+    "start": 0.692916,
+    "dur": 0.203791
+   },
+   {
+    "text": "imatrix",
+    "start": 0.910333,
+    "dur": 0.502708
+   },
+   {
+    "text": "estraga",
+    "start": 1.426625,
+    "dur": 0.529875
+   },
+   {
+    "text": "o",
+    "start": 1.970125,
+    "dur": 0.04075
+   },
+   {
+    "text": "Q4",
+    "start": 2.024458,
+    "dur": 0.6521669
+   },
+   {
+    "text": "não",
+    "start": 2.948375,
+    "dur": 0.258166
+   },
+   {
+    "text": "é",
+    "start": 3.220125,
+    "dur": 0.081541
+   },
+   {
+    "text": "engenharia",
+    "start": 3.315208,
+    "dur": 0.706541
+   },
+   {
+    "text": "Eu",
+    "start": 4.279875,
+    "dur": 0.135875
+   },
+   {
+    "text": "vejo",
+    "start": 4.429333,
+    "dur": 0.339666
+   },
+   {
+    "text": "um",
+    "start": 4.782625,
+    "dur": 0.108708
+   },
+   {
+    "text": "erro",
+    "start": 4.904875,
+    "dur": 0.203791
+   },
+   {
+    "text": "grave",
+    "start": 5.122291,
+    "dur": 0.394041
+   },
+   {
+    "text": "no",
+    "start": 5.529875,
+    "dur": 0.095125
+   },
+   {
+    "text": "arquivo",
+    "start": 5.638583,
+    "dur": 0.516291
+   },
+   {
+    "text": "O",
+    "start": 7.092375,
+    "dur": 0.108708
+   },
+   {
+    "text": "meu",
+    "start": 7.214666,
+    "dur": 0.27175
+   },
+   {
+    "text": "Q4",
+    "start": 7.5,
+    "dur": 0.6114159
+   },
+   {
+    "text": "piorou",
+    "start": 8.125,
+    "dur": 0.394041
+   },
+   {
+    "text": "no",
+    "start": 8.532625,
+    "dur": 0.122291
+   },
+   {
+    "text": "teste",
+    "start": 8.668458,
+    "dur": 0.516291
+   },
+   {
+    "text": "Q5",
+    "start": 10.122291,
+    "dur": 0.66575
+   },
+   {
+    "text": "teve",
+    "start": 10.801625,
+    "dur": 0.244583
+   },
+   {
+    "text": "perplexidade",
+    "start": 11.059791,
+    "dur": 0.842375
+   },
+   {
+    "text": "menor",
+    "start": 11.91575,
+    "dur": 0.394041
+   },
+   {
+    "text": "Eu",
+    "start": 13.247291,
+    "dur": 0.190208
+   },
+   {
+    "text": "gero",
+    "start": 13.451083,
+    "dur": 0.326083
+   },
+   {
+    "text": "a",
+    "start": 13.79075,
+    "dur": 0.027166
+   },
+   {
+    "text": "imatrix",
+    "start": 13.831541,
+    "dur": 0.570666
+   },
+   {
+    "text": "com",
+    "start": 14.41575,
+    "dur": 0.190208
+   },
+   {
+    "text": "dados",
+    "start": 14.619583,
+    "dur": 0.380416
+   },
+   {
+    "text": "reais",
+    "start": 15.013583,
+    "dur": 0.597833
+   },
+   {
+    "text": "Eu",
+    "start": 16.548916,
+    "dur": 0.298916
+   },
+   {
+    "text": "uso",
+    "start": 16.861416,
+    "dur": 0.244583
+   },
+   {
+    "text": "textos",
+    "start": 17.119583,
+    "dur": 0.434791
+   },
+   {
+    "text": "curtos",
+    "start": 17.567916,
+    "dur": 0.489125
+   },
+   {
+    "text": "do",
+    "start": 18.070666,
+    "dur": 0.108708
+   },
+   {
+    "text": "meu",
+    "start": 18.192916,
+    "dur": 0.163041
+   },
+   {
+    "text": "domínio",
+    "start": 18.369583,
+    "dur": 0.502708
+   },
+   {
+    "text": "Eu",
+    "start": 19.809791,
+    "dur": 0.163041
+   },
+   {
+    "text": "refaço",
+    "start": 19.986416,
+    "dur": 0.611416
+   },
+   {
+    "text": "o",
+    "start": 20.611416,
+    "dur": 0.04075
+   },
+   {
+    "text": "Q4",
+    "start": 20.66575,
+    "dur": 0.6114159
+   },
+   {
+    "text": "com",
+    "start": 21.29075,
+    "dur": 0.163041
+   },
+   {
+    "text": "imatrix",
+    "start": 21.467375,
+    "dur": 0.720125
+   },
+   {
+    "text": "Eu",
+    "start": 23.125,
+    "dur": 0.203791
+   },
+   {
+    "text": "meço",
+    "start": 23.342375,
+    "dur": 0.366833
+   },
+   {
+    "text": "a",
+    "start": 23.722833,
+    "dur": 0.04075
+   },
+   {
+    "text": "perplexidade",
+    "start": 23.777166,
+    "dur": 0.869583
+   },
+   {
+    "text": "no",
+    "start": 24.660333,
+    "dur": 0.108708
+   },
+   {
+    "text": "fim",
+    "start": 24.782625,
+    "dur": 0.326083
+   },
+   {
+    "text": "Eu",
+    "start": 26.046208,
+    "dur": 0.176625
+   },
+   {
+    "text": "só",
+    "start": 26.236416,
+    "dur": 0.217375
+   },
+   {
+    "text": "aceito",
+    "start": 26.467375,
+    "dur": 0.421208
+   },
+   {
+    "text": "um",
+    "start": 26.902166,
+    "dur": 0.081541
+   },
+   {
+    "text": "número",
+    "start": 26.997291,
+    "dur": 0.326083
+   },
+   {
+    "text": "mais",
+    "start": 27.336958,
+    "dur": 0.258166
+   },
+   {
+    "text": "baixo",
+    "start": 27.608708,
+    "dur": 0.475541
+   },
+   {
+    "text": "Eu",
+    "start": 29.02175,
+    "dur": 0.190208
+   },
+   {
+    "text": "só",
+    "start": 29.225541,
+    "dur": 0.230958
+   },
+   {
+    "text": "subo",
+    "start": 29.470125,
+    "dur": 0.448375
+   },
+   {
+    "text": "o",
+    "start": 29.932083,
+    "dur": 0.04075
+   },
+   {
+    "text": "que",
+    "start": 29.986416,
+    "dur": 0.122291
+   },
+   {
+    "text": "passou",
+    "start": 30.122291,
+    "dur": 0.407625
+   },
+   {
+    "text": "na",
+    "start": 30.543458,
+    "dur": 0.135875
+   },
+   {
+    "text": "prova",
+    "start": 30.692916,
+    "dur": 0.461958
+   },
+   {
+    "text": "Se",
+    "start": 32.092375,
+    "dur": 0.230958
+   },
+   {
+    "text": "inscreve",
+    "start": 32.336958,
+    "dur": 0.652166
+   },
+   {
+    "text": "Próxima",
+    "start": 33.926625,
+    "dur": 0.516291
+   },
+   {
+    "text": "armadilha",
+    "start": 34.456541,
+    "dur": 0.652166
+   },
+   {
+    "text": "de",
+    "start": 35.122291,
+    "dur": 0.163041
+   },
+   {
+    "text": "IA",
+    "start": 35.298916,
+    "dur": 0.3941
+   }
+  ],
+  "duration": 36.19,
+  "hook_join": true,
+  "voice": "pt-BR-AntonioNeural",
+  "recorded_beats": [
+   {
+    "type": "hook",
+    "start": 0.0,
+    "dur": 4.222,
+    "cue": "Quantizar sem imatrix estraga o Q4, não é engenharia.",
+    "text": "Quantizar sem imatrix estraga o Q4, não é engenharia.",
+    "object": "QUANTIZAR",
+    "emoji": ""
+   },
+   {
+    "type": "quote",
+    "start": 4.28,
+    "dur": 2.242,
+    "cue": "Eu vejo um erro grave no arquivo.",
+    "text": "Eu vejo um erro grave no arquivo.",
+    "emoji": "",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 7.092,
+    "dur": 2.46,
+    "cue": "O meu Q4 piorou no teste.",
+    "text": "O meu Q4 piorou no teste.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 10.122,
+    "dur": 2.555,
+    "cue": "Q5 teve perplexidade menor.",
+    "text": "Q5 teve perplexidade menor.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 13.247,
+    "dur": 2.732,
+    "cue": "Eu gero a imatrix com dados reais.",
+    "text": "Eu gero a imatrix com dados reais.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 16.549,
+    "dur": 2.691,
+    "cue": "Eu uso textos curtos do meu domínio.",
+    "text": "Eu uso textos curtos do meu domínio.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 19.81,
+    "dur": 2.745,
+    "cue": "Eu refaço o Q4 com imatrix.",
+    "text": "Eu refaço o Q4 com imatrix.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 23.125,
+    "dur": 2.351,
+    "cue": "Eu meço a perplexidade no fim.",
+    "text": "Eu meço a perplexidade no fim.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 26.046,
+    "dur": 2.406,
+    "cue": "Eu só aceito um número mais baixo.",
+    "text": "Eu só aceito um número mais baixo.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "quote",
+    "start": 29.022,
+    "dur": 2.583,
+    "cue": "Eu só subo o que passou na prova.",
+    "text": "Eu só subo o que passou na prova.",
+    "attribution": "",
+    "plain": true
+   },
+   {
+    "type": "cta",
+    "start": 32.092,
+    "dur": 3.78,
+    "cue": "Se inscreve. Próxima armadilha de IA.",
+    "text": "Se inscreve · IA",
+    "sub": ""
+   }
+  ],
+  "recorded_hook_pace": {
+   "version": "rr_v1",
+   "claim_words": 9,
+   "claim_spoken_end": 4.022,
+   "claim_match": "exact"
+  },
+  "recorded_gate": [
+   "[B] RR hook pace: FAIL — claim 9 words (max 8); claim spoken by 4.02s (max 3.0s); first cut at 4.28s (max 2.5s). RR claim ≤8 words, fully spoken by 3.0s, first cut by 2.5s (shorter title head / opening line)."
+  ],
+  "sentence_pace_post": {
+   "target_s": 2.2,
+   "cap_s": 2.5,
+   "splits": 0,
+   "changes": 0,
+   "warnings": [
+    "script length: 12 sentences (max 12), est 36.5s total (max 35s)",
+    "hook pace: est 3.87s over the 2.2s target — first cut lands ≈0.3s later (RR max 2.5s); hook kept as written (shorter title head): Quantizar sem imatrix estraga o Q4, não é engenharia."
+   ]
+  }
+ }
+}

@@ -895,6 +895,10 @@ def _auto_produce(session: Session) -> None:
         # value stays DRAFT — it never takes a render slot; the next valid draft
         # does. The reason is recorded once on video.error + a produce JobRun.
         rows = [(v, t) for v, t in rows if not _hold_invalid_subject(session, v, ch)]
+        # Per-channel draft policy (RR 2026-11-13): stale / hook-preflight-failing
+        # drafts leave the bench with a reason instead of burning a render slot.
+        from app.services import autoproduce_policy
+        rows, _skipped = autoproduce_policy.filter_rows(session, ch, rows)
         if not rows:
             continue
         long_pairs = [(v, t) for v, t in rows if t.content_format == "long"]

@@ -4074,14 +4074,28 @@ def _os_extend_spoken(prev: dict, cur_st: float, words, slips=None) -> bool:
         start = float(prev.get("start") or 0)
     except (TypeError, ValueError):
         return False
-    end = min(float(cur_st) - fade, float(span[1]) + craft.QUOTE_HOLD_TAIL_S)
+    last = float(span[1])
+    end = min(float(cur_st) - fade, last + craft.QUOTE_HOLD_TAIL_S)
+    tail = craft.QUOTE_HOLD_TAIL_S
+    if _OS_VO_CARDS.get() and craft.sync_gate_aligned():
+        # Gate-aligned brands (RR, PT ≈0.94s inter-sentence pause): the 0.3s
+        # tail alone leaves 0.94 − 0.3 = 0.64s → 0.52s beyond the fade, just
+        # over the 0.5s blank budget (RR #1316 / #1434, 2026-11-13). Hold into
+        # the pause only as far as needed to bring the hole under the blank
+        # budget, never past last word + STALE_CARD_MAX_S nor into the next
+        # card (both minus _VO_EDGE). OS keeps the 0.3s tail.
+        want = float(cur_st) - fade - (craft.BLANK_GAP_MAX_S - _VO_EDGE)
+        cap = min(float(cur_st) - fade, last + craft.STALE_CARD_MAX_S - _VO_EDGE)
+        if want > end + 1e-6:
+            end = min(want, cap)
+            tail = end - last
     if end <= start + _MIN_DUR - 1e-6:
         return False
     prev["dur"] = round(end - start, 3)
     prev["cap_extended_spoken"] = True
     _slip(slips, "cap_extended_spoken", prev,
           [f"hold {prev['dur']:.2f}s through last spoken word + "
-           f"{craft.QUOTE_HOLD_TAIL_S:.1f}s (never into the next sentence)"])
+           f"{tail:.1f}s (never into the next sentence)"])
     return True
 
 
