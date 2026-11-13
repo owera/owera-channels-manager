@@ -21,7 +21,10 @@ from app.models import Channel, OAuthStatus, Video, VideoStatus
 from app.routers import (channels, features, media, music, onboarding, platform_oauth,
                          playlists, profiles, queue, settings as settings_router, spa_auth,
                          stripe_webhook, thumbnails, topics, trends, videos, youtube_admin)
+from app import actor_auth, audit_log
+from app.access_scope import enforce_actor_scope, route_template
 from app.services import spa_google_login
+from app.workspace import request_identity
 from app.services import render_loop, scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -91,27 +94,57 @@ _SPA_AUTH_PREFIX = "/api/auth/"
 _STRIPE_WEBHOOK_PATH = "/api/stripe/webhook"
 
 
-def _basic_password_ok(request: Request) -> bool:
-    if not settings.app_password:
-        return False
+def _basic_credentials(request: Request) -> tuple[str, str] | None:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Basic "):
-        return False
+        return None
     try:
         decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
-        _username, _, password = decoded.partition(":")
-        return secrets.compare_digest(password, settings.app_password)
+        username, _, password = decoded.partition(":")
+        return username, password
     except Exception:
-        return False
+        return None
+
+
+def _basic_actor(request: Request):
+    """Per-actor token (scoped) or the legacy shared password → Actor, else None."""
+    creds = _basic_credentials(request)
+    if not creds:
+        return None
+    return actor_auth.authenticate_basic(creds[1])
+
+
+def _basic_password_ok(request: Request) -> bool:
+    return _basic_actor(request) is not None
 
 
 def _spa_session_ok(request: Request) -> bool:
     return spa_google_login.spa_session_identity(request) is not None
 
 
+def _audit(request: Request, status: int, *, actor: str, auth: str,
+           reason: str | None = None) -> None:
+    path = routed_path(request)
+    if not path.startswith("/api"):
+        return
+    ws_id = getattr(request.state, "audit_workspace_id", None)
+    ws_slug = getattr(request.state, "audit_workspace_slug", None)
+    if ws_slug is None:
+        try:
+            ident = request_identity(request)
+            ws_slug = ident[0] if ident else None
+        except Exception:
+            ws_slug = None
+    audit_log.write(actor=actor, auth=auth, workspace_id=ws_id, workspace_slug=ws_slug,
+                    route=route_template(request), method=request.method, status=status,
+                    reason=reason)
+
+
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
-    """HTTP Basic Auth for agents; SPA Google session for humans when enabled."""
+    """Per-actor Basic tokens (legacy shared password = actor 'legacy-shared') for
+    agents; SPA Google session for humans when enabled. Every authenticated or
+    denied /api request writes one append-only audit line (app/audit_log.py)."""
     path = routed_path(request)
     spa_login = spa_google_login.spa_login_enabled()
 
@@ -132,14 +165,27 @@ async def basic_auth(request: Request, call_next):
     if spa_login and not path.startswith("/api"):
         return await call_next(request)
 
-    if _basic_password_ok(request):
-        return await call_next(request)
+    actor = _basic_actor(request)
+    if actor is not None:
+        request.state.actor = actor
+        resp = await call_next(request)
+        _audit(request, resp.status_code, actor=actor.name, auth=actor.method,
+               reason=getattr(request.state, "audit_reason", None))
+        return resp
     if spa_login and _spa_session_ok(request):
-        return await call_next(request)
+        ident = spa_google_login.spa_session_identity(request)
+        request.state.actor = actor_auth.Actor(
+            name=f"google:{ident[1]}" if ident else "google", method="spa-google",
+            workspaces=frozenset({ident[0]}) if ident else frozenset())
+        resp = await call_next(request)
+        _audit(request, resp.status_code, actor=request.state.actor.name, auth="spa-google",
+               reason=getattr(request.state, "audit_reason", None))
+        return resp
 
-    if not settings.app_password and not spa_login:
-        return await call_next(request)
+    if not settings.app_password and not spa_login and not actor_auth._load_records():
+        return await call_next(request)   # local dev: auth disabled entirely
 
+    _audit(request, 401, actor="unauthenticated", auth="none")
     if spa_login:
         return Response(status_code=401)
 
@@ -165,7 +211,8 @@ if settings.spa_google_login:
 for r in (channels, features, onboarding, platform_oauth, spa_auth, stripe_webhook,
           playlists, profiles, topics, videos, queue, media, settings_router, youtube_admin,
           trends, music, thumbnails):
-    app.include_router(r.router)
+    # V3: per-actor workspace scope on every API route (app/access_scope.py).
+    app.include_router(r.router, dependencies=[Depends(enforce_actor_scope)])
 
 
 PROCESS_HEADROOM_DEGRADED_PCT = 85

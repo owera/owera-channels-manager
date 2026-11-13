@@ -134,7 +134,11 @@ def current_workspace(
     request: Request,
     session: Session = Depends(get_session),
 ) -> Workspace:
-    return get_workspace(session, resolve_workspace_slug(request))
+    ws = get_workspace(session, resolve_workspace_slug(request))
+    # V3 audit log: the workspace this request actually touched.
+    request.state.audit_workspace_id = ws.id
+    request.state.audit_workspace_slug = ws.slug
+    return ws
 
 
 def channels_for_workspace(ws: Workspace):
