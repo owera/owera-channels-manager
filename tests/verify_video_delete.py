@@ -19,7 +19,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, Workspace
 
 _checks = 0
 
@@ -37,12 +37,23 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
+    # current_workspace resolves slug "owera". Without this row the route
+    # 404s before delete, which is why the suite went red after isolation.
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.add(Workspace(id=2, slug="tenant-b", name="Tenant B"))
     s.commit()
-    s.add(Topic(channel_id=1, name="T"))
+    s.add(Channel(id=1, workspace_id=1, slug="a", name="A",
+                  oauth_status=OAuthStatus.CONNECTED))
+    s.add(Channel(id=2, workspace_id=2, slug="b", name="B",
+                  oauth_status=OAuthStatus.CONNECTED))
     s.commit()
-    s.add(Video(channel_id=1, topic_id=1, subject="doomed video",
+    s.add(Topic(id=1, channel_id=1, name="T"))
+    s.add(Topic(id=2, channel_id=2, name="TB"))
+    s.commit()
+    s.add(Video(id=1, channel_id=1, topic_id=1, subject="doomed video",
                 status=VideoStatus.REJECTED, yt_video_id="ytx123"))
+    s.add(Video(id=2, channel_id=2, topic_id=2, subject="secret other tenant",
+                status=VideoStatus.DRAFT, yt_video_id="yt-secret"))
     s.commit()
 
 
@@ -71,11 +82,19 @@ with Session(engine) as s:
        and "ytx123" in run.detail,
        "detail records the pre-delete status, subject, and yt id")
 
-r2 = client.delete("/api/videos/999", auth=("x", "testpw"))
-ok(r2.status_code == 204, "deleting a missing id is still a 204 no-op")
+# multi_workspace is off, so the caller is owera. A missing id and a video
+# that lives on another workspace must not be distinguishable, and neither
+# write a JobRun. A 204 for the missing id used to say "no such row".
+foreign = client.delete("/api/videos/2", auth=("x", "testpw"))
+missing = client.delete("/api/videos/999", auth=("x", "testpw"))
+ok(foreign.status_code == 404 and missing.status_code == 404,
+   "foreign and missing ids are both 404")
+ok(foreign.json()["detail"] == missing.json()["detail"] == "video not found",
+   "foreign id does not differ from a missing id")
 with Session(engine) as s:
+    ok(s.get(Video, 2) is not None, "foreign video is not deleted")
     n = len(s.exec(select(JobRun).where(JobRun.kind == "delete")).all())
-    ok(n == 1, "a no-op delete writes no JobRun")
+    ok(n == 1, "a refused delete writes no JobRun")
 
 main.app.dependency_overrides.clear()
 settings.app_password = _orig_pw
