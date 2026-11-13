@@ -18,6 +18,7 @@ from app.services import (
     music_gen,
     publish_loop,
     render_loop,
+    youtube_purge,
 )
 
 logger = logging.getLogger("manager.scheduler")
@@ -103,6 +104,15 @@ def start() -> None:
         "interval", hours=24,
         id="music_replenish", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+    # P3: delete YouTube API data ≤30 days after access was lost (revoked,
+    # disconnected, invalid_grant). Idempotent; first run 5 min after startup.
+    _scheduler.add_job(
+        _safe(youtube_purge.tick, "youtube_purge"),
+        "interval", hours=youtube_purge.TICK_HOURS,
+        id="youtube_purge", max_instances=1, coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
     _scheduler.start()
     logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "

@@ -217,6 +217,15 @@ def _health_snapshot(session: Session) -> dict:
                                   if c.oauth_status == OAuthStatus.CONNECTED),
         "channels_paused": sum(1 for c in channels if c.paused),
         "channels_needing_attention": needs_attention,
+        # Split of the not-connected channels (additive; status logic unchanged):
+        # expired = had a token that stopped working; never_connected = an
+        # onboarding channel that has not finished its first connect yet.
+        "channels_expired": sum(1 for c in channels
+                                if c.oauth_status == OAuthStatus.EXPIRED),
+        "channels_never_connected": sum(
+            1 for c in channels
+            if c.oauth_status == OAuthStatus.DISCONNECTED
+            and c.access_lost_at is None and not c.yt_channel_id),
         "videos_failed": failed,
         "system": {"processes": processes},
     }

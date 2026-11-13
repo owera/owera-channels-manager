@@ -323,12 +323,10 @@ def disconnect(
     ch = require_ws_channel(session, ws, channel_id)
     youtube.disconnect_channel(session, ch)
     # Operator-initiated: deliberately bypasses notify.mark_dead — an
-    # intentional disconnect must not page anyone.
-    ch.oauth_status = OAuthStatus.DISCONNECTED
-    ch.yt_channel_id = None
-    ch.yt_channel_title = None
-    session.add(ch)
-    session.commit()
+    # intentional disconnect must not page anyone (no reconnect alert). It does
+    # start the 30-day YouTube-data purge clock and sends the one access-lost
+    # email to contact@ for a real channel (P3/P7).
+    notify.mark_operator_disconnect(session, ch)
     session.refresh(ch)
     return ch
 
