@@ -1962,3 +1962,33 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 78. ✅ DONE (PR autoimprove/2026-11-13-runs-workspace) audit log follows workspace isolation — normal
+- **resolution (2026-11-13):** `queue._runs_for_workspace` is the choke
+  point for `GET /api/runs` and `GET /api/agent/state` `recent_runs`.
+  A row is visible when its channel is in the workspace, or
+  `channel_id` is null and the row has no video (shared pool) or that
+  video's channel is here. A null `channel_id` used to mean "every
+  tenant", so a render error that logged only `video_id` leaked.
+  `channel_id` / `video_id` query params go through `require_channel` /
+  `require_video` (missing and foreign both 404, same detail). A
+  workspace with no channels sees only global rows. `multi_workspace`
+  off still resolves owera and stays unauthenticated. Suite:
+  `tests/verify_agent_a1.py` 18 → 34. Six mutants killed
+  (drop-scope, null-channel-global, drop-require-channel,
+  drop-require-video, drop-global, state-post-filter).
+- **why (found 2026-11-13 ranking remaining unscoped reads after the
+  open workspace-isolation PRs):** topics, playlists, trends, profiles,
+  youtube_admin, media, and thumbnails already have PRs. `GET /api/runs`
+  still returned every `JobRun`, including another tenant's delete line
+  (subject + YouTube id).
+- **caution:** normal (`queue.py` only; not a money-path file). Isolated
+  commit + regression tests.
+- **acceptance:** tenant-b's unfiltered `/runs` and `agent/state`
+  recent_runs are own-channel rows plus the global pool, not owera's
+  null-channel video row; owera still sees that row; foreign and missing
+  ids are the same 404; a workspace with no channels sees only the
+  global pool; `multi_workspace` off stays open and still resolves owera.
+  Not bundled: trend rows with a null `channel_id` stay visible to every
+  workspace (shared research). `DELETE /api/videos/{id}` still returns
+  204 for a missing id and 404 for a foreign id.

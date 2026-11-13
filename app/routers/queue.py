@@ -1,14 +1,16 @@
 from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, func, select
+from sqlmodel import Session, and_, func, or_, select
 
 from app.config import settings
 from app.db import app_settings, get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendStatus,
                         Video, VideoStatus, Workspace)
 from app.services import issues, quota
-from app.workspace import channels_for_workspace, current_workspace
+from app.workspace import (
+    channels_for_workspace, current_workspace, require_channel, require_video,
+)
 from app.services.mpt_client import mpt
 from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
@@ -109,10 +111,43 @@ def dashboard(session: Session = Depends(get_session), ws: Workspace = Depends(c
     return _dashboard_for_workspace(session, ws)
 
 
+def _runs_for_workspace(ch_ids: set[int]):
+    """JobRuns this workspace may read.
+
+    Own-channel rows, plus a null-channel row when it has no video (shared
+    pool / scheduler) or that video's channel is here. A null channel_id
+    used to mean "show to every tenant", which leaked render errors that
+    set video_id and omitted channel_id. A workspace with no channels
+    still sees shared pool rows. Empty ``IN ()`` is dialect-dependent,
+    so that case returns the global predicate directly.
+    """
+    no_channel = JobRun.channel_id.is_(None)
+    global_row = and_(no_channel, JobRun.video_id.is_(None))
+    if not ch_ids:
+        return global_row
+    own_videos = select(Video.id).where(Video.channel_id.in_(ch_ids))
+    return or_(
+        JobRun.channel_id.in_(ch_ids),
+        and_(no_channel, or_(JobRun.video_id.is_(None), JobRun.video_id.in_(own_videos))),
+    )
+
+
 @router.get("/runs")
 def runs(channel_id: int | None = None, video_id: int | None = None, limit: int = 100,
-         session: Session = Depends(get_session)):
-    q = select(JobRun)
+         session: Session = Depends(get_session),
+         ws: Workspace = Depends(current_workspace)):
+    """Audit log for this workspace.
+
+    Unfiltered used to return every JobRun, including another tenant's
+    delete line (subject + YouTube id). A missing id and a foreign id
+    both 404 with the same detail.
+    """
+    if channel_id is not None:
+        require_channel(session, ws, channel_id)
+    if video_id is not None:
+        require_video(session, ws, video_id)
+    ch_ids = {ch.id for ch in session.exec(channels_for_workspace(ws)).all()}
+    q = select(JobRun).where(_runs_for_workspace(ch_ids))
     if channel_id is not None:
         q = q.where(JobRun.channel_id == channel_id)
     if video_id is not None:
@@ -173,11 +208,13 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
             "pending": pending, "published": published,
         })
 
-    recent_runs_q = select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit * 3)
-    recent_runs = [
-        r for r in session.exec(recent_runs_q).all()
-        if r.channel_id is None or r.channel_id in ch_ids
-    ][:runs_limit]
+    # Same scope as GET /runs. Filtering after a global LIMIT let another
+    # tenant's rows fill the window, and a null channel_id with a video_id
+    # was treated as shared.
+    recent_runs = list(session.exec(
+        select(JobRun).where(_runs_for_workspace(ch_ids))
+        .order_by(JobRun.created_at.desc()).limit(runs_limit)
+    ).all())
 
     # Active trends (so the agent dedupes + learns from prior research each run).
     trends_q = (
