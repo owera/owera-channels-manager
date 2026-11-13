@@ -40,6 +40,14 @@ claw0 DB read 2026-11-13 (id 2 ``tenant-b`` is the O3/O4 external-tenant test
 and is NOT internal). Empty / unparseable value → no workspace is allowed
 (everything blocked). Stripe-provisioned customer workspaces are never in it.
 
+Headless agents (growth, code, run-check) are *additionally* scoped by
+``settings.agent_run_workspace_ids`` (env ``MANAGER_AGENT_RUN_WORKSPACE_IDS``,
+default ``"1"``). Their context and actions only include those workspaces, so a
+non-allowlisted tenant with channels no longer blocks the global run. The LLM
+allowlist stays a hard defense: an id in the agent-run env that is not on the
+LLM allowlist is dropped (logged) and never enters the context; an empty
+effective set refuses the run (fail closed).
+
 No exemption for "pure provided script" calls: a provided script still travels
 with title/subject/topic text that can come from a YouTube import, and the
 render prompt carries channel context. Proving a call Google-free per call is
@@ -84,19 +92,49 @@ class LLMBlocked(_Base):
             "until the xAI Enterprise key; see docs/LLM_GUARD.md)")
 
 
-def internal_workspace_ids() -> frozenset[int]:
-    raw = getattr(settings, "llm_internal_workspace_ids", "") or ""
+def _parse_id_list(raw) -> frozenset[int]:
+    """Comma-separated ints. Empty or any malformed token → empty (never widens)."""
     out: set[int] = set()
-    for part in str(raw).split(","):
+    for part in str(raw or "").split(","):
         part = part.strip()
         if not part:
             continue
         try:
             out.add(int(part))
         except ValueError:
-            # A malformed allowlist must not widen access: drop everything.
+            # A malformed list must not widen access: drop everything.
             return frozenset()
     return frozenset(out)
+
+
+def internal_workspace_ids() -> frozenset[int]:
+    return _parse_id_list(getattr(settings, "llm_internal_workspace_ids", "") or "")
+
+
+def agent_run_workspace_ids() -> frozenset[int]:
+    """Configured agent-run workspace ids (not yet intersected with the LLM allowlist)."""
+    return _parse_id_list(getattr(settings, "agent_run_workspace_ids", "") or "")
+
+
+def effective_agent_run_workspace_ids(
+        *, log_drops: bool = False, call_type: str = "agent_run") -> frozenset[int]:
+    """Agent-run ids that are also on the LLM allowlist.
+
+    Ids in ``MANAGER_AGENT_RUN_WORKSPACE_IDS`` that are missing from
+    ``MANAGER_LLM_INTERNAL_WORKSPACE_IDS`` are dropped (the guard blocks that
+    workspace). When ``log_drops`` is set, each drop is logged with
+    ``llm_blocked_external_google_data``. An empty result means the run must
+    be refused (fail closed).
+    """
+    configured = agent_run_workspace_ids()
+    allowed = internal_workspace_ids()
+    dropped = configured - allowed
+    if log_drops and dropped:
+        for ws in sorted(dropped):
+            logger.warning(
+                "%s workspace_id=%s call_type=%s reason=dropped_from_agent_run",
+                BLOCK_EVENT, ws, call_type)
+    return configured & allowed
 
 
 def _coerce_ws(workspace_id) -> int | None:
@@ -186,8 +224,10 @@ def workspace_of_channel(channel_id, session=None) -> int | None:
 # --------------------------------------------------------------------- agents
 
 def external_workspaces_with_data(session=None) -> list[int] | None:
-    """Workspace ids outside the allowlist that own at least one channel (and so
-    can hold Google OAuth / YouTube data). ``None`` when the DB can't be read."""
+    """Workspace ids outside the LLM allowlist that own at least one channel
+    (and so can hold Google OAuth / YouTube data). ``None`` when the DB can't
+    be read. Diagnostic only — agent preflight no longer blocks the global run
+    just because such a workspace exists; see ``agent_preflight``."""
     try:
         from sqlmodel import Session, select
 
@@ -209,20 +249,125 @@ def external_workspaces_with_data(session=None) -> list[int] | None:
         return None
 
 
+def agent_run_context(session=None) -> dict | None:
+    """Workspaces and channels the headless agents may observe or act on.
+
+    Restricted to ``effective_agent_run_workspace_ids()``. Safe fields only
+    (id / slug / name) — no OAuth tokens, emails, or analytics. ``None`` when
+    the DB can't be read (fail closed).
+    """
+    try:
+        from sqlmodel import Session, select
+
+        from app.db import engine
+        from app.models import Channel, Workspace
+
+        allowed = effective_agent_run_workspace_ids()
+
+        def _q(s):
+            if not allowed:
+                return {"workspace_ids": [], "workspaces": [], "channels": []}
+            wss = list(s.exec(select(Workspace).where(Workspace.id.in_(sorted(allowed)))).all())
+            chs = list(s.exec(select(Channel).where(Channel.workspace_id.in_(sorted(allowed)))).all())
+            workspaces = [
+                {"id": int(w.id), "slug": w.slug, "name": w.name}
+                for w in wss if w.id is not None and int(w.id) in allowed
+            ]
+            channels = [
+                {"id": int(c.id), "workspace_id": int(c.workspace_id),
+                 "slug": c.slug, "name": c.name}
+                for c in chs
+                if c.id is not None and c.workspace_id is not None
+                and int(c.workspace_id) in allowed
+            ]
+            return {
+                "workspace_ids": sorted(allowed),
+                "workspaces": sorted(workspaces, key=lambda r: r["id"]),
+                "channels": sorted(channels, key=lambda r: r["id"]),
+            }
+
+        if session is not None:
+            return _q(session)
+        with Session(engine) as s:
+            return _q(s)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def agent_run_scope_prompt(ctx: dict) -> str:
+    """Markdown preamble injected into the agent ``--prompt-file``. No secrets."""
+    lines = [
+        "# Agent run workspace scope (injected by llm agent-exec; do not ignore)",
+        "",
+        "This run is limited to the workspaces listed below "
+        "(`MANAGER_AGENT_RUN_WORKSPACE_IDS`). You may only observe and act on "
+        "these workspaces and their channels.",
+        "",
+        "- Do not read `manager.db`, the API, or the filesystem for any workspace "
+        "or channel that is not listed below.",
+        "- For HTTP Basic Auth, use only these workspace slugs as the username "
+        "(or `{slug}+channels` / `{slug}+vm`). Legacy bare usernames "
+        "`channels`, `vm`, and `admin` map to workspace `owera` (id 1) — use "
+        "them only if id 1 is in the list below.",
+        "- If a tool returns data for a workspace or channel not listed here, "
+        "discard it and do not send it onward in a prompt or report.",
+        "",
+        "## Allowed workspaces",
+    ]
+    wss = ctx.get("workspaces") or []
+    chs = ctx.get("channels") or []
+    if not wss:
+        lines.append("- (none — the run should have been refused)")
+    else:
+        for w in wss:
+            lines.append(f"- id={w['id']} slug={w['slug']} name={w['name']}")
+    lines += ["", "## Allowed channels"]
+    if not chs:
+        lines.append("- (none)")
+    else:
+        for c in chs:
+            lines.append(
+                f"- id={c['id']} workspace_id={c['workspace_id']} "
+                f"slug={c['slug']} name={c['name']}")
+    return "\n".join(lines) + "\n"
+
+
 def agent_preflight(call_type: str, session=None) -> bool:
-    """Headless ``grok`` agents (growth agent, code agent, run check) read the API
-    and the repo across ALL workspaces with the shared Basic credential, so their
-    effective workspace is "every workspace". Allowed only when no non-allowlisted
-    workspace owns a channel. Fail closed on any doubt (unreadable DB)."""
-    ext = external_workspaces_with_data(session)
-    if ext is None:
+    """Headless ``grok`` agents (growth, code, run-check) are scoped to
+    ``MANAGER_AGENT_RUN_WORKSPACE_IDS`` (default ``1``). A non-allowlisted
+    workspace that owns a channel no longer blocks the run, because that
+    workspace is excluded from the injected context.
+
+    Fail closed when the DB is unreadable, the LLM allowlist is empty, or the
+    effective agent-run set is empty (including when every configured agent-run
+    id was dropped for not being on the LLM allowlist). The allowlist remains a
+    defense: a configured id that is not allowlisted is logged and dropped.
+    """
+    # Touch the DB first: an unreadable DB must block even if the id lists
+    # look fine (we cannot prove what the agent would see).
+    try:
+        from sqlmodel import Session, select
+
+        from app.db import engine
+        from app.models import Channel
+
+        def _probe(s):
+            s.exec(select(Channel.workspace_id).limit(1)).all()
+
+        if session is not None:
+            _probe(session)
+        else:
+            with Session(engine) as s:
+                _probe(s)
+    except Exception:  # noqa: BLE001
         _log_block("unknown", call_type)
         return False
-    if ext:
-        for ws in ext:
-            _log_block(ws if ws != -1 else None, call_type)
-        return False
+
     if not internal_workspace_ids():
+        _log_block("none-allowlisted", call_type)
+        return False
+    effective = effective_agent_run_workspace_ids(log_drops=True, call_type=call_type)
+    if not effective:
         _log_block("none-allowlisted", call_type)
         return False
     return True
@@ -239,11 +384,12 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     call_type = argv[1]
     if agent_preflight(call_type):
-        print(f"llm_guard allowed call_type={call_type}")
+        ctx = agent_run_context() or {}
+        ids = ",".join(str(i) for i in ctx.get("workspace_ids") or [])
+        print(f"llm_guard allowed call_type={call_type} agent_run_workspace_ids={ids}")
         return 0
-    ext = external_workspaces_with_data()
-    print(f"{BLOCK_EVENT} call_type={call_type} external_workspace_ids="
-          f"{','.join(str(w) for w in (ext or [])) or 'unknown'}")
+    print(f"{BLOCK_EVENT} call_type={call_type} agent_run_workspace_ids="
+          f"{','.join(str(i) for i in sorted(effective_agent_run_workspace_ids())) or 'none'}")
     return 3
 
 

@@ -18,6 +18,7 @@ So **only Owera's own workspaces may reach the LLM**. Everything else fails clos
 | Env | Format | Default |
 |---|---|---|
 | `MANAGER_LLM_INTERNAL_WORKSPACE_IDS` | comma-separated workspace ids, e.g. `1` | `1` |
+| `MANAGER_AGENT_RUN_WORKSPACE_IDS` | comma-separated workspace ids the headless agents may observe and act on | `1` |
 
 * `1` is workspace slug `owera` ("Owera (legacy default workspace)"), which holds
   ch1 Owera Software and ch2 Rodrigo Recio. Read-only on the claw0 DB, 2026-11-13.
@@ -25,6 +26,12 @@ So **only Owera's own workspaces may reach the LLM**. Everything else fails clos
   test and is **not** internal by default.
 * Empty or malformed value → no workspace allowed (everything blocked). It never widens.
 * Stripe-provisioned buyer workspaces are never on the list.
+* `MANAGER_AGENT_RUN_WORKSPACE_IDS` scopes growth / code / run-check. Default `1`.
+  It does not widen the LLM allowlist: an id that is not also on
+  `MANAGER_LLM_INTERNAL_WORKSPACE_IDS` is dropped (logged
+  `llm_blocked_external_google_data reason=dropped_from_agent_run`) and never
+  enters the agent context. If the effective set is empty, the run is refused
+  (fail closed). Empty or malformed value → nothing allowed.
 
 ## Choke point
 
@@ -65,18 +72,34 @@ The log line never contains prompt content.
 
 The growth agent, code agent and run check run `grok` with `bypassPermissions`,
 the repo as cwd and the shared Basic password. The Basic username is the
-workspace slug, so with that password they can read **any** workspace over the
-API, or `manager.db` directly. Their effective scope is "every workspace".
-They may start only when **no workspace outside the allowlist owns a channel**.
-A buyer workspace with no channel yet holds no Google data and does not block.
-A missing venv, an unreadable DB or any error blocks the run (exit 0, alert,
-event in the agent log).
+workspace slug, so with that password they *could* read any workspace over the
+API, or `manager.db` directly. To keep Google Limited Use, their runs are
+**scoped to `MANAGER_AGENT_RUN_WORKSPACE_IDS`** (default `1` = owera):
 
-Effect on claw0 today: `tenant-b` (id 2) owns ch3/ch4, so **run-check and
-code-agent are skipped** until the CTO does one of these:
-(a) adds `2` to the allowlist, if tenant-b is Owera-internal test data;
-(b) removes or purges tenant-b's channel data;
-(c) ships V3, so agent tokens are scoped to `owera`. Direct DB access is still an ops gap after that.
+* `llm agent-exec` prepends a workspace-scope preamble to `--prompt-file` listing
+  only those workspaces and channels (id, slug, name — no tokens, emails, or
+  analytics) and sets `MANAGER_AGENT_RUN_WORKSPACE_IDS` in the child env to the
+  effective ids. The playbooks tell the agent to use only those slugs as the
+  Basic username (or `{slug}+channels` / `{slug}+vm`) and to discard any other
+  workspace's data.
+* `agent_preflight` no longer blocks the global run just because another
+  workspace (e.g. `tenant-b` id 2) owns a channel. That workspace is simply
+  excluded from the context.
+* The LLM allowlist is still a hard defense. If the agent-run env includes an
+  id that is not on `MANAGER_LLM_INTERNAL_WORKSPACE_IDS`, that workspace is
+  dropped and logged (`llm_blocked_external_google_data
+  reason=dropped_from_agent_run`). If nothing remains, the run is refused
+  (fail closed).
+* A missing venv, an unreadable DB, an empty / malformed agent-run list, or an
+  empty LLM allowlist still blocks the run (exit 0 from the shell wrapper,
+  alert, event in the agent log).
+
+With the default `1`, growth / code / run-check can run on claw0 while
+`tenant-b` exists; they only see workspace 1. After this lands, the CTO can
+set `MANAGER_LLM_INTERNAL_WORKSPACE_IDS` back to `1` (it is temporarily `1,2`
+so the unscoped agents can start). Direct DB access remains an ops gap — the
+injected preamble and playbook are the control; they do not physically revoke
+`bypassPermissions`.
 
 ## No exemption for "pure provided script" calls
 
@@ -89,7 +112,9 @@ allowlisted workspace. Revisit with the Enterprise key.
 
 `tests/verify_llm_guard.py`: allowlist parsing, external blocked, internal
 allowed, unknown/no scope blocked, no content logged, `complete`/MPT blocked
-before spawn/HTTP, `run_job` and `render_loop` behavior, agent preflight, entry
-points scoped. It also includes a **static grep** that fails on a new process spawn,
+before spawn/HTTP, `run_job` and `render_loop` behavior, agent preflight and
+scoped context (ws2 excluded; configured `MANAGER_AGENT_RUN_WORKSPACE_IDS`;
+subprocess-mocked `agent-exec` for growth/code/run-check), entry points scoped.
+It also includes a **static grep** that fails on a new process spawn,
 grok argv, HTTP LLM client, MPT LLM endpoint or `llm.complete` importer outside
 the known sites, and on a `run/*.sh` that runs `grok` without the preflight.

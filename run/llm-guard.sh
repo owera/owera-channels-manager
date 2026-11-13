@@ -3,12 +3,14 @@
 # Sourced by run/*.sh right before the agent starts. See docs/LLM_GUARD.md.
 #
 # The agents run a consumer `grok login` session (training allowed) with
-# bypassPermissions, the repo as cwd and the shared Basic password, so they can
-# read EVERY workspace (API username = workspace slug, or manager.db directly).
-# Google Limited Use: no Google-sourced data from a non-Owera workspace may reach
-# that LLM. So an agent may start only when no workspace outside the allowlist
-# (MANAGER_LLM_INTERNAL_WORKSPACE_IDS, default "1" = owera) owns a channel.
-# Fail closed: a missing venv, an unreadable DB or any error blocks the run.
+# bypassPermissions, the repo as cwd and the shared Basic password, so they
+# could read every workspace (API username = workspace slug, or manager.db).
+# They are scoped to MANAGER_AGENT_RUN_WORKSPACE_IDS (default "1" = owera):
+# preflight allows the run when those workspaces are on the LLM allowlist
+# (MANAGER_LLM_INTERNAL_WORKSPACE_IDS), even if another tenant has channels.
+# An agent-run id that is not allowlisted is dropped (logged) or, if none
+# remain, the run is refused. Fail closed: a missing venv, an unreadable DB
+# or any error blocks the run.
 #
 # llm_guard_preflight CALL_TYPE  -> 0 allowed; non-zero blocked (event logged to $LOG)
 llm_guard_preflight() {

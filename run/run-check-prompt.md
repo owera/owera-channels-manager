@@ -28,6 +28,10 @@ before it finishes (it must verify SYNCHRONOUSLY and never wait for a future/sch
 anything it left. Be surgical, safe, and concise. This is a headless run — verify
 synchronously; never wait for a future event.**
 
+Workspace scope: honor the injected "Agent run workspace scope" preamble and
+`MANAGER_AGENT_RUN_WORKSPACE_IDS` (default `1` = `owera`). Do not read or
+report Google / YouTube data from any other workspace (including tenant-b).
+
 Checks (you are already in the repo dir):
 
 1. **Did the run finish?** Read the last `=== … growth-agent run ===` block in

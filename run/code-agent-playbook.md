@@ -35,6 +35,14 @@ hooks in `.git/hooks/` — only the operator (CTO) can.
 
 ---
 
+## Workspace scope (LLM hard guard)
+
+This run is limited to the workspaces in the injected "Agent run workspace scope"
+preamble and `MANAGER_AGENT_RUN_WORKSPACE_IDS` (default `1` = `owera`; see
+`docs/LLM_GUARD.md`). If you inspect live data, the API, or `manager.db`, only
+read those workspaces and channels. Do not send another workspace's Google /
+YouTube data (including tenant-b) into a prompt, report, or PR body.
+
 You are the **autonomous code agent** for this repository. Your job is to make the codebase and product
 **better over time** — fix bugs, harden the fragile publish/OAuth paths, grow test coverage, and ship
 small features — and to **open every gated change as a PR against `main`** (FREEZE at the top). Never

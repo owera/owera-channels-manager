@@ -12,14 +12,19 @@ Use). Covered, with no network, no real grok and no DB on disk:
   - mpt_client submit / social_metadata: blocked before any HTTP
   - worker.run_job: external workspace → STATE_FAILED LLMBlocked, grok never run
   - render_loop._llm_guard_block: external → FAILED (not transient), internal → pass
-  - agent_preflight (growth/code/run-check agents): any external workspace with a
-    channel → blocked; owera only → allowed; unreadable DB → blocked
+  - agent_preflight (growth/code/run-check agents): scoped to
+    MANAGER_AGENT_RUN_WORKSPACE_IDS (default "1"); a tenant workspace with a
+    channel does not block the run; that workspace is excluded from context;
+    unreadable DB / empty effective set → blocked; a configured id off the
+    LLM allowlist is dropped (logged) and fail-closed if none remain
   - entry points bind a scope (ideas, metadata, thumbnail, compose, render, preflight)
   - STATIC: no new LLM / subprocess call site outside the choke point (grep)
 """
 from __future__ import annotations
 
 import inspect
+import json
+import os
 import io
 import logging
 import re
@@ -225,8 +230,12 @@ ok(src.index("_llm_guard_block(") < src.index("engine.submit("),
 ok('params["workspace_id"] = channel.workspace_id' in src, "render params carry workspace_id")
 
 # --------------------------------------------------------------------------- agents
-print("agent preflight (growth agent / code agent / run check)")
+print("agent preflight + scoped context (growth / code / run-check)")
 from app.models import Channel, Workspace  # noqa: E402
+import app.db as _db  # noqa: E402
+
+ok(settings.agent_run_workspace_ids == "1", "default agent-run env is '1'")
+ok(llm_guard.agent_run_workspace_ids() == frozenset({1}), "default agent-run parses to {1}")
 
 eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(eng)
@@ -236,18 +245,119 @@ with Session(eng) as s:
     s.commit()
     cap.lines.clear()
     ok(llm_guard.agent_preflight("growth_agent", session=s) is True, "only owera channels → allowed")
+    s.add(Workspace(id=2, slug="tenant-b", name="Tenant B"))
     s.add(Workspace(id=5, slug="buyer", name="Buyer"))
     s.commit()
     ok(llm_guard.agent_preflight("growth_agent", session=s) is True,
        "external workspace with no channel (no Google data yet) → allowed")
-    s.add(Channel(id=9, workspace_id=5, slug="buyer-yt", name="Buyer YT"))
+    s.add(Channel(id=9, workspace_id=2, slug="elen3x", name="TENANT-B-SECRET-CHANNEL"))
+    s.add(Channel(id=10, workspace_id=5, slug="buyer-yt", name="Buyer YT SECRET"))
     s.commit()
-    ok(llm_guard.agent_preflight("growth_agent", session=s) is False,
-       "external workspace with a channel → agent blocked")
-    ok("llm_blocked_external_google_data workspace_id=5 call_type=growth_agent" in cap.lines,
-       "agent block logged with workspace id + call type")
-    ok(llm_guard.workspace_of_channel(9, session=s) == 5, "workspace_of_channel reads the DB")
+    for ct in ("growth_agent", "code_agent", "run_check"):
+        cap.lines.clear()
+        ok(llm_guard.agent_preflight(ct, session=s) is True,
+           f"{ct}: ws2 with a channel does not block a run scoped to ws1")
+        ctx = llm_guard.agent_run_context(session=s)
+        ok(ctx is not None and ctx["workspace_ids"] == [1],
+           f"{ct}: context workspace_ids == [1]")
+        ok(all(c["workspace_id"] == 1 for c in ctx["channels"]),
+           f"{ct}: context channels are ws1 only")
+        blob = json.dumps(ctx)
+        ok("TENANT-B-SECRET-CHANNEL" not in blob and "Buyer YT SECRET" not in blob
+           and "tenant-b" not in blob and not any(w["id"] in (2, 5) for w in ctx["workspaces"]),
+           f"{ct}: ws2/buyer excluded from context")
+        ok(llm_guard.workspace_of_channel(9, session=s) == 2, "workspace_of_channel still reads the DB")
     ok(llm_guard.workspace_of_channel(404, session=s) is None, "unknown channel → None (blocked)")
+
+    # A configured value other than the default.
+    s.add(Workspace(id=7, slug="internal-b", name="Internal B"))
+    s.add(Channel(id=17, workspace_id=7, slug="ib", name="Internal B Channel"))
+    s.commit()
+    with patch.object(settings, "llm_internal_workspace_ids", "1,7"), \
+            patch.object(settings, "agent_run_workspace_ids", "7"):
+        for ct in ("growth_agent", "code_agent", "run_check"):
+            ok(llm_guard.agent_preflight(ct, session=s) is True,
+               f"{ct}: configured AGENT_RUN=7 is allowed when 7 is on the LLM allowlist")
+            ctx = llm_guard.agent_run_context(session=s)
+            ok(ctx["workspace_ids"] == [7], f"{ct}: configured context is ws7 only")
+            names = {c["name"] for c in ctx["channels"]}
+            slugs = {w["slug"] for w in ctx["workspaces"]}
+            ok("Internal B Channel" in names and "Owera Software" not in names
+               and "TENANT-B-SECRET-CHANNEL" not in names,
+               f"{ct}: configured context has ws7 channel, not ws1/ws2")
+            ok(slugs == {"internal-b"}, f"{ct}: configured context workspace slug is internal-b")
+
+    # Defense: agent-run env includes a workspace off the LLM allowlist → drop it.
+    cap.lines.clear()
+    with patch.object(settings, "agent_run_workspace_ids", "1,2"):
+        ok(llm_guard.agent_preflight("growth_agent", session=s) is True,
+           "AGENT_RUN includes ws2 (not on LLM allowlist) → ws2 dropped, run continues")
+        ok(any("workspace_id=2" in ln and "dropped_from_agent_run" in ln for ln in cap.lines),
+           "dropped ws2 is logged with llm_blocked_external_google_data")
+        ctx = llm_guard.agent_run_context(session=s)
+        ok(ctx["workspace_ids"] == [1] and "TENANT-B-SECRET-CHANNEL" not in json.dumps(ctx),
+           "dropped ws2 never enters the context")
+
+    with patch.object(settings, "agent_run_workspace_ids", "2"):
+        ok(llm_guard.agent_preflight("growth_agent", session=s) is False,
+           "AGENT_RUN=2 only (off the LLM allowlist) → fail closed")
+    with patch.object(settings, "agent_run_workspace_ids", ""):
+        ok(llm_guard.agent_preflight("growth_agent", session=s) is False,
+           "empty AGENT_RUN → fail closed")
+    with patch.object(settings, "agent_run_workspace_ids", "1,foo"):
+        ok(llm_guard.agent_preflight("growth_agent", session=s) is False,
+           "malformed AGENT_RUN → fail closed (never widens)")
+
+    # Subprocess mocked: agent-exec for all three call types, ws2 excluded.
+    print("agent-exec (subprocess mocked): context is ws1 only")
+    playbook = Path(os.environ.get("TMPDIR", "/tmp")) / "cm-agent-run-playbook.md"
+    playbook.write_text("PLAYBOOK BODY\n", encoding="utf-8")
+    with patch.object(_db, "engine", eng):
+        for ct in ("growth_agent", "code_agent", "run_check"):
+            with patch.object(os, "execvpe") as ex:
+                rc = llm.main(["agent-exec", ct, "--", "grok", "--prompt-file", str(playbook)])
+            ok(rc == 0 and ex.call_count == 1 and ex.call_args[0][0] == "grok",
+               f"{ct}: agent-exec not blocked, execs grok (no real LLM)")
+            argv, env = ex.call_args[0][1], ex.call_args[0][2]
+            ok("--prompt-file" in argv, f"{ct}: prompt-file present")
+            pf = Path(argv[argv.index("--prompt-file") + 1])
+            text_pf = pf.read_text(encoding="utf-8")
+            ok("PLAYBOOK BODY" in text_pf and "Owera Software" in text_pf
+               and "slug=owera" in text_pf,
+               f"{ct}: combined prompt has scope + playbook and ws1 data")
+            ok("TENANT-B-SECRET-CHANNEL" not in text_pf and "Buyer YT SECRET" not in text_pf
+               and "tenant-b" not in text_pf and "slug=buyer" not in text_pf,
+               f"{ct}: combined prompt excludes ws2/buyer")
+            ok(env.get("MANAGER_AGENT_RUN_WORKSPACE_IDS") == "1",
+               f"{ct}: child env carries effective workspace ids = 1")
+            ok("XAI_API_KEY" not in env, f"{ct}: API keys still stripped")
+            try:
+                pf.unlink()
+            except OSError:
+                pass
+    try:
+        playbook.unlink()
+    except OSError:
+        pass
+
+    with patch.object(settings, "llm_internal_workspace_ids", "1,7"), \
+            patch.object(settings, "agent_run_workspace_ids", "7"), \
+            patch.object(_db, "engine", eng), \
+            patch.object(os, "execvpe") as ex:
+        playbook2 = Path(os.environ.get("TMPDIR", "/tmp")) / "cm-agent-run-playbook-7.md"
+        playbook2.write_text("PLAYBOOK BODY\n", encoding="utf-8")
+        rc = llm.main(["agent-exec", "growth_agent", "--", "grok", "--prompt-file", str(playbook2)])
+        argv = ex.call_args[0][1]
+        env = ex.call_args[0][2]
+        text_pf = Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+        ok(rc == 0 and env.get("MANAGER_AGENT_RUN_WORKSPACE_IDS") == "7"
+           and "Internal B Channel" in text_pf and "Owera Software" not in text_pf
+           and "TENANT-B-SECRET-CHANNEL" not in text_pf,
+           "configured AGENT_RUN=7: exec prompt has only ws7")
+        try:
+            playbook2.unlink()
+        except OSError:
+            pass
 
 
 class _BadSession:
@@ -257,9 +367,11 @@ class _BadSession:
 
 ok(llm_guard.agent_preflight("code_agent", session=_BadSession()) is False,
    "unreadable DB → agent blocked (fail closed)")
-with patch.object(llm_guard, "external_workspaces_with_data", return_value=[]):
+with patch.object(llm_guard, "agent_preflight", return_value=True), \
+        patch.object(llm_guard, "agent_run_context",
+                     return_value={"workspace_ids": [1], "workspaces": [], "channels": []}):
     ok(llm_guard.main(["agent-preflight", "run_check"]) == 0, "CLI exit 0 when allowed")
-with patch.object(llm_guard, "external_workspaces_with_data", return_value=[2]):
+with patch.object(llm_guard, "agent_preflight", return_value=False):
     ok(llm_guard.main(["agent-preflight", "run_check"]) == 3, "CLI exit 3 when blocked")
 ok(llm_guard.main(["bogus"]) == 2, "CLI usage error → 2 (non-zero = blocked by the shell helper)")
 

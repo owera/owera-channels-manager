@@ -106,7 +106,7 @@ if [ ! -r "$REPO/run/llm-guard.sh" ]; then
 fi
 . "$REPO/run/llm-guard.sh"
 if ! llm_guard_preflight growth_agent; then
-  log "LLM guard: blocked (external workspace holds channel data) — skipping run"
+  log "LLM guard: blocked (empty/unallowlisted agent-run scope, or unreadable DB) — skipping run"
   alert "llm_blocked_external_google_data — growth-agent skipped" 0
   exit 0
 fi
