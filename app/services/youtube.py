@@ -522,11 +522,74 @@ def fetch_identity(service) -> dict:
     return {"id": it["id"], "title": it["snippet"]["title"]}
 
 
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+
+
+def revoke_token_at_google(token: str) -> str:
+    """Best-effort revoke of a Google OAuth token (refresh or access).
+
+    Returns a short outcome for logs ("revoked", "already_invalid", "http_<n>",
+    "error_<Class>"). Never raises and never logs the token. Revoking a refresh
+    token ends the grant, so Google stops issuing access tokens for it."""
+    import httpx
+
+    if not token:
+        return "no_token"
+    try:
+        r = httpx.post(
+            GOOGLE_REVOKE_URL,
+            data={"token": token},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    except Exception as e:  # network, DNS, timeout
+        return f"error_{type(e).__name__}"
+    if r.status_code == 200:
+        return "revoked"
+    if r.status_code == 400:
+        # invalid_token: already revoked or expired — nothing left to revoke.
+        return "already_invalid"
+    return f"http_{r.status_code}"
+
+
+def _revoke_platform_grant(session, channel: "Channel") -> str:
+    """Revoke the platform (CM web client) grant for ``channel`` at Google.
+
+    Legacy ``legacy_file`` channels (ch1/ch2) are deliberately NOT revoked: they
+    use the channel owner's own desktop OAuth client, outside the CM project, and
+    one revoke would end that owner's grant for every channel on the same Google
+    account. They keep the delete-only behaviour."""
+    from app.services import token_store
+
+    try:
+        info = token_store.load_token_info(session, channel) or {}
+    except Exception as e:
+        logger.warning("revoke skipped for channel id=%s: token unreadable (%s)",
+                       channel.id, type(e).__name__)
+        return "unreadable"
+    token = info.get("refresh_token") or info.get("token") or ""
+    outcome = revoke_token_at_google(token)
+    level = logging.INFO if outcome in ("revoked", "already_invalid", "no_token") else logging.WARNING
+    logger.log(level, "google revoke for channel id=%s workspace=%s: %s",
+               channel.id, channel.workspace_id, outcome)
+    return outcome
+
+
 def disconnect_channel(session, channel: "Channel") -> None:
-    """Drop credentials for legacy file or platform store."""
+    """Revoke the grant at Google (platform channels, best-effort), then drop our
+    copy of the credentials (platform store and legacy token files).
+
+    A revoke failure never blocks the local delete: Google is told first so the
+    token still exists to be revoked, and whatever happens there, the local copy
+    is removed."""
     if _uses_platform_oauth(channel):
         from app.services import token_store
 
+        try:
+            _revoke_platform_grant(session, channel)
+        except Exception as e:  # pragma: no cover - defensive, never block delete
+            logger.warning("google revoke raised for channel id=%s: %s",
+                           channel.id, type(e).__name__)
         token_store.delete_credential(session, channel.id)  # type: ignore[arg-type]
     disconnect(channel.slug)
 
