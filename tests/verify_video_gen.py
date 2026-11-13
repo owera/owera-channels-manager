@@ -286,7 +286,7 @@ _llm_calls: list[dict] = []
 
 
 def _complete_factory(text: str):
-    def _complete(prompt, system=None, max_tokens=None, timeout=None):
+    def _complete(prompt, system=None, max_tokens=None, timeout=None, **kwargs):
         _llm_calls.append({
             "prompt": prompt,
             "system": system,
@@ -550,7 +550,7 @@ out_empty = _run_ideas(_text="", n=8)
 ok(out_empty == [], "empty LLM content → []")
 
 
-def _none_content(prompt, system=None, max_tokens=None, timeout=None):
+def _none_content(prompt, system=None, max_tokens=None, timeout=None, **kwargs):
     _llm_calls.append({"prompt": prompt, "timeout": timeout})
     return None
 

@@ -115,6 +115,21 @@ class Settings(BaseSettings):
     # Effort for the storyboard compose call only (the step that times out).
     # Accepted values per the CLI model catalog: low | medium | high | xhigh.
     grok_compose_reasoning_effort: str = "medium"  # env: MANAGER_GROK_COMPOSE_REASONING_EFFORT
+    # Effort for light completions: idea strip (video_gen.generate_ideas, used
+    # by autofill + trends adopt) and metadata._llm_fallback. Default "low" so
+    # grok-4.7 does not spend the CLI default "high" (CTO: 2.5–8 min with ~27
+    # tools) against grok_timeout_seconds_light (180s; claw0 palliative is 420s).
+    # Same mechanism as compose: passed as ``--reasoning-effort`` through
+    # llm.complete(); empty string = no flag (kill switch, CLI default).
+    # Accepted values (grok 1.0.77 catalog): none | minimal | low | medium |
+    # high | xhigh | max. env: MANAGER_GROK_EFFORT_IDEAS
+    #
+    # Tools (documented, NOT default): these prompts are structured text and
+    # do not obviously need the CLI tool set. grok 1.0.77 also accepts
+    # --disable-web-search, --no-subagents, --max-turns 1, --tools, and
+    # --disallowed-tools. Leave them off until we have evidence the tool set
+    # (not just high effort) is what blows the light budget.
+    grok_effort_ideas: str = "low"                # env: MANAGER_GROK_EFFORT_IDEAS
     # edge-tts NoAudioReceived is an upstream flake (2026-09-26 21:00-21:53 BRT: 4 of
     # 8 en-US calls, then clean). Retry in-process before failing the whole render so
     # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).

@@ -116,7 +116,9 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 f"No commentary.{lang_rule}{niche_block}\n\n"
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
-        text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light)) or ""
+        effort = settings.grok_effort_ideas or None
+        text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
+                        reasoning_effort=effort) or ""
         text = re.sub(r"^```[a-zA-Z0-9]*\s*|\s*```$", "", text.strip())
         data = json.loads(text)
         return _from_meta(subject, data)

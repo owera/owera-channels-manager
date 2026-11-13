@@ -94,8 +94,11 @@ def complete(
     ``settings.grok_timeout_seconds_light`` for idea/metadata callers).
 
     ``model`` defaults to ``settings.grok_model`` (empty = CLI default);
-    ``reasoning_effort`` defaults to none (CLI default). The storyboard compose
-    seam (``worker._llm_compose``) passes ``settings.grok_compose_reasoning_effort``.
+    ``reasoning_effort`` defaults to none (CLI default). Callers pin it:
+    storyboard compose (``worker._llm_compose``) uses
+    ``settings.grok_compose_reasoning_effort`` (default "medium"); light
+    callers (``video_gen.generate_ideas``, ``metadata._llm_fallback``) use
+    ``settings.grok_effort_ideas`` (default "low", env MANAGER_GROK_EFFORT_IDEAS).
     """
     model = model if model is not None else (settings.grok_model or None)
     cmd = build_cmd(prompt, system, model=model, reasoning_effort=reasoning_effort)

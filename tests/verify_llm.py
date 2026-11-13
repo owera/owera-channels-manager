@@ -98,6 +98,8 @@ ok(_Settings.model_fields["grok_model"].default == "",
    "default grok_model is empty (CLI default model, no -m); .env may pin it")
 ok(_Settings.model_fields["grok_compose_reasoning_effort"].default == "medium",
    "default compose reasoning effort is medium (2026-09-22 grok-4.7 compose timeouts)")
+ok(_Settings.model_fields["grok_effort_ideas"].default == "low",
+   "default ideas/metadata reasoning effort is low (grok-4.7 high blows the light timeout)")
 cmd_pin = llm.build_cmd("u", system="s", model="grok-4.6", reasoning_effort="medium")
 ok(cmd_pin == [settings.grok_bin, "-m", "grok-4.6", "--reasoning-effort", "medium",
                "-p", "s\n\nu"],
@@ -181,9 +183,13 @@ settings.storage_dir = _orig_storage
 src_vg = inspect.getsource(video_gen.generate_ideas)
 ok("grok_timeout_seconds_light" in src_vg,
    "generate_ideas uses grok_timeout_seconds_light")
+ok("grok_effort_ideas" in src_vg and "reasoning_effort" in src_vg,
+   "generate_ideas pins reasoning_effort from settings.grok_effort_ideas")
 src_meta = inspect.getsource(metadata._llm_fallback)
 ok("grok_timeout_seconds_light" in src_meta,
    "metadata._llm_fallback uses grok_timeout_seconds_light")
+ok("grok_effort_ideas" in src_meta and "reasoning_effort" in src_meta,
+   "metadata._llm_fallback pins reasoning_effort from settings.grok_effort_ideas")
 src_worker = inspect.getsource(worker._llm)
 ok("timeout" not in src_worker.split("complete(")[1].split(")")[0],
    "worker._llm keeps default (storyboard/script) timeout — no light override")
@@ -324,9 +330,95 @@ settings.grok_compose_reasoning_effort = _orig_eff
 with patch.object(llm, "complete", return_value="x") as m:
     worker._llm("script prompt")
 ok("reasoning_effort" not in m.call_args.kwargs,
-   "worker._llm (script/thumb) does not pin effort — only compose does")
+   "worker._llm (script/thumb) does not pin effort — compose and light ideas/metadata do")
 src_gc = inspect.getsource(worker._generate_composition)
 ok("llm=_llm_compose" in src_gc, "storyboard.compose is wired to worker._llm_compose")
+
+# ---------------------------------------------------------------------------
+# Call-type effort pins, asserted at the mocked subprocess argv
+# (ideas / metadata / compose / script). Never calls a real grok.
+# ---------------------------------------------------------------------------
+print("call-type effort pins (subprocess argv)")
+
+import os as _os
+
+# env: MANAGER_GROK_EFFORT_IDEAS (prefix + field name). A live .env must not
+# hide this: env vars win over env_file in pydantic-settings.
+with patch.dict(_os.environ, {"MANAGER_GROK_EFFORT_IDEAS": "minimal"}):
+    _from_env = _Settings()
+ok(_from_env.grok_effort_ideas == "minimal",
+   "MANAGER_GROK_EFFORT_IDEAS is read onto Settings.grok_effort_ideas")
+
+
+def _argv_for(thunk):
+    """Run thunk with subprocess.run mocked; return (argv, timeout)."""
+    _captured.clear()
+    _storage = settings.storage_dir
+    _model = settings.grok_model
+    with tempfile.TemporaryDirectory() as _td:
+        settings.storage_dir = _td
+        settings.grok_model = _Settings.model_fields["grok_model"].default
+        with patch.object(llm.subprocess, "run", side_effect=_run_ok):
+            thunk()
+    settings.storage_dir = _storage
+    settings.grok_model = _model
+    return _captured["cmd"], _captured["timeout"]
+
+
+def _effort_of(cmd):
+    if "--reasoning-effort" not in cmd:
+        return None
+    return cmd[cmd.index("--reasoning-effort") + 1]
+
+
+# Pin the code defaults for this block so a claw0 .env (compose=medium already,
+# ideas possibly unset) cannot change what we assert about argv.
+_orig_ideas = settings.grok_effort_ideas
+_orig_compose = settings.grok_compose_reasoning_effort
+settings.grok_effort_ideas = _Settings.model_fields["grok_effort_ideas"].default
+settings.grok_compose_reasoning_effort = _Settings.model_fields["grok_compose_reasoning_effort"].default
+
+cmd, timeout = _argv_for(lambda: video_gen.generate_ideas("T", None, [], n=1))
+ok(_effort_of(cmd) == "low",
+   "generate_ideas (autofill/trends) argv has --reasoning-effort low")
+ok(timeout == settings.grok_timeout_seconds_light,
+   "generate_ideas keeps the light timeout")
+ok(cmd[-2] == "-p", "generate_ideas still ends with -p <prompt>")
+
+cmd, timeout = _argv_for(lambda: metadata._llm_fallback("S", "script text"))
+ok(_effort_of(cmd) == "low",
+   "metadata._llm_fallback argv has --reasoning-effort low")
+ok(timeout == settings.grok_timeout_seconds_light,
+   "metadata._llm_fallback keeps the light timeout")
+
+cmd, timeout = _argv_for(lambda: worker._llm_compose("sb user", system="sb sys"))
+ok(_effort_of(cmd) == "medium",
+   "worker._llm_compose argv still has --reasoning-effort medium")
+ok(timeout == settings.grok_timeout_seconds,
+   "worker._llm_compose keeps the HARD timeout")
+
+cmd, timeout = _argv_for(lambda: worker._llm("script prompt"))
+ok(_effort_of(cmd) is None,
+   "worker._llm (script/thumb) argv has no --reasoning-effort")
+ok(timeout == settings.grok_timeout_seconds,
+   "worker._llm keeps the HARD timeout")
+
+# Kill switch and override, same mechanism as compose.
+settings.grok_effort_ideas = ""
+cmd, _ = _argv_for(lambda: video_gen.generate_ideas("T", None, [], n=1))
+ok(_effort_of(cmd) is None,
+   "empty grok_effort_ideas → generate_ideas adds no --reasoning-effort (kill switch)")
+cmd, _ = _argv_for(lambda: metadata._llm_fallback("S", "script text"))
+ok(_effort_of(cmd) is None,
+   "empty grok_effort_ideas → metadata adds no --reasoning-effort (kill switch)")
+
+settings.grok_effort_ideas = "medium"
+cmd, _ = _argv_for(lambda: video_gen.generate_ideas("T", None, [], n=1))
+ok(_effort_of(cmd) == "medium",
+   "MANAGER_GROK_EFFORT_IDEAS / settings.grok_effort_ideas override reaches argv")
+
+settings.grok_effort_ideas = _orig_ideas
+settings.grok_compose_reasoning_effort = _orig_compose
 
 print()
 print(f"ALL {_checks} CHECKS PASSED")

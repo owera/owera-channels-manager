@@ -503,7 +503,9 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             f"{avoid or '(none yet)'}\n\n"
             "Return ONLY the titles, one per line, no numbering, no bullets, no commentary."
         )
-    text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light)) or ""
+    effort = settings.grok_effort_ideas or None
+    text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
+                    reasoning_effort=effort) or ""
 
     seen = {s.lower() for s in existing}
     out: list[str] = []
