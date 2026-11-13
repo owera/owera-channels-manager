@@ -1,0 +1,949 @@
+{
+ "_note": "OS #1477 (OSI reveal, Shipping topic 45) prod snapshot 2026-11-12 21:00 render: provided script + edge-tts WordBoundary narration_words + stored LLM beats that FAILed Gate B/C.",
+ "video_id": 1477,
+ "subject": "Owera Super Intelligence: an AI attendant for small businesses (demo, fictional clinic)",
+ "title": "Owera Super Intelligence: an AI attendant for small businesses (demo, fictional clinic)",
+ "topic_id": 45,
+ "topic_name": "Shipping",
+ "description": "Owera Super Intelligence is an AI attendant that Owera sets up and runs for small businesses. It answers your customer, confirms the time and hands off to your team when a person is needed. Day 1: web chat. WhatsApp only if agreed on the setup call; not included by default. Everything in this video is a fictional clinic. Try the demo: https://owera.si/demo/",
+ "voice": "en-US-AndrewNeural",
+ "script": "This is Owera Super Intelligence. It's an AI attendant for small businesses. Owera sets it up and runs it. It answers your customers after hours too. This clinic is a fictional example. It's late at night. A customer asks about Saturday. It replies with the open times. Then it confirms the time with the customer. It logs a pre-booking. Your team gives the final confirmation. This is still the fictional clinic. Now someone asks which medicine to take. It won't give clinical advice. It points them to emergency care if urgent. It hands off to your team instead. It never pretends to be a person. Day one is web chat only. Try the demo in Portuguese. The link is in the description. Subscribe — next Shipping drop.",
+ "duration": 43.55,
+ "narration_words": [
+  {
+   "text": "This",
+   "start": 0.1,
+   "dur": 0.25
+  },
+  {
+   "text": "is",
+   "start": 0.4125,
+   "dur": 0.2
+  },
+  {
+   "text": "Owera",
+   "start": 0.625,
+   "dur": 0.475
+  },
+  {
+   "text": "Super",
+   "start": 1.1125,
+   "dur": 0.35
+  },
+  {
+   "text": "Intelligence",
+   "start": 1.475,
+   "dur": 0.6875
+  },
+  {
+   "text": "It's",
+   "start": 2.575,
+   "dur": 0.1125
+  },
+  {
+   "text": "an",
+   "start": 2.7,
+   "dur": 0.1
+  },
+  {
+   "text": "AI",
+   "start": 2.8125,
+   "dur": 0.3375
+  },
+  {
+   "text": "attendant",
+   "start": 3.1625,
+   "dur": 0.4625
+  },
+  {
+   "text": "for",
+   "start": 3.6375,
+   "dur": 0.1375
+  },
+  {
+   "text": "small",
+   "start": 3.7875,
+   "dur": 0.2625
+  },
+  {
+   "text": "businesses",
+   "start": 4.0625,
+   "dur": 0.65
+  },
+  {
+   "text": "Owera",
+   "start": 5.1375,
+   "dur": 0.3755
+  },
+  {
+   "text": "sets",
+   "start": 5.525,
+   "dur": 0.3125
+  },
+  {
+   "text": "it",
+   "start": 5.85,
+   "dur": 0.075
+  },
+  {
+   "text": "up",
+   "start": 5.9375,
+   "dur": 0.2
+  },
+  {
+   "text": "and",
+   "start": 6.3,
+   "dur": 0.1
+  },
+  {
+   "text": "runs",
+   "start": 6.4125,
+   "dur": 0.25
+  },
+  {
+   "text": "it",
+   "start": 6.675,
+   "dur": 0.175
+  },
+  {
+   "text": "It",
+   "start": 7.2625,
+   "dur": 0.1125
+  },
+  {
+   "text": "answers",
+   "start": 7.3875,
+   "dur": 0.325
+  },
+  {
+   "text": "your",
+   "start": 7.725,
+   "dur": 0.1125
+  },
+  {
+   "text": "customers",
+   "start": 7.85,
+   "dur": 0.5125
+  },
+  {
+   "text": "after",
+   "start": 8.375,
+   "dur": 0.2875
+  },
+  {
+   "text": "hours",
+   "start": 8.675,
+   "dur": 0.3
+  },
+  {
+   "text": "too",
+   "start": 8.9875,
+   "dur": 0.2875
+  },
+  {
+   "text": "This",
+   "start": 9.7,
+   "dur": 0.1375
+  },
+  {
+   "text": "clinic",
+   "start": 9.85,
+   "dur": 0.3875
+  },
+  {
+   "text": "is",
+   "start": 10.35,
+   "dur": 0.1
+  },
+  {
+   "text": "a",
+   "start": 10.4625,
+   "dur": 0.05
+  },
+  {
+   "text": "fictional",
+   "start": 10.525,
+   "dur": 0.5125
+  },
+  {
+   "text": "example",
+   "start": 11.05,
+   "dur": 0.5125
+  },
+  {
+   "text": "It's",
+   "start": 11.975,
+   "dur": 0.1125
+  },
+  {
+   "text": "late",
+   "start": 12.1,
+   "dur": 0.1625
+  },
+  {
+   "text": "at",
+   "start": 12.275,
+   "dur": 0.0875
+  },
+  {
+   "text": "night",
+   "start": 12.375,
+   "dur": 0.3
+  },
+  {
+   "text": "A",
+   "start": 13.0875,
+   "dur": 0.0625
+  },
+  {
+   "text": "customer",
+   "start": 13.1625,
+   "dur": 0.4375
+  },
+  {
+   "text": "asks",
+   "start": 13.6125,
+   "dur": 0.2875
+  },
+  {
+   "text": "about",
+   "start": 13.9125,
+   "dur": 0.225
+  },
+  {
+   "text": "Saturday",
+   "start": 14.15,
+   "dur": 0.5375
+  },
+  {
+   "text": "It",
+   "start": 15.1,
+   "dur": 0.0875
+  },
+  {
+   "text": "replies",
+   "start": 15.2,
+   "dur": 0.475
+  },
+  {
+   "text": "with",
+   "start": 15.6875,
+   "dur": 0.125
+  },
+  {
+   "text": "the",
+   "start": 15.825,
+   "dur": 0.1125
+  },
+  {
+   "text": "open",
+   "start": 15.95,
+   "dur": 0.25
+  },
+  {
+   "text": "times",
+   "start": 16.2125,
+   "dur": 0.55
+  },
+  {
+   "text": "Then",
+   "start": 17.175,
+   "dur": 0.1
+  },
+  {
+   "text": "it",
+   "start": 17.2875,
+   "dur": 0.075
+  },
+  {
+   "text": "confirms",
+   "start": 17.375,
+   "dur": 0.5125
+  },
+  {
+   "text": "the",
+   "start": 17.9,
+   "dur": 0.0875
+  },
+  {
+   "text": "time",
+   "start": 18.0,
+   "dur": 0.2875
+  },
+  {
+   "text": "with",
+   "start": 18.3,
+   "dur": 0.1125
+  },
+  {
+   "text": "the",
+   "start": 18.425,
+   "dur": 0.075
+  },
+  {
+   "text": "customer",
+   "start": 18.5125,
+   "dur": 0.5375
+  },
+  {
+   "text": "It",
+   "start": 19.4625,
+   "dur": 0.1125
+  },
+  {
+   "text": "logs",
+   "start": 19.5875,
+   "dur": 0.2625
+  },
+  {
+   "text": "a",
+   "start": 19.8625,
+   "dur": 0.0625
+  },
+  {
+   "text": "pre-booking",
+   "start": 19.9375,
+   "dur": 0.575
+  },
+  {
+   "text": "Your",
+   "start": 20.9375,
+   "dur": 0.1
+  },
+  {
+   "text": "team",
+   "start": 21.05,
+   "dur": 0.35
+  },
+  {
+   "text": "gives",
+   "start": 21.525,
+   "dur": 0.2
+  },
+  {
+   "text": "the",
+   "start": 21.7375,
+   "dur": 0.0875
+  },
+  {
+   "text": "final",
+   "start": 21.8375,
+   "dur": 0.325
+  },
+  {
+   "text": "confirmation",
+   "start": 22.175,
+   "dur": 0.725
+  },
+  {
+   "text": "This",
+   "start": 23.3125,
+   "dur": 0.1875
+  },
+  {
+   "text": "is",
+   "start": 23.5125,
+   "dur": 0.1125
+  },
+  {
+   "text": "still",
+   "start": 23.6375,
+   "dur": 0.2875
+  },
+  {
+   "text": "the",
+   "start": 23.9375,
+   "dur": 0.0875
+  },
+  {
+   "text": "fictional",
+   "start": 24.0375,
+   "dur": 0.4125
+  },
+  {
+   "text": "clinic",
+   "start": 24.4625,
+   "dur": 0.4375
+  },
+  {
+   "text": "Now",
+   "start": 25.3125,
+   "dur": 0.125
+  },
+  {
+   "text": "someone",
+   "start": 25.45,
+   "dur": 0.3
+  },
+  {
+   "text": "asks",
+   "start": 25.7625,
+   "dur": 0.325
+  },
+  {
+   "text": "which",
+   "start": 26.1,
+   "dur": 0.15
+  },
+  {
+   "text": "medicine",
+   "start": 26.2625,
+   "dur": 0.35
+  },
+  {
+   "text": "to",
+   "start": 26.625,
+   "dur": 0.0625
+  },
+  {
+   "text": "take",
+   "start": 26.7,
+   "dur": 0.375
+  },
+  {
+   "text": "It",
+   "start": 27.4875,
+   "dur": 0.0875
+  },
+  {
+   "text": "won't",
+   "start": 27.5875,
+   "dur": 0.175
+  },
+  {
+   "text": "give",
+   "start": 27.775,
+   "dur": 0.1625
+  },
+  {
+   "text": "clinical",
+   "start": 27.95,
+   "dur": 0.4
+  },
+  {
+   "text": "advice",
+   "start": 28.3625,
+   "dur": 0.55
+  },
+  {
+   "text": "It",
+   "start": 29.325,
+   "dur": 0.1125
+  },
+  {
+   "text": "points",
+   "start": 29.45,
+   "dur": 0.35
+  },
+  {
+   "text": "them",
+   "start": 29.8125,
+   "dur": 0.225
+  },
+  {
+   "text": "to",
+   "start": 30.05,
+   "dur": 0.1375
+  },
+  {
+   "text": "emergency",
+   "start": 30.2,
+   "dur": 0.5875
+  },
+  {
+   "text": "care",
+   "start": 30.8,
+   "dur": 0.2625
+  },
+  {
+   "text": "if",
+   "start": 31.075,
+   "dur": 0.1125
+  },
+  {
+   "text": "urgent",
+   "start": 31.2,
+   "dur": 0.4125
+  },
+  {
+   "text": "It",
+   "start": 32.025,
+   "dur": 0.075
+  },
+  {
+   "text": "hands",
+   "start": 32.1125,
+   "dur": 0.275
+  },
+  {
+   "text": "off",
+   "start": 32.4,
+   "dur": 0.2
+  },
+  {
+   "text": "to",
+   "start": 32.6125,
+   "dur": 0.0875
+  },
+  {
+   "text": "your",
+   "start": 32.7125,
+   "dur": 0.1
+  },
+  {
+   "text": "team",
+   "start": 32.825,
+   "dur": 0.2625
+  },
+  {
+   "text": "instead",
+   "start": 33.1,
+   "dur": 0.475
+  },
+  {
+   "text": "It",
+   "start": 33.9875,
+   "dur": 0.1
+  },
+  {
+   "text": "never",
+   "start": 34.1,
+   "dur": 0.25
+  },
+  {
+   "text": "pretends",
+   "start": 34.3625,
+   "dur": 0.4375
+  },
+  {
+   "text": "to",
+   "start": 34.8125,
+   "dur": 0.075
+  },
+  {
+   "text": "be",
+   "start": 34.9,
+   "dur": 0.1375
+  },
+  {
+   "text": "a",
+   "start": 35.05,
+   "dur": 0.05
+  },
+  {
+   "text": "person",
+   "start": 35.1125,
+   "dur": 0.45
+  },
+  {
+   "text": "Day",
+   "start": 35.975,
+   "dur": 0.1375
+  },
+  {
+   "text": "one",
+   "start": 36.125,
+   "dur": 0.2125
+  },
+  {
+   "text": "is",
+   "start": 36.35,
+   "dur": 0.1
+  },
+  {
+   "text": "web",
+   "start": 36.4625,
+   "dur": 0.2125
+  },
+  {
+   "text": "chat",
+   "start": 36.6875,
+   "dur": 0.25
+  },
+  {
+   "text": "only",
+   "start": 36.95,
+   "dur": 0.3125
+  },
+  {
+   "text": "Try",
+   "start": 37.675,
+   "dur": 0.15
+  },
+  {
+   "text": "the",
+   "start": 37.8375,
+   "dur": 0.1
+  },
+  {
+   "text": "demo",
+   "start": 37.95,
+   "dur": 0.3
+  },
+  {
+   "text": "in",
+   "start": 38.2625,
+   "dur": 0.075
+  },
+  {
+   "text": "Portuguese",
+   "start": 38.35,
+   "dur": 0.7125
+  },
+  {
+   "text": "The",
+   "start": 39.4875,
+   "dur": 0.075
+  },
+  {
+   "text": "link",
+   "start": 39.575,
+   "dur": 0.275
+  },
+  {
+   "text": "is",
+   "start": 40.0125,
+   "dur": 0.125
+  },
+  {
+   "text": "in",
+   "start": 40.15,
+   "dur": 0.0875
+  },
+  {
+   "text": "the",
+   "start": 40.25,
+   "dur": 0.075
+  },
+  {
+   "text": "description",
+   "start": 40.3375,
+   "dur": 0.5625
+  },
+  {
+   "text": "Subscribe",
+   "start": 41.3125,
+   "dur": 0.5375
+  },
+  {
+   "text": "next",
+   "start": 42.1625,
+   "dur": 0.2125
+  },
+  {
+   "text": "Shipping",
+   "start": 42.3875,
+   "dur": 0.3
+  },
+  {
+   "text": "drop",
+   "start": 42.7,
+   "dur": 0.35
+  }
+ ],
+ "stored_beats": [
+  {
+   "type": "hook",
+   "start": 0.0,
+   "dur": 2.455,
+   "cue": "This is Owera Super Intelligence",
+   "text": "This is Owera Super Intelligence.",
+   "object": "OWERA",
+   "emoji": ""
+  },
+  {
+   "type": "list",
+   "start": 2.575,
+   "dur": 2.443,
+   "cue": "It's an AI attendant",
+   "emoji": "",
+   "items": [
+    {
+     "text": "For small businesses",
+     "emoji": ""
+    }
+   ],
+   "title": "AI attendant"
+  },
+  {
+   "type": "quote",
+   "start": 5.138,
+   "dur": 2.005,
+   "cue": "Owera sets it up",
+   "text": "Owera sets it up and runs it.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 7.263,
+   "dur": 2.317,
+   "cue": "It answers your customers after hours too.",
+   "text": "It answers your customers after hours too.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 9.7,
+   "dur": 2.8,
+   "cue": "This clinic is a",
+   "text": "This clinic is a fictional example.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 12.62,
+   "dur": 2.36,
+   "cue": "A customer asks about Saturday.",
+   "text": "A customer asks about Saturday.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 15.1,
+   "dur": 1.955,
+   "cue": "It replies with the",
+   "text": "It replies with the open times.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 17.175,
+   "dur": 2.167,
+   "cue": "Then it confirms the time with the customer.",
+   "text": "Then it confirms the time with the customer.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 19.462,
+   "dur": 2.63,
+   "cue": "It logs a pre-booking",
+   "text": "It logs a pre-booking.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 22.212,
+   "dur": 2.8,
+   "cue": "This is still the fictional clinic.",
+   "text": "This is still the fictional clinic.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 25.132,
+   "dur": 2.236,
+   "cue": "Now someone asks which",
+   "text": "Now someone asks which medicine to take.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 27.488,
+   "dur": 1.0,
+   "cue": "It won't give clinical advice.",
+   "text": "It won't give clinical advice.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 28.608,
+   "dur": 2.414,
+   "cue": "It points them to emergency care if urgent.",
+   "text": "It points them to emergency care if urgent.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 31.142,
+   "dur": 2.725,
+   "cue": "It hands off to your team instead.",
+   "text": "It hands off to your team instead.",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 33.987,
+   "dur": 2.8,
+   "cue": "It never pretends to",
+   "text": "It never pretends to be a person.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 36.907,
+   "dur": 1.36,
+   "cue": "Try the demo in",
+   "text": "Try the demo in Portuguese.",
+   "emoji": "",
+   "attribution": ""
+  },
+  {
+   "type": "quote",
+   "start": 38.387,
+   "dur": 2.393,
+   "cue": "The link is in the description.",
+   "text": "The link is in the description.",
+   "attribution": ""
+  },
+  {
+   "type": "cta",
+   "start": 40.9,
+   "dur": 2.65,
+   "cue": "Subscribe — next Shipping drop.",
+   "text": "Subscribe · Shipping",
+   "sub": "same series"
+  }
+ ],
+ "stored_beat_timing": "card_hold_280",
+ "stored_craft_gate": {
+  "result": "FAIL",
+  "checks": {
+   "A": "PASS",
+   "B": "FAIL",
+   "C": "FAIL"
+  },
+  "reasons": [
+   "[B] Card text: FAIL — vs_card_not_allowed: card 1 type=list 'AI attendant For small businesses' is a VS/list template (OS mid cards are whole VO sentences). One card per spoken sentence, quotes only of words the VO says, no invented tool output, PT-BR copy on PT cards, no back-to-back near-duplicate cards.",
+   "[B] Card timing: FAIL — quote_before_speech: card 5 quote starts at 12.62s, first spoken word at 13.09s (must enter at the first word); quote_before_speech: card 9 quote starts at 22.21s, first spoken word at 23.31s (must enter at the first word); quote_before_speech: card 10 quote starts at 25.13s, first spoken word at 25.31s (must enter at the first word); quote_before_speech: card 12 quote starts at 28.61s, first spoken word at 29.32s (must enter at the first word); quote_before_speech: card 13 quote starts at 31.14s, first spoken word at 32.02s (must enter at the first word); quote_before_speech: card 15 quote starts at 36.91s, first spoken word at 37.67s (must enter at the first word); quote_before_speech: card 16 quote starts at 38.39s, first spoken word at 39.49s (must enter at the first word); stale_card: card 1 type=list ends at 5.02s, last spoken word at 3.62s (1.39s leftover; max 0.50s); stale_card: card 4 type=quote ends at 12.50s, last spoken word at 11.56s (0.94s leftover; max 0.50s); stale_card: card 8 type=quote ends at 22.09s, last spoken word at 20.51s (1.58s leftover; max 0.50s); stale_card: card 14 type=quote ends at 36.79s, last spoken word at 35.56s (1.23s leftover; max 0.50s). A quote enters at its first spoken word; a card (including the hook) may not stay up more than 0.5s after its last spoken word (stale_card / quote_before_speech).",
+   "[B] Card exits early: FAIL — card_exits_early: card 9 ends at 25.01s, last spoken word at 24.90s (must hold through the last word + 0.20s pad); card_exits_early: card 11 ends at 28.49s, last spoken word at 28.91s (must hold through the last word + 0.20s pad); card_exits_early: card 12 ends at 31.02s, last spoken word at 31.61s (must hold through the last word + 0.20s pad); card_exits_early: card 15 ends at 38.27s, last spoken word at 39.06s (must hold through the last word + 0.20s pad); card_exits_early: card 16 ends at 40.78s, last spoken word at 40.90s (must hold through the last word + 0.20s pad). A card must hold through its last spoken word.",
+   "[B] Card enters early: FAIL — card_enters_early: card 5 starts at 12.62s, first spoken word at 13.09s (lead 0.47s; max 0.3s); card_enters_early: card 9 starts at 22.21s, first spoken word at 23.31s (lead 1.10s; max 0.3s); card_enters_early: card 12 starts at 28.61s, first spoken word at 29.32s (lead 0.72s; max 0.3s); card_enters_early: card 13 starts at 31.14s, first spoken word at 32.02s (lead 0.88s; max 0.3s); card_enters_early: card 15 starts at 36.91s, first spoken word at 37.67s (lead 0.77s; max 0.3s); card_enters_early: card 16 starts at 38.39s, first spoken word at 39.49s (lead 1.10s; max 0.3s). A card may lead its speech by at most 0.3s.",
+   "[C] Spoken list/slide spam: FAIL — list/statement mid-board with no code/command/diagram/compare/stat (spoken-slide spam)"
+  ],
+  "kinds": [
+   {
+    "check": "card_text",
+    "kind": "real",
+    "detail": "vs_card_not_allowed: card 1 type=list 'AI attendant For small businesses' is a VS/list template (OS mid cards are whole VO sentences)"
+   },
+   {
+    "check": "os_cards",
+    "kind": "real",
+    "detail": "vs_card_not_allowed: card 1 type=list 'AI attendant For small businesses' is a VS/list template (OS mid cards are whole VO sentences)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 5 quote starts at 12.62s, first spoken word at 13.09s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 9 quote starts at 22.21s, first spoken word at 23.31s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 10 quote starts at 25.13s, first spoken word at 25.31s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 12 quote starts at 28.61s, first spoken word at 29.32s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 13 quote starts at 31.14s, first spoken word at 32.02s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 15 quote starts at 36.91s, first spoken word at 37.67s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "quote_before_speech: card 16 quote starts at 38.39s, first spoken word at 39.49s (must enter at the first word)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "stale_card: card 1 type=list ends at 5.02s, last spoken word at 3.62s (1.39s leftover; max 0.50s)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "stale_card: card 4 type=quote ends at 12.50s, last spoken word at 11.56s (0.94s leftover; max 0.50s)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "stale_card: card 8 type=quote ends at 22.09s, last spoken word at 20.51s (1.58s leftover; max 0.50s)"
+   },
+   {
+    "check": "card_timing",
+    "kind": "real",
+    "detail": "stale_card: card 14 type=quote ends at 36.79s, last spoken word at 35.56s (1.23s leftover; max 0.50s)"
+   },
+   {
+    "check": "card_exits_early",
+    "kind": "real",
+    "detail": "card_exits_early: card 9 ends at 25.01s, last spoken word at 24.90s (must hold through the last word + 0.20s pad)"
+   },
+   {
+    "check": "card_exits_early",
+    "kind": "real",
+    "detail": "card_exits_early: card 11 ends at 28.49s, last spoken word at 28.91s (must hold through the last word + 0.20s pad)"
+   },
+   {
+    "check": "card_exits_early",
+    "kind": "real",
+    "detail": "card_exits_early: card 12 ends at 31.02s, last spoken word at 31.61s (must hold through the last word + 0.20s pad)"
+   },
+   {
+    "check": "card_exits_early",
+    "kind": "real",
+    "detail": "card_exits_early: card 15 ends at 38.27s, last spoken word at 39.06s (must hold through the last word + 0.20s pad)"
+   },
+   {
+    "check": "card_exits_early",
+    "kind": "real",
+    "detail": "card_exits_early: card 16 ends at 40.78s, last spoken word at 40.90s (must hold through the last word + 0.20s pad)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 5 starts at 12.62s, first spoken word at 13.09s (lead 0.47s; max 0.3s)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 9 starts at 22.21s, first spoken word at 23.31s (lead 1.10s; max 0.3s)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 12 starts at 28.61s, first spoken word at 29.32s (lead 0.72s; max 0.3s)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 13 starts at 31.14s, first spoken word at 32.02s (lead 0.88s; max 0.3s)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 15 starts at 36.91s, first spoken word at 37.67s (lead 0.77s; max 0.3s)"
+   },
+   {
+    "check": "card_enters_early",
+    "kind": "real",
+    "detail": "card_enters_early: card 16 starts at 38.39s, first spoken word at 39.49s (lead 1.10s; max 0.3s)"
+   },
+   {
+    "check": "slide_spam",
+    "kind": "real",
+    "detail": "list/statement mid-board with no code/command/diagram/compare/stat (spoken-slide spam)"
+   }
+  ],
+  "generator_slips": 0,
+  "generator_slip_list": []
+ }
+}
