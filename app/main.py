@@ -31,6 +31,9 @@ logging.basicConfig(level=logging.INFO,
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_dotenv_into_env()
+    # LLM_BACKEND=api without XAI_DATA_RETENTION_ACK=zdr|30d_no_training refuses to start.
+    from app.services import llm as _llm
+    _llm.boot_check()
     ensure_dirs()
     init_db()
     render_loop.recover_orphaned_renders()        # re-queue renders orphaned by a restart

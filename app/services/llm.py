@@ -106,12 +106,32 @@ def complete(
     """
     # Hard guard (choke point): refuse before building/spawning anything when the
     # bound workspace is not Owera-internal. Raises LLMBlocked (a GrokCLIError).
+    # Applies to BOTH backends (cli and api).
     from app.services import llm_guard
-    llm_guard.require(call_type)
+    ws = llm_guard.require(call_type)
     model = model if model is not None else (settings.grok_model or None)
+    timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
+    if backend() == "api":
+        sc = llm_guard.current()
+        return _complete_api(prompt, system, model=model, reasoning_effort=reasoning_effort,
+                             timeout=timeout, workspace_id=ws,
+                             call_type=call_type or (sc[1] if sc else None) or "unknown")
+    return _complete_cli(prompt, system, model=model, reasoning_effort=reasoning_effort,
+                         timeout=timeout)
+
+
+def backend() -> str:
+    """``settings.llm_backend``: "api" only when explicitly set; anything else = cli."""
+    return "api" if (getattr(settings, "llm_backend", "") or "").strip().lower() == "api" else "cli"
+
+
+# --------------------------------------------------------------------------- cli backend
+
+def _complete_cli(prompt: str, system: str | None, *, model: str | None,
+                  reasoning_effort: str | None, timeout: int) -> str:
+    """``grok -p`` (consumer ``grok login`` session). Unchanged behavior."""
     cmd = build_cmd(prompt, system, model=model, reasoning_effort=reasoning_effort)
     cwd = scratch_dir()
-    timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
     env = _child_env()
     logger.info("llm backend=grok-cli bin=%s model=%s effort=%s prompt_chars=%d",
                 settings.grok_bin, model or "default", reasoning_effort or "default",
@@ -141,3 +161,373 @@ def complete(
             f"grok -p exited {proc.returncode}: {tail or '(no stderr)'}. {_OIDC_HINT}"
         )
     return (proc.stdout or "").strip()
+
+
+# --------------------------------------------------------------------------- api backend
+#
+# xAI API (Enterprise ToS), POST {base}/responses — https://docs.x.ai/docs/api-reference
+# (fetched 2026-11-13). Same contract as the CLI path for callers:
+#   * one attempt per call, no in-client retry (the CLI does none; render_loop owns
+#     retries via _TRANSIENT);
+#   * timeout → GrokCLIError "grok.Timeout: ..." (same transient token);
+#   * any other failure → GrokCLIError (non-zero exit equivalent);
+#   * returns the stripped output text.
+# The key is sent only in the Authorization header; it is never logged, never put in
+# an error message, never written to the usage JSONL.
+
+# USD per 1M tokens. Source: https://docs.x.ai/docs/models "Text API Pricing",
+# fetched 2026-11-13. Requests whose prompt reaches long_threshold tokens are billed
+# at the long_* rate for ALL tokens. Override: MANAGER_LLM_PRICE_TABLE_JSON.
+DEFAULT_PRICES: dict[str, dict[str, float]] = {
+    "grok-4.7": {"input": 2.00, "cached_input": 0.50, "output": 6.00,
+                 "long_threshold": 200_000, "long_input": 4.00,
+                 "long_cached_input": 1.00, "long_output": 12.00},
+    "grok-4.6": {"input": 2.00, "cached_input": 0.50, "output": 6.00,
+                 "long_threshold": 200_000, "long_input": 4.00,
+                 "long_cached_input": 1.00, "long_output": 12.00},
+    "grok-4.5": {"input": 2.00, "cached_input": 0.30, "output": 6.00,
+                 "long_threshold": 200_000, "long_input": 4.00,
+                 "long_cached_input": 0.60, "long_output": 12.00},
+}
+
+BUDGET_EVENT = "llm_budget_blocked"
+
+
+class LLMRetentionNotAcknowledged(GrokCLIError):
+    """LLM_BACKEND=api without a valid XAI_DATA_RETENTION_ACK. Not transient."""
+
+
+# Allowed values of XAI_DATA_RETENTION_ACK (an explicit statement by the operator of
+# what the xAI account behind XAI_API_KEY retains — never inferred):
+#   zdr              the org has Zero Data Retention enabled;
+#   30d_no_training  standard API retention (30 days), prompts not used for training.
+RETENTION_ACK_VALUES = ("zdr", "30d_no_training")
+
+RETENTION_MESSAGE = ("LLM_BACKEND=api requires XAI_DATA_RETENTION_ACK=zdr|30d_no_training "
+                     "in the manager .env: state what the xAI account behind XAI_API_KEY "
+                     "retains (zdr only if ZDR is on for the org), or set LLM_BACKEND=cli.")
+
+
+def data_retention() -> str:
+    """The acknowledged retention value ("" when unset/invalid)."""
+    v = (getattr(settings, "xai_data_retention_ack", "") or "").strip().lower()
+    return v if v in RETENTION_ACK_VALUES else ""
+
+
+def require_retention_ack() -> str:
+    """Fail closed in api mode: empty or unknown XAI_DATA_RETENTION_ACK raises."""
+    v = data_retention()
+    if backend() == "api" and not v:
+        raise LLMRetentionNotAcknowledged(RETENTION_MESSAGE)
+    return v
+
+
+def boot_check() -> None:
+    """Called from the app lifespan: refuse to start in api mode without a valid
+    retention acknowledgement; log the acknowledged value."""
+    if backend() == "api":
+        v = require_retention_ack()
+        logger.info("llm backend=xai-api data_retention=%s base=%s (agent runs stay on "
+                    "grok-cli)", v, settings.llm_api_base_url)
+
+
+# CLI effort vocabulary (grok 1.0.77: none|minimal|low|medium|high|xhigh|max) → xAI
+# Responses API ``reasoning.effort`` (grok-4.5/4.6/4.7: low|medium|high|xhigh;
+# reasoning cannot be disabled). Unknown values are dropped (API default "high").
+_API_EFFORT = {"none": "low", "minimal": "low", "low": "low", "medium": "medium",
+               "high": "high", "xhigh": "xhigh", "max": "xhigh"}
+
+
+def api_effort(reasoning_effort: str | None) -> str | None:
+    if not reasoning_effort:
+        return None
+    v = _API_EFFORT.get(reasoning_effort.strip().lower())
+    if v is None:
+        logger.warning("llm backend=xai-api unknown reasoning_effort=%r: not sent "
+                       "(API default)", reasoning_effort)
+    return v
+
+
+# Stateless requests only: these keys are the whole allowed request body.
+# No previous_response_id / conversation / background / store=true, ever.
+_ALLOWED_BODY_KEYS = frozenset({"model", "input", "instructions", "reasoning", "store"})
+
+
+def _assert_stateless(body: dict) -> None:
+    extra = set(body) - _ALLOWED_BODY_KEYS
+    if extra or body.get("store") is not False or not isinstance(body.get("input"), str):
+        raise LLMConfigError(f"xai api request is not stateless (keys={sorted(body)})")
+
+
+class LLMBudgetExceeded(GrokCLIError):
+    """api backend refused: monthly cap reached or not configured. Not transient."""
+
+
+class LLMConfigError(GrokCLIError):
+    """api backend misconfigured (no key, unknown model/price). Not transient."""
+
+
+def price_table() -> dict[str, dict[str, float]]:
+    import json
+    raw = (getattr(settings, "llm_price_table_json", "") or "").strip()
+    if not raw:
+        return dict(DEFAULT_PRICES)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+        return {str(k): {kk: float(vv) for kk, vv in v.items()} for k, v in data.items()}
+    except Exception as e:  # noqa: BLE001
+        raise LLMConfigError(f"MANAGER_LLM_PRICE_TABLE_JSON is not valid JSON price table ({e})")
+
+
+def api_model(model: str | None) -> str:
+    """CLI model id → API model id. ``-m grok-4.7`` (live claw0 MANAGER_GROK_MODEL)
+    is the same id on the API; empty (CLI default) → settings.llm_api_default_model."""
+    return (model or "").strip() or (settings.llm_api_default_model or "grok-4.7")
+
+
+def estimate_cost(model: str, input_tokens: int, cached_tokens: int, output_tokens: int,
+                  reasoning_tokens: int = 0) -> float:
+    p = price_table().get(model)
+    if p is None:
+        raise LLMConfigError(f"no price for model {model!r} in the LLM price table")
+    long = input_tokens >= p.get("long_threshold", float("inf"))
+    pin = p.get("long_input", p["input"]) if long else p["input"]
+    pcache = (p.get("long_cached_input", p.get("cached_input", pin)) if long
+              else p.get("cached_input", pin))
+    pout = p.get("long_output", p["output"]) if long else p["output"]
+    uncached = max(0, input_tokens - cached_tokens)
+    # Reasoning tokens are generated tokens: billed at the output rate.
+    return (uncached * pin + cached_tokens * pcache
+            + (output_tokens + reasoning_tokens) * pout) / 1_000_000
+
+
+def usage_path():
+    from pathlib import Path
+    p = (getattr(settings, "llm_usage_path", "") or "").strip()
+    return Path(p) if p else Path(settings.storage_dir) / "llm-usage.jsonl"
+
+
+def record_usage(row: dict) -> None:
+    """Append one usage row (no content). A write failure is logged, never raised."""
+    import json
+    path = usage_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, separators=(",", ":"), sort_keys=True) + "\n")
+    except OSError as e:
+        logger.warning("llm usage JSONL write failed (%s): %s", path, type(e).__name__)
+
+
+def month_to_date_usd(now=None) -> float:
+    """Sum of cost_usd over the current UTC month. Unreadable rows are skipped;
+    an unreadable FILE raises (caller fails closed)."""
+    import json
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    prefix = now.strftime("%Y-%m")
+    path = usage_path()
+    if not path.exists():
+        return 0.0
+    total = 0.0
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if str(r.get("ts", "")).startswith(prefix):
+                try:
+                    total += float(r.get("cost_usd") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+    return total
+
+
+def check_budget(call_type: str, workspace_id) -> float:
+    """Fail closed: no cap → blocked; month-to-date ≥ cap → blocked; ledger
+    unreadable → blocked. Returns the remaining USD."""
+    cap = float(getattr(settings, "llm_monthly_usd_cap", 0.0) or 0.0)
+    if cap <= 0:
+        logger.warning("%s reason=cap_not_set workspace_id=%s call_type=%s",
+                       BUDGET_EVENT, workspace_id, call_type)
+        raise LLMBudgetExceeded(
+            f"{BUDGET_EVENT}: LLM_MONTHLY_USD_CAP is not set; the api backend refuses "
+            "every call until it is (fail closed)")
+    try:
+        spent = month_to_date_usd()
+    except OSError as e:
+        logger.warning("%s reason=ledger_unreadable workspace_id=%s call_type=%s",
+                       BUDGET_EVENT, workspace_id, call_type)
+        raise LLMBudgetExceeded(f"{BUDGET_EVENT}: usage ledger unreadable ({type(e).__name__})")
+    if spent >= cap:
+        logger.warning("%s reason=cap_reached spent_usd=%.4f cap_usd=%.2f workspace_id=%s "
+                       "call_type=%s", BUDGET_EVENT, spent, cap, workspace_id, call_type)
+        raise LLMBudgetExceeded(
+            f"{BUDGET_EVENT}: monthly cap reached (spent ${spent:.2f} of ${cap:.2f})")
+    return cap - spent
+
+
+def _api_key() -> str:
+    key = settings.xai_api_key.get_secret_value() if settings.xai_api_key else ""
+    if not (key or "").strip():
+        raise LLMConfigError(
+            "LLM_BACKEND=api but XAI_API_KEY is not set in the manager .env "
+            "(no fallback to the grok CLI)")
+    return key.strip()
+
+
+def _http_client(timeout: int):
+    """Seam for tests (mock transport)."""
+    import httpx
+    return httpx.Client(base_url=settings.llm_api_base_url.rstrip("/"), timeout=timeout)
+
+
+def _output_text(data: dict) -> str:
+    if isinstance(data.get("output_text"), str):
+        return data["output_text"]
+    parts: list[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for c in item.get("content") or []:
+            if isinstance(c, dict) and c.get("type") == "output_text":
+                parts.append(c.get("text") or "")
+    return "".join(parts)
+
+
+def _complete_api(prompt: str, system: str | None, *, model: str | None,
+                  reasoning_effort: str | None, timeout: int, workspace_id,
+                  call_type: str) -> str:
+    import time
+    from datetime import datetime, timezone
+
+    import httpx
+
+    retention = require_retention_ack()
+    mdl = api_model(model)
+    if mdl not in price_table():
+        raise LLMConfigError(f"no price for model {mdl!r}: add it to MANAGER_LLM_PRICE_TABLE_JSON")
+    key = _api_key()
+    check_budget(call_type, workspace_id)
+    body: dict = {"model": mdl, "input": prompt if prompt is not None else "",
+                  "store": False}
+    if system and system.strip():
+        body["instructions"] = system.strip()
+    effort = api_effort(reasoning_effort)
+    if effort:
+        body["reasoning"] = {"effort": effort}
+    _assert_stateless(body)   # store=false explicit, no previous_response_id/conversation
+    logger.info("llm backend=xai-api model=%s effort=%s prompt_chars=%d call_type=%s "
+                "workspace_id=%s data_retention=%s", mdl, effort or "default",
+                len(build_prompt(prompt, system)), call_type, workspace_id, retention)
+    row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+           "backend": "api", "model": mdl, "call_type": call_type,
+           "workspace_id": workspace_id, "effort": effort,
+           "effort_requested": reasoning_effort or None, "data_retention": retention}
+    t0 = time.monotonic()
+    try:
+        with _http_client(timeout) as c:
+            r = c.post("/responses", json=body,
+                       headers={"Authorization": f"Bearer {key}"})
+    except httpx.TimeoutException as e:
+        record_usage({**row, "status": "timeout", "cost_usd": 0.0,
+                      "duration_s": round(time.monotonic() - t0, 2)})
+        raise GrokCLIError(f"grok.Timeout: xai api timed out after {timeout}s") from e
+    except httpx.HTTPError as e:
+        record_usage({**row, "status": "transport_error", "cost_usd": 0.0,
+                      "duration_s": round(time.monotonic() - t0, 2)})
+        raise GrokCLIError(f"xai api transport error: {type(e).__name__}") from e
+    dur = round(time.monotonic() - t0, 2)
+    if r.status_code >= 400:
+        record_usage({**row, "status": f"http_{r.status_code}", "cost_usd": 0.0,
+                      "duration_s": dur})
+        detail = ""
+        try:
+            err = (r.json() or {}).get("error")
+            detail = (err.get("code") or err.get("type") or "") if isinstance(err, dict) else str(err or "")
+        except ValueError:
+            pass
+        # Same shape as "grok -p exited N: <tail>"; status code kept so 503/529 stay
+        # transient in render_loop exactly as a CLI stderr with them would.
+        raise GrokCLIError(f"xai api HTTP {r.status_code}: {str(detail)[:200] or '(no detail)'}")
+    try:
+        data = r.json()
+    except ValueError as e:
+        record_usage({**row, "status": "bad_json", "cost_usd": 0.0, "duration_s": dur})
+        raise GrokCLIError("xai api returned non-JSON") from e
+    u = data.get("usage") or {}
+    in_t = int(u.get("input_tokens") or u.get("prompt_tokens") or 0)
+    out_t = int(u.get("output_tokens") or u.get("completion_tokens") or 0)
+    cached = int(((u.get("input_tokens_details") or u.get("prompt_tokens_details") or {})
+                  .get("cached_tokens")) or 0)
+    reasoning = int(((u.get("output_tokens_details") or u.get("completion_tokens_details") or {})
+                     .get("reasoning_tokens")) or 0)
+    est = estimate_cost(mdl, in_t, cached, out_t, reasoning)
+    reported = None
+    if u.get("cost_in_usd_ticks") is not None:
+        reported = int(u["cost_in_usd_ticks"]) / 10_000_000_000   # 1e10 ticks = $1
+    logger.info("llm_usage backend=xai-api model=%s response_model=%s call_type=%s "
+                "workspace_id=%s input_tokens=%d cached_input_tokens=%d output_tokens=%d "
+                "reasoning_tokens=%d cost_usd=%.6f", mdl, data.get("model") or mdl, call_type,
+                workspace_id, in_t, cached, out_t, reasoning,
+                reported if reported is not None else est)
+    record_usage({**row, "status": data.get("status") or "completed",
+                  "response_model": data.get("model") or mdl,
+                  "input_tokens": in_t, "cached_input_tokens": cached,
+                  "output_tokens": out_t, "reasoning_tokens": reasoning,
+                  "cost_usd_estimated": round(est, 6),
+                  "cost_usd_reported": None if reported is None else round(reported, 6),
+                  "cost_usd": round(reported if reported is not None else est, 6),
+                  "duration_s": dur})
+    if data.get("status") not in (None, "completed"):
+        raise GrokCLIError(f"xai api response status={data.get('status')}")
+    return (_output_text(data) or "").strip()
+
+
+# --------------------------------------------------------------------------- agents
+#
+# Headless grok agents (run/growth-agent.sh, code-agent.sh, run-check.sh) exec
+# through this module:
+#   python -m app.services.llm agent-exec <call_type> -- grok --prompt-file ...
+# Guard preflight, then exec the command unchanged on the Grok CLI (consumer
+# ``grok login`` session) in BOTH backends: LLM_BACKEND=api moves only
+# ``complete()`` to the xAI API (CTO, 2026-11-13). API keys are stripped from the
+# child env so the CLI can never silently bill XAI_API_KEY outside the cap/ledger.
+
+def agent_exec_plan(call_type: str, cmd: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Return (argv, env) for an agent run (always the CLI), or raise (guard)."""
+    from app.services import llm_guard
+    if not cmd:
+        raise LLMConfigError("agent-exec: no command")
+    if not llm_guard.agent_preflight(call_type):
+        raise llm_guard.LLMBlocked("external", call_type)
+    if backend() == "api":
+        logger.info("llm agent-exec call_type=%s backend=grok-cli (LLM_BACKEND=api applies "
+                    "to complete() only)", call_type)
+    return cmd, _child_env()
+
+
+def main(argv: list[str] | None = None) -> int:
+    import sys
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) < 3 or argv[0] != "agent-exec" or "--" not in argv:
+        print("usage: python -m app.services.llm agent-exec <call_type> -- <cmd...>",
+              file=sys.stderr)
+        return 2
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    call_type = argv[1]
+    cmd = argv[argv.index("--") + 1:]
+    try:
+        argv2, env = agent_exec_plan(call_type, cmd)
+    except GrokCLIError as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    os.execvpe(argv2[0], argv2, env)   # watchdog keeps the grok PID
+    return 0  # pragma: no cover
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
