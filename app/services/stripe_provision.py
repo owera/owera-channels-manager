@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -225,58 +226,141 @@ def deliver_welcome(session: Session, workspace_id: int) -> bool:
     return False
 
 
-def _sync_subscription_fields(session: Session, sub: dict[str, Any]) -> None:
-    subscription_id = (sub.get("id") or "") or None
-    customer_id = (sub.get("customer") or "") or None
-    status = _map_subscription_status(sub.get("status"))
+def _ts(v: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(int(v), tz=timezone.utc).replace(tzinfo=None) if v else None
+    except (TypeError, ValueError, OSError):
+        return None
 
-    ws = _find_workspace(
-        session,
-        subscription_id=subscription_id,
-        customer_id=customer_id,
-        owner_email=None,
-    )
+
+def _invoice_subscription_id(invoice: dict[str, Any]) -> str | None:
+    """Invoice → subscription id across API versions (top-level `subscription`
+    before 2025-03-31.basil; `parent.subscription_details.subscription` after)."""
+    sub = invoice.get("subscription")
+    if isinstance(sub, dict):
+        sub = sub.get("id")
+    if not sub:
+        details = ((invoice.get("parent") or {}).get("subscription_details") or {})
+        sub = details.get("subscription")
+    return (sub or "") or None
+
+
+def _subscription_period_end(sub: dict[str, Any]) -> datetime | None:
+    """Subscription → current period end across API versions (top-level before
+    basil; per item `items.data[].current_period_end` after)."""
+    if sub.get("current_period_end"):
+        return _ts(sub.get("current_period_end"))
+    items = ((sub.get("items") or {}).get("data") or [])
+    ends = [i.get("current_period_end") for i in items if i.get("current_period_end")]
+    return _ts(max(ends)) if ends else None
+
+
+def _invoice_period_end(invoice: dict[str, Any]) -> datetime | None:
+    lines = ((invoice.get("lines") or {}).get("data") or [])
+    ends = [((ln.get("period") or {}).get("end")) for ln in lines]
+    ends = [e for e in ends if e]
+    return _ts(max(ends)) if ends else None
+
+
+def _state_workspace(session: Session, *, subscription_id: str | None,
+                     customer_id: str | None) -> Workspace | None:
+    ws = _find_workspace(session, subscription_id=subscription_id,
+                         customer_id=customer_id, owner_email=None)
     if not ws or ws.id == OWERA_WORKSPACE_ID:
-        return
+        return None
+    return ws
+
+
+def _in_order(ws: Workspace, event_created: int | None, ev_type: str) -> bool:
+    """True if this event is not older than the last applied state change.
+    Ties apply (same second; Stripe gives no finer order)."""
+    if event_created is None or ws.stripe_state_event_created is None:
+        return True
+    if event_created < ws.stripe_state_event_created:
+        logger.info("stripe %s for workspace id=%s ignored: older (created=%s) than applied state (%s)",
+                    ev_type, ws.id, event_created, ws.stripe_state_event_created)
+        return False
+    return True
+
+
+def _apply(session: Session, ws: Workspace, event_created: int | None, *, status: str | None = None,
+           raw: str | None = None, period_end: datetime | None = None,
+           cancel_at_period_end: bool | None = None, paid_at: datetime | None = None,
+           customer_id: str | None = None, subscription_id: str | None = None) -> None:
+    if status is not None:
+        ws.subscription_status = status
+    if raw is not None:
+        ws.stripe_raw_status = raw
+    if period_end is not None:
+        ws.subscription_current_period_end = period_end
+    if cancel_at_period_end is not None:
+        ws.subscription_cancel_at_period_end = bool(cancel_at_period_end)
+    if paid_at is not None:
+        ws.last_invoice_paid_at = paid_at
     if customer_id:
         ws.stripe_customer_id = customer_id
     if subscription_id:
         ws.stripe_subscription_id = subscription_id
-    ws.subscription_status = status
+    if event_created is not None:
+        ws.stripe_state_event_created = max(event_created, ws.stripe_state_event_created or 0)
     ws.updated_at = utcnow()
     session.add(ws)
 
 
-def handle_subscription_deleted(session: Session, sub: dict[str, Any]) -> None:
+def _sync_subscription_fields(session: Session, sub: dict[str, Any],
+                              event_created: int | None = None,
+                              ev_type: str = "customer.subscription.updated") -> None:
     subscription_id = (sub.get("id") or "") or None
     customer_id = (sub.get("customer") or "") or None
-    ws = _find_workspace(
-        session,
-        subscription_id=subscription_id,
-        customer_id=customer_id,
-        owner_email=None,
-    )
-    if not ws or ws.id == OWERA_WORKSPACE_ID:
+    ws = _state_workspace(session, subscription_id=subscription_id, customer_id=customer_id)
+    if not ws or not _in_order(ws, event_created, ev_type):
         return
-    ws.subscription_status = "canceled"
-    ws.updated_at = utcnow()
-    session.add(ws)
+    _apply(session, ws, event_created,
+           status=_map_subscription_status(sub.get("status")),
+           raw=(sub.get("status") or None),
+           period_end=_subscription_period_end(sub),
+           cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
+           customer_id=customer_id, subscription_id=subscription_id)
 
 
-def handle_payment_failed(session: Session, invoice: dict[str, Any]) -> None:
-    subscription_id = (invoice.get("subscription") or "") or None
+def handle_subscription_deleted(session: Session, sub: dict[str, Any],
+                                event_created: int | None = None) -> None:
+    subscription_id = (sub.get("id") or "") or None
+    customer_id = (sub.get("customer") or "") or None
+    ws = _state_workspace(session, subscription_id=subscription_id, customer_id=customer_id)
+    if not ws or not _in_order(ws, event_created, "customer.subscription.deleted"):
+        return
+    # Data is retained; only the plan state changes.
+    _apply(session, ws, event_created, status="canceled", raw=sub.get("status") or "canceled",
+           cancel_at_period_end=False)
+
+
+def handle_payment_failed(session: Session, invoice: dict[str, Any],
+                          event_created: int | None = None) -> None:
+    subscription_id = _invoice_subscription_id(invoice)
     customer_id = (invoice.get("customer") or "") or None
-    ws = _find_workspace(
-        session,
-        subscription_id=subscription_id,
-        customer_id=customer_id,
-        owner_email=None,
-    )
-    if not ws or ws.id == OWERA_WORKSPACE_ID:
+    ws = _state_workspace(session, subscription_id=subscription_id, customer_id=customer_id)
+    if not ws or not _in_order(ws, event_created, "invoice.payment_failed"):
         return
-    ws.subscription_status = "past_due"
-    ws.updated_at = utcnow()
-    session.add(ws)
+    if ws.subscription_status == "canceled":
+        return          # a dunning retry after cancel never revives or demotes it
+    _apply(session, ws, event_created, status="past_due", raw="past_due")
+
+
+def handle_invoice_paid(session: Session, invoice: dict[str, Any],
+                        event_created: int | None = None) -> None:
+    """invoice.paid: record paid-through, and recover past_due/unpaid → active."""
+    subscription_id = _invoice_subscription_id(invoice)
+    customer_id = (invoice.get("customer") or "") or None
+    if not subscription_id:
+        return          # one-time invoice (not a CM subscription)
+    ws = _state_workspace(session, subscription_id=subscription_id, customer_id=customer_id)
+    if not ws or not _in_order(ws, event_created, "invoice.paid"):
+        return
+    paid_at = _ts((invoice.get("status_transitions") or {}).get("paid_at")) or utcnow()
+    status = "active" if ws.subscription_status in ("past_due", "unpaid", "inactive", "trialing") else None
+    _apply(session, ws, event_created, status=status, raw="active" if status else None,
+           period_end=_invoice_period_end(invoice), paid_at=paid_at)
 
 
 def dispatch_event(session: Session, event: dict[str, Any]) -> int | None:
@@ -286,17 +370,25 @@ def dispatch_event(session: Session, event: dict[str, Any]) -> int | None:
     data = event.get("data") or {}
     obj = data.get("object") or {}
 
+    created = event.get("created")
+    try:
+        created = int(created) if created is not None else None
+    except (TypeError, ValueError):
+        created = None
+
     if ev_type == "checkout.session.completed":
         return handle_checkout_completed(session, obj, str(event.get("id") or ""))
     elif ev_type in (
         "customer.subscription.created",
         "customer.subscription.updated",
     ):
-        _sync_subscription_fields(session, obj)
+        _sync_subscription_fields(session, obj, created, ev_type)
     elif ev_type == "customer.subscription.deleted":
-        handle_subscription_deleted(session, obj)
+        handle_subscription_deleted(session, obj, created)
     elif ev_type == "invoice.payment_failed":
-        handle_payment_failed(session, obj)
+        handle_payment_failed(session, obj, created)
+    elif ev_type == "invoice.paid":
+        handle_invoice_paid(session, obj, created)
     return None
 
 

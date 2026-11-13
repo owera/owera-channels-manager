@@ -276,7 +276,8 @@ r5 = post_event(client, fail_event)
 ok(r5.status_code == 200, "invoice.payment_failed 200")
 with Session(engine) as s:
     bob = s.get(Workspace, bob_id)
-    ok(bob.subscription_status == "past_due", "payment_failed → past_due")
+    # P6: a dunning failure after the subscription was deleted keeps it canceled.
+    ok(bob.subscription_status == "canceled", "payment_failed after cancel keeps canceled")
 
 # --- unknown type → 200 ---
 unk = {"id": "evt_unknown", "type": "customer.created", "data": {"object": {}}}

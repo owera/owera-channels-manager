@@ -78,7 +78,12 @@ def _add_missing_columns() -> None:
                       ("stripe_customer_id", "VARCHAR"),
                       ("stripe_subscription_id", "VARCHAR"),
                       ("welcome_email_sent", "BOOLEAN DEFAULT 0"),
-                      ("closed_at", "DATETIME")],
+                      ("closed_at", "DATETIME"),
+                      ("stripe_state_event_created", "INTEGER"),
+                      ("stripe_raw_status", "VARCHAR"),
+                      ("subscription_current_period_end", "DATETIME"),
+                      ("subscription_cancel_at_period_end", "BOOLEAN DEFAULT 0"),
+                      ("last_invoice_paid_at", "DATETIME")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
