@@ -39,17 +39,7 @@ async def stripe_webhook(request: Request, session: Session = Depends(get_sessio
 
     logger.info("stripe event id=%s type=%s", event_id, event_type)
 
-    first_time = stripe_provision.record_event_idempotent(session, event_id, event_type)
-    if not first_time:
-        session.commit()
-        return Response(status_code=200, content="ok")
-
-    try:
-        stripe_provision.dispatch_event(session, event)
-        session.commit()
-    except Exception:
-        session.rollback()
-        logger.exception("stripe event id=%s type=%s handler failed", event_id, event_type)
-        return Response(status_code=500, content="handler error")
-
+    status = stripe_provision.process_event(session, event)
+    if status != 200:
+        return Response(status_code=status, content="handler error")
     return Response(status_code=200, content="ok")

@@ -124,9 +124,28 @@ def _ensure_default_workspace(session: Session) -> None:
         conn.execute(text("UPDATE channel SET workspace_id = 1 WHERE workspace_id IS NULL"))
 
 
+def _ensure_unique_stripe_subscription() -> None:
+    """One workspace per Stripe subscription (partial unique index; NULLs allowed).
+    Skipped with a warning if existing rows already collide, so startup never fails."""
+    import logging
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError, OperationalError
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_stripe_subscription "
+                "ON workspace (stripe_subscription_id) "
+                "WHERE stripe_subscription_id IS NOT NULL"))
+    except (IntegrityError, OperationalError) as e:
+        logging.getLogger("manager.db").warning(
+            "ux_workspace_stripe_subscription not created: %s", type(e).__name__)
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _ensure_unique_stripe_subscription()
     _relax_videometric_notnull()
     with Session(engine) as s:
         _ensure_default_workspace(s)

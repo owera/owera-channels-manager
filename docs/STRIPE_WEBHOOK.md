@@ -7,6 +7,7 @@ Paid sign-ups via [Payment Link](https://buy.stripe.com/4gMeVc81u18Kg9GcIK5EY00)
 | Variable | Purpose |
 |----------|---------|
 | `MANAGER_STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_…`) from Stripe Dashboard → Developers → Webhooks |
+| `MANAGER_STRIPE_CM_PAYMENT_LINKS` | Optional, comma-separated Payment Link ids that provision. Default is the CM link; leave unset |
 | `MANAGER_RESEND_API_KEY` | Resend API key for the one-time welcome email (optional; logs a warning if unset) |
 
 Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do not commit secrets.
@@ -28,7 +29,16 @@ Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do 
 | `invoice.payment_failed` | Set `subscription_status=past_due` |
 | Other types | Ignored (`200`) |
 
-Idempotency: `StripeEvent` table (unique Stripe `event.id`). Replays and duplicate deliveries are no-ops.
+Idempotency (two layers, both race-safe):
+
+1. `StripeEvent` (primary key = Stripe `event.id`). Replays and duplicate deliveries of the same event are no-ops.
+2. `StripeCheckoutSession` (primary key = Checkout Session `cs_…`). A second `checkout.session.completed` for the same session under a **different** event id (a second live endpoint, or a resend) is a no-op. A partial unique index `ux_workspace_stripe_subscription` also allows only one workspace per `stripe_subscription_id`.
+
+Under concurrent delivery on SQLite, a racing request either waits for the write lock and then sees the committed row, or gets `database is locked` and returns `500`; Stripe retries it and the retry is a no-op. The welcome email is sent **after** the provisioning commit, claimed by a conditional `UPDATE … WHERE welcome_email_sent = 0`, so it goes out at most once per workspace. A failed send releases the claim.
+
+### Which checkouts provision
+
+The live Stripe account is shared with OSI (one-time Payment Links), and every webhook endpoint receives every `checkout.session.completed`. Only sessions whose `payment_link` is in `MANAGER_STRIPE_CM_PAYMENT_LINKS` (default: the CM link `plink_1UL1ccADrWLjH4u9HD9GC4n4`) provision. A session with no `payment_link` provisions only when `mode=subscription`. Everything else is acknowledged with `200` and ignored.
 
 ## Google Sign-In mapping
 
