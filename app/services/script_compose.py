@@ -125,10 +125,18 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
               detail=f"compose script (no render): status={v.status} effort={effort}")
     session.commit()
 
+    from app.services import llm_guard
     from app.services import sentence_pace as _sp
+    _ch = session.get(Channel, channel_id) if channel_id is not None else None
     try:
-        text = (generate(subject, params) or "").strip()
+        with llm_guard.scope(_ch.workspace_id if _ch else None, "script_compose"):
+            text = (generate(subject, params) or "").strip()
         pace_post = _sp.warn_summary(_sp.take_last_report())
+    except llm_guard.LLMBlocked as e:
+        quota.log(session, kind=JOB_KIND, status="error", video_id=video_id,
+                  channel_id=channel_id, detail=f"compose refused: {e}"[:500])
+        session.commit()
+        return {"error": f"compose refused: {e}", "http": 403}
     except Exception as e:  # grok.Timeout / nonzero / missing binary
         err = f"{type(e).__name__}: {e}"[:500]
         quota.log(session, kind=JOB_KIND, status="error", video_id=video_id,

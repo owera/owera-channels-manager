@@ -18,7 +18,7 @@ from sqlmodel import Session, func, select
 from app.config import settings
 from app.db import app_settings, session_scope
 from app.models import Channel, JobRun, RenderProfile, Topic, Video, VideoStatus, utcnow
-from app.services import metadata, quota
+from app.services import llm_guard, metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.engines.worker import _has_visible_frames
 from app.services.mpt_client import build_video_params
@@ -146,6 +146,28 @@ def _cc_dict(raw) -> dict:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _llm_guard_block(session: Session, video: Video, channel: Channel) -> bool:
+    """True (row parked FAILED, no submit) when the channel's workspace may not use
+    the LLM (llm_guard: no Google data from a non-Owera workspace in a consumer
+    grok prompt). Every render engine calls an LLM, so the row fails before any
+    side effect (playlist, slot, TTS). Not transient: no retry loop. The guard
+    logs ``llm_blocked_external_google_data`` once per row transition."""
+    if llm_guard.is_allowed(channel.workspace_id):
+        return False
+    reason = str(llm_guard.LLMBlocked(channel.workspace_id, "render"))
+    if video.status != VideoStatus.FAILED or video.error != reason:
+        try:
+            llm_guard.require("render", workspace_id=channel.workspace_id)
+        except llm_guard.LLMBlocked:
+            pass  # logged by require()
+        video.status = VideoStatus.FAILED
+        video.error = reason
+        session.add(video)
+        quota.log(session, kind="render", status="error", video_id=video.id,
+                  channel_id=channel.id, detail=reason)
+    return True
 
 
 def _gate_b_preflight_block(session: Session, video: Video, channel: Channel,
@@ -318,9 +340,10 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         try:
             _ch_meta = session.get(Channel, video.channel_id)
             _niche = (_ch_meta.niche or "").strip() if _ch_meta else None
-            meta = metadata.generate(video.subject, video.script or "", fmt,
-                                     language=video_gen.channel_language(session, video.channel_id),
-                                     niche=_niche)
+            with llm_guard.scope(_ch_meta.workspace_id if _ch_meta else None, "metadata"):
+                meta = metadata.generate(video.subject, video.script or "", fmt,
+                                         language=video_gen.channel_language(session, video.channel_id),
+                                         niche=_niche)
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             _retry_or_fail(session, video, err,
@@ -673,6 +696,8 @@ def _submit_new(session: Session) -> None:
         channel = session.get(Channel, video.channel_id)
         if not channel or channel.paused:
             continue
+        if _llm_guard_block(session, video, channel):
+            continue
         # In-flight renders count against the budget too: gating on completed
         # renders alone overshoots to budget+concurrency-1, because a new render
         # starts after each success while the rest are still in flight (2026-07-26
@@ -703,8 +728,10 @@ def _submit_new(session: Session) -> None:
         params["brand"] = brand
         # Same title-first claim the pre-check uses (provided_script_hook_reason).
         params["title"] = video.title
-        if _gate_b_preflight_block(session, video, channel, provided_script, params):
-            continue
+        params["workspace_id"] = channel.workspace_id   # llm_guard scope in worker.run_job
+        with llm_guard.scope(channel.workspace_id, "gate_b_preflight"):
+            if _gate_b_preflight_block(session, video, channel, provided_script, params):
+                continue
         # A video is starting production → make sure its topic playlist exists.
         ensure_topic_playlist(session, topic, channel)
         if provided_script:
@@ -720,7 +747,8 @@ def _submit_new(session: Session) -> None:
         engine_name = resolve_engine(session, video, topic, channel)
         engine = get_engine(engine_name)
         try:
-            task_id = engine.submit(video, params)
+            with llm_guard.scope(channel.workspace_id, "render_submit"):
+                task_id = engine.submit(video, params)
         except Exception as e:
             quota.log(session, kind="render", status="error", video_id=video.id,
                       channel_id=channel.id, detail=f"submit failed: {e}")

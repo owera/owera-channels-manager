@@ -986,9 +986,14 @@ def regenerate_metadata(video_id: int, session: Session = Depends(get_session),
     fmt = "long" if topic and topic.content_format == "long" else "short"
     ch = session.get(Channel, v.channel_id)
     _niche = (ch.niche or "").strip() if ch else None
-    meta = metadata.generate(v.subject, v.script or "", fmt,
-                             language=video_gen.channel_language(session, v.channel_id),
-                             niche=_niche)
+    from app.services import llm_guard
+    try:
+        with llm_guard.scope(ch.workspace_id if ch else None, "metadata"):
+            meta = metadata.generate(v.subject, v.script or "", fmt,
+                                     language=video_gen.channel_language(session, v.channel_id),
+                                     niche=_niche)
+    except llm_guard.LLMBlocked as e:
+        raise HTTPException(403, str(e))
     v.title, v.description = meta["title"], meta["description"]
     v.tags_json = json.dumps(meta["tags"])
     v.metadata_generated = True

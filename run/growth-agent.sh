@@ -97,6 +97,20 @@ if [ "${RENDERING:-0}" -gt 0 ]; then
   exit 0
 fi
 
+# --- LLM hard guard (CTO/CoS 2026-11-13, docs/LLM_GUARD.md) — fail closed --
+# No Google-sourced data from a non-Owera workspace may reach the consumer grok
+# session. Blocked → no run, exit 0 (not an outage), event in $LOG.
+if [ ! -r "$REPO/run/llm-guard.sh" ]; then
+  log "LLM guard: run/llm-guard.sh missing — refusing to run (fail closed)"
+  exit 1
+fi
+. "$REPO/run/llm-guard.sh"
+if ! llm_guard_preflight growth_agent; then
+  log "LLM guard: blocked (external workspace holds channel data) — skipping run"
+  alert "llm_blocked_external_google_data — growth-agent skipped" 0
+  exit 0
+fi
+
 # --- Run ------------------------------------------------------------------
 log "starting daily run"
 # { } is not a subshell — STATUS set inside remains visible after the group.

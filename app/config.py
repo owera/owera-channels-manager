@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     # --disallowed-tools. Leave them off until we have evidence the tool set
     # (not just high effort) is what blows the light budget.
     grok_effort_ideas: str = "low"                # env: MANAGER_GROK_EFFORT_IDEAS
+    # LLM hard guard (app/services/llm_guard.py, docs/LLM_GUARD.md): comma-separated
+    # Owera-internal workspace ids allowed to reach the LLM. The consumer `grok login`
+    # session may train on prompts, so Google-sourced data from any other workspace
+    # must never reach it (Google Limited Use). "1" = slug "owera". Empty → all blocked.
+    llm_internal_workspace_ids: str = "1"     # env: MANAGER_LLM_INTERNAL_WORKSPACE_IDS
     # edge-tts NoAudioReceived is an upstream flake (2026-09-26 21:00-21:53 BRT: 4 of
     # 8 en-US calls, then clean). Retry in-process before failing the whole render so
     # a short blip does not burn the video's render retry budget in ~2 minutes (v1360).
