@@ -600,3 +600,18 @@ export const useMut = () => {
     }),
   };
 };
+
+export interface BillingStatus {
+  subscription_status: string;
+  has_billing: boolean;
+  portal_enabled: boolean;
+}
+
+export const useBilling = () =>
+  useQuery({ queryKey: ["billing"], queryFn: () => api<BillingStatus>("/billing"), retry: false });
+
+/** Opens the Stripe Customer Portal for this workspace (one-time session URL). */
+export async function openBillingPortal(): Promise<void> {
+  const { url } = await api<{ url: string }>("/billing/portal", { method: "POST" });
+  window.location.assign(url);
+}

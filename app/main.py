@@ -18,7 +18,7 @@ from sqlmodel import Session, func, select
 from app.config import ensure_dirs, load_dotenv_into_env, settings
 from app.db import get_session, init_db
 from app.models import Channel, OAuthStatus, Video, VideoStatus
-from app.routers import (channels, features, media, music, onboarding, platform_oauth,
+from app.routers import (billing, channels, features, media, music, onboarding, platform_oauth,
                          playlists, profiles, queue, settings as settings_router, spa_auth,
                          stripe_webhook, thumbnails, topics, trends, videos, youtube_admin)
 from app.services import spa_google_login
@@ -162,7 +162,7 @@ if settings.spa_google_login:
         https_only=settings.session_cookie_secure,
     )
 
-for r in (channels, features, onboarding, platform_oauth, spa_auth, stripe_webhook,
+for r in (billing, channels, features, onboarding, platform_oauth, spa_auth, stripe_webhook,
           playlists, profiles, topics, videos, queue, media, settings_router, youtube_admin,
           trends, music, thumbnails):
     app.include_router(r.router)
