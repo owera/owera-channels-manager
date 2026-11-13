@@ -207,6 +207,17 @@ class Settings(BaseSettings):
     # 2.2s / 2.5s. env: MANAGER_SENTENCE_PACE='{"rr":{"target_s":2.2,"cap_s":2.5}}'.
     sentence_pace: dict[str, dict[str, float]] = {"rr": {"target_s": 2.2, "cap_s": 2.5}}
 
+    # --- Auto-produce draft policy (per channel; app/services/autoproduce_policy.py)
+    # key ("channel:<id>", slug, brand) -> {"max_age_days", "not_before" (ISO UTC),
+    # "hook_preflight", "measure_spoken"}. Drafts that miss go to rejected with
+    # "auto-produce skipped (stale draft): <reason>" instead of taking a render
+    # slot; autofill then refills the topic with fresh, hook-checked ideas. A
+    # channel with no entry keeps auto-produce exactly as before (OS). RR
+    # 2026-11-13: 5 Sept/Oct drafts burned 5 slots on Gate B hook pace.
+    # env: MANAGER_AUTO_PRODUCE_DRAFT_POLICY='{"rr":{"max_age_days":14,"hook_preflight":true}}'.
+    auto_produce_draft_policy: dict[str, dict] = {
+        "rr": {"max_age_days": 14, "hook_preflight": True, "measure_spoken": True}}
+
     # --- Per-topic policy flags (shared structure; app/services/topic_flags.py) --
     # flag name -> list of Topic ids it applies to ("*" = every topic). env:
     # MANAGER_TOPIC_FLAGS as a JSON object, e.g.
