@@ -102,7 +102,9 @@ log "starting code-agent sprint"
 # { } is not a subshell — STATUS set inside remains visible after the group.
 {
   echo "================ $(ts) code-agent run ================"
-  freeze_run_with_watchdog grok --prompt-file "$REPO/run/code-agent-playbook.md" \
+  # LLM client (app/services/llm.py agent-exec): guard + backend (cli / xAI API + cap).
+  freeze_run_with_watchdog env PYTHONPATH="$REPO" "$REPO/.venv/bin/python" -m app.services.llm \
+    agent-exec code_agent -- grok --prompt-file "$REPO/run/code-agent-playbook.md" \
     --permission-mode bypassPermissions \
     --cwd "$REPO"
   STATUS=$?

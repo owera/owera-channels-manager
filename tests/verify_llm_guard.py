@@ -340,15 +340,29 @@ grok_sites = sorted({rel(p) for p in PY_FILES for _, l in _code_lines(p) if grok
 ok(grok_sites == ["app/config.py", "app/services/llm.py"] or grok_sites == ["app/services/llm.py"],
    f"grok argv only in llm.py (+ the config default): {grok_sites}")
 csrc = inspect.getsource(llm.complete)
-ok(csrc.index("llm_guard.require(") < csrc.index("subprocess.run("),
-   "llm.complete calls llm_guard.require before subprocess.run")
+ok(csrc.index("llm_guard.require(") < csrc.index("_complete_api(")
+   and csrc.index("llm_guard.require(") < csrc.index("_complete_cli("),
+   "llm.complete calls llm_guard.require before either backend (cli / api)")
+ok("subprocess.run(" in inspect.getsource(llm._complete_cli)
+   and "subprocess.run(" not in csrc, "grok -p spawn lives only in llm._complete_cli")
 
 # 3) no HTTP LLM client anywhere in app/ run/ scripts/
 http_llm = re.compile(r"(api\.x\.ai|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis"
                       r"|/chat/completions|/v1/messages|\bimport (openai|anthropic|litellm|xai_sdk)\b"
                       r"|\bfrom (openai|anthropic|litellm|xai_sdk)\b|aiplatform\.googleapis)")
-http_sites = sorted({f"{rel(p)}:{i}" for p in PY_FILES for i, l in _code_lines(p) if http_llm.search(l)})
+_XAI_HOME = {"app/config.py", "app/services/llm.py"}   # the one LLM client (+ its config)
+http_sites = sorted({f"{rel(p)}:{i}" for p in PY_FILES for i, l in _code_lines(p)
+                     if http_llm.search(l)
+                     and not (rel(p) in _XAI_HOME and "api.x.ai" in l and "import" not in l)})
 ok(not http_sites, f"no HTTP LLM client call site (found: {http_sites})")
+# the xAI API (Enterprise) backend lives only in llm.py; its base URL only in config.py
+xai_sites = sorted({rel(p) for p in PY_FILES for _, l in _code_lines(p)
+                    if re.search(r"api\.x\.ai|/responses\b|xai_api_key", l)})
+ok(set(xai_sites) <= {"app/config.py", "app/services/llm.py"},
+   f"xAI API base URL / key / endpoint only in config.py + llm.py: {xai_sites}")
+asrc = inspect.getsource(llm._complete_api)
+ok(asrc.index("check_budget(") < asrc.index('.post("/responses"'),
+   "api backend checks the budget before POST")
 
 # 4) MPT LLM endpoints only via the guarded client methods
 mpt_eps = sorted({rel(p) for p in PY_FILES for _, l in _code_lines(p)
@@ -376,5 +390,7 @@ for sh in sorted((ROOT / "run").glob("*.sh")):
         continue
     pre = [i for i, l in enumerate(lines) if re.match(r"\s*if ! llm_guard_preflight \w+", l)]
     ok(pre and min(pre) < min(grok_lines), f"{sh.name}: llm_guard_preflight before the grok run")
+    ok(all("agent-exec" in lines[i] for i in grok_lines),
+       f"{sh.name}: grok runs through the LLM client (llm agent-exec)")
 
 print(f"\nALL OK ({_checks} checks)")
