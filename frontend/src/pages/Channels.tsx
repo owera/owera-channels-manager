@@ -5,7 +5,7 @@ import {
 } from "../api";
 import { oauthStatusLabel } from "../copy";
 import { intFromBlur } from "../intFromBlur";
-import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
+import { ConnectConsentNote, Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
 import ChannelYoutube from "./ChannelYoutube";
 
 const OAUTH_HEX: Record<string, string> = {
@@ -330,6 +330,7 @@ function ChannelDetail({ channel }: { channel: Channel }) {
           <button className="btn btn-ghost" onClick={() => m.disconnectChannel.mutate(channel.id)}>Disconnect</button>
         )}
       </div>
+      {!connected && <ConnectConsentNote className="mt-3 max-w-xl" />}
       {connecting && <p className="mt-3 text-sm text-fog-300">A Google sign-in tab opened — approve access there. This page updates when you&apos;re done.</p>}
       {(platformOauth ? m.platformOauthStart : m.oauthStart).isError && (
         <div className="mt-2 text-xs font-mono text-[#f7768e]">

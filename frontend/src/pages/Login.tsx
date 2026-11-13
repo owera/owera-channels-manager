@@ -1,3 +1,5 @@
+import { PolicyLinks } from "../ui";
+
 export default function Login() {
   return (
     <div className="min-h-dvh flex items-center justify-center p-6 bg-ink-900">
@@ -15,6 +17,7 @@ export default function Login() {
         >
           Sign in with Google
         </a>
+        <PolicyLinks className="justify-center mt-6" />
       </div>
     </div>
   );
