@@ -76,6 +76,16 @@ class StripeEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class StripeCheckoutSession(SQLModel, table=True):
+    """One row per provisioned Checkout Session (cs_…). The primary key makes a
+    second delivery for the same session (a different event id, or a second
+    webhook endpoint) a no-op even under concurrent delivery."""
+    id: str = Field(primary_key=True, max_length=255)
+    event_id: str = Field(max_length=255)
+    workspace_id: Optional[int] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class OAuthPending(SQLModel, table=True):
     """Single-use OAuth state + PKCE verifier (survives process restart)."""
     id: Optional[int] = Field(default=None, primary_key=True)

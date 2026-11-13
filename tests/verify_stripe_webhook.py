@@ -63,13 +63,18 @@ def checkout_event(
     email: str,
     customer: str = "cus_test",
     subscription: str = "sub_test",
+    cs_id: str | None = None,
+    mode: str = "subscription",
+    payment_link: str | None = "plink_1UL1ccADrWLjH4u9HD9GC4n4",
 ) -> dict:
     return {
         "id": event_id,
         "type": "checkout.session.completed",
         "data": {
             "object": {
-                "id": "cs_test",
+                "id": cs_id or f"cs_{event_id}",
+                "mode": mode,
+                "payment_link": payment_link,
                 "customer": customer,
                 "subscription": subscription,
                 "customer_details": {"email": email},

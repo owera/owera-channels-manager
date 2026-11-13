@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # Signing secret from Stripe Dashboard → Webhooks (whsec_…). Empty = route returns 503.
     stripe_webhook_secret: str = ""
 
+    # Payment Link ids whose checkouts provision a CM workspace
+    # (env: MANAGER_STRIPE_CM_PAYMENT_LINKS, comma-separated). The Stripe account
+    # is shared with OSI one-time links, so a checkout from any other link is
+    # ignored. A checkout with no payment_link provisions only in subscription mode.
+    stripe_cm_payment_links: str = "plink_1UL1ccADrWLjH4u9HD9GC4n4"
+
     # Resend transactional email (env: MANAGER_RESEND_API_KEY). Welcome mail after checkout.
     resend_api_key: str = ""
 
