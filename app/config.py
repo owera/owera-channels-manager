@@ -146,6 +146,14 @@ class Settings(BaseSettings):
     xai_api_key: SecretStr = Field(default=SecretStr(""), validation_alias=AliasChoices(
         "XAI_API_KEY", "MANAGER_XAI_API_KEY"))
     llm_api_base_url: str = "https://api.x.ai/v1"   # env: MANAGER_LLM_API_BASE_URL
+    # Enterprise DPA requires Zero Data Retention on the xAI org. The api backend
+    # refuses to boot / call unless the operator confirms ZDR is on: XAI_ZDR_CONFIRMED=1.
+    xai_zdr_confirmed: bool = Field(default=False, validation_alias=AliasChoices(
+        "XAI_ZDR_CONFIRMED", "MANAGER_XAI_ZDR_CONFIRMED"))
+    # Headless grok agents in api mode: the Grok CLI's own request shape (store /
+    # previous_response_id) is not under our control, so they are refused until the
+    # CTO verifies the CLI sends stateless requests on the API-key path.
+    llm_agent_api_stateless_verified: bool = False  # env: MANAGER_LLM_AGENT_API_STATELESS_VERIFIED
     # Model the api backend uses when the CLI would use its own default (grok_model
     # empty). Live claw0 pins MANAGER_GROK_MODEL=grok-4.7, which maps 1:1.
     llm_api_default_model: str = "grok-4.7"   # env: MANAGER_LLM_API_DEFAULT_MODEL

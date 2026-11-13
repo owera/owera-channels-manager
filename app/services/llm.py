@@ -193,6 +193,38 @@ DEFAULT_PRICES: dict[str, dict[str, float]] = {
 BUDGET_EVENT = "llm_budget_blocked"
 
 
+class LLMZDRNotConfirmed(GrokCLIError):
+    """LLM_BACKEND=api without XAI_ZDR_CONFIRMED=1 (Enterprise DPA). Not transient."""
+
+
+ZDR_MESSAGE = ("LLM_BACKEND=api requires XAI_ZDR_CONFIRMED=1 in the manager .env: the "
+               "xAI Enterprise DPA requires Zero Data Retention on the org. Confirm ZDR "
+               "in the xAI console, then set it, or set LLM_BACKEND=cli.")
+
+
+def require_zdr() -> None:
+    if backend() == "api" and not bool(getattr(settings, "xai_zdr_confirmed", False)):
+        raise LLMZDRNotConfirmed(ZDR_MESSAGE)
+
+
+def boot_check() -> None:
+    """Called from the app lifespan: refuse to start in api mode without ZDR."""
+    if backend() == "api":
+        require_zdr()
+        logger.info("llm backend=xai-api zdr_confirmed=1 base=%s", settings.llm_api_base_url)
+
+
+# Stateless requests only (ZDR): these keys are the whole allowed request body.
+# No previous_response_id / conversation / background / store=true, ever.
+_ALLOWED_BODY_KEYS = frozenset({"model", "input", "instructions", "reasoning", "store"})
+
+
+def _assert_stateless(body: dict) -> None:
+    extra = set(body) - _ALLOWED_BODY_KEYS
+    if extra or body.get("store") is not False or not isinstance(body.get("input"), str):
+        raise LLMConfigError(f"xai api request is not stateless (keys={sorted(body)})")
+
+
 class LLMBudgetExceeded(GrokCLIError):
     """api backend refused: monthly cap reached or not configured. Not transient."""
 
@@ -340,6 +372,7 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
 
     import httpx
 
+    require_zdr()
     mdl = api_model(model)
     if mdl not in price_table():
         raise LLMConfigError(f"no price for model {mdl!r}: add it to MANAGER_LLM_PRICE_TABLE_JSON")
@@ -351,6 +384,7 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
         body["instructions"] = system.strip()
     if reasoning_effort:
         body["reasoning"] = {"effort": reasoning_effort}
+    _assert_stateless(body)   # ZDR: store=false explicit, no previous_response_id/conversation
     logger.info("llm backend=xai-api model=%s effort=%s prompt_chars=%d call_type=%s "
                 "workspace_id=%s", mdl, reasoning_effort or "default",
                 len(build_prompt(prompt, system)), call_type, workspace_id)
@@ -399,7 +433,13 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
     reported = None
     if u.get("cost_in_usd_ticks") is not None:
         reported = int(u["cost_in_usd_ticks"]) / 10_000_000_000   # 1e10 ticks = $1
+    logger.info("llm_usage backend=xai-api model=%s response_model=%s call_type=%s "
+                "workspace_id=%s input_tokens=%d cached_input_tokens=%d output_tokens=%d "
+                "reasoning_tokens=%d cost_usd=%.6f", mdl, data.get("model") or mdl, call_type,
+                workspace_id, in_t, cached, out_t, reasoning,
+                reported if reported is not None else est)
     record_usage({**row, "status": data.get("status") or "completed",
+                  "response_model": data.get("model") or mdl,
                   "input_tokens": in_t, "cached_input_tokens": cached,
                   "output_tokens": out_t, "reasoning_tokens": reasoning,
                   "cost_usd_estimated": round(est, 6),
@@ -452,6 +492,12 @@ def agent_exec_plan(call_type: str, cmd: list[str]) -> tuple[list[str], dict[str
     env = os.environ.copy()
     if backend() != "api":
         return cmd, env
+    require_zdr()
+    if not bool(getattr(settings, "llm_agent_api_stateless_verified", False)):
+        raise LLMConfigError(
+            "agent-exec in api mode: the Grok CLI's request shape (store / "
+            "previous_response_id) is not verified stateless for ZDR; set "
+            "MANAGER_LLM_AGENT_API_STATELESS_VERIFIED=1 only after the CTO verifies it")
     mdl = api_model(settings.grok_model or None)
     if mdl not in price_table():
         raise LLMConfigError(f"no price for model {mdl!r}")

@@ -51,6 +51,24 @@ A model missing from the price table → `LLMConfigError` (fail closed).
 - Missing key → `LLMConfigError`, with a clear message and **no fallback to the CLI**.
 - Guard B applies in both modes.
 
+## ZDR (Enterprise DPA)
+
+- **Boot check:** with `LLM_BACKEND=api` and without `XAI_ZDR_CONFIRMED=1`, the manager
+  **refuses to start** (`LLMZDRNotConfirmed` from the lifespan, with a clear message).
+  Each api call and agent run checks it again.
+- **Stateless requests only:** the body is restricted to `model`, `input` (string),
+  `instructions`, `reasoning` and `store`, and `store` is always explicitly `false`.
+  Anything else is refused before HTTP, including `previous_response_id`, conversation
+  state, `background`, `store:true`, and an `input` that isn't a string (a message
+  array). Tests check the mocked payload.
+- **Agents on api:** the Grok CLI builds its own requests, and we haven't verified
+  whether those set `store` or `previous_response_id`. So `agent-exec` in api mode is refused until
+  the CTO verifies it and sets `MANAGER_LLM_AGENT_API_STATELESS_VERIFIED=1`. Until
+  then the growth agent, code agent and run check do **not** run in api mode.
+- **Per-call log:** `llm_usage backend=xai-api model=… response_model=… call_type=… workspace_id=…
+  input_tokens=… cached_input_tokens=… output_tokens=… reasoning_tokens=… cost_usd=…`
+  (no content), plus the JSONL row below.
+
 ## Usage ledger (JSONL)
 
 Default path: `storage/llm-usage.jsonl` (`MANAGER_LLM_USAGE_PATH` overrides it).
@@ -92,11 +110,13 @@ Override: `MANAGER_LLM_PRICE_TABLE_JSON` (same keys: `input`, `cached_input`,
 # --- LLM backend (docs/LLM_BACKEND.md) — CTO edits, Rodrigo's named yes ---
 LLM_BACKEND=api                     # or MANAGER_LLM_BACKEND; unset/cli = today's grok login
 XAI_API_KEY=xai-…                   # Rodrigo's xAI Enterprise key; never commit / log / paste
+XAI_ZDR_CONFIRMED=1                 # only after ZDR is confirmed ON for the xAI org (Enterprise DPA)
 LLM_MONTHLY_USD_CAP=50              # USD per UTC month; unset/0 in api mode = everything blocked
 MANAGER_LLM_USAGE_PATH=/Users/rodrigorecio/src/owera-channels-manager/storage/llm-usage.jsonl
 # optional:
 # MANAGER_LLM_API_DEFAULT_MODEL=grok-4.7
 # MANAGER_LLM_AGENT_RUN_USD_ESTIMATE=1.00
+# MANAGER_LLM_AGENT_API_STATELESS_VERIFIED=1   # agents on api: only after the CTO verifies the CLI is stateless
 # MANAGER_LLM_PRICE_TABLE_JSON={"grok-4.7":{"input":2,"cached_input":0.5,"output":6}}
 ```
 

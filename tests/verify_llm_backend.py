@@ -114,7 +114,8 @@ def _client_with(handler):
 def api_env(**over):
     vals = {"llm_backend": "api", "xai_api_key": SecretStr(FAKE_KEY),
             "llm_monthly_usd_cap": 10.0, "llm_usage_path": str(USAGE),
-            "grok_model": "grok-4.7", "llm_price_table_json": ""}
+            "grok_model": "grok-4.7", "llm_price_table_json": "",
+            "xai_zdr_confirmed": True, "llm_agent_api_stateless_verified": True}
     vals.update(over)
     return [patch.object(settings, k, v) for k, v in vals.items()]
 
@@ -167,6 +168,66 @@ ok(PROMPT not in raw and "SYS-INSTR" not in raw and "hello api" not in raw and F
    "usage JSONL has no prompt, system, output or key")
 ok(all(FAKE_KEY not in l and "SECRET-PROMPT" not in l for l in cap.lines),
    "logs carry no key and no content")
+
+ok(set(body) <= {"model", "input", "instructions", "reasoning", "store"}
+   and "previous_response_id" not in body and "conversation" not in body
+   and "background" not in body and body["store"] is False and isinstance(body["input"], str),
+   "ZDR: stateless payload — store=false explicit, no previous_response_id/conversation/background")
+for bad in ({"model": "m", "input": "x", "store": True},
+            {"model": "m", "input": "x", "store": False, "previous_response_id": "r0"},
+            {"model": "m", "input": "x"},
+            {"model": "m", "input": [{"role": "user", "content": "x"}], "store": False}):
+    try:
+        llm._assert_stateless(bad)
+        ok(False, f"stateful body must be refused: {sorted(bad)}")
+    except llm.LLMConfigError:
+        ok(True, f"stateful/implicit body refused: {sorted(bad)}")
+use = [l for l in cap.lines if l.startswith("llm_usage ")]
+ok(use and "model=grok-4.7" in use[-1] and "input_tokens=1000" in use[-1]
+   and "output_tokens=100" in use[-1] and "call_type=storyboard_compose" in use[-1]
+   and "workspace_id=1" in use[-1], "per-call log line: model + usage (no content)")
+
+print("ZDR boot check")
+with _Multi(api_env(xai_zdr_confirmed=False)), \
+        patch.object(llm, "_http_client", side_effect=AssertionError("no HTTP without ZDR")):
+    try:
+        llm.boot_check()
+        ok(False, "boot must refuse api without ZDR")
+    except llm.LLMZDRNotConfirmed as e:
+        ok("XAI_ZDR_CONFIRMED=1" in str(e), "boot_check: api without XAI_ZDR_CONFIRMED=1 → clear error")
+    try:
+        with llm_guard.scope(1, "ideas"):
+            llm.complete("x")
+        ok(False, "call must refuse without ZDR")
+    except llm.LLMZDRNotConfirmed:
+        ok(True, "per-call: api without ZDR refused too (no HTTP)")
+    with patch.object(llm_guard, "agent_preflight", return_value=True):
+        try:
+            llm.agent_exec_plan("growth_agent", ["grok"])
+            ok(False, "agent must refuse without ZDR")
+        except llm.LLMZDRNotConfirmed:
+            ok(True, "agent-exec: api without ZDR refused")
+with _Multi(api_env()):
+    llm.boot_check()
+    ok(True, "boot_check passes with api + XAI_ZDR_CONFIRMED=1")
+with patch.object(settings, "xai_zdr_confirmed", False):
+    llm.boot_check()
+    ok(True, "boot_check is a no-op in cli mode (default)")
+with patch.dict(os.environ, {"XAI_ZDR_CONFIRMED": "1"}):
+    ok(Settings().xai_zdr_confirmed is True, "env XAI_ZDR_CONFIRMED=1 is read")
+ok(Settings().xai_zdr_confirmed is False or os.environ.get("XAI_ZDR_CONFIRMED"),
+   "default: ZDR not confirmed")
+import inspect  # noqa: E402
+import app.main as _main  # noqa: E402
+_ls = inspect.getsource(_main.lifespan)
+ok(_ls.index("boot_check()") < _ls.index("ensure_dirs()"), "app lifespan runs the ZDR boot check first")
+with _Multi(api_env(llm_agent_api_stateless_verified=False)), \
+        patch.object(llm_guard, "agent_preflight", return_value=True):
+    try:
+        llm.agent_exec_plan("growth_agent", ["grok"])
+        ok(False, "unverified agent statelessness must refuse")
+    except llm.LLMConfigError as e:
+        ok("STATELESS_VERIFIED" in str(e), "api agents refused until CLI statelessness is verified")
 
 # model mapping: CLI default (empty) → llm_api_default_model
 with _Multi(api_env(grok_model="")), patch.object(llm, "_http_client",
