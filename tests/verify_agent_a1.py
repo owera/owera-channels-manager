@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, Topic, Video, VideoStatus, Workspace
+from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace
 from app.routers import queue, videos
 from app.services import review_guard
 from app.workspace import parse_basic_auth_username, resolve_workspace_slug
@@ -60,6 +60,7 @@ SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
     s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Workspace(slug="tenant-b", name="Tenant B"))
+    s.add(Workspace(slug="tenant-c", name="Tenant C"))
     s.commit()
     ws_b = s.exec(__import__("sqlmodel").select(Workspace).where(Workspace.slug == "tenant-b")).one()
     s.add(Channel(id=1, workspace_id=1, slug="ow-ch", name="Owera CH"))
@@ -68,6 +69,16 @@ with Session(engine) as s:
     s.add(Topic(id=2, channel_id=2, name="T2", position=1))
     s.add(Video(id=10, channel_id=1, topic_id=1, subject="ow video", status=VideoStatus.DRAFT, position=1))
     s.add(Video(id=20, channel_id=2, topic_id=2, subject="tb video", status=VideoStatus.DRAFT, position=1))
+    s.add(JobRun(channel_id=1, video_id=10, kind="delete", status="success",
+                 detail="SECRET-OWERA"))
+    s.add(JobRun(channel_id=2, video_id=20, kind="delete", status="success",
+                 detail="SECRET-TB"))
+    s.add(JobRun(channel_id=None, video_id=None, kind="music_gen", status="success",
+                 detail="GLOBAL-POOL"))
+    # Render errors sometimes omit channel_id and keep only video_id.
+    # That row still belongs to the video's workspace.
+    s.add(JobRun(channel_id=None, video_id=10, kind="render", status="error",
+                 detail="SECRET-OWERA-NULLCH"))
     s.commit()
 
 app = FastAPI()
@@ -109,6 +120,67 @@ in_ws = client.post("/api/videos/20/approve", headers=auth_b_ch, json={})
 ok(in_ws.status_code != 404, "tenant-b+channels reaches tenant-b video (not 404)")
 legacy = client.post("/api/videos/10/approve", headers=auth_legacy_ch, json={})
 ok(legacy.status_code != 404, "legacy channels reaches owera video (not 404)")
+
+
+def _details(resp):
+    return {row["detail"] for row in resp.json()}
+
+
+no_auth_runs = client.get("/api/runs")
+ok(no_auth_runs.status_code == 401, "multi_workspace: GET /runs without identity → 401")
+
+runs_b = client.get("/api/runs", headers=auth_b)
+ok(runs_b.status_code == 200, "tenant-b GET /runs is 200")
+ok(_details(runs_b) == {"SECRET-TB", "GLOBAL-POOL"},
+   "tenant-b unfiltered /runs is own channel + global pool, not owera")
+runs_ow = client.get("/api/runs", headers=auth_ow)
+ok(_details(runs_ow) == {"SECRET-OWERA", "SECRET-OWERA-NULLCH", "GLOBAL-POOL"},
+   "owera unfiltered /runs keeps its null-channel video row and hides tenant-b")
+
+own_ch = client.get("/api/runs?channel_id=2", headers=auth_b)
+ok(own_ch.status_code == 200 and _details(own_ch) == {"SECRET-TB"},
+   "channel filter is that channel only, not the global pool")
+foreign_ch = client.get("/api/runs?channel_id=1", headers=auth_b)
+missing_ch = client.get("/api/runs?channel_id=99999", headers=auth_b)
+ok(foreign_ch.status_code == 404 and missing_ch.status_code == 404,
+   "foreign and missing channel_id are both 404")
+ok(foreign_ch.json()["detail"] == missing_ch.json()["detail"] == "channel not found",
+   "foreign channel_id does not differ from a missing id")
+
+own_vid = client.get("/api/runs?video_id=10", headers=auth_ow)
+ok(own_vid.status_code == 200
+   and _details(own_vid) == {"SECRET-OWERA", "SECRET-OWERA-NULLCH"},
+   "video filter returns the channel row and the null-channel row for that video")
+foreign_vid = client.get("/api/runs?video_id=10", headers=auth_b)
+missing_vid = client.get("/api/runs?video_id=99999", headers=auth_b)
+ok(foreign_vid.status_code == 404 and missing_vid.status_code == 404,
+   "foreign and missing video_id are both 404")
+ok(foreign_vid.json()["detail"] == missing_vid.json()["detail"] == "video not found",
+   "foreign video_id does not differ from a missing id")
+mix = client.get("/api/runs?channel_id=2&video_id=10", headers=auth_b)
+ok(mix.status_code == 404, "own channel + foreign video is 404, not the channel's rows")
+
+state_runs = {r["detail"] for r in state_b["recent_runs"]}
+ok(state_runs == {"SECRET-TB", "GLOBAL-POOL"},
+   "agent/state recent_runs uses the same scope as /runs")
+state_ow = client.get("/api/agent/state", headers=auth_ow).json()
+ow_runs = {r["detail"] for r in state_ow["recent_runs"]}
+ok("SECRET-OWERA-NULLCH" in ow_runs and "SECRET-TB" not in ow_runs,
+   "agent/state keeps owera's null-channel video row and hides tenant-b")
+
+auth_c = {"Authorization": "Basic " + base64.b64encode(b"tenant-c:secret").decode()}
+empty_ws = client.get("/api/runs", headers=auth_c)
+ok(empty_ws.status_code == 200 and _details(empty_ws) == {"GLOBAL-POOL"},
+   "workspace with no channels sees only global rows")
+
+settings.multi_workspace = False
+try:
+    legacy_runs = client.get("/api/runs")
+    ok(legacy_runs.status_code == 200, "multi_workspace off: /runs stays open")
+    ok(_details(legacy_runs) == {"SECRET-OWERA", "SECRET-OWERA-NULLCH", "GLOBAL-POOL"},
+       "multi_workspace off still resolves owera, not every workspace")
+finally:
+    settings.multi_workspace = True
 
 # OpenAPI behind Basic (full app)
 from app.main import app as main_app
