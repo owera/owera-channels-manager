@@ -161,7 +161,7 @@ print("generate: MPT dead → grok-cli fallback")
 _llm_calls: list[dict] = []
 
 
-def _fake_complete(prompt, system=None, max_tokens=None, timeout=None):
+def _fake_complete(prompt, system=None, max_tokens=None, timeout=None, **kwargs):
     _llm_calls.append({"prompt": prompt, "system": system,
                        "max_tokens": max_tokens, "timeout": timeout})
     return json.dumps({
@@ -221,7 +221,7 @@ ok(long_script not in prompt_long,
    "full uncapped script is absent from the prompt")
 
 # fenced JSON response is stripped before parse
-def _fenced_complete(prompt, system=None, max_tokens=None, timeout=None):
+def _fenced_complete(prompt, system=None, max_tokens=None, timeout=None, **kwargs):
     return "```json\n" + json.dumps({
         "title": "Fenced", "caption": "c", "hashtags": ["#x"],
     }) + "\n```"

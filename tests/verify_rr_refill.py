@@ -450,7 +450,7 @@ _calls: list[str] = []
 
 
 def _stub(text):
-    def _complete(prompt, system=None, max_tokens=None, timeout=None):
+    def _complete(prompt, system=None, max_tokens=None, timeout=None, **kwargs):
         _calls.append(prompt)
         return text
     return _complete
