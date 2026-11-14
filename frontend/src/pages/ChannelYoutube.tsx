@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  useChannelYoutube, useMetrics, useMut, useSubscribers, useSubscriptions,
+  useChannelYoutube, useFeatures, useMetrics, useMut, useSubscribers, useSubscriptions,
   useMonetization, type Channel, type ChannelBranding, type MonetizationMetric,
   type MonetizationTier,
 } from "../api";
@@ -270,6 +270,9 @@ function Subscriptions({ channel }: { channel: Channel }) {
 }
 
 export default function ChannelYoutube({ channel }: { channel: Channel }) {
+  // Subscriptions admin is off unless the server flag is on (PO CM cut C2).
+  const { data: features } = useFeatures();
+  const showSubscriptions = features?.youtube_subscriptions_admin === true;
   if (channel.oauth_status !== "connected") {
     return (
       <div className="mt-6">
@@ -277,7 +280,7 @@ export default function ChannelYoutube({ channel }: { channel: Channel }) {
         <div className="mt-2">
           <Empty compact>
             <p className="text-fog-100 font-medium mb-1">YouTube tools unlock after connect</p>
-            <p>Branding, metrics, and subscription lists appear here once YouTube is connected.</p>
+            <p>Branding and metrics appear here once YouTube is connected.</p>
           </Empty>
         </div>
       </div>
@@ -288,7 +291,7 @@ export default function ChannelYoutube({ channel }: { channel: Channel }) {
       <MonetizationWidget channel={channel} />
       <Metrics channel={channel} />
       <Branding channel={channel} />
-      <Subscriptions channel={channel} />
+      {showSubscriptions && <Subscriptions channel={channel} />}
     </>
   );
 }

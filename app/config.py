@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     oauth_redirect_uri: str = "https://channels.owera.com/api/oauth/google/callback"
     token_enc_key: str = ""
 
+    # YouTube subscriptions admin (list/subscribe/unsubscribe the channel to
+    # others) and the "recent subscribers" list. Not part of the Google OAuth
+    # verification use case (PO CM cut C2, 2026-11-13): OFF by default for every
+    # workspace, including owera. Env: MANAGER_YOUTUBE_SUBSCRIPTIONS_ADMIN=1.
+    youtube_subscriptions_admin: bool = False
+
     # SPA human login (Google Sign-In → session cookie). Separate Web OAuth client
     # from platform YouTube Connect (MANAGER_GOOGLE_*). GCP project 618513602444.
     spa_google_login: bool = False
