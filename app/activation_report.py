@@ -18,7 +18,8 @@ import sys
 from sqlalchemy import text
 from sqlmodel import Session, select
 
-_REQUIRED = {"workspace": ("is_test", "paid_at", "first_draft_at"),
+_REQUIRED = {"workspace": ("is_test", "paid_at", "first_draft_at",
+                            "login_ambiguous_owner_count", "login_ambiguous_owner_last_at"),
              "video": ("approved_by",)}
 
 
@@ -47,7 +48,9 @@ def build(session: Session, *, workspace: str | None = None, include_test: bool 
     else:
         rows = activation.report_all(session, include_test=include_test,
                                      include_owera=include_owera)
-    return {"ok": True, "workspaces": rows}
+    return {"ok": True, "workspaces": rows,
+            "ops_alerts": [{"workspace_id": r["workspace_id"], **alert}
+                           for r in rows for alert in r["ops_alerts"]]}
 
 
 def main(argv: list[str] | None = None) -> int:

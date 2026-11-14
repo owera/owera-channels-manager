@@ -89,6 +89,8 @@ def _add_missing_columns() -> None:
                       ("last_invoice_paid_at", "DATETIME"),
                       ("scheduler_paused", "BOOLEAN DEFAULT 0"),
                       ("is_test", "BOOLEAN DEFAULT 0"),
+                      ("login_ambiguous_owner_count", "INTEGER"),
+                      ("login_ambiguous_owner_last_at", "DATETIME"),
                       ("paid_at", "DATETIME"),
                       ("first_draft_at", "DATETIME")],
     }

@@ -6,6 +6,8 @@ Uses ``MANAGER_SPA_GOOGLE_*`` credentials on GCP project 618513602444.
 
 from __future__ import annotations
 
+import contextvars
+import logging
 import secrets
 from typing import Any
 from urllib.parse import urlencode
@@ -17,6 +19,14 @@ from app.config import settings
 
 LOGIN_SCOPES = ("openid", "email", "profile")
 SESSION_KEY = "cm_spa_auth"
+LOGIN_ERROR_KEY = "cm_login_error"
+_resolution_error = contextvars.ContextVar("spa_resolution_error", default=None)
+logger = logging.getLogger("manager.spa_google_login")
+
+
+def resolution_error() -> str | None:
+    return _resolution_error.get()
+
 OAUTH_STATE_SESSION_KEY = "cm_spa_oauth_state"
 
 # v1 allowlist (CoS locked): only this Google account may use SPA human login.
@@ -35,15 +45,16 @@ def normalized_email(raw: str) -> str:
     return (raw or "").strip().lower()
 
 
-def workspace_for_email(email: str) -> str | None:
+def workspace_for_email(email: str, *, record_alert: bool = False) -> str | None:
     """Allowlisted email → workspace slug, or None if denied."""
+    _resolution_error.set(None)
     key = normalized_email(email)
     if not key:
         return None
     slug = _SPA_EMAIL_WORKSPACE.get(key)
     if slug:
         return slug
-    return _workspace_slug_from_owner_email(key)
+    return _workspace_slug_from_owner_email(key, record_alert=record_alert)
 
 
 def test_workspace_emails() -> frozenset[str]:
@@ -60,7 +71,7 @@ def may_sign_in_to_test_workspace(key: str, ws) -> bool:
     return key in test_workspace_emails() or key == normalized_email(ws.owner_email or "")
 
 
-def _workspace_slug_from_owner_email(key: str) -> str | None:
+def _workspace_slug_from_owner_email(key: str, *, record_alert: bool = False) -> str | None:
     """Stripe-provisioned buyers: workspace.owner_email → slug (not workspace id 1).
 
     Fail closed: an email owning more than one workspace resolves to none (one
@@ -75,7 +86,27 @@ def _workspace_slug_from_owner_email(key: str) -> str | None:
         with Session(engine) as session:
             rows = [w for w in session.exec(
                 select(Workspace).where(Workspace.owner_email == key)).all() if w.id != 1]
-            if len(rows) != 1:
+            if len(rows) > 1:
+                _resolution_error.set("login_ambiguous_owner")
+                ids = sorted(w.id for w in rows)
+                if not record_alert:
+                    return None
+                logger.warning("login_ambiguous_owner workspace_ids=%s count=%s", ids, len(ids))
+                # No email/token stored. Alert applies to each affected workspace.
+                from app.models import utcnow
+                now = utcnow()
+                for w in rows:
+                    w.login_ambiguous_owner_count = (w.login_ambiguous_owner_count or 0) + 1
+                    w.login_ambiguous_owner_last_at = now
+                    session.add(w)
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    logger.warning("login_ambiguous_owner_persist_failed workspace_ids=%s count=%s",
+                                   ids, len(ids))
+                return None
+            if not rows:
                 return None
             ws = rows[0]
             if getattr(ws, "is_test", False) and not may_sign_in_to_test_workspace(key, ws):
@@ -99,7 +130,11 @@ def spa_session_identity(request: Request) -> tuple[str, str] | None:
     if not email or not ws:
         return None
     if workspace_for_email(email) != ws:
+        if resolution_error():
+            request.session[LOGIN_ERROR_KEY] = resolution_error()
         return None
+    if LOGIN_ERROR_KEY in request.session:
+        request.session.pop(LOGIN_ERROR_KEY, None)
     actor = str(payload.get("actor") or email.split("@", 1)[0])
     return ws, actor
 

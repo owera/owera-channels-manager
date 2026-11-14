@@ -81,6 +81,8 @@ class Workspace(SQLModel, table=True):
     # S5: ops-provisioned E2E workspace (app.provision_test_workspace), no Stripe.
     # Never has a fake paid_at; activation_report flags it.
     is_test: bool = Field(default=False)
+    login_ambiguous_owner_count: Optional[int] = None
+    login_ambiguous_owner_last_at: Optional[datetime] = None
     # S1 activation timestamps (tz-aware UTC). paid_at = first CM checkout's
     # Stripe event.created (A0); first_draft_at = first successful render of any
     # video in this workspace (A3). Both written once, never overwritten.

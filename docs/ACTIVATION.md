@@ -51,7 +51,15 @@ session check) resolves an `is_test` workspace only for its provisioned
 `owner_email` or an email in `MANAGER_TEST_WORKSPACE_EMAILS`, and never for an
 owera allowlist email (that one always maps to `owera`). An email that owns more
 than one workspace resolves to none, so one account never maps to two
-workspaces. The `+test` alias is deliberately **not** mapped from the base
+workspaces. That case is an ops alert, not a generic error: the OAuth callback
+redirects to `/?login_error=login_ambiguous_owner` (and `/api/auth/me` returns
+401 `login_ambiguous_owner`), the SPA shows "We found more than one workspace for
+this account. Email contact@owera.com and we'll fix it within 1 business day.",
+the `manager.spa_google_login` logger writes one WARNING
+`login_ambiguous_owner workspace_ids=[…] count=N` (no email), and each affected
+workspace gets `login_ambiguous_owner_count` +1 / `login_ambiguous_owner_last_at`
+(additive, nullable). `activation_report` lists it under `ops_alerts` (top level
+and per workspace row). The `+test` alias is deliberately **not** mapped from the base
 address: that would let `rodrigo@owera.com` into a test workspace (the
 cross-workspace leak S4 closes).
 

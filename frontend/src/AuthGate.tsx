@@ -6,7 +6,7 @@ import App from "./App";
 export default function AuthGate() {
   const { data: features, isLoading: fLoading } = useFeatures();
   const spaLogin = features?.spa_google_login === true;
-  const { data: me, isLoading: mLoading, isError } = useAuthMe(spaLogin);
+  const { data: me, isLoading: mLoading, isError, error } = useAuthMe(spaLogin);
 
   if (fLoading || (spaLogin && mLoading)) {
     return (
@@ -17,7 +17,9 @@ export default function AuthGate() {
   }
 
   if (spaLogin && (isError || !me)) {
-    return <Login />;
+    const code = error?.message === "login_ambiguous_owner"
+      ? "login_ambiguous_owner" : new URLSearchParams(window.location.search).get("login_error");
+    return <Login errorCode={code} />;
   }
 
   return <App spaLogin={spaLogin} userEmail={me?.email} />;

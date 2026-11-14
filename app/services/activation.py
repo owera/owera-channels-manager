@@ -218,6 +218,10 @@ def report(session: Session, ws: Workspace, now: datetime | None = None) -> dict
 
     return {
         "workspace_id": ws.id, "workspace_slug": ws.slug,
+        "ops_alerts": ([{"code": "login_ambiguous_owner",
+                         "count": ws.login_ambiguous_owner_count,
+                         "last_at": iso_utc(ws.login_ambiguous_owner_last_at)}]
+                       if ws.login_ambiguous_owner_count else []),
         "is_test": bool(ws.is_test),
         "paid": paid is not None,
         "subscription_status": ws.subscription_status,

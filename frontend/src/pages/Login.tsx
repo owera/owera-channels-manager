@@ -1,6 +1,6 @@
 import { PolicyLinks } from "../ui";
 
-export default function Login() {
+export default function Login({ errorCode }: { errorCode?: string | null }) {
   return (
     <div className="min-h-dvh flex items-center justify-center p-6 bg-ink-900">
       <div className="panel max-w-md w-full p-8 text-center">
@@ -10,7 +10,11 @@ export default function Login() {
             Owera <span className="text-signal">Channels Manager</span>
           </span>
         </div>
-        <p className="text-sm text-fog-400 mb-8">Sign in with your Owera Google account to continue.</p>
+        {errorCode === "login_ambiguous_owner" ? (
+          <p role="alert" className="text-sm text-fog-200 mb-8">We found more than one workspace for this account. Email contact@owera.com and we&apos;ll fix it within 1 business day.</p>
+        ) : (
+          <p className="text-sm text-fog-400 mb-8">Sign in with your Owera Google account to continue.</p>
+        )}
         <a
           href="/api/auth/google/start"
           className="btn inline-flex items-center justify-center gap-2 w-full"

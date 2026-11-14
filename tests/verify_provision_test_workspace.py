@@ -315,6 +315,65 @@ with patch.object(settings, "test_workspace_emails", ""):
     ok(spa_google_login.workspace_for_email("paid+test@owera.com") is not None,
        "non-test (paid) workspace login unchanged")
 
+print("Stripe checkout with an already-known email reuses the workspace (no duplicate)")
+with Session(engine) as s:
+    s.add(Workspace(slug="known-buyer", name="Known", owner_email="known.buyer@gmail.com",
+                    subscription_status="trialing"))
+    s.commit()
+    KNOWN = s.exec(select(Workspace).where(Workspace.slug == "known-buyer")).one().id
+evk = {"id": "evt_known", "type": "checkout.session.completed", "created": 1_793_000_000,
+       "data": {"object": {"id": "cs_known", "mode": "subscription", "payment_link": "plink_cm",
+                           "customer": "cus_known", "subscription": "sub_known",
+                           "customer_details": {"email": "Known.Buyer@Gmail.com"}}}}
+with patch.object(stripe_email, "send_welcome_email", return_value=True):
+    with Session(engine) as s:
+        ok(stripe_provision.process_event(s, evk) == 200, "checkout for a known email processed")
+with Session(engine) as s:
+    rows = s.exec(select(Workspace).where(Workspace.owner_email == "known.buyer@gmail.com")).all()
+    ok([w.id for w in rows] == [KNOWN], "same workspace reused, no duplicate row")
+    ok(rows[0].stripe_customer_id == "cus_known" and rows[0].subscription_status == "active",
+       "Stripe ids attached to the existing workspace")
+
+print("ambiguous owner login: code, alert line, report entry")
+from fastapi.testclient import TestClient
+from app.routers import spa_auth as _spa_auth
+from app import activation_report as _ar
+cap2 = _Cap()
+_logging.getLogger("manager.spa_google_login").addHandler(cap2)
+with Session(engine) as s:
+    DUPS = sorted(w.id for w in s.exec(select(Workspace).where(Workspace.owner_email == "dup@gmail.com")).all())
+ok(len(DUPS) == 2, "two workspaces own dup@gmail.com")
+ok(spa_google_login.workspace_for_email("dup@gmail.com") is None and
+   spa_google_login.resolution_error() == "login_ambiguous_owner", "resolver flags login_ambiguous_owner")
+ok(not any(l.startswith("login_ambiguous_owner") for l in cap2.lines),
+   "plain resolution (session checks) does not raise the alert")
+with patch.object(spa_google_login, "consume_oauth_state", return_value=True), \
+        patch.object(spa_google_login, "exchange_code_and_profile",
+                     return_value={"email": "Dup@Gmail.com", "email_verified": True}):
+    import app.main as _main
+    c = TestClient(_main.app)
+    r = c.get("/api/auth/google/callback?code=x&state=y", follow_redirects=False)
+ok(r.status_code == 302 and r.headers["location"] == "/?login_error=login_ambiguous_owner",
+   "callback redirects with login_error=login_ambiguous_owner")
+me = c.get("/api/auth/me")
+ok(me.status_code == 401 and me.json()["detail"] == "login_ambiguous_owner",
+   "session: /api/auth/me returns the code (SPA maps it to the screen)")
+alert = [l for l in cap2.lines if l.startswith("login_ambiguous_owner ")]
+ok(alert == [f"login_ambiguous_owner workspace_ids={DUPS} count=2"], "one WARNING alert line with ids + count")
+ok(not any("dup" in l.lower() or "@" in l for l in cap2.lines), "no email in the alert line")
+with Session(engine) as s:
+    out = _ar.build(s, include_test=True)
+ok(sorted(a["workspace_id"] for a in out["ops_alerts"] if a["code"] == "login_ambiguous_owner") == DUPS,
+   "activation report: ops alert on each affected workspace")
+ok(all(a["count"] == 1 and a["last_at"] for a in out["ops_alerts"]), "alert has count + last_at")
+row = next(r for r in out["workspaces"] if r["workspace_id"] == DUPS[0])
+ok(row["ops_alerts"][0]["code"] == "login_ambiguous_owner", "per-workspace ops_alerts in the report row")
+login_src = (Path(__file__).resolve().parent.parent / "frontend/src/pages/Login.tsx").read_text()
+ok("We found more than one workspace for this account. Email contact@owera.com and we&apos;ll fix it "
+   "within 1 business day." in login_src and "login_ambiguous_owner" in
+   (Path(__file__).resolve().parent.parent / "frontend/src/AuthGate.tsx").read_text(),
+   "SPA maps login_ambiguous_owner to the exact EN text")
+
 print("not exposed over HTTP")
 import app.main as main
 paths = {getattr(r, "path", "") for r in main.app.routes}
