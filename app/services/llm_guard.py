@@ -60,6 +60,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import logging
+import re
 import sys
 from typing import Iterator
 
@@ -83,13 +84,30 @@ except Exception:  # pragma: no cover - import cycle safety
 class LLMBlocked(_Base):
     """The LLM call was refused by the external-Google-data guard. Not transient."""
 
-    def __init__(self, workspace_id, call_type: str):
+    def __init__(self, workspace_id, call_type: str, reason: str | None = None):
         self.workspace_id = workspace_id
         self.call_type = call_type
-        super().__init__(
-            f"{BLOCK_EVENT}: LLM call refused for workspace_id={workspace_id} "
-            f"call_type={call_type} (only Owera-internal workspaces may use the LLM "
-            "until the xAI Enterprise key; see docs/LLM_GUARD.md)")
+        self.reason = reason
+        if reason is None:
+            msg = (f"{BLOCK_EVENT}: LLM call refused for workspace_id={workspace_id} "
+                   f"call_type={call_type} (only Owera-internal workspaces may use the LLM "
+                   "until the xAI Enterprise key; see docs/LLM_GUARD.md)")
+        else:
+            msg = (f"{BLOCK_EVENT}: LLM call refused for workspace_id={workspace_id} "
+                   f"call_type={call_type} reason={reason} (see docs/LLM_GUARD.md)")
+        super().__init__(msg)
+
+
+class LLMCrossWorkspace(LLMBlocked):
+    """L2: data from one workspace was about to enter another workspace's prompt."""
+
+
+class LLMFieldRejected(LLMBlocked):
+    """L3: a field outside the L6 allowlist was declared for a prompt."""
+
+
+class LLMRawDump(LLMBlocked):
+    """L7: a raw YouTube API payload was about to enter a prompt."""
 
 
 def _parse_id_list(raw) -> frozenset[int]:
@@ -171,21 +189,23 @@ def scope(workspace_id, call_type: str) -> Iterator[None]:
     Contextvars are per-thread for new threads: set the scope INSIDE the thread
     target (e.g. ``worker.run_job``), not around ``Thread.start``."""
     token = _scope.set((_coerce_ws(workspace_id), call_type))
+    dtok = _data_ws.set(frozenset())
     try:
         yield
     finally:
+        _data_ws.reset(dtok)
         _scope.reset(token)
 
 
-def _log_block(workspace_id, call_type: str) -> None:
-    logger.warning("%s workspace_id=%s call_type=%s", BLOCK_EVENT, workspace_id, call_type)
+def _log_block(workspace_id, call_type: str, reason: str | None = None) -> None:
+    if reason is None:  # exact pre-S8 line (allowlist block), kept for log greps
+        logger.warning("%s workspace_id=%s call_type=%s", BLOCK_EVENT, workspace_id, call_type)
+    else:
+        logger.warning("%s workspace_id=%s call_type=%s reason=%s", BLOCK_EVENT,
+                       workspace_id, call_type, reason)
 
 
-def require(call_type: str | None = None, *, workspace_id=_UNSET) -> int:
-    """Gate one LLM call. Returns the allowed workspace id or raises ``LLMBlocked``.
-
-    ``workspace_id`` overrides the context scope when given explicitly.
-    ``call_type`` names the call for the log (defaults to the scope's)."""
+def _resolve(call_type: str | None, workspace_id) -> tuple[int | None, str]:
     sc = _scope.get()
     if workspace_id is _UNSET:
         ws = sc[0] if sc else None
@@ -194,10 +214,345 @@ def require(call_type: str | None = None, *, workspace_id=_UNSET) -> int:
     ct = call_type or (sc[1] if sc else None) or "unknown"
     if sc and call_type and sc[1] and sc[1] != call_type:
         ct = f"{sc[1]}/{call_type}"
-    if not is_allowed(ws):
-        _log_block(ws, ct)
-        raise LLMBlocked(ws, ct)
-    return ws  # type: ignore[return-value]
+    return ws, ct
+
+
+def block_reason(ws: int | None, ct: str, fields=_UNSET) -> str | None | bool:
+    """Why ``ws`` may not make an LLM call of type ``ct`` (no side effects, no log).
+
+    Returns ``False`` when allowed, ``None`` for the pre-S8 allowlist block (exact
+    old log line / message), or a short reason string."""
+    if ws is None:
+        return None
+    if ws in internal_workspace_ids():
+        if kill_switch_on(ws, internal=True):
+            return "kill_switch"
+        bad = foreign_data_workspaces(ws)
+        if bad:
+            return "cross_workspace_data"
+        return False
+    if not external_release_enabled():
+        return None   # flag OFF: identical to the #217 allowlist guard
+    r = release_block_reason(ws, ct, fields)
+    if r:
+        return r
+    if foreign_data_workspaces(ws):
+        return "cross_workspace_data"
+    return False
+
+
+def would_allow(workspace_id, call_type: str) -> bool:
+    """``require`` without raising or logging (render pre-check)."""
+    return block_reason(_coerce_ws(workspace_id), call_type) is False
+
+
+def require(call_type: str | None = None, *, workspace_id=_UNSET, fields=_UNSET) -> int:
+    """Gate one LLM call. Returns the allowed workspace id or raises ``LLMBlocked``.
+
+    ``workspace_id`` overrides the context scope when given explicitly.
+    ``call_type`` names the call for the log (defaults to the scope's).
+    ``fields``: the prompt's declared field names (``complete()`` passes them;
+    ``None`` = undeclared). Omitted (pre-checks) → no field check. Declared
+    fields outside the L6 allowlist are always rejected (``LLMFieldRejected``)."""
+    ws, ct = _resolve(call_type, workspace_id)
+    if fields is not _UNSET and fields is not None:
+        bad = rejected_fields(fields)
+        if bad:
+            _log_block(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
+            _persist_block(ws, "field_not_allowed")
+            raise LLMFieldRejected(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
+    r = block_reason(ws, ct, fields)
+    if r is False:
+        _clear_block_if_set(ws)
+        return ws  # type: ignore[return-value]
+    _log_block(ws, ct, r)
+    _persist_block(ws, r)
+    if r == "cross_workspace_data":
+        raise LLMCrossWorkspace(ws, ct, r)
+    raise LLMBlocked(ws, ct, r)
+
+
+# ------------------------------------------------------------------ S8 (L2/L3/L7)
+#
+# L3 / L6 field allowlist. LegalOps (LEGAL-DECISION-LLM-YT-DATA.md L3) and the L6
+# consent line (CM-CONNECT-AI-LINE.md, sha 845c22005853) name exactly these
+# Google-sourced fields: video titles, descriptions, tags and channel stats.
+# Adding a YouTube field here changes the public L6 line too (back to CMO +
+# LegalOps), so tests/verify_llm_guard_s8.py pins this set.
+YT_FIELDS: frozenset[str] = frozenset({"video_title", "video_description", "video_tags",
+                                       "channel_stats"})
+# Raw statistics only (YouTube channels.list ``statistics``). No derived metric
+# (L4, YT III.E.4.h): no averages, rates, deltas, percentages or scores.
+CHANNEL_STATS_KEYS: frozenset[str] = frozenset({"subscriber_count", "view_count",
+                                                "video_count"})
+# Workspace-authored, non-Google inputs (typed by the customer/operator in CM or
+# generated by CM itself): allowed in a prompt, not covered by the L6 line.
+CM_FIELDS: frozenset[str] = frozenset({"topic", "theme_prompt", "niche", "steer_notes",
+                                       "language", "script", "storyboard", "craft_rules"})
+ALLOWED_FIELDS: frozenset[str] = YT_FIELDS | CM_FIELDS
+
+# L7 caps: a prompt carries short excerpts, never a dump of the channel.
+MAX_TITLE_CHARS = 200
+MAX_DESCRIPTION_CHARS = 1000
+MAX_TAGS = 30
+MAX_TAG_CHARS = 60
+MAX_VIDEOS = 60
+
+_RAW_DUMP_RE = re.compile(
+    r'"kind"\s*:\s*"youtube(?:Analytics)?#|"etag"\s*:\s*"|youtube#(?:video|channel|playlistItem|search)ListResponse'
+    r'|"columnHeaders"\s*:\s*\[|"(?:access|refresh)_token"\s*:', re.I)
+
+_fields: contextvars.ContextVar[tuple[str, ...] | None] = contextvars.ContextVar(
+    "llm_guard_fields", default=None)
+_data_ws: contextvars.ContextVar[frozenset[int]] = contextvars.ContextVar(
+    "llm_guard_data_ws", default=frozenset())
+
+
+def rejected_fields(fields) -> set[str]:
+    return {str(f) for f in (fields or ()) if str(f) not in ALLOWED_FIELDS}
+
+
+@contextlib.contextmanager
+def declare(*fields: str) -> Iterator[None]:
+    """Declare the field names the next ``complete()`` prompt is built from (L3).
+    Unknown names raise ``LLMFieldRejected`` right here (fail fast)."""
+    bad = rejected_fields(fields)
+    if bad:
+        sc = _scope.get()
+        ws, ct = (sc if sc else (None, "unknown"))
+        _log_block(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
+        raise LLMFieldRejected(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
+    token = _fields.set(tuple(dict.fromkeys(fields)))
+    try:
+        yield
+    finally:
+        _fields.reset(token)
+
+
+def declared_fields() -> tuple[str, ...] | None:
+    return _fields.get()
+
+
+def note_data(workspace_id) -> None:
+    """L2: record that data owned by ``workspace_id`` is going into the current
+    scope's prompt. ``require()`` refuses the call when any noted workspace differs
+    from the bound one. Call it wherever channel/video rows are read for a prompt."""
+    ws = _coerce_ws(workspace_id)
+    _data_ws.set(_data_ws.get() | {ws if ws is not None else -1})
+
+
+def foreign_data_workspaces(ws: int | None) -> set[int]:
+    return {w for w in _data_ws.get() if w != ws}
+
+
+def assert_data_workspace(workspace_id) -> None:
+    """L2 hard check at the read site: data of ``workspace_id`` may only be read for
+    a prompt of the same (bound) workspace. Raises ``LLMCrossWorkspace``."""
+    note_data(workspace_id)
+    sc = _scope.get()
+    bound = sc[0] if sc else None
+    ct = sc[1] if sc else "unknown"
+    if bound is None or foreign_data_workspaces(bound):
+        _log_block(bound, ct, "cross_workspace_data")
+        raise LLMCrossWorkspace(bound, ct, "cross_workspace_data")
+
+
+def minimize(payload: dict) -> tuple[dict, list[str]]:
+    """L3/L4/L7: keep only allowlisted fields, raw channel stats and capped excerpts.
+
+    Returns ``(clean, stripped)`` where ``stripped`` lists dropped field names
+    (``channel_stats.<key>`` for dropped stat keys). Values are never logged."""
+    clean: dict = {}
+    stripped: list[str] = []
+    for k, v in (payload or {}).items():
+        k = str(k)
+        if k not in ALLOWED_FIELDS:
+            stripped.append(k)
+            continue
+        if k == "channel_stats":
+            if not isinstance(v, dict):
+                stripped.append(k)
+                continue
+            stats = {}
+            for sk, sv in v.items():
+                if sk in CHANNEL_STATS_KEYS and isinstance(sv, int) and not isinstance(sv, bool):
+                    stats[sk] = sv
+                else:
+                    stripped.append(f"channel_stats.{sk}")
+            if stats:
+                clean[k] = stats
+            continue
+        if k == "video_tags":
+            if not isinstance(v, (list, tuple)):
+                stripped.append(k)
+                continue
+            clean[k] = [str(t)[:MAX_TAG_CHARS] for t in v if isinstance(t, str)][:MAX_TAGS]
+            continue
+        if k in ("video_title", "video_description") and isinstance(v, (list, tuple)):
+            cap = MAX_TITLE_CHARS if k == "video_title" else MAX_DESCRIPTION_CHARS
+            clean[k] = [str(x)[:cap] for x in v if isinstance(x, str)][:MAX_VIDEOS]
+            continue
+        if isinstance(v, (dict, list, tuple, set)):
+            stripped.append(k)          # L7: no nested / raw structures
+            continue
+        if v is None:
+            continue
+        text = str(v)
+        if k == "video_title":
+            text = text[:MAX_TITLE_CHARS]
+        elif k == "video_description":
+            text = text[:MAX_DESCRIPTION_CHARS]
+        clean[k] = text
+    if stripped:
+        sc = _scope.get()
+        logger.info("llm_fields_stripped workspace_id=%s call_type=%s fields=%s",
+                    sc[0] if sc else None, sc[1] if sc else "unknown",
+                    ",".join(sorted(stripped)))
+    return clean, stripped
+
+
+def check_prompt(prompt: str | None, system: str | None = None, call_type: str | None = None) -> None:
+    """L7: refuse a prompt that carries a raw YouTube / Analytics API payload or an
+    OAuth token field. Logs ids only."""
+    text = f"{system or ''}\n{prompt or ''}"
+    if _RAW_DUMP_RE.search(text):
+        ws, ct = _resolve(call_type, _UNSET)
+        _log_block(ws, ct, "raw_youtube_payload")
+        raise LLMRawDump(ws, ct, "raw_youtube_payload")
+
+
+def log_call(workspace_id, call_type: str, fields, *, backend: str,
+             input_tokens: int | None, output_tokens: int | None, estimated: bool) -> None:
+    """L3 per-call log: workspace, route (call type), field NAMES and token counts.
+    Never the prompt or the response."""
+    logger.info("llm_call workspace_id=%s call_type=%s fields=%s backend=%s "
+                "input_tokens=%s output_tokens=%s tokens=%s ws_read=%s", workspace_id, call_type,
+                ",".join(fields) if fields else "undeclared", backend,
+                "na" if input_tokens is None else input_tokens,
+                "na" if output_tokens is None else output_tokens,
+                "estimated" if estimated else "reported", ws_read_state())
+
+
+def ws_read_state() -> str:
+    """``ok`` / ``fail`` / ``na`` (no row read in this context)."""
+    try:
+        return _WS_READ.get()
+    except Exception:  # noqa: BLE001
+        return "na"
+
+
+# ------------------------------------------------------------------ kill switch + release
+
+import contextvars as _cv
+
+# S8 (CTO 2026-11-14): last workspace-row read result in this context, surfaced as
+# ``ws_read=ok|fail|na`` on the llm_call line so unreadable-row passes are countable.
+_WS_READ: _cv.ContextVar[str] = _cv.ContextVar("llm_guard_ws_read", default="na")
+
+# Short SQLite busy_timeout for the guard's row read (CTO: ~200 ms) so a writer
+# lock doesn't stall an LLM call; on timeout internal passes with a warning,
+# external is blocked.
+WS_READ_BUSY_TIMEOUT_MS = 200
+
+# Last row read by ``_workspace_row`` in this context: lets ``require`` clear a
+# persisted refusal on the next allowed call without an extra read or a write
+# lock on every call.
+_LAST_ROW: _cv.ContextVar[tuple[int, object] | None] = _cv.ContextVar(
+    "llm_guard_last_row", default=None)
+
+def external_release_enabled() -> bool:
+    """``MANAGER_LLM_EXTERNAL_RELEASE`` (default OFF). OFF = #217 allowlist only."""
+    return bool(getattr(settings, "llm_external_release", False))
+
+
+# Purposes LegalOps accepts for an external workspace (ideas, script, metadata,
+# Gate B, submit). Anything else (rubric harness, agents…) stays internal-only.
+RELEASE_CALL_TYPES: frozenset[str] = frozenset({
+    "ideas", "script_compose", "metadata", "thumbnail", "gate_b_preflight", "render",
+    "render_submit", "mpt_render", "mpt_social_metadata"})
+
+
+def _workspace_row(ws: int):
+    """``(row, error)``; row None + error None = no such workspace."""
+    _LAST_ROW.set(None)
+    try:
+        from sqlmodel import Session
+
+        from app.db import engine
+        from app.models import Workspace
+
+        with Session(engine) as s:
+            prev = None
+            try:
+                if engine.dialect.name == "sqlite":
+                    conn = s.connection()
+                    prev = conn.exec_driver_sql("PRAGMA busy_timeout").scalar()
+                    conn.exec_driver_sql(f"PRAGMA busy_timeout={int(WS_READ_BUSY_TIMEOUT_MS)}")
+                row = s.get(Workspace, int(ws))
+                if row is not None:
+                    s.expunge(row)
+            finally:
+                if prev is not None:
+                    try:
+                        s.connection().exec_driver_sql(f"PRAGMA busy_timeout={int(prev)}")
+                    except Exception:  # noqa: BLE001
+                        pass
+            _WS_READ.set("ok")
+            _LAST_ROW.set((int(ws), row))
+            return row, None
+    except Exception as e:  # noqa: BLE001
+        _WS_READ.set("fail")
+        return None, type(e).__name__
+
+
+def kill_switch_on(ws: int, *, internal: bool) -> bool:
+    """``Workspace.llm_disabled``. Unreadable row: an internal workspace keeps
+    today's behavior (allowed, warning logged); an external one is blocked."""
+    row, err = _workspace_row(ws)
+    if err is not None:
+        if internal:
+            logger.warning("llm_guard_kill_switch_unreadable workspace_id=%s error=%s", ws, err)
+            return False
+        return True
+    return bool(row is not None and getattr(row, "llm_disabled", False))
+
+
+def _is_paid(row) -> bool:
+    # S1 adds Workspace.paid_at (acd4794); until it merges, Stripe's "active".
+    return (getattr(row, "paid_at", None) is not None
+            or (getattr(row, "subscription_status", "") or "") == "active")
+
+
+def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
+    """Release policy for a NON-internal workspace (flag ON only). ``None`` = allowed.
+
+    PROPOSED policy (PO S8 cut; final decision CTO/LegalOps/CoS/PO, due Wed 18):
+    paid or is_test AND terms + privacy accepted, not kill-switched, purpose in
+    RELEASE_CALL_TYPES, prompt fields declared, and the API backend with the
+    no-training retention ack (the CLI consumer session may train: never external)."""
+    try:
+        from app.services import llm as _llm
+        if _llm.backend() != "api" or not _llm.data_retention():
+            return "backend_may_train"
+    except Exception:  # noqa: BLE001
+        return "backend_may_train"
+    parts = [p for p in str(ct).split("/") if p]
+    if not parts or any(p not in RELEASE_CALL_TYPES for p in parts):
+        return "purpose_not_released"
+    if fields is None:
+        return "fields_undeclared"
+    row, err = _workspace_row(ws)
+    if err is not None:
+        return "workspace_unreadable"
+    if row is None:
+        return "workspace_unknown"
+    if getattr(row, "llm_disabled", False):
+        return "kill_switch"
+    if not (_is_paid(row) or getattr(row, "is_test", False)):
+        return "not_paid_or_test"
+    if getattr(row, "terms_accepted_at", None) is None or getattr(row, "privacy_accepted_at", None) is None:
+        return "terms_privacy_not_accepted"
+    return None
 
 
 def workspace_of_channel(channel_id, session=None) -> int | None:
@@ -219,6 +574,113 @@ def workspace_of_channel(channel_id, session=None) -> int | None:
             return _q(s)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ------------------------------------------------------- user-visible refusal (S8)
+#
+# PO CM 14/11: a refusal is never silent. With the release flag ON, every refusal
+# of a NON-internal workspace is persisted on the workspace row
+# (``llm_blocked_reason`` / ``llm_blocked_at``), shown in the SPA as a
+# "Drafts paused: …" banner via GET /api/onboarding/status, and cleared by the
+# next allowed call. Flag OFF: nothing is persisted or shown (#217 unchanged).
+# ``llm_blocked_at`` = when the CURRENT reason was first seen (a repeat of the
+# same reason doesn't rewrite the row).
+
+# reason → (setup step id, user-facing EN text). Unknown/internal → support.
+BLOCK_USER_TEXT: dict[str, tuple[str, str]] = {
+    "terms_privacy_not_accepted": (
+        "terms_privacy",
+        "Drafts paused: finish setup step \"Accept the Terms of Service and Privacy Policy\"."),
+    "not_paid_or_test": (
+        "payment", "Drafts paused: finish setup step \"Payment\"."),
+    # Reserved for S2 (wizard): a per-workspace AI-data acknowledgement. No guard
+    # reason emits it yet; mapped so S2 only has to return it.
+    "ai_data_not_acknowledged": (
+        "ai_data", "Drafts paused: finish setup step \"AI data\"."),
+}
+_SUPPORT = ("support", "Drafts paused: please contact Owera support so we can finish your setup.")
+
+
+def _norm_reason(reason: str) -> str:
+    return str(reason).split(":", 1)[0][:64]
+
+
+def block_message(reason: str | None) -> dict | None:
+    """``{"reason", "step", "message"}`` for a persisted reason (no ``at``)."""
+    if not reason:
+        return None
+    r = _norm_reason(reason)
+    step, msg = BLOCK_USER_TEXT.get(r, _SUPPORT)
+    return {"reason": r, "step": step, "message": msg}
+
+
+def blocked_status(ws_row) -> dict | None:
+    """Public read for the SPA banner and (after S1 merges) ``activation_report``:
+    ``{"reason", "step", "message", "at"}`` or ``None``. ``None`` whenever the
+    release flag is OFF (no banner for the #217 allowlist block)."""
+    if ws_row is None or not external_release_enabled():
+        return None
+    out = block_message(getattr(ws_row, "llm_blocked_reason", None))
+    if out is None:
+        return None
+    at = getattr(ws_row, "llm_blocked_at", None)
+    if at is not None and getattr(at, "tzinfo", None) is None:
+        from datetime import timezone as _tz
+        at = at.replace(tzinfo=_tz.utc)
+    out["at"] = at.isoformat() if at is not None else None
+    return out
+
+
+def _write_ws(sql: str, params: dict) -> None:
+    """Best-effort single UPDATE with the short busy_timeout. Never raises: a
+    failed write must not turn a refusal into a different error."""
+    try:
+        from sqlalchemy import text as _text
+
+        from app.db import engine
+
+        with engine.begin() as conn:
+            prev = None
+            if engine.dialect.name == "sqlite":
+                prev = conn.exec_driver_sql("PRAGMA busy_timeout").scalar()
+                conn.exec_driver_sql(f"PRAGMA busy_timeout={int(WS_READ_BUSY_TIMEOUT_MS)}")
+            try:
+                conn.execute(_text(sql), params)
+            finally:
+                if prev is not None:
+                    conn.exec_driver_sql(f"PRAGMA busy_timeout={int(prev)}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("llm_guard_block_state_write_failed error=%s", type(e).__name__)
+
+
+def _persist_block(ws: int | None, reason) -> None:
+    if ws is None or not isinstance(reason, str) or reason == "workspace_unknown":
+        return
+    if not external_release_enabled() or ws in internal_workspace_ids():
+        return
+    from app.models import utcnow
+    r = _norm_reason(reason)
+    _write_ws("UPDATE workspace SET llm_blocked_reason = :r, llm_blocked_at = :now "
+              "WHERE id = :id AND (llm_blocked_reason IS NULL OR llm_blocked_reason != :r)",
+              {"r": r, "now": utcnow(), "id": int(ws)})
+
+
+def _clear_block_if_set(ws: int | None) -> None:
+    last = _LAST_ROW.get()
+    if ws is None or last is None or last[0] != ws:
+        return
+    if not getattr(last[1], "llm_blocked_reason", None):
+        return
+    _write_ws("UPDATE workspace SET llm_blocked_reason = NULL, llm_blocked_at = NULL "
+              "WHERE id = :id AND llm_blocked_reason IS NOT NULL", {"id": int(ws)})
+    _LAST_ROW.set(None)
+
+
+def clear_block(ws: int) -> None:
+    """Explicit clear (e.g. S2 wizard after terms acceptance). The next allowed
+    LLM call clears it anyway."""
+    _write_ws("UPDATE workspace SET llm_blocked_reason = NULL, llm_blocked_at = NULL "
+              "WHERE id = :id AND llm_blocked_reason IS NOT NULL", {"id": int(ws)})
 
 
 # --------------------------------------------------------------------- agents

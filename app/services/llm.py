@@ -11,6 +11,7 @@ no HTTP-API fallback — fail clearly so the operator can ``grok login`` and ret
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import subprocess
@@ -199,8 +200,14 @@ def complete(
     model: str | None = None,
     reasoning_effort: str | None = None,
     call_type: str | None = None,
+    fields: tuple[str, ...] | list[str] | None = None,
 ) -> str:
     """Run ``grok -p`` and return stdout text.
+
+    S8: ``fields`` (or an enclosing ``llm_guard.declare(...)``) names what the
+    prompt is built from; names outside the L6 allowlist are rejected. The prompt
+    is refused if it carries a raw YouTube API payload (L7). One ``llm_call`` log
+    line per call: workspace, call type, field names, token counts, no content.
 
     Guarded: the caller must have bound an Owera-internal workspace with
     ``llm_guard.scope(workspace_id, call_type)``; otherwise ``LLMBlocked``.
@@ -222,16 +229,38 @@ def complete(
     # bound workspace is not Owera-internal. Raises LLMBlocked (a GrokCLIError).
     # Applies to BOTH backends (cli and api).
     from app.services import llm_guard
-    ws = llm_guard.require(call_type)
+    decl = tuple(fields) if fields is not None else llm_guard.declared_fields()
+    ws = llm_guard.require(call_type, fields=decl)
+    llm_guard.check_prompt(prompt, system, call_type)
     model = model if model is not None else (settings.grok_model or None)
     timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
+    sc = llm_guard.current()
+    ct = call_type or (sc[1] if sc else None) or "unknown"
     if backend() == "api":
-        sc = llm_guard.current()
-        return _complete_api(prompt, system, model=model, reasoning_effort=reasoning_effort,
-                             timeout=timeout, workspace_id=ws,
-                             call_type=call_type or (sc[1] if sc else None) or "unknown")
-    return _complete_cli(prompt, system, model=model, reasoning_effort=reasoning_effort,
-                         timeout=timeout)
+        tok = _last_usage.set(None)
+        try:
+            out = _complete_api(prompt, system, model=model, reasoning_effort=reasoning_effort,
+                                timeout=timeout, workspace_id=ws, call_type=ct)
+            u = _last_usage.get()
+        finally:
+            _last_usage.reset(tok)
+        llm_guard.log_call(ws, ct, decl, backend="api",
+                           input_tokens=u[0] if u else None,
+                           output_tokens=u[1] if u else None, estimated=False)
+        return out
+    out = _complete_cli(prompt, system, model=model, reasoning_effort=reasoning_effort,
+                        timeout=timeout)
+    # The CLI reports no usage: ~4 chars per token, flagged "estimated".
+    llm_guard.log_call(ws, ct, decl, backend="cli",
+                       input_tokens=len(build_prompt(prompt or "", system)) // 4,
+                       output_tokens=len(out or "") // 4, estimated=True)
+    return out
+
+
+# (input_tokens, output_tokens) of the last _complete_api call in this context,
+# read by complete() for the S8 llm_call line. Never holds content.
+_last_usage: contextvars.ContextVar[tuple[int, int] | None] = contextvars.ContextVar(
+    "llm_last_usage", default=None)
 
 
 def backend() -> str:
@@ -596,6 +625,7 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
                   .get("cached_tokens")) or 0)
     reasoning = int(((u.get("output_tokens_details") or u.get("completion_tokens_details") or {})
                      .get("reasoning_tokens")) or 0)
+    _last_usage.set((in_t, out_t + reasoning))
     est = estimate_cost(mdl, in_t, cached, out_t, reasoning)
     reported = None
     if u.get("cost_in_usd_ticks") is not None:

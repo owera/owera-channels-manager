@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useDashboard, useOnboarding, useRuns, useSettings, type DashboardRow, type Status } from "../api";
 import { oauthStatusLabel } from "../copy";
 import { STATUS_META } from "../status";
-import { Dot, Empty } from "../ui";
+import { Dot, Empty, LlmBlockedBanner } from "../ui";
 
 function relTime(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now();
@@ -140,6 +140,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 md:p-8 max-w-[1500px]">
+      <LlmBlockedBanner blocked={onboarding?.llm_blocked} />
       {onboarding && !onboarding.onboarding_complete && (
         <div className="mb-6 panel px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-signal/30">
           <span className="text-sm text-fog-200 leading-relaxed">Finish setup: connect YouTube, add a topic, and generate your first ideas.</span>

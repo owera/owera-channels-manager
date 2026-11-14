@@ -117,8 +117,10 @@ def _llm_fallback(subject: str, script: str, content_format: str = "short",
                 f"Subject: {subject}\n\nScript: {script[:2000]}"
             )
         effort = settings.grok_effort_ideas or None
-        text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
-                        reasoning_effort=effort) or ""
+        from app.services import llm_guard
+        with llm_guard.declare("video_title", "script", "niche", "language"):
+            text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
+                            reasoning_effort=effort) or ""
         text = re.sub(r"^```[a-zA-Z0-9]*\s*|\s*```$", "", text.strip())
         data = json.loads(text)
         return _from_meta(subject, data)

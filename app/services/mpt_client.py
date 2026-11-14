@@ -69,7 +69,7 @@ class MPTClient:
         MPT runs its own LLM (script / search terms) on the subject we send:
         guarded like ``llm.complete`` (raises ``llm_guard.LLMBlocked``)."""
         from app.services import llm_guard
-        llm_guard.require("mpt_render")
+        llm_guard.require("mpt_render", fields=("video_title", "script"))
         with self._client() as c:
             r = c.post("/videos", json=params)
             r.raise_for_status()
@@ -92,7 +92,7 @@ class MPTClient:
 
         LLM on the MPT side: guarded first (``LLMBlocked`` propagates, not None)."""
         from app.services import llm_guard
-        llm_guard.require("mpt_social_metadata")
+        llm_guard.require("mpt_social_metadata", fields=("video_title", "script"))
         try:
             with self._client() as c:
                 r = c.post("/social-metadata", json={

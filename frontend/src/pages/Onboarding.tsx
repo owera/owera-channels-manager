@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useOnboarding } from "../api";
-import { Dot, Empty, SectionLabel } from "../ui";
+import { Dot, Empty, LlmBlockedBanner, SectionLabel } from "../ui";
 
 export default function Onboarding() {
   const { data, isLoading } = useOnboarding();
@@ -9,6 +9,7 @@ export default function Onboarding() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl">
+      <LlmBlockedBanner blocked={data.llm_blocked} />
       <div className="label mb-2">// early access</div>
       <h1 className="font-display font-extrabold text-3xl text-fog-50 mb-2">Onboarding</h1>
       <p className="text-fog-400 text-sm mb-8 max-w-xl">

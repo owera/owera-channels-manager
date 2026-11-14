@@ -118,3 +118,31 @@ subprocess-mocked `agent-exec` for growth/code/run-check), entry points scoped.
 It also includes a **static grep** that fails on a new process spawn,
 grok argv, HTTP LLM client, MPT LLM endpoint or `llm.complete` importer outside
 the known sites, and on a `run/*.sh` that runs `grok` without the preflight.
+
+## S8: workspace scope, field allowlist, kill switch, external release (2026-11-14)
+
+PO CM cut S8; LegalOps LEGAL-DECISION-LLM-YT-DATA.md (L2/L3/L5/L7); L6 line
+CM-CONNECT-AI-LINE.md (sha 845c22005853). Tests: `tests/verify_llm_guard_s8.py`.
+
+| Rule | Where | Always on? |
+|---|---|---|
+| L2 data only from the bound workspace | `llm_guard.assert_data_workspace` / `note_data`; `llm_context.youtube_context` (the sanctioned reader); `require()` refuses when a noted workspace ≠ bound one (`reason=cross_workspace_data`) | yes |
+| L3 field allowlist | `llm_guard.YT_FIELDS` = video_title, video_description, video_tags, channel_stats (raw subscriber/view/video counts) + `CM_FIELDS` (customer/CM-authored: topic, theme_prompt, niche, steer_notes, language, script, storyboard, craft_rules). Callers declare with `llm_guard.declare(...)` or `complete(fields=...)`; a name outside → `LLMFieldRejected`. `llm_guard.minimize` strips anything else (names logged, never values) | yes |
+| L3 per-call log | `llm_call workspace_id=… call_type=… fields=… backend=… input_tokens=… output_tokens=… tokens=reported|estimated` (CLI has no usage: ~4 chars/token) | yes |
+| L4 | no derived stat key passes `minimize` (avg_*, ctr, deltas, pct) | yes |
+| L5 Gate B | a non-allowlisted workspace never skip-gate auto-approves (`render_loop._effective_skip_gate`) | yes (only reachable with the release flag) |
+| L7 no raw dumps | `llm_guard.check_prompt`: a prompt with a YouTube/Analytics API payload (`"kind": "youtube#…"`, `etag`, `columnHeaders`) or an OAuth token field → `LLMRawDump`; excerpt caps `MAX_*` | yes |
+| Kill switch | `Workspace.llm_disabled`; ops `python -m app.llm_kill_switch status|disable|enable --workspace ID`; effective next call, no restart; internal workspaces too | yes |
+| External release | `MANAGER_LLM_EXTERNAL_RELEASE` (default **OFF** = #217 allowlist only) | flag |
+
+Adding a Google-sourced field to `YT_FIELDS` changes the public L6 line (back to CMO + LegalOps).
+
+Release check (flag ON, non-internal workspace), all required, first failing reason logged:
+`backend_may_train` (needs `LLM_BACKEND=api` + `XAI_DATA_RETENTION_ACK`; the CLI consumer
+session may train) → `purpose_not_released` (call type ∉ ideas, script_compose, metadata,
+thumbnail, gate_b_preflight, render, render_submit, mpt_render, mpt_social_metadata) →
+`fields_undeclared` → `workspace_unreadable` / `workspace_unknown` → `kill_switch` →
+`not_paid_or_test` (paid = `paid_at` (S1) or `subscription_status == "active"`; or `is_test`)
+→ `terms_privacy_not_accepted` (`terms_accepted_at` and `privacy_accepted_at`, no UI yet).
+**The policy is not decided** (CTO/LegalOps/CoS/PO, due Wed 18); the flag stays OFF until it is
+and L1 (no training at the provider) is proven. Headless agents are unchanged (internal only).

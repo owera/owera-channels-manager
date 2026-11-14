@@ -504,8 +504,12 @@ def generate_ideas(topic_name: str, theme_prompt: str | None, existing: list[str
             "Return ONLY the titles, one per line, no numbering, no bullets, no commentary."
         )
     effort = settings.grok_effort_ideas or None
-    text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
-                    reasoning_effort=effort) or ""
+    from app.services import llm_guard
+    # S8/L3: existing subjects may be YouTube-imported titles (video_title).
+    with llm_guard.declare("topic", "theme_prompt", "niche", "steer_notes", "language",
+                           "craft_rules", "video_title"):
+        text = complete(prompt, timeout=int(settings.grok_timeout_seconds_light),
+                        reasoning_effort=effort) or ""
 
     seen = {s.lower() for s in existing}
     out: list[str] = []

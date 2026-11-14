@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from sqlmodel import Session, func, select
 
+from app.services import llm_guard
+
 from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus, Workspace
 from app.services import activation
 
@@ -85,4 +87,6 @@ def evaluate(session: Session, ws: Workspace) -> dict:
             "first_published_at": activation.iso_utc(first_pub),
         },
         "render_failed": activation.render_failed_signal(session, ws),
+        # S8: last LLM guard refusal ("Drafts paused: …"), None when allowed or flag OFF.
+        "llm_blocked": llm_guard.blocked_status(ws),
     }

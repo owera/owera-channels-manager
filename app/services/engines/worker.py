@@ -546,9 +546,17 @@ def _creation_config(subject, params, html, script, duration, resolution, bgm, u
 # --------------------------------------------------------------------------- LLM steps
 
 def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
+    from app.services import llm_guard
     from app.services.llm import complete
 
-    return complete(prompt, system=system, max_tokens=max_tokens)
+    with llm_guard.declare(*_WORKER_LLM_FIELDS):
+        return complete(prompt, system=system, max_tokens=max_tokens)
+
+
+# S8/L3: what the render worker's prompts (script, storyboard, legacy composition,
+# thumbnail hook) are built from. No YouTube field beyond the video title.
+_WORKER_LLM_FIELDS = ("video_title", "script", "storyboard", "niche", "language",
+                      "craft_rules", "topic", "theme_prompt")
 
 
 def _llm_compose(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
@@ -562,9 +570,12 @@ def _llm_compose(prompt: str, system: str | None = None, max_tokens: int = 2000)
     Empty setting = CLI default (kill switch)."""
     from app.services.llm import complete
 
+    from app.services import llm_guard
+
     effort = settings.grok_compose_reasoning_effort or None
-    return complete(prompt, system=system, max_tokens=max_tokens,
-                    reasoning_effort=effort)
+    with llm_guard.declare(*_WORKER_LLM_FIELDS):
+        return complete(prompt, system=system, max_tokens=max_tokens,
+                        reasoning_effort=effort)
 
 
 def _word_count_bounds(params: dict) -> tuple[int, int]:

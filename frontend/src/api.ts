@@ -308,11 +308,20 @@ export interface OnboardingStep {
   done: boolean;
 }
 
+export interface LlmBlocked {
+  reason: string;
+  step: "terms_privacy" | "payment" | "ai_data" | "support" | string;
+  message: string;
+  at: string | null;
+}
+
 export interface OnboardingStatus {
   workspace_id: number;
   workspace_slug: string;
   onboarding_complete: boolean;
   steps: OnboardingStep[];
+  /** S8: last LLM guard refusal ("Drafts paused: …"); null when drafts are allowed. */
+  llm_blocked?: LlmBlocked | null;
 }
 
 export const useOnboarding = () =>

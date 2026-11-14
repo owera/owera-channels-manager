@@ -216,3 +216,14 @@ export function ConnectConsentNote({ className = "" }: { className?: string }) {
     </p>
   );
 }
+
+/** S8: "Drafts paused: …" banner from GET /api/onboarding/status `llm_blocked`. */
+export function LlmBlockedBanner({ blocked }: { blocked?: { message: string; reason: string } | null }) {
+  if (!blocked) return null;
+  return (
+    <div role="alert" data-testid="llm-blocked-banner"
+      className="mb-6 panel px-4 py-3 border-amber-400/40 text-sm text-fog-100 leading-relaxed">
+      {blocked.message}
+    </div>
+  );
+}
