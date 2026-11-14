@@ -7,10 +7,12 @@ import { oauthStatusLabel } from "../copy";
 import { intFromBlur } from "../intFromBlur";
 import { Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
 import ChannelYoutube from "./ChannelYoutube";
+import { l6ConnectAiLine } from "../l6ConnectAiLine";
 
 const OAUTH_HEX: Record<string, string> = {
   connected: "#c9f24e", expired: "#f5a524", error: "#f7768e", disconnected: "#6c7681",
 };
+
 
 // ---------- Topics (content themes) ----------
 function TopicCard({
@@ -292,6 +294,9 @@ function ChannelDetail({ channel }: { channel: Channel }) {
           <p className="text-sm text-fog-300 mt-2 max-w-xl leading-relaxed">
             Sign in with Google so Channels Manager can upload videos, create playlists, and read basic channel stats.
             {platformOauth ? " Early access uses Owera's shared Google sign-in — no JSON key upload." : " Upload your Google Cloud client secret if prompted, then connect."}
+          </p>
+          <p className="text-sm text-fog-200 mt-3 max-w-xl leading-relaxed">
+            {l6ConnectAiLine(typeof navigator !== "undefined" ? navigator : undefined)}
           </p>
         </div>
       )}
