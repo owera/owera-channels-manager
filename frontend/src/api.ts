@@ -331,6 +331,67 @@ export const useOnboarding = () =>
     refetchInterval: 8000,
   });
 
+// ---- S2 onboarding wizard (GET/POST /api/onboarding/wizard*) ----
+export type WizardStepId =
+  | "channel" | "youtube" | "topics" | "budgets" | "consents" | "ideas" | "first_draft";
+
+export interface WizardPresetTopic { name: string; theme_prompt: string | null; content_format: string }
+export interface WizardPreset { id: string; label: string; niche: string; topics: WizardPresetTopic[] }
+
+export interface WizardState {
+  workspace_id: number;
+  active: boolean;
+  /** Wizard active, or done but the first draft hasn't rendered: Trends/Settings hidden. */
+  first_login: boolean;
+  current_step: WizardStepId | null;
+  steps: { id: WizardStepId; done: boolean }[];
+  channel: {
+    id: number; name: string; niche: string | null; oauth_status: OAuthStatus;
+    yt_channel_title: string | null; daily_render_budget: number; daily_publish_budget: number;
+  } | null;
+  topics: { id: number; name: string; theme_prompt: string | null }[];
+  default_budgets: { daily_render_budget: number; daily_publish_budget: number };
+  presets: { copy_status: string; topic_count: number; niches: WizardPreset[] };
+  consents: {
+    terms_accepted_at: string | null; privacy_accepted_at: string | null;
+    ai_data_ack_at: string | null; ai_data_ack_version: string | null;
+  };
+  ai_data_line_version: string;
+  first_draft: { video_id: number; status: Status; subject: string; priority: boolean } | null;
+  first_draft_at: string | null;
+  llm_blocked: LlmBlocked | null;
+}
+
+export const useWizard = (enabled = true, poll = false) =>
+  useQuery({
+    queryKey: ["wizard"],
+    queryFn: () => api<WizardState>("/onboarding/wizard"),
+    enabled,
+    retry: false,
+    refetchInterval: poll ? 3000 : false,
+  });
+
+export const useWizardMut = () => {
+  const qc = useQueryClient();
+  const post = (path: string) => (body: any) =>
+    api<WizardState>(`/onboarding/wizard/${path}`, { method: "POST", body: j(body) });
+  const done = (data: WizardState) => {
+    qc.setQueryData(["wizard"], data);
+    invalidate(qc, ["channels", "onboarding", "dashboard"]);
+  };
+  return {
+    channel: useMutation({ mutationFn: post("channel"), onSuccess: done }),
+    topics: useMutation({ mutationFn: post("topics"), onSuccess: done }),
+    budgets: useMutation({ mutationFn: post("budgets"), onSuccess: done }),
+    consents: useMutation({ mutationFn: post("consents"), onSuccess: done }),
+    firstDraft: useMutation({
+      mutationFn: post("first-draft"),
+      onSuccess: done,
+      onError: () => invalidate(qc, ["wizard"]),   // refusal → refetch S8's banner
+    }),
+  };
+};
+
 export const useTrends = (status?: string) =>
   useQuery({
     queryKey: ["trends", status ?? "all"],

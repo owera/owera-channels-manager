@@ -554,7 +554,29 @@ def _queued_candidates(session: Session) -> list[Video]:
             ordered.extend(longs + shorts)
         else:
             ordered.extend(shorts + longs)
-    return ordered
+    return _first_draft_first(session, ordered)
+
+
+def _first_draft_first(session: Session, ordered: list[Video]) -> list[Video]:
+    """S2: a new workspace's first draft (queued by the onboarding wizard) is
+    offered the next free render slot before every other QUEUED row.
+
+    Only the ORDER of the candidate list changes. ``render_concurrency``, each
+    channel's ``daily_render_budget``, holds, pauses, the LLM guard and the
+    per-channel long/short mix (``_auto_produce`` / ``_rebalance_queued_mix``,
+    i.e. the OS/RR limits) are untouched, and an in-flight render is never
+    preempted: the first draft simply takes the next slot that frees up. The
+    priority lapses once S1 stamps ``Workspace.first_draft_at``."""
+    from app.services.onboarding_wizard import priority_video_ids
+    try:
+        prio = priority_video_ids(session)
+    except Exception:  # noqa: BLE001 - ordering must never break the render tick
+        logger.exception("first-draft priority lookup failed")
+        return ordered
+    if not prio:
+        return ordered
+    return ([v for v in ordered if v.id in prio]
+             + [v for v in ordered if v.id not in prio])
 
 
 def _rebalance_queued_mix(session: Session) -> None:

@@ -100,6 +100,19 @@ class Workspace(SQLModel, table=True):
     # allowed call. Written only by llm_guard (never by request handlers).
     llm_blocked_reason: Optional[str] = None
     llm_blocked_at: Optional[datetime] = None
+    # S2 guided onboarding (wizard). ai_data_ack_at = the user acknowledged the L6
+    # AI-data line (CM-CONNECT-AI-LINE.md) inside onboarding; ai_data_ack_version =
+    # the line's sha it was shown (845c22005853). S8's release check requires it
+    # ("AI data" step). wizard_* mark the wizard's own progress; the other steps are
+    # derived from the data (channel, OAuth, topics, consents, videos).
+    # first_draft_video_id = the draft the wizard queued at top render priority
+    # (render_loop._queued_candidates) until first_draft_at is stamped (S1).
+    ai_data_ack_at: Optional[datetime] = None
+    ai_data_ack_version: Optional[str] = None
+    wizard_started_at: Optional[datetime] = None
+    wizard_budgets_at: Optional[datetime] = None
+    wizard_completed_at: Optional[datetime] = None
+    first_draft_video_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

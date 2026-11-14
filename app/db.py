@@ -97,7 +97,13 @@ def _add_missing_columns() -> None:
                       ("terms_accepted_at", "DATETIME"),
                       ("privacy_accepted_at", "DATETIME"),
                       ("llm_blocked_reason", "VARCHAR"),
-                      ("llm_blocked_at", "DATETIME")],
+                      ("llm_blocked_at", "DATETIME"),
+                      ("ai_data_ack_at", "DATETIME"),
+                      ("ai_data_ack_version", "VARCHAR"),
+                      ("wizard_started_at", "DATETIME"),
+                      ("wizard_budgets_at", "DATETIME"),
+                      ("wizard_completed_at", "DATETIME"),
+                      ("first_draft_video_id", "INTEGER")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

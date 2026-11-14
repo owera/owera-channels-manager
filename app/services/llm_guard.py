@@ -527,7 +527,8 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
     """Release policy for a NON-internal workspace (flag ON only). ``None`` = allowed.
 
     PROPOSED policy (PO S8 cut; final decision CTO/LegalOps/CoS/PO, due Wed 18):
-    paid or is_test AND terms + privacy accepted, not kill-switched, purpose in
+    paid or is_test AND terms + privacy accepted AND AI data acknowledged (S2),
+    not kill-switched, purpose in
     RELEASE_CALL_TYPES, prompt fields declared, and the API backend with the
     no-training retention ack (the CLI consumer session may train: never external)."""
     try:
@@ -552,6 +553,10 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
         return "not_paid_or_test"
     if getattr(row, "terms_accepted_at", None) is None or getattr(row, "privacy_accepted_at", None) is None:
         return "terms_privacy_not_accepted"
+    # S2 (PO CM condition ii): the "AI data" step S8 reserved. The user saw the L6
+    # line (CM-CONNECT-AI-LINE.md) inside onboarding and acknowledged it.
+    if getattr(row, "ai_data_ack_at", None) is None:
+        return "ai_data_not_acknowledged"
     return None
 
 
@@ -593,8 +598,8 @@ BLOCK_USER_TEXT: dict[str, tuple[str, str]] = {
         "Drafts paused: finish setup step \"Accept the Terms of Service and Privacy Policy\"."),
     "not_paid_or_test": (
         "payment", "Drafts paused: finish setup step \"Payment\"."),
-    # Reserved for S2 (wizard): a per-workspace AI-data acknowledgement. No guard
-    # reason emits it yet; mapped so S2 only has to return it.
+    # S2 wizard: per-workspace AI-data acknowledgement (Workspace.ai_data_ack_at),
+    # emitted by release_block_reason after terms/privacy.
     "ai_data_not_acknowledged": (
         "ai_data", "Drafts paused: finish setup step \"AI data\"."),
 }

@@ -7,17 +7,26 @@ import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Trends from "./pages/Trends";
+import Wizard from "./pages/Wizard";
 import { HeldToasts, PolicyLinks } from "./ui";
 
-const NAV = [
+type NavItem = { to: string; label: string; short: string; code: string; end?: boolean;
+  /** S2: hidden on the first login (setup wizard until the first draft rendered). */
+  hideOnFirstLogin?: boolean };
+
+const NAV: NavItem[] = [
   { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
   { to: "/board", label: "Review queue", short: "Queue", code: "01" },
   { to: "/channels", label: "Channels", short: "Channels", code: "02" },
   { to: "/onboarding", label: "Onboarding", short: "Start", code: "06" },
-  { to: "/trends", label: "Trends", short: "Trends", code: "03" },
+  { to: "/trends", label: "Trends", short: "Trends", code: "03", hideOnFirstLogin: true },
   { to: "/profiles", label: "Render Profiles", short: "Profiles", code: "04" },
-  { to: "/settings", label: "Settings", short: "Config", code: "05" },
+  { to: "/settings", label: "Settings", short: "Config", code: "05", hideOnFirstLogin: true },
 ];
+
+function navItems(firstLogin?: boolean): NavItem[] {
+  return firstLogin ? NAV.filter((n) => !n.hideOnFirstLogin) : NAV;
+}
 
 function SignOut({ email }: { email?: string }) {
   const logout = async () => {
@@ -38,7 +47,7 @@ function SignOut({ email }: { email?: string }) {
   );
 }
 
-function Sidebar({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: string }) {
+function Sidebar({ spaLogin, userEmail, firstLogin }: { spaLogin?: boolean; userEmail?: string; firstLogin?: boolean }) {
   return (
     <aside className="hidden md:flex w-60 shrink-0 border-r border-ink-line bg-ink-800/60 flex-col">
       <div className="px-5 pt-6 pb-5 border-b border-ink-line">
@@ -52,7 +61,7 @@ function Sidebar({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: stri
       </div>
 
       <nav className="flex-1 py-4">
-        {NAV.map((n) => (
+        {navItems(firstLogin).map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
@@ -76,10 +85,10 @@ function Sidebar({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: stri
   );
 }
 
-function BottomNav() {
+function BottomNav({ firstLogin }: { firstLogin?: boolean }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 md:hidden z-40 bg-ink-800/95 backdrop-blur-sm border-t border-ink-line flex">
-      {NAV.map((n) => (
+      {navItems(firstLogin).map((n) => (
         <NavLink
           key={n.to}
           to={n.to}
@@ -98,10 +107,12 @@ function BottomNav() {
   );
 }
 
-export default function App({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: string }) {
+export default function App({ spaLogin, userEmail, firstLogin }: {
+  spaLogin?: boolean; userEmail?: string; firstLogin?: boolean;
+}) {
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Sidebar spaLogin={spaLogin} userEmail={userEmail} />
+      <Sidebar spaLogin={spaLogin} userEmail={userEmail} firstLogin={firstLogin} />
       <main className="flex-1 overflow-y-auto pb-[56px] md:pb-0">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -109,6 +120,7 @@ export default function App({ spaLogin, userEmail }: { spaLogin?: boolean; userE
           <Route path="/board/:channelId" element={<Board />} />
           <Route path="/channels" element={<Channels />} />
           <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/welcome" element={<Wizard />} />
           <Route path="/trends" element={<Trends />} />
           <Route path="/review/:videoId" element={<Review />} />
           <Route path="/profiles" element={<Profiles />} />
@@ -119,7 +131,7 @@ export default function App({ spaLogin, userEmail }: { spaLogin?: boolean; userE
         </footer>
       </main>
       <HeldToasts />
-      <BottomNav />
+      <BottomNav firstLogin={firstLogin} />
     </div>
   );
 }

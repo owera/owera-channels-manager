@@ -49,11 +49,11 @@ SQLModel.metadata.create_all(eng)
 with Session(eng) as s:
     s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Workspace(id=2, slug="buyer", name="Buyer", subscription_status="active",
-                    privacy_accepted_at=NOW))                      # paid, terms missing
+                    privacy_accepted_at=NOW, ai_data_ack_at=NOW))  # S2 AI-data step                      # paid, terms missing
     s.add(Workspace(id=3, slug="trial", name="Trial", terms_accepted_at=NOW,
                     privacy_accepted_at=NOW))                      # not paid
     s.add(Workspace(id=4, slug="ok", name="OK", subscription_status="active",
-                    terms_accepted_at=NOW, privacy_accepted_at=NOW))
+                    terms_accepted_at=NOW, privacy_accepted_at=NOW, ai_data_ack_at=NOW))  # S2 AI-data step
     s.commit()
 
 appdb_patch = patch.object(appdb, "engine", eng)

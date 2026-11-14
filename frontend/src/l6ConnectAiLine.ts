@@ -3,6 +3,10 @@
  * The only i18n in the SPA: PT when the browser locale starts with "pt",
  * otherwise EN. Both strings are verbatim from CM-CONNECT-AI-LINE.md.
  */
+/** Version of CM-CONNECT-AI-LINE.md these strings come from. S2: sent back with the
+ * onboarding AI-data acknowledgement (Workspace.ai_data_ack_version). */
+export const L6_CONNECT_AI_LINE_SHA = "845c22005853";
+
 export const L6_CONNECT_AI_LINE_EN =
   "To write your drafts, Channels Manager sends your videos' titles, descriptions, tags and channel stats to an AI provider in the US, only to create your own drafts. Nothing is published until you approve it.";
 
