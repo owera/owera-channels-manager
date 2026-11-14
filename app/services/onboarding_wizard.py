@@ -78,7 +78,8 @@ def is_first_login(session: Session, ws: Workspace) -> bool:
 def consents_done(ws: Workspace) -> bool:
     from app.services import google_limited_use
     from app.services import terms_consent
-    return terms_consent.is_valid(ws) and google_limited_use.is_valid(ws)
+    return (terms_consent.is_valid(ws) and not terms_consent.reaccept_required(ws)
+            and google_limited_use.is_valid(ws))
 
 
 def _terms_flags() -> dict:

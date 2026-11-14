@@ -157,6 +157,83 @@ def doc_block_reason(ws) -> str | None:
     return None
 
 
+INTERNAL_FLOOR = frozenset({1, 2})
+
+
+def _internal(ws_id) -> bool:
+    try:
+        from app.services import llm_guard
+        return int(ws_id) in INTERNAL_FLOOR or int(ws_id) in llm_guard.internal_workspace_ids()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def latest_record(session, ws_id):
+    """The workspace's newest TermsConsentEvent, or None."""
+    from sqlmodel import select
+
+    from app.models import TermsConsentEvent
+    return session.exec(select(TermsConsentEvent).where(TermsConsentEvent.workspace_id == int(ws_id))
+                        .order_by(TermsConsentEvent.id.desc())).first()
+
+
+def reaccept_required(ws, session=None) -> bool:
+    """CTO 14/11: a non-internal workspace whose latest stored acceptance does not
+    say which documents were accepted (no record, or a blank terms / privacy doc
+    sha) must accept again once the shas for its locale are configured; the new
+    record carries the shas now in force. A later
+    change of the configured shas (doc update) does NOT force this (LegalOps)."""
+    if getattr(ws, "terms_accepted_at", None) is None or ws.id is None or _internal(ws.id):
+        return False
+    if doc_block_reason(ws) is not None:
+        # Shas not configured yet: re-accepting would write blanks again (and the
+        # wizard would loop); the release refuses with terms_doc_unpinned instead.
+        return False
+    if session is None:
+        from sqlmodel import Session
+
+        from app.db import engine
+        with Session(engine) as s:
+            rec = latest_record(s, ws.id)
+    else:
+        rec = latest_record(session, ws.id)
+    return rec is None or not rec.terms_doc_sha or not rec.privacy_doc_sha
+
+
+def reaccept_block_reason(ws, session=None) -> str | None:
+    return "terms_reaccept_required" if reaccept_required(ws, session) else None
+
+
+def status(ws, session) -> dict:
+    """GET /api/onboarding/terms: what Settings needs to show the box again."""
+    return {"accepted_at": None if ws.terms_accepted_at is None else ws.terms_accepted_at.isoformat(),
+            "locale": ws.terms_accepted_locale, "version": ws.terms_accepted_version,
+            "valid": is_valid(ws) and not reaccept_required(ws, session),
+            "reaccept_required": reaccept_required(ws, session),
+            "pt_not_live": block_reason(ws) == "terms_pt_not_live",
+            **public_flags()}
+
+
+def accept(session, ws, *, sentence_sha: str | None, locale: str | None, user_id: str | None) -> str:
+    """Store an acceptance (first timestamps kept) and append its record; returns the locale.
+
+    The version / locale are replaced whenever the stored one doesn't count (none, a
+    PT acceptance while gated, or a record that must be re-accepted)."""
+    loc = validate(sentence_sha, locale)
+    from app.models import utcnow
+    now = utcnow()
+    replace = (not ws.terms_accepted_version or block_reason(ws) == "terms_pt_not_live"
+               or reaccept_required(ws, session))
+    ws.terms_accepted_at = ws.terms_accepted_at or now
+    ws.privacy_accepted_at = ws.privacy_accepted_at or now
+    if replace:
+        ws.terms_accepted_version = (sentence_sha or "").strip().lower()
+        ws.terms_accepted_locale = loc
+        record(session, ws, sentence_sha=ws.terms_accepted_version, locale=loc, user_id=user_id)
+    session.add(ws)
+    return loc
+
+
 def is_valid(ws) -> bool:
     return block_reason(ws) is None
 

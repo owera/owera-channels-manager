@@ -568,6 +568,14 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
     r = _tc.doc_block_reason(row)
     if r is not None:
         return r
+    # CTO 14/11: the latest stored acceptance must name the documents (no record or a
+    # blank doc sha → the user accepts again; a later doc-sha config change does not).
+    try:
+        r = _tc.reaccept_block_reason(row)
+    except Exception:  # noqa: BLE001
+        return "workspace_unreadable"
+    if r is not None:
+        return r
     # S2 (PO CM condition ii + LegalOps 14/11): Google Limited Use consent — the
     # user ticked the exact LegalOps text (EN/PT); a sha of a text we no longer
     # show is stale and asked again (app/services/google_limited_use.py).
@@ -657,6 +665,7 @@ BLOCK_USER_TEXT: dict[str, tuple[str, dict[str, str]]] = {
     # CTO / LegalOps 14/11: accepted under the PT text while MANAGER_TERMS_PT_LIVE is false;
     # same "Terms and privacy" step (asked again in EN).
     "terms_pt_not_live": ("terms_privacy", _paused("terms_privacy")),
+    "terms_reaccept_required": ("terms_privacy", _paused("terms_privacy")),
     # terms_doc_unpinned (ops: MANAGER_TERMS_DOC_SHA_* / MANAGER_PRIVACY_DOC_SHA_* unset) is
     # not the user's to fix → the generic "contact support" banner (_SUPPORT).
     "not_paid_or_test": ("payment", _paused("payment")),

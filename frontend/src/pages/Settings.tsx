@@ -3,6 +3,7 @@ import { openBillingPortal, useBilling, useMut, useSettings } from "../api";
 import { intFromBlur } from "../intFromBlur";
 import { Field, SectionLabel, Toggle } from "../ui";
 import { GoogleLimitedUseSettings } from "./AiData";
+import { TermsReacceptSettings } from "./TermsSettings";
 import { wizardT as t } from "../wizardI18n";
 
 type IntKey = "render_concurrency" | "publish_drip_minutes"
@@ -62,6 +63,7 @@ export default function Settings() {
             <Toggle on={s.scheduler_paused} onChange={(v) => patch({ scheduler_paused: v })} />
           </div>
         </div>
+        <TermsReacceptSettings />
         <GoogleLimitedUseSettings />
       </div>
     );
@@ -109,6 +111,7 @@ export default function Settings() {
             onBlur={commitInt("topic_autogen_target", 0)} />
         </Field>
       </div>
+      <TermsReacceptSettings />
       <GoogleLimitedUseSettings />
     </div>
   );

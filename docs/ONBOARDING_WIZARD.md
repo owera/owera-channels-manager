@@ -165,6 +165,15 @@ locale's values are recorded; the app never fetches the pages). At each legal-pa
 stores the exact served bytes as `<MANAGER_LEGAL_ARCHIVE_DIR>/<sha256>.html` (+ `.json`) and
 prints the sha to set.
 
+**Re-acceptance (CTO 14/11):** for a non-internal workspace (not 1 / 2, not in
+`MANAGER_LLM_INTERNAL_WORKSPACE_IDS`), once the document shas for its accepted locale are
+configured, a latest `TermsConsentEvent` that is missing or has a blank `terms_doc_sha` /
+`privacy_doc_sha` means the S8 release refuses with `terms_reaccept_required`. The wizard's
+consents step reopens (`consents_done` false) and Settings shows the same single box
+(`TermsReacceptSettings`, `GET /api/onboarding/terms`, `POST /api/onboarding/terms/accept`);
+re-accepting writes a new record with the shas now in force. A later change of the configured
+shas (a document update) does not force re-acceptance (LegalOps decides that separately).
+
 CMO v3 also localizes the footer links (Privacidade · Termos · Termos de Serviço do YouTube,
 `aria-label` "Jurídico") and the Dashboard / Settings bodies (`footer.*`, `dash.*`,
 `settings.*`). Out of scope: the #215 Connect consent note and server activity kind/detail.

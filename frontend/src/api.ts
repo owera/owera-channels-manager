@@ -450,6 +450,39 @@ export const useAiDataMut = () => {
   };
 };
 
+// ---- Terms re-acceptance outside the wizard (GET/POST /api/onboarding/terms*, CTO 14/11) ----
+export interface TermsStatus {
+  accepted_at: string | null;
+  locale: string | null;
+  version: string | null;
+  valid: boolean;
+  /** Latest consent record names no document sha (and the shas are now configured). */
+  reaccept_required: boolean;
+  pt_not_live: boolean;
+  pt_live: boolean;
+  accepted_shas: { en?: string; pt?: string };
+}
+
+export const useTerms = (enabled = true) =>
+  useQuery({
+    queryKey: ["terms"],
+    queryFn: () => api<TermsStatus>("/onboarding/terms"),
+    enabled,
+    retry: false,
+  });
+
+export const useTermsMut = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { terms: boolean; terms_text_sha: string; terms_locale: string }) =>
+      api<TermsStatus>("/onboarding/terms/accept", { method: "POST", body: j(body) }),
+    onSuccess: (data: TermsStatus) => {
+      qc.setQueryData(["terms"], data);
+      invalidate(qc, ["wizard", "onboarding", "ai-data"]);
+    },
+  });
+};
+
 export const useTrends = (status?: string) =>
   useQuery({
     queryKey: ["trends", status ?? "all"],

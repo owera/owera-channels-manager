@@ -146,7 +146,7 @@ with _release(ws_pt):
 print("CTO 14/11 fail closed: legal document shas must be pinned for the accepted locale")
 from app.services import google_limited_use as _glu  # noqa: E402
 P = "9" * 64
-ws_ext = NS(terms_accepted_at=T, privacy_accepted_at=T, terms_accepted_version=tc.SHA_EN, terms_accepted_locale="en",
+ws_ext = NS(id=9, terms_accepted_at=T, privacy_accepted_at=T, terms_accepted_version=tc.SHA_EN, terms_accepted_locale="en",
             llm_disabled=False, is_test=True, paid_at=None, subscription_status=None,
             ai_data_ack_at=T, ai_data_ack_version=_glu.text_sha(_glu.TEXT_EN), ai_data_ack_locale="en",
             ai_data_ack_user="buyer@example.com", ai_data_ack_withdrawn_at=None)
@@ -159,8 +159,12 @@ def _pins(**kw):
     return st
 
 
-def _rel(row, **pins):
-    with _pins(**pins), _release(row), patch.object(llm_guard, "workspace_monthly_cap_reached", lambda ws: False):
+PINNED_REC = NS(terms_doc_sha=P, privacy_doc_sha=P)
+
+
+def _rel(row, rec=PINNED_REC, **pins):
+    with _pins(**pins), _release(row), patch.object(llm_guard, "workspace_monthly_cap_reached", lambda ws: False), \
+         patch.object(tc, "latest_record", lambda session, ws_id: rec):
         return llm_guard.release_block_reason(9, "ideas", fields=("subject",))
 
 
@@ -176,6 +180,35 @@ with patch.object(settings, "terms_pt_live", True):
     ws_ptl = NS(**{**vars(ws_ext), "terms_accepted_version": tc.SHA_PT, "terms_accepted_locale": "pt"})
     ok(_rel(ws_ptl, terms_doc_sha_pt="") == "terms_doc_unpinned" and _rel(ws_ptl) is None,
        "PT acceptance (gate open): the PT shas apply")
+print("CTO 14/11: the latest stored record must name the documents (terms_reaccept_required)")
+ok(_rel(ws_ext, rec=NS(terms_doc_sha=None, privacy_doc_sha=None)) == "terms_reaccept_required",
+   "(a) record with blank shas + shas now configured → terms_reaccept_required")
+ok(_rel(ws_ext, rec=NS(terms_doc_sha=P, privacy_doc_sha="")) == "terms_reaccept_required",
+   "(a) blank privacy_doc_sha alone → terms_reaccept_required")
+ok(_rel(ws_ext, rec=None) == "terms_reaccept_required", "no record at all (accepted before records existed) → re-accept")
+ok(_rel(ws_ext) is None, "(b) a record with both shas → passes")
+ok(_rel(ws_ext, rec=NS(terms_doc_sha="1" * 64, privacy_doc_sha="2" * 64)) is None,
+   "doc update later (configured shas differ from the record's) does NOT force re-acceptance")
+ok(_rel(ws_ext, rec=NS(terms_doc_sha=None, privacy_doc_sha=None), terms_doc_sha_en="") == "terms_doc_unpinned",
+   "shas not configured yet → terms_doc_unpinned first (re-accepting would write blanks again)")
+with _pins(), patch.object(tc, "latest_record", lambda session, ws_id: NS(terms_doc_sha=None, privacy_doc_sha=None)):
+    ok(tc.reaccept_required(ws_ext, session=object()) is True, "reaccept_required: external + blank record")
+    for iid in (1, 2):
+        ok(tc.reaccept_required(NS(**{**vars(ws_ext), "id": iid}), session=object()) is False,
+           f"(c) internal ws {iid}: never asked to re-accept")
+    with patch.object(settings, "llm_internal_workspace_ids", "1,9"):
+        ok(tc.reaccept_required(ws_ext, session=object()) is False, "(c) a workspace in MANAGER_LLM_INTERNAL_WORKSPACE_IDS: unaffected")
+ok(llm_guard.BLOCK_USER_TEXT["terms_reaccept_required"][0] == "terms_privacy",
+   "banner sends the user to the 'Terms and privacy' step")
+tsx = (ROOT / "frontend/src/pages/TermsSettings.tsx").read_text()
+sett = (ROOT / "frontend/src/pages/Settings.tsx").read_text()
+ok("if (!data || !data.reaccept_required) return null;" in tsx and tsx.count('type="checkbox"') == 1
+   and "termsConsent(nav, ptLive)" in tsx and "termsPtBlocked(nav, ptLive)" in tsx
+   and "terms_text_sha: tc.sha, terms_locale: tc.locale" in tsx,
+   "Settings: the Terms box shows again only when re-acceptance is required (same sentence, PT gate)")
+ok(sett.count("<TermsReacceptSettings />") == 2, "Settings (admin + buyer views) render it")
+ok('"/onboarding/terms/accept"' in (ROOT / "frontend/src/api.ts").read_text(), "SPA posts the re-acceptance")
+
 ok(llm_guard.block_message("terms_doc_unpinned", "en")["step"] == "support",
    "ops misconfig → the generic 'contact support' banner (never silent)")
 with _pins(terms_doc_sha_en="", privacy_doc_sha_en="", terms_doc_sha_pt="", privacy_doc_sha_pt=""), \
@@ -184,6 +217,7 @@ with _pins(terms_doc_sha_en="", privacy_doc_sha_en="", terms_doc_sha_pt="", priv
     ok(llm_guard.block_reason(1, "ideas") is False and llm_guard.block_reason(2, "ideas") is False,
        "internal ws 1 / 2 with every doc sha empty: unaffected (allowed)")
     ok(_rel(ws_ext, terms_doc_sha_en="") == "terms_doc_unpinned", "…while an external one is refused")
+    ok(llm_guard.block_reason(1, "ideas") is False, "(c) internal ws 1 with blank records: still allowed")
 
 ok(llm_guard.BLOCK_USER_TEXT["terms_pt_not_live"][0] == "terms_privacy",
    "banner sends the user back to the 'Terms and privacy' step (never silent)")

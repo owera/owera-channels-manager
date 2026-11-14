@@ -49,6 +49,7 @@ import app.main as main
 from app.config import settings
 # CTO 14/11: the external release needs the legal document shas pinned for the
 # accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+from _terms_fixture import pin_terms_record  # noqa: E402
 PINNED_DOC_SHA = "0" * 64
 for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
     setattr(settings, _k, PINNED_DOC_SHA)
@@ -108,7 +109,9 @@ def provision(email, cs):
         w = s.get(Workspace, wid)
         w.terms_accepted_at = NOW
         w.privacy_accepted_at = NOW
-        s.add(w); s.commit()
+        s.add(w)
+        pin_terms_record(s, wid)
+        s.commit()
         return wid, w.slug
 
 

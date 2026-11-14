@@ -37,6 +37,7 @@ import app.main as main
 from app.config import settings
 # CTO 14/11: the external release needs the legal document shas pinned for the
 # accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+from _terms_fixture import pin_terms_record  # noqa: E402
 PINNED_DOC_SHA = "0" * 64
 for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
     setattr(settings, _k, PINNED_DOC_SHA)
@@ -420,7 +421,9 @@ with Session(eng) as s:   # terms + privacy only (e.g. accepted before S2 shippe
     w = s.get(Workspace, WC)
     w.terms_accepted_at = NOW
     w.privacy_accepted_at = NOW
-    s.add(w); s.commit()
+    s.add(w)
+    pin_terms_record(s, WC)
+    s.commit()
 with cfg(**ON):
     try:
         llm_guard.require("ideas", workspace_id=WC, fields=("topic",))
@@ -567,6 +570,51 @@ ok(render_loop._finalize.__code__.co_names.count("stamp_first_draft") >= 1
    or "stamp_first_draft" in inspect.getsource(render_loop._finalize), "render_loop._finalize calls the S1 hook")
 
 # ---- 6. per instance, copy flag, frontend wiring ------------------------------------
+print("CTO 14/11: re-acceptance when the latest consent record names no document sha")
+# WC is ws 2 here, inside the internal floor {1, 2} of terms_consent; use buyer C (id > 2).
+ok(WC > 2, "buyer C is an external workspace id")
+client.post("/api/onboarding/ai-data/ack", headers=H(WC),
+            json={"ai_data": True, "text_sha": google_limited_use.text_sha(google_limited_use.TEXT_EN), "locale": "en"})
+from app.models import TermsConsentEvent  # noqa: E402,F811
+with cfg(**ON):
+    ok(llm_guard.block_reason(WC, "ideas") is False, "(b) WC's record carries the doc shas → passes")
+    ok(client.get("/api/onboarding/terms", headers=H(WC)).json()["reaccept_required"] is False, "no re-accept needed")
+    with Session(eng) as s_:   # e.g. accepted while the deploy had no doc shas set
+        s_.add(TermsConsentEvent(workspace_id=WC, user_id="x", locale="en", sentence_sha=terms_consent.SHA_EN,
+                                 terms_url=terms_consent.TERMS_URL_EN, terms_doc_sha=None,
+                                 privacy_url=terms_consent.PRIVACY_URL_EN, privacy_doc_sha=None))
+        s_.commit()
+    ok(llm_guard.block_reason(WC, "ideas") == "terms_reaccept_required",
+       "(a) blank latest record + shas now configured → refused terms_reaccept_required")
+    ts_ = client.get("/api/onboarding/terms", headers=H(WC)).json()
+    ok(ts_["reaccept_required"] is True and ts_["valid"] is False, "GET /terms: reaccept_required → Settings shows the box")
+    st_ = get_state(WC)
+    ok({x["id"]: x["done"] for x in st_["steps"]}["consents"] is False, "wizard: the consents step is open again")
+    ok(llm_guard.block_message("terms_reaccept_required", "pt")["step"] == "terms_privacy", "banner → Terms step")
+    r = client.post("/api/onboarding/terms/accept", headers=H(WC), json={"terms": False})
+    ok(r.status_code == 400, "unchecked → 400")
+    r = client.post("/api/onboarding/terms/accept", headers=H(WC),
+                    json={"terms": True, "terms_text_sha": terms_consent.SHA_EN, "terms_locale": "en"})
+    ok(r.status_code == 200 and r.json()["reaccept_required"] is False and r.json()["valid"] is True,
+       "re-accept → cleared")
+    with Session(eng) as s_:
+        last = terms_consent.latest_record(s_, WC)
+    ok(last.terms_doc_sha == PINNED_DOC_SHA and last.privacy_doc_sha == PINNED_DOC_SHA and last.locale == "en",
+       "the new record carries the document shas now in force")
+    ok(llm_guard.block_reason(WC, "ideas") is False, "release passes again")
+    ok({x["id"]: x["done"] for x in get_state(WC)["steps"]}["consents"] is True, "wizard consents step done again")
+    with patch.object(settings, "terms_doc_sha_en", "7" * 64):
+        ok(llm_guard.block_reason(WC, "ideas") is False, "a later doc update (new configured sha) does not force it")
+    with Session(eng) as s_:   # (c) internal ws 1 with a blank record
+        s_.add(TermsConsentEvent(workspace_id=1, user_id="x", locale="en", sentence_sha=terms_consent.SHA_EN,
+                                 terms_url=terms_consent.TERMS_URL_EN, privacy_url=terms_consent.PRIVACY_URL_EN))
+        w1 = s_.get(Workspace, 1)
+        w1.terms_accepted_at = w1.terms_accepted_at or NOW
+        s_.add(w1); s_.commit()
+    ok(llm_guard.block_reason(1, "ideas") is False and
+       client.get("/api/onboarding/terms", headers=H(1)).json()["reaccept_required"] is False,
+       "(c) internal ws 1: unaffected (allowed, no re-accept box)")
+
 print("per instance + copy flag + SPA wiring")
 blob = (ROOT / "app/services/topic_presets.py").read_text()
 low = "\n".join(l for l in blob.splitlines() if not l.lstrip().startswith("#")).lower()
