@@ -296,6 +296,14 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
     dest = dest_dir / "video.mp4"
     shutil.copy(src, dest)
     video.video_path = str(dest)
+    # S2 / PO CM 14/11: nothing after the render may read the MPT scratch
+    # (mpt_storage_dir/<task_id>, deleted by mpt_retention 7 days after the job
+    # finished). The only other artifact read later is chapters' index.html:
+    # copy it next to video.mp4 when MPT wrote one. HyperFrames is unchanged.
+    if getattr(engine, "name", None) == "mpt":
+        _idx = src.parent / "index.html"
+        if _idx.is_file() and not _idx.is_symlink():
+            shutil.copy(_idx, dest_dir / "index.html")
 
     # Last gate before APPROVED -> auto-publish: reject a blank render (covers every
     # engine, including ones without the worker-side pre-mux pixel check).

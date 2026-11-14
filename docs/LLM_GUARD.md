@@ -209,5 +209,9 @@ and L1 (no training at the provider) is proven. Headless agents are unchanged (i
   (scratch: publishing uses the Manager's own copy in `storage/videos/<id>/`). Runs as its
   own scheduler job `mpt_task_retention` every 6 h (same cycle as S7 `token_refresh_age`,
   not a step inside it: S7's tick stays DB-only and the two fail independently).
+  Nothing after the render reads the MPT scratch (audit + `tests/verify_mpt_scratch_independence.py`):
+  `render_loop._finalize` copies `final-1.mp4` → `storage/videos/<id>/video.mp4` (and `index.html`,
+  if MPT wrote one, for long-form chapters); publish, thumbnails, chapters, Gate B / craft checks,
+  vm_pass, re-render and the review player all use `storage/videos/<id>/`.
 - **Follow-up (after 27/11)**: bind script/storyboard to video_id+workspace in DB instead of
   text prefix. Until then the text-prefix check stays fail-closed for external workspaces.
