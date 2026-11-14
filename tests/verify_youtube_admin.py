@@ -34,6 +34,19 @@ from app.models import (Channel, ChannelMetric, OAuthStatus, Topic, Video,
                         VideoMetric, VideoStatus)
 from app.routers import youtube_admin as yt_admin
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -56,6 +69,7 @@ def fresh_engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
+    _seed_ws1(engine)
     return engine
 
 

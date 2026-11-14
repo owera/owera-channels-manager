@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
-from app.db import app_settings, get_session
+from app.db import app_settings, channel_workspace_paused, get_session
 from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace, utcnow
 from app.workspace import current_workspace, require_channel, require_video
 from app.schemas import (
@@ -221,6 +221,8 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session),
     # Global / channel-wide stops apply to every queued video.
     if cfg_row.scheduler_paused:
         return {str(v.id): entry("scheduler paused") for v in queued}
+    if channel_workspace_paused(session, ch):
+        return {str(v.id): entry("workspace paused") for v in queued}
     if ch.paused:
         return {str(v.id): entry("channel paused") for v in queued}
 

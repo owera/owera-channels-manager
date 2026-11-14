@@ -85,7 +85,8 @@ def _add_missing_columns() -> None:
                       ("stripe_raw_status", "VARCHAR"),
                       ("subscription_current_period_end", "DATETIME"),
                       ("subscription_cancel_at_period_end", "BOOLEAN DEFAULT 0"),
-                      ("last_invoice_paid_at", "DATETIME")],
+                      ("last_invoice_paid_at", "DATETIME"),
+                      ("scheduler_paused", "BOOLEAN DEFAULT 0")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
@@ -166,6 +167,32 @@ def init_db() -> None:
             s.add(models.Settings(id=1))
             s.commit()
         ensure_default_profile(s)
+
+
+# Workspace id that owns the truly global settings (scheduler kill switch,
+# render_concurrency, drip, autogen knobs). S4: only this workspace may read
+# the full Settings row or PATCH it; every other workspace gets its own pause.
+ADMIN_WORKSPACE_ID = 1
+
+
+def paused_workspace_ids(session: Session) -> set[int]:
+    """Ids of workspaces whose own automation is paused (S4 per-workspace pause).
+
+    ``init_db`` adds the
+    column before any loop starts."""
+    rows = session.exec(
+        select(models.Workspace.id).where(
+            models.Workspace.scheduler_paused == True)  # noqa: E712
+    ).all()
+    return {int(r) for r in rows if r is not None}
+
+
+def channel_workspace_paused(session: Session, channel, paused: set[int] | None = None) -> bool:
+    """True if ``channel`` belongs to a workspace that paused its automation."""
+    if channel is None:
+        return False
+    ids = paused if paused is not None else paused_workspace_ids(session)
+    return (getattr(channel, "workspace_id", None) or ADMIN_WORKSPACE_ID) in ids
 
 
 def get_session() -> Iterator[Session]:

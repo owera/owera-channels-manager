@@ -69,6 +69,19 @@ from app.models import Settings
 from app.routers import settings as settings_router
 from app.services import render_loop
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -100,6 +113,7 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 
+_seed_ws1(engine)
 with Session(engine) as s:
     s.add(Settings(id=1, render_concurrency=1, publish_drip_minutes=30,
                    scheduler_paused=False, topic_autogen_enabled=False,

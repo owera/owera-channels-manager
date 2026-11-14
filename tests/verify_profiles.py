@@ -28,6 +28,19 @@ from app.models import Channel, RenderProfile
 import app.schemas as schemas
 from app.routers import profiles as profiles_router
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -52,6 +65,7 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 
+_seed_ws1(engine)
 with Session(engine) as s:
     s.add(Channel(slug="a", name="A"))
     s.add(Channel(slug="b", name="B"))
@@ -185,16 +199,14 @@ ok("OmitScope" in on_b and "NullScope" in on_b,
 
 r = client.post("/api/profiles", auth=auth, json={
     "name": "ZeroScope", "channel_id": 0})
-ok(r.status_code == 201, "create integer channel_id=0 is 201")
-ok(r.json().get("channel_id") == 0, "create integer 0 echoes 0 (not null)")
-ok(by_name("ZeroScope")["channel_id"] == 0,
-   "integer 0 persists (bool false is the reject; 0 is not shared)")
+# S4: channel_id must be a channel of the caller's workspace; id 0 is no
+# channel, so it is the same 404 as a foreign one (was: 201 orphan row).
+ok(r.status_code == 404, "create integer channel_id=0 (no such channel) is 404")
 on_one = listed(1)
 on_b = listed(ch_b_id)
 all_rows = listed()
-ok("ZeroScope" not in on_one and "ZeroScope" not in on_b,
-   "integer 0 is on neither real channel's list (not treated as shared)")
-ok(all_rows.get("ZeroScope") == 0, "integer 0 is on the unfiltered list")
+ok("ZeroScope" not in on_one and "ZeroScope" not in on_b and "ZeroScope" not in all_rows,
+   "integer 0 is not persisted (not treated as shared)")
 
 # PATCH has no channel_id field. Extra keys are ignored, so a bool must
 # not rebind OnB — and neither must an integer (scope is create-only).

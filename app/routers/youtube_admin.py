@@ -13,22 +13,23 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, ChannelMetric, Topic, Video, VideoMetric, VideoStatus
+from app.models import (Channel, ChannelMetric, Topic, Video, VideoMetric, VideoStatus,
+                        Workspace)
 from app.schemas import BrandingUpdate, SubscribeBody
 from app.services import analytics_loop, metrics_loop, notify, quota, youtube
 from app.services.youtube import (NeedsConnect, QUOTA_CHANNEL_UPDATE,
                                   QUOTA_SUBSCRIPTION_WRITE)
+from app.workspace import current_workspace, require_channel
 
 router = APIRouter(prefix="/api/channels/{channel_id}", tags=["youtube-admin"])
 
 
-def _connected(session: Session, channel_id: int):
+def _connected(session: Session, channel_id: int, ws: Workspace):
     """Return (channel, youtube_service) or raise a clean HTTP error. A dead
     token discovered here flips (and alerts) the channel before the 409 — the
-    409 alone would leave the dashboard showing CONNECTED and nobody paged."""
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    409 alone would leave the dashboard showing CONNECTED and nobody paged.
+    S4: another workspace's channel is a 404 before any token is touched."""
+    ch = require_channel(session, ws, channel_id)
     try:
         return ch, youtube.get_service(ch.slug, channel=ch, session=session)
     except NeedsConnect as e:
@@ -54,9 +55,10 @@ _SUBS_GATE = [Depends(_require_subscriptions_feature)]
 # ---- Overview & branding -------------------------------------------------
 
 @router.get("/youtube")
-def youtube_overview(channel_id: int, session: Session = Depends(get_session)):
+def youtube_overview(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Live snippet + statistics + branding for the connected channel."""
-    _ch, service = _connected(session, channel_id)
+    _ch, service = _connected(session, channel_id, ws)
     try:
         data = youtube.fetch_channel(service)
     except Exception as e:
@@ -68,8 +70,9 @@ def youtube_overview(channel_id: int, session: Session = Depends(get_session)):
 
 @router.put("/branding")
 def update_branding(channel_id: int, body: BrandingUpdate,
-                    session: Session = Depends(get_session)):
-    ch, service = _connected(session, channel_id)
+                    session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
+    ch, service = _connected(session, channel_id, ws)
     if not ch.yt_channel_id:
         raise HTTPException(400, "channel identity unknown — reconnect first")
     try:
@@ -89,10 +92,10 @@ def update_branding(channel_id: int, body: BrandingUpdate,
 # ---- Metrics -------------------------------------------------------------
 
 @router.get("/metrics")
-def get_metrics(channel_id: int, session: Session = Depends(get_session)):
+def get_metrics(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Stored snapshot history (oldest→newest) for the subscriber/view/video trend."""
-    if not session.get(Channel, channel_id):
-        raise HTTPException(404, "channel not found")
+    require_channel(session, ws, channel_id)
     rows = session.exec(
         select(ChannelMetric).where(ChannelMetric.channel_id == channel_id)
         .order_by(ChannelMetric.captured_at)
@@ -101,9 +104,10 @@ def get_metrics(channel_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/metrics/refresh")
-def refresh_metrics(channel_id: int, session: Session = Depends(get_session)):
+def refresh_metrics(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Fetch live statistics and record a snapshot now."""
-    ch, _service = _connected(session, channel_id)
+    ch, _service = _connected(session, channel_id, ws)
     m = metrics_loop.record_snapshot(session, ch)
     if m is None:
         raise HTTPException(502, "could not fetch channel statistics")
@@ -115,9 +119,10 @@ def refresh_metrics(channel_id: int, session: Session = Depends(get_session)):
 # ---- Subscriptions -------------------------------------------------------
 
 @router.get("/subscriptions", dependencies=_SUBS_GATE)
-def list_subscriptions(channel_id: int, session: Session = Depends(get_session)):
+def list_subscriptions(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Channels this account follows."""
-    _ch, service = _connected(session, channel_id)
+    _ch, service = _connected(session, channel_id, ws)
     try:
         return youtube.list_subscriptions(service)
     except Exception as e:
@@ -126,8 +131,9 @@ def list_subscriptions(channel_id: int, session: Session = Depends(get_session))
 
 @router.post("/subscriptions", status_code=201, dependencies=_SUBS_GATE)
 def add_subscription(channel_id: int, body: SubscribeBody,
-                     session: Session = Depends(get_session)):
-    _ch, service = _connected(session, channel_id)
+                     session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
+    _ch, service = _connected(session, channel_id, ws)
     try:
         target = youtube.resolve_channel_id(service, body.channel)
         result = youtube.subscribe(service, target)
@@ -141,8 +147,9 @@ def add_subscription(channel_id: int, body: SubscribeBody,
 
 @router.delete("/subscriptions/{sub_id}", status_code=204, dependencies=_SUBS_GATE)
 def remove_subscription(channel_id: int, sub_id: str,
-                        session: Session = Depends(get_session)):
-    _ch, service = _connected(session, channel_id)
+                        session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
+    _ch, service = _connected(session, channel_id, ws)
     try:
         youtube.unsubscribe(service, sub_id)
     except Exception as e:
@@ -153,9 +160,10 @@ def remove_subscription(channel_id: int, sub_id: str,
 
 
 @router.get("/subscribers", dependencies=_SUBS_GATE)
-def list_subscribers(channel_id: int, session: Session = Depends(get_session)):
+def list_subscribers(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Recent subscribers to this channel (read-only)."""
-    _ch, service = _connected(session, channel_id)
+    _ch, service = _connected(session, channel_id, ws)
     try:
         return youtube.list_subscribers(service)
     except Exception as e:
@@ -263,21 +271,21 @@ def _compute_monetization(session: Session, channel_id: int) -> dict:
 
 
 @router.get("/monetization")
-def get_monetization(channel_id: int, session: Session = Depends(get_session)):
+def get_monetization(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """YouTube Partner Program milestone progress for both tiers (fan funding and ad revenue).
     Computed from stored snapshots — no live API call needed."""
-    if not session.get(Channel, channel_id):
-        raise HTTPException(404, "channel not found")
+    require_channel(session, ws, channel_id)
     return _compute_monetization(session, channel_id)
 
 
 @router.get("/video-analytics")
 def video_analytics(channel_id: int, sort: str = "views",
-                    session: Session = Depends(get_session)):
+                    session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Latest analytics per published video (the leaderboard), sortable. Includes
     `age_hours` so consumers can apply a maturity window (analytics lags 24–72h)."""
-    if not session.get(Channel, channel_id):
-        raise HTTPException(404, "channel not found")
+    require_channel(session, ws, channel_id)
     if sort not in _SORTABLE:
         sort = "views"
     now = datetime.now(timezone.utc)
@@ -319,11 +327,11 @@ def video_analytics(channel_id: int, sort: str = "views",
 
 
 @router.get("/video-analytics/by-topic")
-def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_session)):
+def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Aggregate latest analytics by topic and by content format — the core signal
     the growth agent learns from (which themes / formats actually perform)."""
-    if not session.get(Channel, channel_id):
-        raise HTTPException(404, "channel not found")
+    require_channel(session, ws, channel_id)
     latest = _latest_metrics(session, channel_id)
     topics = _topics_map(session, channel_id)
 
@@ -376,12 +384,11 @@ def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_ses
 
 
 @router.post("/video-analytics/refresh")
-def refresh_video_analytics(channel_id: int, session: Session = Depends(get_session)):
+def refresh_video_analytics(channel_id: int, session: Session = Depends(get_session),
+        ws: Workspace = Depends(current_workspace)):
     """Fetch live per-video analytics now (bypasses the once-per-day gate). Requires
     the channel reconsented for the analytics scope; records a VideoMetric per video."""
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_channel(session, ws, channel_id)
     if not ch.yt_channel_id:
         raise HTTPException(400, "channel identity unknown — reconnect first")
     now = datetime.now(timezone.utc)

@@ -35,6 +35,19 @@ from app.routers import playlists as playlists_router
 from app.routers import youtube_admin
 from app.services import analytics_loop, metrics_loop, notify, publish_loop, youtube
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 # Craft-gate B (8f9ed39): `_publish_one` bounces a failing Credits/IA title
 # to REVIEW before get_service. Fixtures must pass the pre-approve lock so
 # the revoked-token wiring pin still reaches NeedsConnect.
@@ -61,6 +74,7 @@ def fresh_session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
+    _seed_ws1(engine)
     return Session(engine)
 
 
@@ -373,7 +387,7 @@ ch = make_channel(s, slug="ch-admin")
 
 cap = CaptureAlerts()
 try:
-    youtube_admin._connected(s, ch.id)
+    youtube_admin._connected(s, ch.id, _WS1)
     code = None
 except HTTPException as e:
     code = e.status_code
@@ -383,7 +397,7 @@ ok(ch.oauth_status == OAuthStatus.EXPIRED,
    "the 409 path flips the channel durably (committed before the alert)")
 ok(len(cap.records) == 1, "the admin-discovered flip alerts exactly once")
 try:
-    youtube_admin._connected(s, ch.id)
+    youtube_admin._connected(s, ch.id, _WS1)
 except HTTPException:
     pass
 ok(len(cap.records) == 1, "a repeat 409 on the dead channel stays silent")

@@ -15,7 +15,8 @@ from sqlmodel import Session, select
 from pathlib import Path
 
 from app.config import settings
-from app.db import app_settings, session_scope
+from app.db import (app_settings, channel_workspace_paused, paused_workspace_ids,
+                    session_scope)
 from app.models import Channel, OAuthStatus, Playlist, Topic, Video, VideoStatus, utcnow
 from app.services import craft, llm_guard, metadata, quota, thumbnail, video_gen, youtube
 from app.services.youtube import (NeedsConnect, QuotaExceeded, UploadStalled,
@@ -580,7 +581,10 @@ def tick() -> None:
         if cfg.scheduler_paused:
             return
         _recover_stuck_publishing(session)            # re-queue any orphaned uploads
+        ws_paused = paused_workspace_ids(session)
         for channel in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+            if channel_workspace_paused(session, channel, ws_paused):
+                continue  # S4: this workspace paused its own automation
             if channel.oauth_status != OAuthStatus.CONNECTED:
                 continue
             if channel.cooldown_until:

@@ -3,11 +3,18 @@ from sqlmodel import Session
 
 from app.config import settings as app_config
 from app.db import app_settings, get_session
-from app.models import Workspace
+from app.models import Workspace, utcnow
 from app.schemas import SettingsUpdate
 from app.services import notify, quota
 from app.services.mpt_client import mpt
-from app.workspace import current_workspace
+from app.workspace import current_workspace, is_admin_workspace
+
+# S4 (docs/WORKSPACE_ISOLATION.md): the Settings row is global — render
+# concurrency, publish drip, autogen knobs and the global scheduler kill switch
+# drive every workspace. Only the admin workspace (ws 1, owera) reads or
+# writes it. Any other workspace sees a filtered view and may only toggle its
+# own pause (Workspace.scheduler_paused); a global key in its PATCH is a 404.
+_WORKSPACE_KEYS = frozenset({"scheduler_paused"})
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -28,11 +35,24 @@ def _require_int(fields: dict, key: str, minimum: int, hint: str) -> None:
         raise HTTPException(400, hint)
 
 
+def _workspace_view(ws: Workspace) -> dict:
+    return {
+        "scope": "workspace",
+        "workspace_id": ws.id,
+        "scheduler_paused": bool(ws.scheduler_paused),
+        "youtube_quota_reset_at": quota.next_quota_reset().isoformat(),
+    }
+
+
 @router.get("/settings")
-def get_settings(session: Session = Depends(get_session)):
+def get_settings(session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    if not is_admin_workspace(ws):
+        return _workspace_view(ws)
     cfg = app_settings(session)
     return {
         **cfg.model_dump(),
+        "scope": "global",
         "mpt_base_url": app_config.mpt_base_url,
         # When the YouTube Data API project quota next resets (Pacific midnight).
         "youtube_quota_reset_at": quota.next_quota_reset().isoformat(),
@@ -40,8 +60,22 @@ def get_settings(session: Session = Depends(get_session)):
 
 
 @router.patch("/settings")
-def update_settings(body: SettingsUpdate, session: Session = Depends(get_session)):
+def update_settings(body: SettingsUpdate, session: Session = Depends(get_session),
+                    ws: Workspace = Depends(current_workspace)):
     fields = body.model_dump(exclude_unset=True)
+    if not is_admin_workspace(ws):
+        if set(fields) - _WORKSPACE_KEYS:
+            # Same answer as an unknown route: global knobs do not exist here.
+            raise HTTPException(404, "Not Found")
+        if "scheduler_paused" in fields:
+            if not isinstance(fields["scheduler_paused"], bool):
+                raise HTTPException(400, "scheduler_paused must be true or false")
+            ws.scheduler_paused = fields["scheduler_paused"]
+            ws.updated_at = utcnow()
+            session.add(ws)
+            session.commit()
+            session.refresh(ws)
+        return _workspace_view(ws)
     # 0/null concurrency stalls every render: render_loop gates on
     # ``in_flight >= cfg.render_concurrency`` and in_flight is always >= 0.
     _require_int(fields, "render_concurrency", 1,

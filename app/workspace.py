@@ -9,7 +9,8 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, Video, Workspace
+from app.db import ADMIN_WORKSPACE_ID
+from app.models import Channel, RenderProfile, Topic, TrendSignal, Video, Workspace
 from app.services import spa_google_login
 
 # Basic Auth usernames that map to a different workspace slug (multi_workspace only).
@@ -156,3 +157,64 @@ def require_video(session: Session, ws: Workspace, video_id: int) -> Video:
     if not ch or ch.workspace_id != ws.id:
         raise HTTPException(404, "video not found")
     return v
+
+
+# ---- S4: workspace isolation helpers ---------------------------------------
+# Rule (CTO spec): a resource owned by another workspace answers **404**, never
+# 403, with the same body as a missing row, so its existence does not leak.
+
+
+def is_admin_workspace(ws: Workspace) -> bool:
+    """ws 1 (owera) owns the truly global settings and shared (channel-less) rows."""
+    return ws.id == ADMIN_WORKSPACE_ID
+
+
+def workspace_channel_ids(session: Session, ws: Workspace) -> list[int]:
+    return [int(i) for i in session.exec(
+        select(Channel.id).where(Channel.workspace_id == ws.id)).all()]
+
+
+def require_topic(session: Session, ws: Workspace, topic_id: int) -> Topic:
+    t = session.get(Topic, topic_id)
+    if not t:
+        raise HTTPException(404, "topic not found")
+    ch = session.get(Channel, t.channel_id)
+    if not ch or ch.workspace_id != ws.id:
+        raise HTTPException(404, "topic not found")
+    return t
+
+
+def trend_visible(session: Session, ws: Workspace, t: TrendSignal) -> bool:
+    """Channel-bound trends belong to the channel's workspace; channel-less
+    (growth-agent research) trends belong to the admin workspace."""
+    if t.channel_id is None:
+        return is_admin_workspace(ws)
+    ch = session.get(Channel, t.channel_id)
+    return bool(ch and ch.workspace_id == ws.id)
+
+
+def require_trend(session: Session, ws: Workspace, trend_id: int) -> TrendSignal:
+    t = session.get(TrendSignal, trend_id)
+    if not t or not trend_visible(session, ws, t):
+        raise HTTPException(404, "trend not found")
+    return t
+
+
+def profile_visible(session: Session, ws: Workspace, p: RenderProfile) -> bool:
+    """Shared (channel-less) profiles are readable by every workspace."""
+    if p.channel_id is None:
+        return True
+    ch = session.get(Channel, p.channel_id)
+    return bool(ch and ch.workspace_id == ws.id)
+
+
+def require_profile(session: Session, ws: Workspace, profile_id: int,
+                    *, write: bool = False) -> RenderProfile:
+    """Read: own or shared. Write: own, or shared only for the admin workspace
+    (a buyer must not restyle ws 1's Default look)."""
+    p = session.get(RenderProfile, profile_id)
+    if not p or not profile_visible(session, ws, p):
+        raise HTTPException(404, "profile not found")
+    if write and p.channel_id is None and not is_admin_workspace(ws):
+        raise HTTPException(404, "profile not found")
+    return p

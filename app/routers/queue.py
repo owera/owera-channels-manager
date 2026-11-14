@@ -153,6 +153,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     through the existing PATCH/POST endpoints; this is its single observation call."""
     # Lazy import avoids any import-order coupling with the youtube-admin router.
     from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
+    from app.routers.settings import _workspace_view as _settings_workspace_view
+    from app.workspace import is_admin_workspace
 
     cfg = app_settings(session)
     channels = session.exec(channels_for_workspace(ws)).all()
@@ -161,7 +163,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     analytics_by_topic = {}
     for ch in channels:
         if ch.oauth_status == OAuthStatus.CONNECTED:
-            analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session)
+            analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session, ws)
 
     topics = []
     topic_rows = (
@@ -225,7 +227,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
 
     return {
         "now": datetime.now(timezone.utc).isoformat(),
-        "settings": cfg,
+        # S4: global Settings only for the admin workspace (ws 1).
+        "settings": cfg if is_admin_workspace(ws) else _settings_workspace_view(ws),
         "dashboard": _dashboard_for_workspace(session, ws),
         "analytics_by_topic": analytics_by_topic,
         "monetization_by_channel": monetization_by_channel,

@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select
 
 from app.config import settings
-from app.db import app_settings, session_scope
+from app.db import (app_settings, channel_workspace_paused, paused_workspace_ids,
+                    session_scope)
 from app.models import Channel, OAuthStatus, Video, VideoMetric, VideoStatus
 from app.services import notify, quota, youtube
 from app.services.quota import _day_start
@@ -229,9 +230,12 @@ def tick() -> None:
         channels = session.exec(
             select(Channel).where(Channel.oauth_status == OAuthStatus.CONNECTED)
         ).all()
+        ws_paused = paused_workspace_ids(session)
         for channel in channels:
             if not channel.yt_channel_id:
                 continue
+            if channel_workspace_paused(session, channel, ws_paused):
+                continue  # S4: this workspace paused its own automation
             try:
                 _snapshot_channel(session, channel, now)
             except Exception:

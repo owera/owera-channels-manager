@@ -74,6 +74,10 @@ class Workspace(SQLModel, table=True):
     subscription_current_period_end: Optional[datetime] = None
     subscription_cancel_at_period_end: bool = False
     last_invoice_paid_at: Optional[datetime] = None
+    # S4: per-workspace automation pause (render submit/auto-produce, publish,
+    # analytics, autofill skip this workspace's channels). The global
+    # Settings.scheduler_paused stays the admin (ws 1) kill switch for everyone.
+    scheduler_paused: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

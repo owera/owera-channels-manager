@@ -16,7 +16,8 @@ from pathlib import Path
 from sqlmodel import Session, func, select
 
 from app.config import settings
-from app.db import app_settings, session_scope
+from app.db import (app_settings, channel_workspace_paused, paused_workspace_ids,
+                    session_scope)
 from app.models import Channel, JobRun, RenderProfile, Topic, Video, VideoStatus, utcnow
 from app.services import llm_guard, metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
@@ -561,7 +562,10 @@ def _rebalance_queued_mix(session: Session) -> None:
 
     Lifecycle: QUEUED → DRAFT (undo of produce); re-render still starts at QUEUED.
     """
+    ws_paused = paused_workspace_ids(session)
     for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+        if channel_workspace_paused(session, ch, ws_paused):
+            continue  # S4: this workspace paused its own automation
         approved_longs = session.exec(
             select(func.count(Video.id)).join(Topic, Topic.id == Video.topic_id)
             .where(Video.channel_id == ch.id,
@@ -692,6 +696,7 @@ def _submit_new(session: Session) -> None:
     if in_flight >= cfg.render_concurrency:
         return
     candidates = _queued_candidates(session)
+    ws_paused = paused_workspace_ids(session)
     now = time.time()
     for video in candidates:
         if in_flight >= cfg.render_concurrency:
@@ -709,6 +714,8 @@ def _submit_new(session: Session) -> None:
         channel = session.get(Channel, video.channel_id)
         if not channel or channel.paused:
             continue
+        if channel_workspace_paused(session, channel, ws_paused):
+            continue  # S4: workspace-level pause (global pause returns in tick)
         if _llm_guard_block(session, video, channel):
             continue
         # In-flight renders count against the budget too: gating on completed
@@ -910,7 +917,10 @@ def _auto_produce(session: Session) -> None:
       overnight cycle (observed ch1 2026-08-11 noon: approved 0L+3S).
     - Remaining headroom → shorts by topic-weight share (smooth WRR), then longs.
     """
+    ws_paused = paused_workspace_ids(session)
     for ch in session.exec(select(Channel).where(Channel.paused == False)).all():  # noqa: E712
+        if channel_workspace_paused(session, ch, ws_paused):
+            continue  # S4: this workspace paused its own automation
         active = session.exec(
             select(func.count(Video.id)).where(
                 Video.channel_id == ch.id,

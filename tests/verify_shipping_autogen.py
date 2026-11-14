@@ -32,6 +32,19 @@ from app.routers import topics as topics_router
 from app.routers import trends as trends_router
 from app.services import review_guard
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -62,6 +75,7 @@ ok(review_guard.drop_teaser_ideas([]) == [] and review_guard.drop_teaser_ideas(N
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
+_seed_ws1(engine)
 with Session(engine) as s:
     s.add(Channel(slug="owera", name="Owera Software", oauth_status=OAuthStatus.CONNECTED,
                   daily_render_budget=5))
