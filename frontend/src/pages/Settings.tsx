@@ -2,6 +2,7 @@ import { useState } from "react";
 import { openBillingPortal, useBilling, useMut, useSettings } from "../api";
 import { intFromBlur } from "../intFromBlur";
 import { Field, SectionLabel, Toggle } from "../ui";
+import { GoogleLimitedUseSettings } from "./AiData";
 
 type IntKey = "render_concurrency" | "publish_drip_minutes"
   | "topic_autogen_min_pending" | "topic_autogen_target";
@@ -60,6 +61,7 @@ export default function Settings() {
             <Toggle on={s.scheduler_paused} onChange={(v) => patch({ scheduler_paused: v })} />
           </div>
         </div>
+        <GoogleLimitedUseSettings />
       </div>
     );
   }
@@ -106,6 +108,7 @@ export default function Settings() {
             onBlur={commitInt("topic_autogen_target", 0)} />
         </Field>
       </div>
+      <GoogleLimitedUseSettings />
     </div>
   );
 }

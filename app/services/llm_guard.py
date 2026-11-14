@@ -527,8 +527,8 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
     """Release policy for a NON-internal workspace (flag ON only). ``None`` = allowed.
 
     PROPOSED policy (PO S8 cut; final decision CTO/LegalOps/CoS/PO, due Wed 18):
-    paid or is_test AND terms + privacy accepted AND AI data acknowledged (S2),
-    not kill-switched, purpose in
+    paid or is_test AND terms + privacy accepted AND a current Google Limited Use
+    consent (S2), under the per-workspace monthly subcap (S2), not kill-switched, purpose in
     RELEASE_CALL_TYPES, prompt fields declared, and the API backend with the
     no-training retention ack (the CLI consumer session may train: never external)."""
     try:
@@ -553,11 +553,40 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
         return "not_paid_or_test"
     if getattr(row, "terms_accepted_at", None) is None or getattr(row, "privacy_accepted_at", None) is None:
         return "terms_privacy_not_accepted"
-    # S2 (PO CM condition ii): the "AI data" step S8 reserved. The user saw the L6
-    # line (CM-CONNECT-AI-LINE.md) inside onboarding and acknowledged it.
-    if getattr(row, "ai_data_ack_at", None) is None:
-        return "ai_data_not_acknowledged"
+    # S2 (PO CM condition ii + LegalOps 14/11): Google Limited Use consent — the
+    # user ticked the exact LegalOps text (EN/PT); a sha of a text we no longer
+    # show is stale and asked again (app/services/google_limited_use.py).
+    from app.services import google_limited_use as _glu
+    r = _glu.block_reason(row)
+    if r is not None:
+        return r
+    # S2 (PO CM 14/11): per-workspace monthly subcap on ledger cost.
+    if workspace_monthly_cap_reached(ws):
+        return "workspace_monthly_cap"
     return None
+
+
+def workspace_month_usd(ws: int) -> float | None:
+    """Month-to-date ledger cost of one workspace; ``None`` = ledger unreadable."""
+    try:
+        from app.services import llm as _llm
+        return _llm.month_to_date_usd(workspace_id=int(ws))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def workspace_monthly_cap_usd() -> float:
+    return float(getattr(settings, "llm_workspace_monthly_usd_cap", 5.0) or 0.0)
+
+
+def workspace_monthly_cap_reached(ws: int) -> bool:
+    """Fail closed: cap ≤ 0 or an unreadable ledger count as reached. Internal
+    allowlisted workspaces are never capped here (callers skip them)."""
+    if ws in internal_workspace_ids():
+        return False
+    cap = workspace_monthly_cap_usd()
+    spent = workspace_month_usd(ws)
+    return cap <= 0 or spent is None or spent >= cap
 
 
 def workspace_of_channel(channel_id, session=None) -> int | None:
@@ -591,41 +620,71 @@ def workspace_of_channel(channel_id, session=None) -> int | None:
 # ``llm_blocked_at`` = when the CURRENT reason was first seen (a repeat of the
 # same reason doesn't rewrite the row).
 
-# reason → (setup step id, user-facing EN text). Unknown/internal → support.
-BLOCK_USER_TEXT: dict[str, tuple[str, str]] = {
-    "terms_privacy_not_accepted": (
-        "terms_privacy",
-        "Drafts paused: finish setup step \"Accept the Terms of Service and Privacy Policy\"."),
-    "not_paid_or_test": (
-        "payment", "Drafts paused: finish setup step \"Payment\"."),
-    # S2 wizard: per-workspace AI-data acknowledgement (Workspace.ai_data_ack_at),
-    # emitted by release_block_reason after terms/privacy.
-    "ai_data_not_acknowledged": (
-        "ai_data", "Drafts paused: finish setup step \"AI data\"."),
+# reason → (setup step id, {locale: user-facing text}). Unknown/internal → support.
+# Copy: CMO CM-WIZARD-COPY.md §3 (sha df45bd814374), EN + PT-BR. The SPA passes
+# its locale (same detection as the L6 line: PT when the browser locale starts
+# with "pt", else EN) and gets the text in that locale; default EN.
+_PAUSED = {"en": 'Drafts paused: finish setup step "{step}".',
+           "pt": 'Rascunhos pausados: termine a etapa "{step}".'}
+_STEP_NAMES = {
+    "ai_data": {"en": "AI data", "pt": "Dados de IA"},
+    "terms_privacy": {"en": "Terms and privacy", "pt": "Termos e privacidade"},
+    "payment": {"en": "Payment", "pt": "Pagamento"},
 }
-_SUPPORT = ("support", "Drafts paused: please contact Owera support so we can finish your setup.")
+
+
+def _paused(step: str) -> dict[str, str]:
+    return {loc: tpl.format(step=_STEP_NAMES[step][loc]) for loc, tpl in _PAUSED.items()}
+
+
+BLOCK_USER_TEXT: dict[str, tuple[str, dict[str, str]]] = {
+    "terms_privacy_not_accepted": ("terms_privacy", _paused("terms_privacy")),
+    "not_paid_or_test": ("payment", _paused("payment")),
+    # S2 wizard: Google Limited Use consent (Workspace.ai_data_ack_*), emitted by
+    # release_block_reason after terms/privacy. A stale consent (text changed)
+    # sends the user back to the same "AI data" step (no separate CMO copy).
+    "ai_data_not_acknowledged": ("ai_data", _paused("ai_data")),
+    "ai_data_ack_stale": ("ai_data", _paused("ai_data")),
+    # S2 per-workspace monthly subcap (MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP).
+    "workspace_monthly_cap": ("monthly_cap", {
+        "en": ("Monthly draft limit reached. You can still review and publish drafts already "
+               "in your queue. New drafts start again next month."),
+        "pt": ("Limite mensal de rascunhos atingido. Você ainda pode revisar e publicar os que "
+               "já estão na fila. Novos rascunhos voltam no próximo mês."),
+    }),
+}
+_SUPPORT = ("support", {
+    "en": "Drafts paused: please contact Owera support so we can finish your setup.",
+    "pt": "Rascunhos pausados: fale com o suporte da Owera para concluirmos a sua configuração.",
+})
+
+
+def ui_locale(locale: str | None) -> str:
+    """"pt" when ``locale`` starts with pt (pt, pt-BR, pt_PT…), else "en"."""
+    return "pt" if str(locale or "").strip().lower().startswith("pt") else "en"
 
 
 def _norm_reason(reason: str) -> str:
     return str(reason).split(":", 1)[0][:64]
 
 
-def block_message(reason: str | None) -> dict | None:
-    """``{"reason", "step", "message"}`` for a persisted reason (no ``at``)."""
+def block_message(reason: str | None, locale: str | None = None) -> dict | None:
+    """``{"reason", "step", "message", "locale"}`` for a persisted reason (no ``at``)."""
     if not reason:
         return None
     r = _norm_reason(reason)
-    step, msg = BLOCK_USER_TEXT.get(r, _SUPPORT)
-    return {"reason": r, "step": step, "message": msg}
+    loc = ui_locale(locale)
+    step, msgs = BLOCK_USER_TEXT.get(r, _SUPPORT)
+    return {"reason": r, "step": step, "message": msgs[loc], "locale": loc}
 
 
-def blocked_status(ws_row) -> dict | None:
+def blocked_status(ws_row, locale: str | None = None) -> dict | None:
     """Public read for the SPA banner and (after S1 merges) ``activation_report``:
     ``{"reason", "step", "message", "at"}`` or ``None``. ``None`` whenever the
     release flag is OFF (no banner for the #217 allowlist block)."""
     if ws_row is None or not external_release_enabled():
         return None
-    out = block_message(getattr(ws_row, "llm_blocked_reason", None))
+    out = block_message(getattr(ws_row, "llm_blocked_reason", None), locale)
     if out is None:
         return None
     at = getattr(ws_row, "llm_blocked_at", None)

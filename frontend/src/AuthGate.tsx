@@ -2,6 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useFeatures, useAuthMe, useWizard } from "./api";
 import Login from "./pages/Login";
 import App from "./App";
+import { AI_DATA_DISMISS_KEY } from "./pages/AiData";
 
 /** When SPA Google login is on, require session before the app shell loads.
  *
@@ -34,6 +35,14 @@ export default function AuthGate() {
   const wizardActive = wizard?.active === true;
   if (wizardActive && location.pathname !== "/welcome") {
     return <Navigate to="/welcome" replace />;
+  }
+  // S2: Google Limited Use consent before the first LLM use (flag ON, external
+  // workspace, none current). "Not now" (this tab) keeps connect/view usable.
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem(AI_DATA_DISMISS_KEY) === "1"; } catch { /* private mode */ }
+  if (!wizardActive && wizard?.google_limited_use?.required === true && !dismissed
+      && location.pathname !== "/ai-data") {
+    return <Navigate to="/ai-data" replace />;
   }
 
   return <App spaLogin={spaLogin} userEmail={me?.email} firstLogin={wizard?.first_login === true} />;

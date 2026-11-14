@@ -7,20 +7,27 @@ existing route function instead of a parallel code path:
 
   channel      → channels.create_channel
   topics       → topics.create_topic (+ Channel.niche)
-  first-draft  → topics.generate_videos (ideas, LLM guard scope "ideas") and
-                 videos.produce (draft → queued); autofill stays a global flag
-                 and is never flipped.
+  first-draft  → topics.generate_videos (1 idea per topic, LLM guard scope
+                 "ideas") and videos.produce (draft → queued); autofill stays a
+                 global flag and is never flipped.
+
+Google Limited Use consent (``/api/onboarding/ai-data*``): the ack-only page
+for any external workspace without a current consent, and the Settings
+withdraw control (app/services/google_limited_use.py).
+
+Locale: ``?locale=`` (the SPA sends the L6 detection result), else the
+Accept-Language header; presets and banners come back in EN or PT.
 """
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.db import get_session
 from app.models import Topic, Video, VideoStatus, utcnow
-from app.services import llm_guard, onboarding_wizard as wiz, topic_presets
+from app.services import google_limited_use, llm_guard, onboarding_wizard as wiz, topic_presets
 from app.services import onboarding as onboarding_svc
 from app.workspace import Workspace, current_workspace, require_channel
 
@@ -29,12 +36,21 @@ logger = logging.getLogger("manager.onboarding")
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
 
 
+def ui_locale(request: Request) -> str:
+    q = request.query_params.get("locale")
+    if q:
+        return llm_guard.ui_locale(q)
+    al = (request.headers.get("accept-language") or "").split(",")[0]
+    return llm_guard.ui_locale(al)
+
+
 @router.get("/status")
 def onboarding_status(
     session: Session = Depends(get_session),
     ws: Workspace = Depends(current_workspace),
+    locale: str = Depends(ui_locale),
 ):
-    return onboarding_svc.evaluate(session, ws)
+    return onboarding_svc.evaluate(session, ws, locale)
 
 
 # ----------------------------------------------------------------- S2 wizard
@@ -58,8 +74,9 @@ def _own_wizard_channel(session: Session, ws: Workspace, channel_id: int):
 
 @router.get("/wizard")
 def wizard_state(session: Session = Depends(get_session),
-                 ws: Workspace = Depends(current_workspace)):
-    return wiz.state(session, ws)
+                 ws: Workspace = Depends(current_workspace),
+                 locale: str = Depends(ui_locale)):
+    return wiz.state(session, ws, locale)
 
 
 class WizardChannelBody(BaseModel):
@@ -68,7 +85,8 @@ class WizardChannelBody(BaseModel):
 
 @router.post("/wizard/channel")
 def wizard_channel(body: WizardChannelBody, session: Session = Depends(get_session),
-                   ws: Workspace = Depends(current_workspace)):
+                   ws: Workspace = Depends(current_workspace),
+                   locale: str = Depends(ui_locale)):
     from app.routers import channels as channels_router
     from app.schemas import ChannelCreate
     existing = wiz.wizard_channel(session, ws)
@@ -76,18 +94,18 @@ def wizard_channel(body: WizardChannelBody, session: Session = Depends(get_sessi
         if ws.wizard_started_at is None:
             raise HTTPException(409, {"code": "workspace_has_channels",
                                       "message": "this workspace already has channels"})
-        return wiz.state(session, ws)   # idempotent re-submit
+        return wiz.state(session, ws, locale)   # idempotent re-submit
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "channel name is required")
     slug = channels_router._slugify(name) or "channel"
     channels_router.create_channel(
-        ChannelCreate(name=name, slug=slug, **wiz.default_budgets()), session=session, ws=ws)
+        ChannelCreate(name=name, slug=slug, **wiz.default_budgets(ws)), session=session, ws=ws)
     ws.wizard_started_at = utcnow()
     session.add(ws)
     session.commit()
     session.refresh(ws)
-    return wiz.state(session, ws)
+    return wiz.state(session, ws, locale)
 
 
 class WizardTopic(BaseModel):
@@ -104,7 +122,8 @@ class WizardTopicsBody(BaseModel):
 
 @router.post("/wizard/topics")
 def wizard_topics(body: WizardTopicsBody, session: Session = Depends(get_session),
-                  ws: Workspace = Depends(current_workspace)):
+                  ws: Workspace = Depends(current_workspace),
+                  locale: str = Depends(ui_locale)):
     from app.routers import topics as topics_router
     from app.schemas import TopicCreate
     ch = _own_wizard_channel(session, ws, body.channel_id)
@@ -141,7 +160,7 @@ def wizard_topics(body: WizardTopicsBody, session: Session = Depends(get_session
         topics_router.create_topic(TopicCreate(channel_id=ch.id, name=name, theme_prompt=tp,
                                                content_format="short"),
                                    session=session, ws=ws)
-    return wiz.state(session, ws)
+    return wiz.state(session, ws, locale)
 
 
 class WizardBudgetsBody(BaseModel):
@@ -152,10 +171,11 @@ class WizardBudgetsBody(BaseModel):
 
 @router.post("/wizard/budgets")
 def wizard_budgets(body: WizardBudgetsBody, session: Session = Depends(get_session),
-                   ws: Workspace = Depends(current_workspace)):
+                   ws: Workspace = Depends(current_workspace),
+                   locale: str = Depends(ui_locale)):
     ch = _own_wizard_channel(session, ws, body.channel_id)
     _need(session, ws, "budgets")
-    d = wiz.default_budgets()
+    d = wiz.default_budgets(ws)
     vals = {}
     for key in ("daily_render_budget", "daily_publish_budget"):
         v = getattr(body, key)
@@ -170,41 +190,47 @@ def wizard_budgets(body: WizardBudgetsBody, session: Session = Depends(get_sessi
     session.add(ws)
     session.commit()
     session.refresh(ws)
-    return wiz.state(session, ws)
+    return wiz.state(session, ws, locale)
 
 
 class WizardConsentsBody(BaseModel):
     terms: bool = False
     privacy: bool = False
     ai_data: bool = False
-    ai_data_line_version: str | None = None
+    # Google Limited Use consent: sha256 of the exact checkbox text displayed
+    # (EN or PT) and the locale it was displayed in.
+    ai_data_text_sha: str | None = None
+    ai_data_locale: str | None = None
 
 
 @router.post("/wizard/consents")
-def wizard_consents(body: WizardConsentsBody, session: Session = Depends(get_session),
-                    ws: Workspace = Depends(current_workspace)):
+def wizard_consents(body: WizardConsentsBody, request: Request,
+                    session: Session = Depends(get_session),
+                    ws: Workspace = Depends(current_workspace),
+                    locale: str = Depends(ui_locale)):
     _need(session, ws, "consents")
     if not (body.terms is True and body.privacy is True and body.ai_data is True):
         raise HTTPException(400, "accept the Terms of Service and the Privacy Policy, "
-                                 "and acknowledge the AI data line")
-    if (body.ai_data_line_version or "") != wiz.AI_DATA_LINE_SHA:
-        raise HTTPException(409, {"code": "ai_data_line_changed",
-                                  "message": "the AI data line changed; reload and read it again"})
+                                 "and tick the AI data box")
+    try:
+        google_limited_use.validate(body.ai_data_locale, body.ai_data_text_sha)
+    except google_limited_use.ConsentError as e:
+        raise HTTPException(409, {"code": e.code, "message": e.message})
     now = utcnow()
     # First acceptance is kept (an audit timestamp is never moved forward).
     ws.terms_accepted_at = ws.terms_accepted_at or now
     ws.privacy_accepted_at = ws.privacy_accepted_at or now
-    if ws.ai_data_ack_at is None:
-        ws.ai_data_ack_at = now
-        ws.ai_data_ack_version = wiz.AI_DATA_LINE_SHA
     session.add(ws)
     session.commit()
     session.refresh(ws)
-    logger.info("onboarding_consents workspace_id=%s terms=1 privacy=1 ai_data=1 version=%s",
-                ws.id, ws.ai_data_ack_version)
+    if not google_limited_use.is_valid(ws):
+        google_limited_use.record_ack(session, ws, user=google_limited_use.request_user(request),
+                                      locale=body.ai_data_locale, sha=body.ai_data_text_sha)
+    logger.info("onboarding_consents workspace_id=%s terms=1 privacy=1 "
+                "google_limited_use_consent=1 text_sha=%s", ws.id, (ws.ai_data_ack_version or "")[:12])
     llm_guard.clear_block(ws.id)    # S8: drop a stale "finish setup step" banner now
     session.refresh(ws)
-    return wiz.state(session, ws)
+    return wiz.state(session, ws, locale)
 
 
 class WizardFirstDraftBody(BaseModel):
@@ -213,39 +239,51 @@ class WizardFirstDraftBody(BaseModel):
 
 @router.post("/wizard/first-draft")
 def wizard_first_draft(body: WizardFirstDraftBody, session: Session = Depends(get_session),
-                       ws: Workspace = Depends(current_workspace)):
-    """Generate ideas for the first topic (existing route) and queue one at top
-    render priority. Idempotent: a second call returns the same draft."""
+                       ws: Workspace = Depends(current_workspace),
+                       locale: str = Depends(ui_locale)):
+    """1 idea for each of the 3 topics (existing generate route), then queue the
+    first topic's idea at top render priority. Idempotent: a second call returns
+    the same draft; a topic that already has ideas is not generated again."""
     from app.routers import topics as topics_router
     from app.routers import videos as videos_router
     from app.schemas import GenerateBody
     ch = _own_wizard_channel(session, ws, body.channel_id)
     if ws.first_draft_video_id is not None:
-        return wiz.state(session, ws)
+        return wiz.state(session, ws, locale)
     _need(session, ws, "ideas")
-    topic = wiz.first_topic(session, ch)
-    if topic is None:
+    topics = wiz._topics(session, ch)
+    if not topics:
         raise HTTPException(409, {"code": "step_out_of_order", "missing": "topics"})
 
-    def _drafts():
+    def _drafts(topic_id):
         return session.exec(select(Video).where(
-            Video.topic_id == topic.id, Video.status == VideoStatus.DRAFT)
+            Video.topic_id == topic_id, Video.status == VideoStatus.DRAFT)
             .order_by(Video.position, Video.id)).all()
 
+    def _has_ideas(topic_id) -> bool:
+        return session.exec(select(Video.id).where(Video.topic_id == topic_id)).first() is not None
+
     gen: dict = {}
-    if not _drafts():
+    blocked_err: HTTPException | None = None
+    for topic in topics:
+        if _has_ideas(topic.id):
+            continue
         try:
-            gen = topics_router.generate_videos(topic.id, GenerateBody(count=wiz.WIZARD_IDEA_COUNT),
-                                          session=session, ws=ws)
+            gen = topics_router.generate_videos(topic.id, GenerateBody(count=wiz.IDEAS_PER_TOPIC),
+                                                session=session, ws=ws)
         except HTTPException as e:
-            if e.status_code == 403:   # LLM guard refusal (S8)
+            if e.status_code == 403:   # LLM guard refusal (S8): stop, don't hammer
                 session.refresh(ws)
-                blocked = llm_guard.blocked_status(ws) or llm_guard.block_message("release_off")
-                raise HTTPException(409, {"code": "llm_blocked", "llm_blocked": blocked,
-                                          "message": blocked["message"]})
+                blocked = (llm_guard.blocked_status(ws, locale)
+                           or llm_guard.block_message("release_off", locale))
+                blocked_err = HTTPException(409, {"code": "llm_blocked", "llm_blocked": blocked,
+                                                  "message": blocked["message"]})
+                break
             raise
-    drafts = _drafts()
+    drafts = [v for t in topics for v in _drafts(t.id)]
     if not drafts:
+        if blocked_err is not None:
+            raise blocked_err
         raise HTTPException(502, {"code": "no_ideas", "reason": (gen or {}).get("reason"),
                                   "message": "no ideas came back; try again in a minute"})
     v = drafts[0]
@@ -255,5 +293,52 @@ def wizard_first_draft(body: WizardFirstDraftBody, session: Session = Depends(ge
     session.add(ws)
     session.commit()
     session.refresh(ws)
-    logger.info("onboarding_first_draft_queued workspace_id=%s video_id=%s priority=1", ws.id, v.id)
-    return wiz.state(session, ws)
+    logger.info("onboarding_first_draft_queued workspace_id=%s video_id=%s priority=1 ideas=%s",
+                ws.id, v.id, len(drafts))
+    return wiz.state(session, ws, locale)
+
+
+# ------------------------------------------- Google Limited Use consent (S2)
+
+@router.get("/ai-data")
+def ai_data_status(session: Session = Depends(get_session),
+                   ws: Workspace = Depends(current_workspace),
+                   locale: str = Depends(ui_locale)):
+    return {**google_limited_use.status(ws),
+            "text_shas": {loc: google_limited_use.text_sha(t)
+                          for loc, t in google_limited_use.TEXTS.items()},
+            "llm_blocked": llm_guard.blocked_status(ws, locale)}
+
+
+class AiDataAckBody(BaseModel):
+    ai_data: bool = False
+    text_sha: str | None = None
+    locale: str | None = None
+
+
+@router.post("/ai-data/ack")
+def ai_data_ack(body: AiDataAckBody, request: Request,
+                session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace),
+                locale: str = Depends(ui_locale)):
+    """Ack-only page: the Google Limited Use consent alone (terms are not
+    re-asked here; the release check still requires them)."""
+    if body.ai_data is not True:
+        raise HTTPException(400, "tick the AI data box")
+    try:
+        google_limited_use.record_ack(session, ws, user=google_limited_use.request_user(request),
+                                      locale=body.locale, sha=body.text_sha)
+    except google_limited_use.ConsentError as e:
+        raise HTTPException(409, {"code": e.code, "message": e.message})
+    return ai_data_status(session=session, ws=ws, locale=locale)
+
+
+@router.post("/ai-data/withdraw")
+def ai_data_withdraw(request: Request, session: Session = Depends(get_session),
+                     ws: Workspace = Depends(current_workspace),
+                     locale: str = Depends(ui_locale)):
+    """Settings: withdraw the Google Limited Use consent. Cuts the LLM at the next
+    call; YouTube data deletion stays on the #214 disconnect / deletion path."""
+    google_limited_use.withdraw(session, ws, user=google_limited_use.request_user(request),
+                                reason="user")
+    return ai_data_status(session=session, ws=ws, locale=locale)

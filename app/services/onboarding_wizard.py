@@ -6,10 +6,11 @@ Steps (in order; each is derived from the data, so a reload resumes):
   youtube     Connect YouTube (existing OAuth routes; consent note #215 + L6 line)
   topics      niche + 3 topics (presets in ``topic_presets`` or free text)
   budgets     confirm the default daily render / publish budgets
-  consents    Terms of Service + Privacy Policy acceptance and the AI-data
-              acknowledgement (L6 line, sha ``AI_DATA_LINE_SHA``)
-  ideas       idea generation for the first topic (existing generate route)
-  first_draft one idea queued at top render priority
+  consents    Terms of Service + Privacy Policy acceptance and the Google Limited
+              Use consent (LegalOps checkbox text, ``google_limited_use``; the L6
+              line stays displayed above it)
+  ideas       1 idea for each of the 3 topics (existing generate route)
+  first_draft the first topic's idea queued at top render priority
 
 The wizard is per instance: nothing here names an Owera workspace, topic or
 channel. It is active for a workspace that has no channel yet, or that started
@@ -24,19 +25,26 @@ from sqlmodel import Session, func, select
 from app.models import Channel, OAuthStatus, Topic, Video, VideoStatus, Workspace
 from app.services import activation, llm_guard, topic_presets
 
-# CM-CONNECT-AI-LINE.md (LegalOps FINAL). The SPA shows the verbatim EN/PT line
-# from frontend/src/l6ConnectAiLine.ts and sends this version back with the ack.
+# CM-CONNECT-AI-LINE.md (LegalOps FINAL). The SPA shows the verbatim EN/PT L6
+# line from frontend/src/l6ConnectAiLine.ts (informational; the consent itself
+# is the Google Limited Use checkbox text, google_limited_use.KNOWN_SHAS).
 AI_DATA_LINE_SHA = "845c22005853"
 
-# Ideas the wizard asks for on the first topic (one becomes the first draft).
-WIZARD_IDEA_COUNT = 3
+# PO CM 14/11: 1 idea from each of the 3 topics (3 total); the first topic's
+# idea becomes the first draft, the other two stay drafts.
+IDEAS_PER_TOPIC = 1
+WIZARD_IDEA_COUNT = IDEAS_PER_TOPIC * topic_presets.WIZARD_TOPIC_COUNT
 
 STEP_IDS = ("channel", "youtube", "topics", "budgets", "consents", "ideas", "first_draft")
 
 
-def default_budgets() -> dict:
-    """The app's channel defaults (ChannelCreate), not a wizard-only number."""
+def default_budgets(ws: Workspace | None = None) -> dict:
+    """Week-1 buyer defaults (2/day, ``buyer_budget``) for a non-internal
+    workspace going through the wizard; the app's ChannelCreate defaults otherwise."""
     from app.schemas import ChannelCreate
+    from app.services import buyer_budget
+    if ws is not None and ws.id is not None and ws.id not in llm_guard.internal_workspace_ids():
+        return buyer_budget.buyer_budgets()
     f = ChannelCreate.model_fields
     return {"daily_render_budget": int(f["daily_render_budget"].default),
             "daily_publish_budget": int(f["daily_publish_budget"].default)}
@@ -68,8 +76,9 @@ def is_first_login(session: Session, ws: Workspace) -> bool:
 
 
 def consents_done(ws: Workspace) -> bool:
+    from app.services import google_limited_use
     return (ws.terms_accepted_at is not None and ws.privacy_accepted_at is not None
-            and ws.ai_data_ack_at is not None)
+            and google_limited_use.is_valid(ws))
 
 
 def _topics(session: Session, ch: Channel | None) -> list[Topic]:
@@ -121,7 +130,8 @@ def missing_before(done: dict[str, bool], step: str) -> str | None:
     return None
 
 
-def state(session: Session, ws: Workspace) -> dict:
+def state(session: Session, ws: Workspace, locale: str | None = None) -> dict:
+    from app.services import google_limited_use
     ch = wizard_channel(session, ws)
     done = step_done(session, ws)
     fd = session.get(Video, ws.first_draft_video_id) if ws.first_draft_video_id else None
@@ -142,22 +152,28 @@ def state(session: Session, ws: Workspace) -> dict:
         },
         "topics": [{"id": t.id, "name": t.name, "theme_prompt": t.theme_prompt}
                    for t in _topics(session, ch)],
-        "default_budgets": default_budgets(),
-        "presets": topic_presets.public_presets(),
+        "default_budgets": default_budgets(ws),
+        "presets": topic_presets.public_presets(locale),
+        "locale": llm_guard.ui_locale(locale),
         "consents": {
             "terms_accepted_at": activation.iso_utc(ws.terms_accepted_at),
             "privacy_accepted_at": activation.iso_utc(ws.privacy_accepted_at),
             "ai_data_ack_at": activation.iso_utc(ws.ai_data_ack_at),
             "ai_data_ack_version": ws.ai_data_ack_version,
+            "ai_data_ack_locale": ws.ai_data_ack_locale,
         },
         "ai_data_line_version": AI_DATA_LINE_SHA,
+        # Google Limited Use consent: the shas the server accepts (per locale).
+        "ai_data_text_shas": {loc: google_limited_use.text_sha(t)
+                              for loc, t in google_limited_use.TEXTS.items()},
+        "google_limited_use": google_limited_use.status(ws),
         "first_draft": None if fd is None else {
             "video_id": fd.id, "status": fd.status, "subject": fd.subject,
             "priority": ws.first_draft_at is None,
         },
         "first_draft_at": activation.iso_utc(ws.first_draft_at),
         # S8 banner ("Drafts paused: finish setup step …"); null when allowed / flag OFF.
-        "llm_blocked": llm_guard.blocked_status(ws),
+        "llm_blocked": llm_guard.blocked_status(ws, locale),
     }
 
 

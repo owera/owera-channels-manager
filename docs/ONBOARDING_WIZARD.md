@@ -2,7 +2,9 @@
 
 PO CM NEXT-CUT S2 + condition (ii) (14/11). Code: `app/services/onboarding_wizard.py`,
 `app/services/topic_presets.py`, `app/routers/onboarding.py` (`/api/onboarding/wizard*`),
-`frontend/src/pages/Wizard.tsx`. Tests: `tests/verify_onboarding_wizard.py`.
+`app/services/google_limited_use.py`, `app/services/buyer_budget.py`,
+`frontend/src/pages/Wizard.tsx`, `frontend/src/pages/AiData.tsx`, `frontend/src/wizardI18n.ts`.
+Tests: `tests/verify_onboarding_wizard.py`, `tests/verify_google_limited_use.py`.
 
 ## Flow
 
@@ -13,25 +15,68 @@ while `first_login` is true (wizard active, or done but the first draft hasn't r
 
 | Step | API | Writes |
 |---|---|---|
-| channel | `POST /wizard/channel {name}` → `channels.create_channel` | Channel (app default budgets), `wizard_started_at` |
+| channel | `POST /wizard/channel {name}` → `channels.create_channel` | Channel (buyer week-1 budgets 2 / 2), `wizard_started_at` |
 | youtube | existing `POST /api/oauth/google/start` or `/api/channels/{id}/oauth/start` | (OAuth callback) `oauth_status=connected` |
 | topics | `POST /wizard/topics {channel_id, niche, preset_id?, topics[3]}` → `topics.create_topic` | `Channel.niche`, 3 topics (replaced while no idea exists) |
 | budgets | `POST /wizard/budgets {channel_id, daily_render_budget?, daily_publish_budget?}` | channel budgets (1–50), `wizard_budgets_at` |
-| consents | `POST /wizard/consents {terms, privacy, ai_data, ai_data_line_version}` | `terms_accepted_at`, `privacy_accepted_at`, `ai_data_ack_at`, `ai_data_ack_version` (first acceptance kept); `llm_guard.clear_block(ws)` |
-| ideas + first draft | `POST /wizard/first-draft {channel_id}` → `topics.generate_videos` (3 ideas, first topic) + `videos.produce` | drafts, one QUEUED, `first_draft_video_id`, `wizard_completed_at` |
+| consents | `POST /wizard/consents {terms, privacy, ai_data, ai_data_text_sha, ai_data_locale}` | `terms_accepted_at`, `privacy_accepted_at` (first acceptance kept); Google Limited Use consent (below); `llm_guard.clear_block(ws)` |
+| ideas + first draft | `POST /wizard/first-draft {channel_id}` → `topics.generate_videos` (1 idea per topic × 3 topics) + `videos.produce` | 3 drafts, the first topic's one QUEUED, `first_draft_video_id`, `wizard_completed_at` |
+
+Every `/api/onboarding/*` route takes `?locale=` (the SPA sends the L6 detection result;
+fallback `Accept-Language`) and returns presets and banners in EN or PT.
 
 Steps are strictly ordered server-side (409 `step_out_of_order`). Every channel id goes
 through `workspace.require_channel` (S4): a foreign or missing id is the same 404.
 The autofill flag (`topic_autogen_enabled`, global) is never touched.
 
-## AI data step (S8 release check)
+## Google Limited Use consent (S8 release check)
 
-`llm_guard.release_block_reason` (flag `MANAGER_LLM_EXTERNAL_RELEASE` ON, non-internal
-workspace) now also requires `ai_data_ack_at`; missing → `ai_data_not_acknowledged`,
-shown by S8's banner as `Drafts paused: finish setup step "AI data".` The SPA shows the
-L6 line verbatim (EN/PT by locale, `frontend/src/l6ConnectAiLine.ts`, sha `845c22005853`)
-and sends that sha with the ack; a different sha is refused (409 `ai_data_line_changed`).
-Flag OFF: unchanged (#217 allowlist).
+LegalOps text (14/11), verbatim, in `app/services/google_limited_use.py` and
+`frontend/src/googleLimitedUse.ts`:
+
+- EN: "I agree that Channels Manager sends my videos' titles, descriptions, tags and channel
+  stats to an AI provider in the US, only to create my own drafts." + link "Privacy policy"
+- PT: "Concordo que o Channels Manager envie os títulos, descrições e tags dos meus vídeos e
+  as estatísticas do canal a um provedor de IA nos EUA, só para criar os meus próprios
+  rascunhos." + link "Política de privacidade"
+
+The checkbox is unchecked by default; the link opens the privacy policy in a new tab
+(`POLICY_LINKS.privacy`). The SPA sends the sha256 of the exact string it displayed and its
+locale; the server accepts only the shas of these two strings (`KNOWN_SHAS`) and stores
+`ai_data_ack_at`, `ai_data_ack_version` (= text sha), `ai_data_ack_locale`,
+`ai_data_ack_user` (SPA Google e-mail, else the Basic Auth actor) on the workspace, plus an
+append-only `GoogleLimitedUseConsentEvent` row (ack / withdraw). The L6 line stays displayed
+above the box (informational).
+
+`llm_guard.release_block_reason` (flag ON, non-internal workspace) refuses with
+`ai_data_not_acknowledged` (none) or `ai_data_ack_stale` (sha of a text no longer shown),
+banner step "AI data". Flag OFF: unchanged (#217 allowlist).
+
+- **Ack-only page** `/ai-data` (`GET /api/onboarding/ai-data`, `POST …/ack`): AuthGate sends
+  any external workspace there while `required` (flag ON, not in
+  `MANAGER_LLM_INTERNAL_WORKSPACE_IDS`, no current consent), including workspaces that
+  accepted the terms outside the wizard. "Not now" (per tab) keeps the app usable: connect
+  and view work; only the LLM is refused.
+- **Withdraw**: `POST /api/onboarding/ai-data/withdraw` (Settings → "AI data (Google Limited
+  Use consent)") clears the consent; the next LLM call is refused. `POST
+  /api/channels/{id}/disconnect` and `/request-deletion` also withdraw it. Data deletion is
+  NOT duplicated: it stays on the #214 clock those routes already start
+  (`notify.mark_operator_disconnect` / `mark_deletion_requested` → `youtube_purge`, 7 d; dead
+  token 30 d).
+- Naming: "Google Limited Use consent" in code and logs (`google_limited_use_consent …`).
+
+## Week-1 budget and monthly subcap (PO CM 14/11)
+
+- Buyer workspace = not internal AND created via the wizard (`wizard_started_at`) or Stripe
+  (`paid_at` / `stripe_customer_id`). Its new channels default to 2 renders / 2 publishes
+  a day (explicit values win). Day-1 burst: for 24 h after the channel was created the
+  render loop allows up to 3 renders (`buyer_budget.effective_render_budget`, used by
+  `_submit_new` and `_auto_produce` only). Internal ws1/ws2 and their channels: unchanged.
+- `MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP` (default 5): ledger cost of one external workspace in
+  the current UTC month; ≥ cap → `workspace_monthly_cap`, banner "Monthly draft limit
+  reached. …" (EN/PT), persisted via S8 `llm_blocked`, counted in A5 (`A5.monthly_cap`). Cap ≤ 0
+  or an unreadable ledger → refused. Internal workspaces exempt. The global
+  `MANAGER_LLM_MONTHLY_USD_CAP` still applies.
 
 ## First-draft priority
 
@@ -44,8 +89,12 @@ long/short mix (`_auto_produce`, `_rebalance_queued_mix`, i.e. the OS/RR limits)
 untouched, and an in-flight render is never preempted; the first draft takes the next slot
 that frees up.
 
-## Presets
+## Copy
 
-No catalog exists (Generics v1: niche is free text). `topic_presets.NICHE_PRESETS` is a small
-structure (niche line + 3 short topics per niche), neutral English placeholders,
-**copy pending CMO review**. No Owera topics, no OS/RR series. The user can type free text.
+CMO `CM-WIZARD-COPY.md` (sha df45bd814374): presets (5 niches × 3 topics, EN + PT, same ids:
+`cooking`, `fitness`, `personal_finance`, `tech_tips`, `local_business`;
+`topic_presets.public_presets(locale)` / `get(id, locale)`, default EN), step titles and help
+lines, banners (`llm_guard.BLOCK_USER_TEXT`, keyed by reason + locale, server-side) and the
+wizard chrome (`frontend/src/wizardI18n.ts`, CMO keys). The ack-only page and the Settings
+control (`ai_data.*`, `settings.glu.*`) are Channels Dev placeholders until CMO copy lands.
+No Owera topics, no OS/RR series. The user can type free text.

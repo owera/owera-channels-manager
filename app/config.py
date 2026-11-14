@@ -199,6 +199,14 @@ class Settings(BaseSettings):
     # account limit is USD 250 shared with Grok Bot + Cursor).
     llm_monthly_usd_cap: float = Field(default=0.0, validation_alias=AliasChoices(
         "MANAGER_LLM_MONTHLY_USD_CAP", "LLM_MONTHLY_USD_CAP"))
+    # S2 (PO CM 14/11): per-workspace monthly (UTC month) LLM subcap in USD for
+    # NON-internal workspaces, summed from the same usage ledger (cost_usd rows
+    # with that workspace_id). Internal allowlisted workspaces are exempt. Reached
+    # → release reason ``workspace_monthly_cap`` ("Monthly draft limit reached").
+    # 0 or negative = every external call refused (fail closed). The global
+    # llm_monthly_usd_cap above still applies on top.
+    llm_workspace_monthly_usd_cap: float = Field(default=5.0, validation_alias=AliasChoices(
+        "MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP", "LLM_WORKSPACE_MONTHLY_USD_CAP"))
     # One JSON line per api complete() call: tokens, model, call type, workspace,
     # UTC ts, cost — never prompt/response content. Empty = storage_dir/llm-usage.jsonl.
     llm_usage_path: str = ""                  # env: MANAGER_LLM_USAGE_PATH

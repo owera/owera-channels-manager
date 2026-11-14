@@ -7,6 +7,7 @@ import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Trends from "./pages/Trends";
+import AiData from "./pages/AiData";
 import Wizard from "./pages/Wizard";
 import { HeldToasts, PolicyLinks } from "./ui";
 
@@ -121,6 +122,7 @@ export default function App({ spaLogin, userEmail, firstLogin }: {
           <Route path="/channels" element={<Channels />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/welcome" element={<Wizard />} />
+          <Route path="/ai-data" element={<AiData />} />
           <Route path="/trends" element={<Trends />} />
           <Route path="/review/:videoId" element={<Review />} />
           <Route path="/profiles" element={<Profiles />} />

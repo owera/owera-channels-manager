@@ -98,6 +98,13 @@ def create_channel(
                  "daily_publish_budget must be >= 0 "
                  "(null TypeErrors the publish tick: "
                  "published_today >= budget)")
+    # S2 (PO CM 14/11): a buyer workspace (wizard / Stripe, not internal) gets the
+    # week-1 2/day defaults unless the caller set the budgets explicitly.
+    from app.services import buyer_budget
+    if buyer_budget.is_buyer(ws):
+        for key, val in buyer_budget.buyer_budgets().items():
+            if key not in body.model_fields_set:
+                setattr(body, key, val)
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
     niche = None
@@ -332,6 +339,9 @@ def disconnect(
     # YT III.D.2.3.a) and sends the one access-lost email to contact@ for a
     # real channel (P3/P7).
     notify.mark_operator_disconnect(session, ch)
+    # S2 (LegalOps 14/11): disconnecting also withdraws the Google Limited Use
+    # consent (LLM cut). Data deletion stays on the #214 clock started above.
+    _withdraw_google_limited_use(session, ws, "disconnect")
     session.refresh(ch)
     return ch
 
@@ -350,8 +360,16 @@ def request_deletion(
     ch = require_ws_channel(session, ws, channel_id)
     youtube.disconnect_channel(session, ch)
     notify.mark_deletion_requested(session, ch)
+    _withdraw_google_limited_use(session, ws, "deletion_requested")
     session.refresh(ch)
     return ch
+
+
+def _withdraw_google_limited_use(session: Session, ws: Workspace, reason: str) -> None:
+    from app.services import google_limited_use
+    row = session.get(type(ws), ws.id) if ws is not None and ws.id is not None else None
+    if row is not None:
+        google_limited_use.withdraw(session, row, user=None, reason=reason)
 
 
 def _probe_connected(session: Session, ch: Channel, service) -> None:

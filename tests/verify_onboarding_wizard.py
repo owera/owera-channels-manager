@@ -5,7 +5,8 @@ Run: PYTHONPATH=. uv run python tests/verify_onboarding_wizard.py
 In-memory SQLite + TestClient. No network, no YouTube, no Stripe call, no real
 LLM: ``llm._complete_api`` is mocked and ``llm._complete_cli`` raises. Covers:
   - wizard flow and each step's API, strictly ordered (409 out of order)
-  - terms / privacy / AI-data ack persistence (first acceptance kept, L6 version)
+  - terms / privacy / Google Limited Use consent persistence (first acceptance
+    kept, sha of the exact LegalOps text)
   - E2E: paid (S1 paid_at via the real checkout handler) + wizard complete +
     MANAGER_LLM_EXTERNAL_RELEASE ON → require() allowed, a draft queued with top
     render priority
@@ -14,8 +15,9 @@ LLM: ``llm._complete_api`` is mocked and ``llm._complete_cli`` raises. Covers:
   - first-draft priority: order only; render_concurrency, budgets and the
     internal (OS/RR-style) channels' rows untouched; no preemption; lapses once
     S1 stamps first_draft_at
-  - per instance: presets carry no Owera topics, marked "copy pending CMO review";
+  - per instance: presets carry no Owera topics (CMO copy, EN + PT, same ids);
     autofill flag never flipped
+  - PO CM 14/11: buyer week-1 defaults 2/2; 1 idea from each of the 3 topics
 """
 from __future__ import annotations
 
@@ -35,8 +37,8 @@ import app.main as main
 from app.config import settings
 from app.db import get_session
 from app.models import (Channel, OAuthStatus, Settings, Topic, Video, VideoStatus, Workspace)
-from app.services import (activation, llm, llm_guard, onboarding_wizard, render_loop,
-                          stripe_provision, topic_presets)
+from app.services import (activation, google_limited_use, llm, llm_guard, onboarding_wizard,
+                          render_loop, stripe_provision, topic_presets)
 
 ROOT = Path(__file__).resolve().parent.parent
 _checks = 0
@@ -164,6 +166,9 @@ for p in llm_patches:
     p.start()
 
 PRESET = topic_presets.NICHE_PRESETS[0]
+SHA_EN = google_limited_use.text_sha(google_limited_use.TEXT_EN)
+CONSENTS = {"terms": True, "privacy": True, "ai_data": True,
+            "ai_data_text_sha": SHA_EN, "ai_data_locale": "en"}
 
 
 def walk_to(ws, step, *, connect=True):
@@ -188,8 +193,7 @@ def walk_to(ws, step, *, connect=True):
             r = post(ws, "budgets", {"channel_id": get_state(ws)["channel"]["id"]})
             assert r.status_code == 200, r.text
         elif sid == "consents":
-            r = post(ws, "consents", {"terms": True, "privacy": True, "ai_data": True,
-                                      "ai_data_line_version": onboarding_wizard.AI_DATA_LINE_SHA})
+            r = post(ws, "consents", CONSENTS)
             assert r.status_code == 200, r.text
         st = get_state(ws)
     return st
@@ -202,15 +206,24 @@ ok(st["active"] is True and st["current_step"] == "channel", "buyer A, 0 channel
 ok([x["id"] for x in st["steps"]] == ["channel", "youtube", "topics", "budgets", "consents",
                                       "ideas", "first_draft"], "seven steps in the S2 order")
 ok(get_state(1)["active"] is False, "workspace with channels and no wizard_started_at → no wizard")
-ok(st["presets"]["copy_status"] == "copy pending CMO review" and len(st["presets"]["niches"]) >= 3
-   and all(len(n["topics"]) == 3 for n in st["presets"]["niches"]), "presets payload: niches × 3 topics, CMO flag")
-ok(st["default_budgets"] == {"daily_render_budget": 6, "daily_publish_budget": 6},
-   "default budgets = the app's ChannelCreate defaults (no wizard-only number)")
+ok(st["presets"]["copy_status"] == "CMO copy 2026-11-14" and len(st["presets"]["niches"]) == 5
+   and all(len(n["topics"]) == 3 for n in st["presets"]["niches"]), "presets payload: 5 niches × 3 topics, CMO copy")
+ok([n["id"] for n in st["presets"]["niches"]] == ["cooking", "fitness", "personal_finance", "tech_tips",
+                                                   "local_business"] and st["presets"]["locale"] == "en",
+   "CMO ids, EN by default")
+pt = client.get("/api/onboarding/wizard?locale=pt-BR", headers=H(WA)).json()["presets"]
+ok(pt["locale"] == "pt" and [n["id"] for n in pt["niches"]] == [n["id"] for n in st["presets"]["niches"]]
+   and pt["niches"][0]["label"] == "Culinária", "?locale=pt-BR → PT presets, same ids")
+pt_h = client.get("/api/onboarding/wizard", headers={**H(WA), "Accept-Language": "pt-BR,pt;q=0.9"}).json()
+ok(pt_h["presets"]["locale"] == "pt", "Accept-Language pt-BR → PT presets")
+ok(topic_presets.get("cooking", "pt")["niche"].startswith("Receitas") and topic_presets.get("cooking")["label"] == "Cooking",
+   "get(id, locale) defaults to EN")
+ok(st["default_budgets"] == {"daily_render_budget": 2, "daily_publish_budget": 2},
+   "PO CM: buyer week-1 default budgets 2/2")
 ok(st["ai_data_line_version"] == "845c22005853", "L6 line version exposed for the ack")
 
 print("wizard: order is enforced server-side")
-r = post(WA, "consents", {"terms": True, "privacy": True, "ai_data": True,
-                          "ai_data_line_version": "845c22005853"})
+r = post(WA, "consents", CONSENTS)
 ok(r.status_code == 409 and r.json()["detail"]["missing"] == "channel", "consents before channel → 409 missing channel")
 
 print("step channel")
@@ -220,7 +233,8 @@ r = post(WA, "channel", {"name": "Bread at Home"})
 ok(r.status_code == 200 and r.json()["steps"][0]["done"], "POST channel creates the workspace's first channel")
 st = r.json()
 CHA = st["channel"]["id"]
-ok(st["channel"]["daily_render_budget"] == 6 and st["current_step"] == "youtube", "defaults applied, next = youtube")
+ok(st["channel"]["daily_render_budget"] == 2 and st["channel"]["daily_publish_budget"] == 2
+   and st["current_step"] == "youtube", "buyer defaults 2/2 applied, next = youtube")
 ok(row(WA).wizard_started_at is not None, "wizard_started_at stamped")
 r = post(WA, "channel", {"name": "Another"})
 ok(r.status_code == 200 and r.json()["channel"]["id"] == CHA, "re-submit is idempotent (no second channel)")
@@ -260,31 +274,32 @@ ok(st["current_step"] == "budgets", "next = budgets")
 print("step budgets")
 r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 0})
 ok(r.status_code == 400, "budget 0 → 400 (would stall the first draft)")
-r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 2})
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 3})
 st = r.json()
-ok(r.status_code == 200 and st["channel"]["daily_render_budget"] == 2
-   and st["channel"]["daily_publish_budget"] == 6 and st["current_step"] == "consents",
+ok(r.status_code == 200 and st["channel"]["daily_render_budget"] == 3
+   and st["channel"]["daily_publish_budget"] == 2 and st["current_step"] == "consents",
    "budgets saved (missing one = default), next = consents")
 
-print("step consents: terms + privacy + AI-data ack")
+print("step consents: terms + privacy + Google Limited Use consent")
 r = post(WA, "first-draft", {"channel_id": CHA})
 ok(r.status_code == 409 and r.json()["detail"]["missing"] == "consents", "first-draft before consents → 409")
-r = post(WA, "consents", {"terms": True, "privacy": True, "ai_data": False,
-                          "ai_data_line_version": "845c22005853"})
+r = post(WA, "consents", dict(CONSENTS, ai_data=False))
 ok(r.status_code == 400 and row(WA).terms_accepted_at is None, "ai_data unchecked → 400, nothing written")
-r = post(WA, "consents", {"terms": True, "privacy": True, "ai_data": True, "ai_data_line_version": "deadbeef"})
-ok(r.status_code == 409 and r.json()["detail"]["code"] == "ai_data_line_changed" and row(WA).ai_data_ack_at is None,
-   "stale L6 version → 409, nothing written")
-r = post(WA, "consents", {"terms": True, "privacy": True, "ai_data": True,
-                          "ai_data_line_version": "845c22005853"})
+r = post(WA, "consents", dict(CONSENTS, ai_data_text_sha="deadbeef"))
+ok(r.status_code == 409 and r.json()["detail"]["code"] == "ai_data_text_changed" and row(WA).ai_data_ack_at is None
+   and row(WA).terms_accepted_at is None, "unknown text sha → 409, nothing written")
+r = post(WA, "consents", dict(CONSENTS, ai_data_text_sha=onboarding_wizard.AI_DATA_LINE_SHA))
+ok(r.status_code == 409 and row(WA).ai_data_ack_at is None, "the L6 sha is not accepted as the consent sha")
+r = post(WA, "consents", CONSENTS)
 w = row(WA)
 ok(r.status_code == 200 and w.terms_accepted_at and w.privacy_accepted_at and w.ai_data_ack_at,
    "terms_accepted_at / privacy_accepted_at / ai_data_ack_at persisted")
-ok(w.ai_data_ack_version == "845c22005853", "ai_data_ack_version = L6 sha")
+ok(w.ai_data_ack_version == SHA_EN and w.ai_data_ack_locale == "en",
+   "ai_data_ack_version = sha of the exact EN text shown; locale en")
 c = r.json()["consents"]
 ok(c["terms_accepted_at"].endswith("Z") and c["ai_data_ack_at"].endswith("Z"), "state shows ISO UTC timestamps")
 T0 = (w.terms_accepted_at, w.privacy_accepted_at, w.ai_data_ack_at)
-post(WA, "consents", {"terms": True, "privacy": True, "ai_data": True, "ai_data_line_version": "845c22005853"})
+post(WA, "consents", CONSENTS)
 w = row(WA)
 ok((w.terms_accepted_at, w.privacy_accepted_at, w.ai_data_ack_at) == T0, "re-submit keeps the first acceptance")
 ok(r.json()["current_step"] == "ideas", "next = ideas")
@@ -316,12 +331,19 @@ with cfg(**ON):
         ok(v.channel_id == CHA and v.topic_id == first_topic.id, "draft comes from the wizard's first topic")
         drafts = s.exec(select(Video).where(Video.channel_id == CHA, Video.status == VideoStatus.DRAFT)).all()
         ok(len(drafts) == 2, "the other ideas stay drafts (normal flow)")
+        per_topic = [len(s.exec(select(Video).where(Video.topic_id == t.id)).all())
+                     for t in s.exec(select(Topic).where(Topic.channel_id == CHA)
+                                     .order_by(Topic.position, Topic.id)).all()]
+        ok(per_topic == [1, 1, 1], f"PO CM: 1 idea from each of the 3 topics ({per_topic})")
+        ok(sorted({d.topic_id for d in drafts}) == sorted({t.id for t in s.exec(select(Topic).where(
+            Topic.channel_id == CHA)).all()} - {first_topic.id}), "the 2 drafts are topics 2 and 3")
         cands = render_loop._queued_candidates(s)
         ok(cands[0].id == FD, "render queue offers the first draft before the internal rows")
         ok(s.get(Settings, 1).topic_autogen_enabled == autogen_before, "autofill flag not flipped")
     r = post(WA, "first-draft", {"channel_id": CHA})
     ok(r.status_code == 200 and r.json()["first_draft"]["video_id"] == FD, "first-draft is idempotent")
     ok(get_state(WA)["llm_blocked"] is None, "no banner when allowed")
+    ok(len([c for c in llm_calls if c.startswith("ideas")]) == 3, "three idea calls (one per topic)")
 
 # ---- 3. without the AI-data ack → refused with the "AI data" banner --------------
 print("without the AI-data ack: refused, 'AI data' step banner (S8)")
@@ -350,10 +372,12 @@ with cfg(**ON):
        "wizard state banner: Drafts paused: finish setup step \"AI data\".")
     r = client.get("/api/onboarding/status", headers=H(WC))
     ok(r.json()["llm_blocked"]["step"] == "ai_data", "GET /api/onboarding/status shows the same banner")
+    bpt = client.get("/api/onboarding/status?locale=pt-BR", headers=H(WC)).json()["llm_blocked"]
+    ok(bpt["message"] == 'Rascunhos pausados: termine a etapa "Dados de IA".' and bpt["locale"] == "pt",
+       "PT banner (CMO copy) by locale, server-side")
     with Session(eng) as s:
         ok(not s.exec(select(Video).where(Video.channel_id == CHC)).all(), "no draft created")
-    r = post(WC, "consents", {"terms": True, "privacy": True, "ai_data": True,
-                              "ai_data_line_version": "845c22005853"})
+    r = post(WC, "consents", CONSENTS)
     ok(r.status_code == 200 and r.json()["llm_blocked"] is None and row(WC).llm_blocked_reason is None,
        "ack → clear_block(ws): banner gone at once")
     ok(row(WC).terms_accepted_at.replace(tzinfo=timezone.utc) == NOW, "earlier terms acceptance kept")
@@ -383,10 +407,10 @@ stb = get_state(WB)
 ok(stb["channel"] is None and stb["topics"] == [] and stb["first_draft"] is None and stb["active"],
    "B's wizard state shows nothing of A")
 with Session(eng) as s:
-    ok(len(s.exec(select(Topic).where(Topic.channel_id == CHA)).all()) == 3 and s.get(Channel, CHA).daily_render_budget == 2,
+    ok(len(s.exec(select(Topic).where(Topic.channel_id == CHA)).all()) == 3 and s.get(Channel, CHA).daily_render_budget == 3,
        "A's rows untouched by B's attempts")
     ok(s.get(Workspace, WB).first_draft_video_id is None, "B got no first draft")
-r = post(WB, "consents", {"terms": True, "privacy": True, "ai_data": True, "ai_data_line_version": "845c22005853"})
+r = post(WB, "consents", CONSENTS)
 ok(r.status_code == 409 and row(WB).terms_accepted_at is None, "B consents only after its own steps (order)")
 with Session(eng) as s:
     w = s.get(Workspace, WB)
@@ -481,7 +505,10 @@ blob = (ROOT / "app/services/topic_presets.py").read_text()
 low = "\n".join(l for l in blob.splitlines() if not l.lstrip().startswith("#")).lower()
 for bad in ("owera", "agent memory", "osi", "channels manager"):
     ok(bad not in low.split('"""', 2)[-1], f"presets carry no Owera-specific text ({bad!r})")
-ok("copy pending CMO review" in blob, "presets marked 'copy pending CMO review' in code")
+ok('COPY_STATUS = "CMO copy 2026-11-14"' in blob and "df45bd814374" in blob, "presets = CMO copy (sha cited)")
+for f in ("app/services/topic_presets.py", "frontend/src/pages/Wizard.tsx", "docs/ONBOARDING_WIZARD.md",
+          "docs/screenshots/s2/README.md"):
+    ok("copy pending cmo review" not in (ROOT / f).read_text().lower(), f"no 'copy pending CMO review' marker left in {f}")
 wsrc = (ROOT / "app/services/onboarding_wizard.py").read_text() + (ROOT / "app/routers/onboarding.py").read_text()
 ok("workspace_id == 1" not in wsrc and "OWERA_WORKSPACE_ID" not in wsrc, "wizard code hardcodes no workspace id")
 ok("topic_autogen_enabled" not in wsrc, "wizard never touches the global autofill flag")
@@ -489,8 +516,8 @@ fe = ROOT / "frontend/src"
 wiz_tsx = (fe / "pages/Wizard.tsx").read_text()
 ok("l6ConnectAiLineProps" in wiz_tsx and "ConnectConsentNote" in wiz_tsx and "aria-describedby" in wiz_tsx,
    "Wizard: Connect YouTube shows the #215 consent note + L6 line (aria-describedby)")
-ok("L6_CONNECT_AI_LINE_SHA" in wiz_tsx and "LlmBlockedBanner" in wiz_tsx and "copy pending CMO review" in wiz_tsx,
-   "Wizard: sends the L6 version with the ack, shows S8's banner, CMO copy flag")
+ok("googleLimitedUse" in wiz_tsx and "LlmBlockedBanner" in wiz_tsx and "wizardT as t" in wiz_tsx,
+   "Wizard: Google Limited Use checkbox, S8 banner, i18n strings")
 l6 = (fe / "l6ConnectAiLine.ts").read_text()
 ok('L6_CONNECT_AI_LINE_SHA = "845c22005853"' in l6, "l6ConnectAiLine.ts exports the line sha")
 gate = (fe / "AuthGate.tsx").read_text() + (fe / "App.tsx").read_text()

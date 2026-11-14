@@ -19,7 +19,7 @@ from app.config import settings
 from app.db import (app_settings, channel_workspace_paused, paused_workspace_ids,
                     session_scope)
 from app.models import Channel, JobRun, RenderProfile, Topic, Video, VideoStatus, utcnow
-from app.services import llm_guard, metadata, quota
+from app.services import buyer_budget, llm_guard, metadata, quota
 from app.services.engines import STATE_COMPLETE, STATE_FAILED, get_engine, resolve_engine
 from app.services.engines.worker import _has_visible_frames
 from app.services.mpt_client import build_video_params
@@ -762,7 +762,7 @@ def _submit_new(session: Session) -> None:
         # burst: 8 rendered against a budget of 5 at concurrency 4, both channels).
         if (quota.rendered_today(session, channel.id)
                 + quota.in_flight_renders(session, channel.id)
-                >= channel.daily_render_budget):
+                >= buyer_budget.effective_render_budget(session, channel)):  # S2 day-1 burst
             continue
         topic = session.get(Topic, video.topic_id)
         fmt = "long" if topic and topic.content_format == "long" else "short"
@@ -964,7 +964,8 @@ def _auto_produce(session: Session) -> None:
                 Video.channel_id == ch.id,
                 Video.status.in_((VideoStatus.QUEUED, VideoStatus.RENDERING)))
         ).one()
-        headroom = ch.daily_render_budget - quota.rendered_today(session, ch.id) - active
+        headroom = (buyer_budget.effective_render_budget(session, ch)  # S2 day-1 burst
+                    - quota.rendered_today(session, ch.id) - active)
         if headroom <= 0:
             continue
         breaker = _render_breaker_reason(session, ch)

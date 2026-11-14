@@ -80,8 +80,15 @@ ok("published_today(session, channel.id) >= (channel.daily_publish_budget or 0)"
    "publish_loop does not rescue a null budget with or 0")
 
 _ren_src = Path(render_loop.__file__).read_text()
-ok(">= channel.daily_render_budget" in _ren_src,
+ok(">= channel.daily_render_budget" in _ren_src
+   or ">= buyer_budget.effective_render_budget(session, channel)" in _ren_src,
    "render_loop still compares against daily_render_budget (None TypeErrors)")
+# S2 day-1 burst: the loop compares against buyer_budget.effective_render_budget,
+# which must not rescue a null budget either.
+from app.services import buyer_budget as _bb  # noqa: E402
+_bb_src = Path(_bb.__file__).read_text()
+ok("daily_render_budget or 0" not in _bb_src and "daily_render_budget or" not in _bb_src,
+   "buyer_budget.effective_render_budget does not rescue a null budget with or 0")
 ok(">= (channel.daily_render_budget or 0)" not in _ren_src,
    "render_loop does not rescue a null budget with or 0")
 

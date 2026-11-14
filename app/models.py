@@ -108,13 +108,32 @@ class Workspace(SQLModel, table=True):
     # first_draft_video_id = the draft the wizard queued at top render priority
     # (render_loop._queued_candidates) until first_draft_at is stamped (S1).
     ai_data_ack_at: Optional[datetime] = None
+    # Google Limited Use consent (LegalOps 14/11): sha256 of the EXACT checkbox
+    # text shown (EN or PT, app/services/google_limited_use.py), its locale and
+    # who ticked it. A sha not in the current known texts = stale → asked again.
     ai_data_ack_version: Optional[str] = None
+    ai_data_ack_locale: Optional[str] = None
+    ai_data_ack_user: Optional[str] = None
+    ai_data_ack_withdrawn_at: Optional[datetime] = None
     wizard_started_at: Optional[datetime] = None
     wizard_budgets_at: Optional[datetime] = None
     wizard_completed_at: Optional[datetime] = None
     first_draft_video_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GoogleLimitedUseConsentEvent(SQLModel, table=True):
+    """Append-only history of the Google Limited Use consent per workspace
+    (ack / withdraw). The current state lives on ``Workspace.ai_data_ack_*``."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="workspace.id", index=True)
+    action: str                      # "ack" | "withdraw"
+    reason: Optional[str] = None     # withdraw: "user" | "disconnect" | "deletion_requested"
+    user: Optional[str] = None
+    locale: Optional[str] = None
+    text_sha: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class StripeEvent(SQLModel, table=True):

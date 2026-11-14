@@ -156,6 +156,23 @@ def _step(done: bool, at: datetime | None = None, **extra) -> dict[str, Any]:
     return d
 
 
+def monthly_cap_signal(ws: Workspace) -> dict[str, Any]:
+    """S2 subcap for A5: ``reached`` once this external workspace's month-to-date
+    ledger cost hits ``MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP`` (or the guard last
+    refused with ``workspace_monthly_cap``). Internal allowlisted ws: exempt."""
+    try:
+        from app.services import llm_guard
+    except Exception:  # noqa: BLE001
+        return {"exempt": None, "reached": False, "spent_usd": None, "cap_usd": None}
+    exempt = ws.id in llm_guard.internal_workspace_ids()
+    spent = None if exempt else llm_guard.workspace_month_usd(ws.id)
+    cap = llm_guard.workspace_monthly_cap_usd()
+    persisted = (getattr(ws, "llm_blocked_reason", None) or "").startswith("workspace_monthly_cap")
+    reached = (not exempt) and (persisted or (spent is not None and spent >= cap and cap > 0))
+    return {"exempt": exempt, "reached": bool(reached),
+            "spent_usd": round(spent, 4) if spent is not None else None, "cap_usd": cap}
+
+
 def report(session: Session, ws: Workspace, now: datetime | None = None) -> dict[str, Any]:
     now = _aware(now) or utcnow()
     channels = list(session.exec(select(Channel).where(Channel.workspace_id == ws.id)).all())
@@ -215,8 +232,11 @@ def report(session: Session, ws: Workspace, now: datetime | None = None) -> dict
     # A5
     sig = render_failed_signal(session, ws, now)
     blk = llm_blocked(ws)
-    a5 = {"done": sig["failed_over_24h"] == 0 and blk is None,
-          "at": blk["at"] if blk else None, **sig, "llm_blocked": blk}
+    cap = monthly_cap_signal(ws)
+    a5 = {"done": sig["failed_over_24h"] == 0 and blk is None and not cap["reached"],
+          "at": blk["at"] if blk else None, **sig, "llm_blocked": blk,
+          # S2: per-workspace monthly LLM subcap (workspace_monthly_cap).
+          "monthly_cap": cap}
 
     # A6
     pubs = []

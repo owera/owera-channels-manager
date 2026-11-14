@@ -144,7 +144,11 @@ thumbnail, gate_b_preflight, render, render_submit, mpt_render, mpt_social_metad
 `fields_undeclared` → `workspace_unreadable` / `workspace_unknown` → `kill_switch` →
 `not_paid_or_test` (paid = `paid_at` (S1) or `subscription_status == "active"`; or `is_test`)
 → `terms_privacy_not_accepted` (`terms_accepted_at` and `privacy_accepted_at`, written by the
-S2 onboarding wizard) → `ai_data_not_acknowledged` (`ai_data_ack_at`: the user saw the L6 line
-inside onboarding and acknowledged it; S2, banner step "AI data").
+S2 onboarding wizard) → `ai_data_not_acknowledged` / `ai_data_ack_stale` (Google Limited Use
+consent: `ai_data_ack_at` + `ai_data_ack_version` = sha256 of the exact LegalOps text shown, EN or
+PT; a sha not in `google_limited_use.KNOWN_SHAS` is stale and asked again; banner step "AI data")
+→ `workspace_monthly_cap` (ledger cost of this workspace this UTC month ≥
+`MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP`, default 5; unreadable ledger or cap ≤ 0 = refused;
+banner "Monthly draft limit reached.").
 **The policy is not decided** (CTO/LegalOps/CoS/PO, due Wed 18); the flag stays OFF until it is
 and L1 (no training at the provider) is proven. Headless agents are unchanged (internal only).
