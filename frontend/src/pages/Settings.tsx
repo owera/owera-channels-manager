@@ -1,9 +1,36 @@
-import { useMut, useSettings } from "../api";
+import { useState } from "react";
+import { openBillingPortal, useBilling, useMut, useSettings } from "../api";
 import { intFromBlur } from "../intFromBlur";
 import { Field, SectionLabel, Toggle } from "../ui";
 
 type IntKey = "render_concurrency" | "publish_drip_minutes"
   | "topic_autogen_min_pending" | "topic_autogen_target";
+
+function BillingPanel() {
+  const { data: b } = useBilling();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!b || !b.has_billing || !b.portal_enabled) return null;
+  return (
+    <div className="panel p-6 mb-6">
+      <SectionLabel>// billing</SectionLabel>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm text-fog-100">Subscription: <span className="font-mono">{b.subscription_status}</span></div>
+          <div className="label">update card, see invoices, or cancel in Stripe</div>
+        </div>
+        <button className="btn btn-signal shrink-0" disabled={busy}
+          onClick={async () => {
+            setBusy(true); setErr(null);
+            try { await openBillingPortal(); } catch (e) { setErr((e as Error).message); setBusy(false); }
+          }}>
+          {busy ? "opening…" : "Manage billing"}
+        </button>
+      </div>
+      {err && <div className="mt-2 text-xs font-mono text-[#f7768e]">{err}</div>}
+    </div>
+  );
+}
 
 export default function Settings() {
   const { data: s } = useSettings();
@@ -24,6 +51,8 @@ export default function Settings() {
         <div className="label mb-2">// settings</div>
         <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Settings</h1>
       </header>
+
+      <BillingPanel />
 
       <div className="panel p-6 mb-6">
         <SectionLabel>// scheduler</SectionLabel>

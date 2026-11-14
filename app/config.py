@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Resend transactional email (env: MANAGER_RESEND_API_KEY). Welcome mail after checkout.
     resend_api_key: str = ""
 
+    # Stripe API key for creating Customer Portal sessions ("Manage billing").
+    # Env: MANAGER_STRIPE_SECRET_KEY. Prefer a RESTRICTED key (rk_live_…) with
+    # only "Customer portal: Write". Empty = the billing endpoints return 503.
+    stripe_secret_key: str = ""
+    # Where the portal sends the buyer back (env: MANAGER_STRIPE_PORTAL_RETURN_URL).
+    stripe_portal_return_url: str = "https://channels.owera.com/settings"
+
     # Optional alert webhook (env: MANAGER_ALERT_WEBHOOK_URL). When a channel's
     # OAuth token flips CONNECTED -> EXPIRED, app/services/notify.py POSTs a JSON
     # payload (Slack "text" + Discord "content" keys) here, on top of the ERROR
