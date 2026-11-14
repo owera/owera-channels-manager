@@ -7,7 +7,7 @@ import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Trends from "./pages/Trends";
-import { HeldToasts } from "./ui";
+import { HeldToasts, PolicyLinks } from "./ui";
 
 const NAV = [
   { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
@@ -70,6 +70,7 @@ function Sidebar({ spaLogin, userEmail }: { spaLogin?: boolean; userEmail?: stri
           </NavLink>
         ))}
       </nav>
+      <PolicyLinks className={`px-5 py-3 ${spaLogin ? "" : "mt-auto border-t border-ink-line"}`} />
       {spaLogin && <SignOut email={userEmail} />}
     </aside>
   );
@@ -113,6 +114,9 @@ export default function App({ spaLogin, userEmail }: { spaLogin?: boolean; userE
           <Route path="/profiles" element={<Profiles />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
+        <footer className="md:hidden px-4 py-6 border-t border-ink-line mt-8">
+          <PolicyLinks />
+        </footer>
       </main>
       <HeldToasts />
       <BottomNav />

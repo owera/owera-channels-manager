@@ -177,3 +177,42 @@ export function HeldToasts() {
     document.body,
   );
 }
+
+// Policy links required by the Google OAuth verification / YouTube API Services
+// Developer Policies (III.A.1, III.A.2.a): privacy policy reachable at all times,
+// plus Terms and the YouTube Terms of Service.
+export const POLICY_LINKS = {
+  privacy: "https://owera.com/privacy/",
+  terms: "https://owera.com/terms/",
+  youtubeTerms: "https://www.youtube.com/t/terms",
+} as const;
+
+function ExtLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline hover:text-fog-100">
+      {children}
+    </a>
+  );
+}
+
+export function PolicyLinks({ className = "" }: { className?: string }) {
+  return (
+    <nav aria-label="Legal" className={`text-[11px] text-fog-400 flex flex-wrap gap-x-2 gap-y-1 ${className}`}>
+      <ExtLink href={POLICY_LINKS.privacy}>Privacy</ExtLink>
+      <span aria-hidden>·</span>
+      <ExtLink href={POLICY_LINKS.terms}>Terms</ExtLink>
+      <span aria-hidden>·</span>
+      <ExtLink href={POLICY_LINKS.youtubeTerms}>YouTube Terms of Service</ExtLink>
+    </nav>
+  );
+}
+
+export function ConnectConsentNote({ className = "" }: { className?: string }) {
+  return (
+    <p className={`text-xs text-fog-400 leading-relaxed ${className}`}>
+      By connecting, you agree to the Owera <ExtLink href={POLICY_LINKS.terms}>Terms</ExtLink>, the{" "}
+      <ExtLink href={POLICY_LINKS.privacy}>Privacy notice</ExtLink> and the{" "}
+      <ExtLink href={POLICY_LINKS.youtubeTerms}>YouTube Terms of Service</ExtLink>.
+    </p>
+  );
+}
