@@ -3,9 +3,11 @@ from sqlmodel import Session
 
 from app.config import settings as app_config
 from app.db import app_settings, get_session
+from app.models import Workspace
 from app.schemas import SettingsUpdate
-from app.services import quota
+from app.services import notify, quota
 from app.services.mpt_client import mpt
+from app.workspace import current_workspace
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -67,3 +69,19 @@ def health():
         "mpt_reachable": mpt.ping(),
         "mpt_base_url": app_config.mpt_base_url,
     }
+
+
+@router.post("/workspace/close")
+def close_workspace(
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    """Close the current workspace (LegalOps cláusula 7 v2, YT III.E.4.g).
+
+    Tokens are dropped immediately; every channel starts the 7-day YouTube
+    data purge clock. The workspace row is kept (``closed_at`` is set).
+    """
+    already = ws.closed_at is not None
+    n = notify.mark_workspace_closed(session, ws)
+    session.refresh(ws)
+    return {"ok": True, "already_closed": already, "channels": n, "closed_at": ws.closed_at}

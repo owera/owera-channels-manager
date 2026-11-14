@@ -327,12 +327,29 @@ def disconnect(
     ch = require_ws_channel(session, ws, channel_id)
     youtube.disconnect_channel(session, ch)
     # Operator-initiated: deliberately bypasses notify.mark_dead — an
-    # intentional disconnect must not page anyone.
-    ch.oauth_status = OAuthStatus.DISCONNECTED
-    ch.yt_channel_id = None
-    ch.yt_channel_title = None
-    session.add(ch)
-    session.commit()
+    # intentional disconnect must not page anyone (no reconnect alert). It does
+    # start the 7-day YouTube-data purge clock (LegalOps cláusula 7 v2,
+    # YT III.D.2.3.a) and sends the one access-lost email to contact@ for a
+    # real channel (P3/P7).
+    notify.mark_operator_disconnect(session, ch)
+    session.refresh(ch)
+    return ch
+
+
+@router.post("/{channel_id}/request-deletion")
+def request_deletion(
+    channel_id: int,
+    session: Session = Depends(get_session),
+    ws: Workspace = Depends(current_workspace),
+):
+    """User asked us to delete this channel's stored YouTube data (YT III.E.4.g).
+
+    The access token is dropped immediately; the 7-day purge clock starts for
+    the remaining YouTube API data (metrics, cached title).
+    """
+    ch = require_ws_channel(session, ws, channel_id)
+    youtube.disconnect_channel(session, ch)
+    notify.mark_deletion_requested(session, ch)
     session.refresh(ch)
     return ch
 

@@ -111,8 +111,10 @@ ok(snap["system"]["processes"] is None,
    "a failed process-headroom reading is omitted, not fatal")
 ok(set(snap.keys()) == {"status", "channels_total", "channels_connected",
                         "channels_paused", "channels_needing_attention", "videos_failed",
-                        "system"},
+                        "channels_expired", "channels_never_connected", "system"},
    "payload is aggregate-only (no names, slugs, ids, or tokens)")
+ok(snap["channels_expired"] == 1 and snap["channels_never_connected"] == 1,
+   "health splits expired (1) from never-connected (1) as aggregate counts")
 
 # healthy: all connected, nothing failed, healthy process headroom -> ok
 h_engine = make_engine()

@@ -65,6 +65,7 @@ class Workspace(SQLModel, table=True):
     stripe_customer_id: Optional[str] = Field(default=None, index=True)
     stripe_subscription_id: Optional[str] = Field(default=None, index=True)
     welcome_email_sent: bool = False
+    closed_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -146,8 +147,34 @@ class Channel(SQLModel, table=True):
     publish_windows: Optional[str] = None
     publish_tz: Optional[str] = None
 
+    # Explicit test/smoke/dogfood marker (P7). A test channel never sends the
+    # contact@ access-lost email. Operators set it by hand; default False.
+    is_test: bool = False
+
+    # Google access lifecycle (P3, naive UTC like utcnow()). access_lost_at is set
+    # when access is definitively gone — operator/user disconnect, a deletion
+    # request, a workspace close, or a refresh that failed with invalid_grant —
+    # and cleared on reconnect. The purge job deletes the channel's YouTube API
+    # data after 7 days (user-initiated) or 30 days (Google revoke / RefreshError).
+    access_lost_at: Optional[datetime] = None
+    access_lost_reason: Optional[str] = None
+    youtube_data_purged_at: Optional[datetime] = None
+    # When oauth_status last flipped (dedupe key for the access-lost email).
+    oauth_status_changed_at: Optional[datetime] = None
+
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ChannelAlert(SQLModel, table=True):
+    """Persisted dedupe for the access-lost email (P7): one row per
+    channel + status + transition time. The primary key makes it once-only."""
+    key: str = Field(primary_key=True, max_length=255)
+    channel_id: int = Field(index=True)
+    status: str
+    transition_at: datetime
+    delivered: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class RenderProfile(SQLModel, table=True):

@@ -28,26 +28,30 @@ def welcome_email_html() -> str:
 </body></html>"""
 
 
-def send_welcome_email(to_email: str) -> bool:
-    """Send the provisioning welcome email once. Returns True if sent (or skipped blocklist)."""
+def _redact(addr: str) -> str:
+    return addr.split("@", 1)[0] + "@…"
+
+
+def send_email(to_email: str, subject: str, html: str, *, label: str = "email") -> bool:
+    """Send one transactional email through Resend from channels@mail.owera.com.
+
+    Returns True if Resend accepted it. Never sends to rodrigo@owera.com. With
+    MANAGER_RESEND_API_KEY unset it logs a warning and sends nothing. Never raises."""
     key = spa_google_login.normalized_email(to_email)
     if not key or key in _BLOCKED_RECIPIENTS:
         return False
 
     api_key = (settings.resend_api_key or "").strip()
     if not api_key:
-        logger.warning(
-            "welcome email not sent to %s: MANAGER_RESEND_API_KEY is unset",
-            key.split("@", 1)[0] + "@…",
-        )
+        logger.warning("%s not sent to %s: MANAGER_RESEND_API_KEY is unset", label, _redact(key))
         return False
 
     payload = {
         "from": FROM_ADDRESS,
         "reply_to": REPLY_TO,
         "to": [key],
-        "subject": "Welcome to Channels Manager",
-        "html": welcome_email_html(),
+        "subject": subject,
+        "html": html,
     }
     try:
         httpx.post(
@@ -56,8 +60,14 @@ def send_welcome_email(to_email: str) -> bool:
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=10.0,
         ).raise_for_status()
-        logger.info("welcome email queued for %s", key.split("@", 1)[0] + "@…")
+        logger.info("%s queued for %s", label, _redact(key))
         return True
     except Exception as e:
-        logger.warning("welcome email delivery failed for %s: %s", key.split("@", 1)[0] + "@…", e)
+        logger.warning("%s delivery failed for %s: %s", label, _redact(key), type(e).__name__)
         return False
+
+
+def send_welcome_email(to_email: str) -> bool:
+    """Send the provisioning welcome email once. Returns True if sent (or skipped blocklist)."""
+    return send_email(to_email, "Welcome to Channels Manager", welcome_email_html(),
+                      label="welcome email")

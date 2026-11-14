@@ -194,6 +194,36 @@ def _loads_token_info(raw: str) -> tuple[Optional[dict], bool]:
     return info, bool(raw[end:].strip())
 
 
+# slug -> OAuth error code of the last failed refresh (e.g. "invalid_grant").
+# Consumed by get_service/get_analytics_service to put the code into the
+# NeedsConnect message, which notify.mark_dead uses to stamp access_lost_at.
+_LAST_REFRESH_ERROR: dict[str, str] = {}
+
+INVALID_GRANT = "invalid_grant"
+
+
+def refresh_error_code(e: BaseException) -> str:
+    """OAuth error code from a google.auth RefreshError, without any secret.
+
+    google-auth raises RefreshError(error_details, response_data) where
+    response_data is the token endpoint's JSON ({"error": "invalid_grant", ...})
+    and error_details starts with "<code>: <description>"."""
+    for a in getattr(e, "args", ()) or ():
+        if isinstance(a, dict) and a.get("error"):
+            return re.sub(r"[^a-z_]", "", str(a["error"]).lower())[:64] or "unknown"
+    first = str(e.args[0]) if getattr(e, "args", None) else ""
+    m = re.match(r"\s*\(?'?([a-z_]{3,64})'?[,:\s]", first)
+    return m.group(1) if m else "unknown"
+
+
+def _needs_connect_missing(slug: str) -> "NeedsConnect":
+    code = _LAST_REFRESH_ERROR.pop(slug, None)
+    msg = f"token missing/expired for channel '{slug}' — reconnect required"
+    if code:
+        msg += f" (refresh failed: {code})"
+    return NeedsConnect(msg)
+
+
 def _refresh_and_persist(
     slug: str,
     creds: Credentials | None,
@@ -208,7 +238,15 @@ def _refresh_and_persist(
         return None
     try:
         creds.refresh(Request())
-    except RefreshError:
+    except RefreshError as e:
+        # Never silent (CTO nit 2026-11-13): log the class and the OAuth error
+        # code (invalid_grant = revoked / expired refresh token), never the token.
+        code = refresh_error_code(e)
+        _LAST_REFRESH_ERROR[slug] = code
+        logger.warning(
+            "token refresh failed for channel '%s' (id=%s): %s code=%s",
+            slug, getattr(channel, "id", None), type(e).__name__, code,
+        )
         return None
     if _uses_platform_oauth(channel):
         from app.services import token_store
@@ -301,7 +339,7 @@ def get_service(
             f"token unreadable for channel '{slug}' — reconnect required ({e})"
         ) from e
     if creds is None:
-        raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
+        raise _needs_connect_missing(slug)
     return build("youtube", "v3", credentials=creds)
 
 
@@ -916,7 +954,7 @@ def get_analytics_service(
         raise NeedsConnect(f"missing client_secret.json for channel '{slug}'")
     creds = _load_creds(slug, CONSENT_SCOPES, channel=channel, session=session)
     if creds is None:
-        raise NeedsConnect(f"token missing/expired for channel '{slug}' — reconnect required")
+        raise _needs_connect_missing(slug)
     return build("youtubeAnalytics", "v2", credentials=creds)
 
 
