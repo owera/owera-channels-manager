@@ -145,6 +145,50 @@ def _paid_at(event_created: Any, data_object: dict[str, Any]) -> datetime:
     return utcnow()
 
 
+def mark_paid_not_test(
+    ws: Workspace, *, event: str, event_id: str, event_created: Any = None,
+    data_object: dict[str, Any] | None = None,
+) -> bool:
+    """A real payment on an S5 ``is_test`` workspace: clear ``is_test``, write
+    ``paid_at`` if still missing (never overwritten) and emit one structured
+    audit line (ids only, no PII). A paying customer never stays marked as test.
+    Returns True if the workspace was flipped. Never touches ws 1."""
+    if ws.id == OWERA_WORKSPACE_ID or not ws.is_test:
+        return False
+    ws.is_test = False
+    if ws.paid_at is None:
+        ws.paid_at = _paid_at(event_created, data_object or {})
+    logger.info("workspace_test_to_paid workspace_id=%s event=%s event_id=%s",
+                ws.id, event, event_id or "-")
+    return True
+
+
+def handle_invoice_paid_test_flip(
+    session: Session, invoice: dict[str, Any], event_id: str = "", event_created: Any = None,
+) -> None:
+    """``invoice.paid`` (S5 part): only the test→paid transition (+ ``paid_at`` if missing).
+    Runs after P6's ``handle_invoice_paid`` (subscription state) in ``dispatch_event``.
+    Idempotent: a replay finds ``is_test`` already False and does nothing. Zero-amount
+    invoices (trials, 100% coupons) are not a real payment and are ignored."""
+    try:
+        if int(invoice.get("amount_paid") or 0) <= 0:
+            return
+    except (TypeError, ValueError):
+        return
+    ws = _find_workspace(
+        session,
+        subscription_id=(invoice.get("subscription") or "") or None,
+        customer_id=(invoice.get("customer") or "") or None,
+        owner_email=None,
+    )
+    if not ws or ws.id == OWERA_WORKSPACE_ID or not ws.is_test:
+        return
+    mark_paid_not_test(ws, event="invoice.paid", event_id=event_id,
+                       event_created=event_created, data_object=invoice)
+    ws.updated_at = utcnow()
+    session.add(ws)
+
+
 def handle_checkout_completed(
     session: Session, data_object: dict[str, Any], event_id: str = "",
     event_created: Any = None,
@@ -205,10 +249,8 @@ def handle_checkout_completed(
         ws.subscription_status = "active"
         if ws.paid_at is None and ws.id != OWERA_WORKSPACE_ID:
             ws.paid_at = _paid_at(event_created, data_object)
-        if ws.is_test:
-            # A real payment landed on an S5 test workspace (same owner_email).
-            # Keep is_test so activation_report still flags it; ops decide.
-            logger.warning("paid checkout attached to is_test workspace id=%s", ws.id)
+        mark_paid_not_test(ws, event="checkout.session.completed", event_id=event_id,
+                           event_created=event_created, data_object=data_object)
         ws.updated_at = utcnow()
         session.add(ws)
 
@@ -412,7 +454,11 @@ def dispatch_event(session: Session, event: dict[str, Any]) -> int | None:
     elif ev_type == "invoice.payment_failed":
         handle_payment_failed(session, obj, created)
     elif ev_type == "invoice.paid":
+        # P6 (#221): subscription state / paid-through, ordered by event.created.
         handle_invoice_paid(session, obj, created)
+        # S5: a real payment on an is_test workspace clears is_test (+ paid_at once).
+        handle_invoice_paid_test_flip(session, obj, str(event.get("id") or ""),
+                                      event_created=event.get("created"))
     return None
 
 

@@ -12,6 +12,12 @@ Idempotent: if a workspace already has this owner_email, it is returned
 unchanged (``"created": false``) — including a real paid workspace, which is
 never flipped to test. Prints one JSON object. Exit 0 ok, 2 refused.
 
+Internal emails only: the domain must be ``owera.com`` and the local part a
+``+test`` alias (``name+test@owera.com``, optionally ``name+test2`` /
+``name+test-osi``; case-insensitive). Anything else, including a plain
+``name@owera.com``, is refused (exit 2), so S5 can never create a test row for
+a real customer's email.
+
 Not exposed over HTTP. Run on claw0 only with CTO's go (it writes prod DB).
 """
 
@@ -19,11 +25,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 from sqlmodel import Session, select
 
 OWERA_WORKSPACE_ID = 1
+INTERNAL_TEST_DOMAIN = "owera.com"
+_TEST_ALIAS_LOCAL = re.compile(r"^[a-z0-9][a-z0-9._-]*\+test(?:[-_.]?[a-z0-9]+)?$")
+
+
+def is_internal_test_email(key: str) -> bool:
+    """``name+test[suffix]@owera.com`` (already lower-cased/stripped)."""
+    local, sep, domain = key.rpartition("@")
+    return bool(sep) and domain == INTERNAL_TEST_DOMAIN and bool(_TEST_ALIAS_LOCAL.match(local))
 
 
 def provision(session: Session, email: str, name: str | None = None) -> dict:
@@ -36,6 +51,8 @@ def provision(session: Session, email: str, name: str | None = None) -> dict:
         return {"ok": False, "error": "invalid email"}
     if key in spa_google_login._SPA_EMAIL_WORKSPACE:
         return {"ok": False, "error": "email is on the owera SPA allowlist; refusing"}
+    if not is_internal_test_email(key):
+        return {"ok": False, "error": "internal test emails only: use name+test@owera.com; refusing"}
 
     existing = session.exec(select(Workspace).where(Workspace.owner_email == key)).first()
     if existing is not None:

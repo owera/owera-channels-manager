@@ -293,7 +293,7 @@ json.dumps(rep)  # serializable
 print("is_test workspace (S5) in report")
 from app.provision_test_workspace import provision
 with Session(engine) as s:
-    out = provision(s, "e2e.tester@example.com")
+    out = provision(s, "e2e.tester+test@owera.com")
     ok(out["ok"] and out["created"] and out["is_test"] and out["paid_at"] is None,
        "S5 provision: is_test, paid_at null")
     tw = s.get(Workspace, out["workspace_id"])
@@ -334,7 +334,7 @@ with cli_engine.connect() as c:
 ok("paid_at" not in cols, "CLI did not migrate the DB")
 _db.init_db()
 with Session(cli_engine) as s:
-    provision(s, "cli.tester@example.com")
+    provision(s, "cli.tester+test@owera.com")
 buf = io.StringIO()
 with redirect_stdout(buf):
     rc = ar.main([])

@@ -4,9 +4,9 @@
 
 | Column | Set by | Meaning |
 |---|---|---|
-| `workspace.paid_at` | `stripe_provision.handle_checkout_completed` | Stripe `event.created` of the first CM checkout (fallback: session `created`, then now). Never overwritten. Never set on ws 1. |
+| `workspace.paid_at` | `stripe_provision.handle_checkout_completed` (and `handle_invoice_paid` for an `is_test` workspace without one) | Stripe `event.created` of the first CM checkout (fallback: session `created`, then now). Never overwritten. Never set on ws 1. |
 | `workspace.first_draft_at` | `render_loop._finalize` (render success) | First successful render of any video in the workspace. Never overwritten. Pre-S1 workspaces: derived from the oldest `jobrun` render success (read side only). |
-| `workspace.is_test` | `python -m app.provision_test_workspace` | E2E workspace created without Stripe. Kept even if a real checkout later lands on the same `owner_email`. |
+| `workspace.is_test` | `python -m app.provision_test_workspace` | E2E workspace created without Stripe (internal `name+test@owera.com` only). **Cleared** by the first real payment (`checkout.session.completed` or `invoice.paid` with `amount_paid > 0`): a paying customer never stays marked as test. |
 | `video.approved_by` | approve / retry-republish (`review_guard.actor_of`), render-loop skip-gate (`auto:skip_gate`) | Who approved. NULL when the request had no identity and whenever `approved_at` is cleared. |
 
 Render-failed signal (A5) is derived, not stored: `FAILED` videos (and how many are
@@ -33,7 +33,23 @@ older than 24 h) plus `jobrun` render errors in the last 24 h, per workspace
 `provision_test_workspace` runs `init_db()` (same additive migration as startup),
 writes one row (`owner_email`, `is_test=1`), no Stripe call, no email, no
 `paid_at`; idempotent (returns the existing row, never flips a paid workspace to
-test); refuses ws 1 and the owera SPA allowlist email.
+test); refuses ws 1, the owera SPA allowlist email and every non-internal
+email: only `name+test@owera.com` (optional suffix: `name+test2`,
+`name+test-osi`; case-insensitive) is accepted, a plain `name@owera.com` is
+refused (exit 2).
+
+### Test → paid transition
+
+A real payment on an `is_test` workspace (`checkout.session.completed` for a CM
+checkout, or `invoice.paid` with `amount_paid > 0` matched by subscription or
+customer id) runs `stripe_provision.mark_paid_not_test`: `is_test` → false,
+`paid_at` written only if still NULL, and one audit line on the
+`manager.stripe_provision` logger (ids only, no PII):
+
+    workspace_test_to_paid workspace_id=<id> event=<stripe type> event_id=<evt_…>
+
+Idempotent: replays find `is_test` already false and log nothing. Ws 1 is never
+touched. (The repo has no audit table; the structured line is the audit record.)
 
 `activation_report` is read-only and never migrates: on a DB without the S1
 columns it exits 2.
