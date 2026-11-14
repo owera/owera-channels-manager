@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, OAuthStatus, Workspace, utcnow
+from app.models import Channel, CredentialSource, OAuthStatus, Workspace, utcnow
 from app.schemas import ChannelCreate, ChannelUpdate
 from app.services import notify, oauth_pending, youtube
 from app.workspace import channels_for_workspace, current_workspace, require_channel as require_ws_channel
@@ -185,6 +185,10 @@ def delete_channel(
     ws: Workspace = Depends(current_workspace),
 ):
     ch = require_ws_channel(session, ws, channel_id)
+    if ch.credential_source == CredentialSource.PLATFORM_OAUTH:
+        # Deleting a platform channel also ends its Google grant (best-effort)
+        # and removes the encrypted token row, same as /disconnect.
+        youtube.disconnect_channel(session, ch)
     session.delete(ch)
     session.commit()
 
