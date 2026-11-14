@@ -136,12 +136,20 @@ def mark_connected(session, channel: Channel, identity: dict) -> None:
 
 
 INVALID_GRANT = "invalid_grant"
+REASON_DISCONNECTED = "disconnected"
+REASON_DELETION_REQUESTED = "deletion_requested"
+REASON_WORKSPACE_CLOSED = "workspace_closed"
+# User-initiated losses: LegalOps cláusula 7 v2 / YT III.D.2.3.a and III.E.4.g (7 days).
+USER_PURGE_REASONS = frozenset({
+    REASON_DISCONNECTED, REASON_DELETION_REQUESTED, REASON_WORKSPACE_CLOSED,
+})
 
 
 def _stamp_access_lost(channel: Channel, new_status: str, error: str | None) -> None:
     """P3: stamp when Google access was definitively lost. A dead flip whose
     error carries invalid_grant (refresh token revoked/expired at Google) starts
-    the 30-day purge clock. The first stamp wins; a reconnect clears it."""
+    the 30-day purge clock (YT III.D.2.3.b). The first stamp wins; a reconnect
+    clears it."""
     if new_status not in DEAD_STATUSES or channel.access_lost_at is not None:
         return
     if error and INVALID_GRANT in str(error):
@@ -149,27 +157,99 @@ def _stamp_access_lost(channel: Channel, new_status: str, error: str | None) -> 
         channel.access_lost_reason = INVALID_GRANT
 
 
-def mark_operator_disconnect(session, channel: Channel) -> bool:
-    """The /disconnect route's status flip: DISCONNECTED, identity cleared,
-    access lost now (reason "disconnected", purge clock starts), committed.
-    No reconnect page (intentional), but a real CONNECTED channel still gets
-    the one access-lost email (P7). Returns True iff it was CONNECTED."""
+def _apply_user_purge_clock(channel: Channel, reason: str, now) -> None:
+    """Start or shorten the purge clock for a user-initiated 7-day reason.
+
+    The first ``access_lost_at`` wins. If the channel was already on a 30-day
+    clock (Google revoke / invalid_grant), the reason switches to the 7-day
+    one so the original stamp + 7 days becomes the deadline.
+    """
+    if channel.access_lost_at is None:
+        channel.access_lost_at = now
+        channel.access_lost_reason = reason
+    elif channel.access_lost_reason not in USER_PURGE_REASONS:
+        channel.access_lost_reason = reason
+
+
+def _end_user_access(channel: Channel, reason: str, now) -> bool:
+    """Flip to DISCONNECTED, clear the YouTube identity, start the 7-day clock.
+
+    Does not commit. Returns True iff the channel was CONNECTED.
+    """
     prev = channel.oauth_status
-    now = utcnow()
     channel.oauth_status = OAuthStatus.DISCONNECTED
     if prev != OAuthStatus.DISCONNECTED:
         channel.oauth_status_changed_at = now
-    if channel.access_lost_at is None:
-        channel.access_lost_at = now
-        channel.access_lost_reason = "disconnected"
+    _apply_user_purge_clock(channel, reason, now)
     channel.yt_channel_id = None
     channel.yt_channel_title = None
+    return prev == OAuthStatus.CONNECTED
+
+
+def mark_operator_disconnect(session, channel: Channel) -> bool:
+    """The /disconnect route's status flip: DISCONNECTED, identity cleared,
+    access lost now (reason "disconnected", 7-day purge clock starts), committed.
+    No reconnect page (intentional), but a real CONNECTED channel still gets
+    the one access-lost email (P7). Returns True iff it was CONNECTED."""
+    now = utcnow()
+    flipped = _end_user_access(channel, REASON_DISCONNECTED, now)
     session.add(channel)
     session.commit()
-    flipped = prev == OAuthStatus.CONNECTED
     if flipped:
         email_access_lost(channel, cause="disconnected in Channels Manager")
     return flipped
+
+
+def mark_deletion_requested(session, channel: Channel) -> bool:
+    """User asked us to delete this channel's YouTube data (YT III.E.4.g).
+
+    Starts the 7-day purge clock (reason "deletion_requested"), flips to
+    DISCONNECTED and clears identity. The caller should already have dropped
+    the local token (and revoked at Google when #213 is stacked). Returns
+    True iff the channel was CONNECTED.
+    """
+    now = utcnow()
+    flipped = _end_user_access(channel, REASON_DELETION_REQUESTED, now)
+    session.add(channel)
+    session.commit()
+    if flipped:
+        email_access_lost(channel, cause="deletion requested")
+    return flipped
+
+
+def mark_workspace_closed(session, workspace) -> int:
+    """Close a workspace (YT III.E.4.g): stamp every channel with the 7-day
+    reason "workspace_closed", drop local tokens, set workspace.closed_at.
+
+    Commits once. Returns how many channels were stamped. Real CONNECTED
+    channels still get the one access-lost email each.
+    """
+    from sqlmodel import select
+
+    from app.services import youtube
+
+    now = utcnow()
+    channels = session.exec(
+        select(Channel).where(Channel.workspace_id == workspace.id)
+    ).all()
+    to_email: list[Channel] = []
+    for ch in channels:
+        try:
+            youtube.disconnect_channel(session, ch)
+        except OSError:
+            pass
+        flipped = _end_user_access(ch, REASON_WORKSPACE_CLOSED, now)
+        session.add(ch)
+        if flipped:
+            to_email.append(ch)
+    if getattr(workspace, "closed_at", None) is None:
+        workspace.closed_at = now
+        workspace.updated_at = now
+        session.add(workspace)
+    session.commit()
+    for ch in to_email:
+        email_access_lost(ch, cause="workspace closed")
+    return len(channels)
 
 
 # ---- P7: access-lost email to contact@ -------------------------------------

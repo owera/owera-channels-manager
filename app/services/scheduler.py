@@ -105,8 +105,9 @@ def start() -> None:
         id="music_replenish", max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
-    # P3: delete YouTube API data ≤30 days after access was lost (revoked,
-    # disconnected, invalid_grant). Idempotent; first run 5 min after startup.
+    # P3: delete YouTube API data 7 days after a user disconnect / deletion
+    # request / workspace close, or 30 days after a Google revoke / invalid
+    # refresh (LegalOps cláusula 7 v2). Idempotent; first run 5 min after startup.
     _scheduler.add_job(
         _safe(youtube_purge.tick, "youtube_purge"),
         "interval", hours=youtube_purge.TICK_HOURS,

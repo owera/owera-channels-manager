@@ -1,30 +1,39 @@
 # YouTube data retention, access-lost alerts, refresh diagnostics
 
-Covers the 30-day deletion rule (YouTube API Services Developer Policies
-§III.E.4, Google API Services User Data Policy), the contact@ alert when a
-real channel loses access, and the refresh-error logging.
+Covers the deletion rules in LegalOps cláusula 7 v2 (YouTube API Services
+Developer Policies III.D.2.3.a, III.E.4.g and III.D.2.3.b; Google API
+Services User Data Policy), the contact@ alert when a real channel loses
+access, and the refresh-error logging.
 
 ## When access counts as lost
 
 `Channel.access_lost_at` (naive UTC) starts the clock. It is stamped by:
 
-| Event | Where | `access_lost_reason` |
-|---|---|---|
-| Disconnect in the app (`POST /api/channels/{id}/disconnect`) | `notify.mark_operator_disconnect` | `disconnected` |
-| A token refresh fails with `invalid_grant` (revoked at Google, or the Testing-mode 7-day expiry) | `notify.mark_dead` via the `NeedsConnect` message | `invalid_grant` |
+| Event | Where | `access_lost_reason` | Deadline |
+|---|---|---|---|
+| Disconnect in the app (`POST /api/channels/{id}/disconnect`) | `notify.mark_operator_disconnect` | `disconnected` | 7 days (III.D.2.3.a) |
+| User asks us to delete (`POST /api/channels/{id}/request-deletion`) | `notify.mark_deletion_requested` | `deletion_requested` | 7 days (III.E.4.g) |
+| Workspace closed (`POST /api/workspace/close`) | `notify.mark_workspace_closed` | `workspace_closed` | 7 days (III.E.4.g) |
+| A token refresh fails with `invalid_grant` (revoked on Google's security page, or the token will not renew) | `notify.mark_dead` via the `NeedsConnect` message | `invalid_grant` | 30 days (III.D.2.3.b) |
 
-The first stamp wins. A reconnect (`notify.mark_connected`) clears it, which
-cancels a pending purge. An `EXPIRED` flip **without** `invalid_grant` (e.g.
-token row missing) does not start the clock in this PR (follow-up P3b).
+The first stamp wins. A later user-initiated event (disconnect, deletion
+request, workspace close) can only *shorten* a 30-day clock to 7 days from
+the original stamp. A reconnect (`notify.mark_connected`) clears the clock,
+which cancels a pending purge. An `EXPIRED` flip **without** `invalid_grant`
+(e.g. token row missing) does not start the clock in this PR (follow-up P3b).
+
+The access token is dropped immediately on disconnect, a deletion request
+and a workspace close (revoked at Google once #213 is stacked).
 
 ## Purge job
 
 `app/services/youtube_purge.py`, registered in the existing APScheduler
 (`youtube_purge`, every 6 h, first run 5 min after start). No env var.
 
-A channel is purged when `access_lost_at` is ≥ 29 days old and it is not
-`connected`, so with the 6 h tick the data is gone within 30 days.
-Idempotent: `youtube_data_purged_at >= access_lost_at` means done.
+A channel is purged when `access_lost_at + 7 days` (user-initiated reasons)
+or `access_lost_at + 30 days` (Google revoke / RefreshError) has been
+reached and it is not `connected`. A tick at exactly that instant deletes
+the data. Idempotent: `youtube_data_purged_at >= access_lost_at` means done.
 
 Deleted: `ChannelMetric` rows, `VideoMetric` rows (analytics, traffic sources,
 search terms), the stored OAuth credential and legacy token files,

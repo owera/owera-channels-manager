@@ -65,6 +65,7 @@ class Workspace(SQLModel, table=True):
     stripe_customer_id: Optional[str] = Field(default=None, index=True)
     stripe_subscription_id: Optional[str] = Field(default=None, index=True)
     welcome_email_sent: bool = False
+    closed_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -151,9 +152,10 @@ class Channel(SQLModel, table=True):
     is_test: bool = False
 
     # Google access lifecycle (P3, naive UTC like utcnow()). access_lost_at is set
-    # when access is definitively gone — operator/user disconnect, or a refresh
-    # that failed with invalid_grant — and cleared on reconnect. The purge job
-    # deletes the channel's YouTube API data once it is ~30 days old.
+    # when access is definitively gone — operator/user disconnect, a deletion
+    # request, a workspace close, or a refresh that failed with invalid_grant —
+    # and cleared on reconnect. The purge job deletes the channel's YouTube API
+    # data after 7 days (user-initiated) or 30 days (Google revoke / RefreshError).
     access_lost_at: Optional[datetime] = None
     access_lost_reason: Optional[str] = None
     youtube_data_purged_at: Optional[datetime] = None

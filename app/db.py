@@ -77,7 +77,8 @@ def _add_missing_columns() -> None:
         "workspace": [("owner_email", "VARCHAR"),
                       ("stripe_customer_id", "VARCHAR"),
                       ("stripe_subscription_id", "VARCHAR"),
-                      ("welcome_email_sent", "BOOLEAN DEFAULT 0")],
+                      ("welcome_email_sent", "BOOLEAN DEFAULT 0"),
+                      ("closed_at", "DATETIME")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

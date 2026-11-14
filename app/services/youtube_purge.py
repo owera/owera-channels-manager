@@ -1,19 +1,31 @@
-"""P3: delete a channel's YouTube API data within 30 days of losing access.
+"""P3: delete a channel's YouTube API data after access is lost.
 
-YouTube API Services Developer Policies §III.E.4 and the Google API Services
-User Data Policy: when a user revokes access (or the grant is otherwise gone),
-API data stored for them must be deleted within 30 days.
+YouTube API Services Developer Policies and the Google API Services User
+Data Policy, as applied by LegalOps cláusula 7 v2:
+
+- Disconnect in the app (revocation via the app's own mechanism): delete
+  within 7 calendar days (YT III.D.2.3.a).
+- User asks us to delete their data, or the workspace is closed: delete
+  within 7 calendar days (YT III.E.4.g).
+- Revocation on Google's security-settings page, or a token that will not
+  refresh (RefreshError / invalid_grant): delete within 30 days (YT III.D.2.3.b).
 
 Clock: ``Channel.access_lost_at`` (naive UTC), stamped by
-- ``notify.mark_operator_disconnect`` — disconnect in the app (reason "disconnected");
-- ``notify.mark_dead`` — a refresh that failed with ``invalid_grant`` (revoked /
-  expired at Google; reason "invalid_grant").
+- ``notify.mark_operator_disconnect`` — disconnect in the app (reason
+  "disconnected", 7 days);
+- ``notify.mark_deletion_requested`` — user asked us to delete (reason
+  "deletion_requested", 7 days);
+- ``notify.mark_workspace_closed`` — workspace closed (reason
+  "workspace_closed", 7 days);
+- ``notify.mark_dead`` — a refresh that failed with ``invalid_grant``
+  (revoked / expired at Google; reason "invalid_grant", 30 days).
 A reconnect (``notify.mark_connected``) clears it and cancels the purge.
 
-The scheduler runs ``tick`` every 6 h. A channel is purged once its clock is
-``PURGE_AFTER`` (29 days) old, so with the tick interval the data is gone
-within 30 days. Idempotent: ``youtube_data_purged_at`` >= ``access_lost_at``
-means already purged; re-running deletes nothing more.
+The scheduler runs ``tick`` every 6 h. A channel is purged once
+``access_lost_at + retention`` has been reached (7 or 30 calendar days
+depending on the reason), so a tick at exactly that instant deletes the
+data. Idempotent: ``youtube_data_purged_at`` >= ``access_lost_at`` means
+already purged; re-running deletes nothing more.
 
 Deleted (YouTube API data only):
 - ``ChannelMetric`` rows (subscriber/view/video counts from channels.list);
@@ -40,28 +52,45 @@ from app.models import Channel, ChannelMetric, OAuthCredential, OAuthStatus, Vid
 
 logger = logging.getLogger("manager.youtube_purge")
 
-RETENTION_DAYS = 30
-PURGE_AFTER = timedelta(days=RETENTION_DAYS - 1)   # + ≤6h tick ⇒ within 30 days
+# LegalOps cláusula 7 v2 / YT III.D.2.3.a and III.E.4.g vs III.D.2.3.b.
+RETENTION_DAYS_USER = 7
+RETENTION_DAYS_GOOGLE = 30
+RETENTION_DAYS = RETENTION_DAYS_GOOGLE  # backward-compatible alias (30-day path)
 TICK_HOURS = 6
+
+
+def retention_delta(reason: str | None) -> timedelta:
+    """How long stored YouTube API data may be kept after this loss reason."""
+    from app.services.notify import USER_PURGE_REASONS
+
+    if reason in USER_PURGE_REASONS:
+        return timedelta(days=RETENTION_DAYS_USER)
+    return timedelta(days=RETENTION_DAYS_GOOGLE)
 
 
 def _naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
+def is_due(channel: Channel, now: datetime) -> bool:
+    """True when the channel's purge deadline has been reached and it is not connected."""
+    if channel.access_lost_at is None or channel.oauth_status == OAuthStatus.CONNECTED:
+        return False
+    lost = _naive(channel.access_lost_at)
+    if channel.youtube_data_purged_at is not None and _naive(channel.youtube_data_purged_at) >= lost:
+        return False
+    return lost + retention_delta(channel.access_lost_reason) <= _naive(now)
+
+
 def due_channels(session: Session, now: datetime | None = None) -> list[Channel]:
     now = _naive(now or utcnow())
-    cutoff = now - PURGE_AFTER
     rows = session.exec(
         select(Channel).where(
             Channel.access_lost_at != None,  # noqa: E711
-            Channel.access_lost_at <= cutoff,
             Channel.oauth_status != OAuthStatus.CONNECTED,
         )
     ).all()
-    return [c for c in rows
-            if c.youtube_data_purged_at is None
-            or _naive(c.youtube_data_purged_at) < _naive(c.access_lost_at)]
+    return [c for c in rows if is_due(c, now)]
 
 
 def purge_channel(session: Session, channel: Channel, now: datetime | None = None) -> dict:

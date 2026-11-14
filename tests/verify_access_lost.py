@@ -2,9 +2,15 @@
 
 - _refresh_and_persist logs the RefreshError class and OAuth code (invalid_grant),
   never the token, and the code reaches the NeedsConnect message;
-- invalid_grant / operator disconnect stamp Channel.access_lost_at; reconnect clears;
-- youtube_purge deletes only YouTube API data ≥29 days after access was lost,
-  idempotently, keeping the workspace and non-YouTube rows;
+- invalid_grant / operator disconnect / deletion request / workspace close
+  stamp Channel.access_lost_at; reconnect clears;
+- youtube_purge deletes only YouTube API data once the deadline is reached,
+  idempotently, keeping the workspace and non-YouTube rows:
+  7 calendar days for disconnect in the app, a deletion request or a
+  workspace close (LegalOps cláusula 7 v2, YT III.D.2.3.a and III.E.4.g);
+  30 days for a Google revoke or RefreshError / invalid_grant (III.D.2.3.b).
+  Fake clock: at (deadline - 1h) the data is still there; at the deadline it
+  has been purged;
 - one access-lost email to contact@owera.com per channel+status+transition
   (persisted dedupe), only for real channels (not paused, not is_test), via
   Resend (mocked), never with a token, never to rodrigo@.
@@ -37,6 +43,7 @@ from app.db import get_session
 from app.models import (Channel, ChannelAlert, ChannelMetric, CredentialSource, OAuthCredential,
                         OAuthStatus, Playlist, Topic, Video, VideoMetric, Workspace, utcnow)
 from app.routers import channels as channels_router
+from app.routers import settings as settings_router
 from app.services import notify, token_store, youtube, youtube_purge
 from app.workspace import current_workspace
 
@@ -163,14 +170,43 @@ c1 = get(1)
 ok(c1.access_lost_at is None and c1.access_lost_reason is None and c1.youtube_data_purged_at is None,
    "reconnect clears the clock")
 
-# ======================= P3: purge job =====================================
-print("P3: purge job")
+def _has_metrics(cid: int) -> bool:
+    with Session(eng) as s:
+        return s.exec(select(ChannelMetric).where(ChannelMetric.channel_id == cid)).first() is not None
+
+
+def _set_lost(cid: int, when: datetime, reason: str, status=OAuthStatus.EXPIRED):
+    with Session(eng) as s:
+        ch = s.get(Channel, cid)
+        ch.oauth_status = status
+        ch.access_lost_at = when
+        ch.access_lost_reason = reason
+        s.add(ch)
+        s.commit()
+
+
+def _assert_deadline(cid: int, t0: datetime, days: int, label: str):
+    """Fake clock (LegalOps cláusula 7 v2): data still there at deadline-1h,
+    purged when the purge job runs at the deadline."""
+    almost = t0 + timedelta(days=days) - timedelta(hours=1)
+    youtube_purge.tick(now=almost)
+    ok(_has_metrics(cid), f"{label}: at {days}d-1h ({days-1}d23h) YouTube data still exists")
+    n = youtube_purge.tick(now=t0 + timedelta(days=days))
+    ok(n >= 1 and not _has_metrics(cid),
+       f"{label}: purge job at {days}d deletes the YouTube data")
+    with Session(eng) as s:
+        ok(s.get(Channel, cid).youtube_data_purged_at is not None, f"{label}: purge stamped")
+
+
+# ======================= P3: purge job (30-day, fake clock) ================
+print("P3: purge job — 30 days for Google revoke / RefreshError")
 mk_channel(10, name="Buyer YT")
 mk_channel(11, name="Other")
+T30 = datetime(2020, 1, 15, 12, 0, 0)
 with Session(eng) as s:
-    t = Topic(channel_id=10, name="T")
-    s.add(t); s.commit(); s.refresh(t)
-    v = Video(channel_id=10, topic_id=t.id, subject="s", yt_video_id="vid10", title="My video")
+    tpc = Topic(channel_id=10, name="T")
+    s.add(tpc); s.commit(); s.refresh(tpc)
+    v = Video(channel_id=10, topic_id=tpc.id, subject="s", yt_video_id="vid10", title="My video")
     s.add(v); s.add(Playlist(channel_id=10, yt_playlist_id="PL10", title="P"))
     s.commit(); s.refresh(v)
     for cid in (10, 11):
@@ -180,25 +216,21 @@ with Session(eng) as s:
     vid = v.id
     ch = s.get(Channel, 10)
     ch.oauth_status = OAuthStatus.EXPIRED
-    ch.access_lost_at = utcnow() - timedelta(days=28)
+    ch.access_lost_at = T30
     ch.access_lost_reason = "invalid_grant"
     s.add(ch)
     c11 = s.get(Channel, 11)
-    c11.access_lost_at = utcnow() - timedelta(days=60)   # stale stamp but CONNECTED → never purged
+    c11.access_lost_at = T30 - timedelta(days=60)   # stale stamp but CONNECTED → never purged
     s.add(c11)
     s.commit()
 
-ok(youtube_purge.tick() == 0, "28 days after loss: nothing purged yet (reconnect grace)")
-ok(youtube_purge.tick(now=utcnow() + timedelta(days=1, hours=12)) == 1,
-   "29.5 days after loss: channel purged (within 30 days)")
+_assert_deadline(10, T30, 30, "invalid_grant / RefreshError")
 with Session(eng) as s:
     c10 = s.get(Channel, 10)
-    ok(not s.exec(select(ChannelMetric).where(ChannelMetric.channel_id == 10)).all(), "ChannelMetric deleted")
     ok(not s.exec(select(VideoMetric).where(VideoMetric.channel_id == 10)).all(),
        "VideoMetric (analytics + traffic/search terms) deleted")
     ok(s.get(OAuthCredential, 10) is None, "dead credential deleted")
     ok(c10.yt_channel_title is None and c10.name == "ch10", "cached YouTube title/name removed")
-    ok(c10.youtube_data_purged_at is not None, "purge stamped")
     ok(s.get(Workspace, 2) is not None, "workspace kept")
     ok(s.get(Video, vid) is not None and s.get(Video, vid).title == "My video", "Video row (our record) kept")
     ok(s.exec(select(Topic).where(Topic.channel_id == 10)).first() is not None, "topics kept")
@@ -207,13 +239,84 @@ with Session(eng) as s:
     ok(s.exec(select(ChannelMetric).where(ChannelMetric.channel_id == 11)).first() is not None,
        "connected channel's data untouched")
     ok(s.get(OAuthCredential, 11) is not None, "connected channel credential untouched")
-ok(youtube_purge.tick(now=utcnow() + timedelta(days=5)) == 0, "re-run is a no-op (idempotent)")
+ok(youtube_purge.tick(now=T30 + timedelta(days=40)) == 0, "re-run is a no-op (idempotent)")
 
 # reconnect then lose again → new clock → purged again later
 with Session(eng) as s:
     notify.mark_connected(s, s.get(Channel, 10), {"id": "UC10", "title": "Buyer YT"})
     s.add(ChannelMetric(channel_id=10, subscriber_count=9)); s.commit()
-ok(youtube_purge.tick(now=utcnow() + timedelta(days=90)) == 0, "reconnected channel is not purged")
+ok(youtube_purge.tick(now=T30 + timedelta(days=90)) == 0, "reconnected channel is not purged")
+
+# ======================= P3: 7-day fake clock (3 triggers) =================
+print("P3: 7-day purge — disconnect, deletion request, workspace close")
+# Isolated TestClient so the three HTTP triggers can run before the P7 email section.
+app_p3 = FastAPI(); app_p3.include_router(channels_router.router); app_p3.include_router(settings_router.router)
+
+
+def _sess_p3():
+    with Session(eng) as session:
+        yield session
+
+
+def _ws_for(ws_id):
+    def _ws():
+        with Session(eng) as session:
+            return session.get(Workspace, ws_id)
+    return _ws
+
+
+app_p3.dependency_overrides[get_session] = _sess_p3
+app_p3.dependency_overrides[current_workspace] = _ws_for(2)
+client_p3 = TestClient(app_p3)
+
+# --- disconnect in the app (YT III.D.2.3.a) ---
+T7A = datetime(2020, 3, 1, 12, 0, 0)
+mk_channel(30, name="Disc 7d")
+with Session(eng) as s:
+    s.add(ChannelMetric(channel_id=30, subscriber_count=5)); s.commit()
+r = client_p3.post("/api/channels/30/disconnect")
+ok(r.status_code == 200 and r.json()["oauth_status"] == OAuthStatus.DISCONNECTED,
+   "disconnect 200 marks the channel disconnected")
+c30 = get(30)
+ok(c30.access_lost_at is not None and c30.access_lost_reason == "disconnected",
+   "disconnect in the app stamps access_lost_at (reason=disconnected)")
+_set_lost(30, T7A, "disconnected", status=OAuthStatus.DISCONNECTED)
+_assert_deadline(30, T7A, 7, "disconnect in the app")
+
+# --- deletion request (YT III.E.4.g) ---
+T7B = datetime(2020, 4, 1, 12, 0, 0)
+mk_channel(31, name="Del 7d")
+with Session(eng) as s:
+    s.add(ChannelMetric(channel_id=31, subscriber_count=5)); s.commit()
+r = client_p3.post("/api/channels/31/request-deletion")
+ok(r.status_code == 200 and r.json()["oauth_status"] == OAuthStatus.DISCONNECTED,
+   "request-deletion 200 marks the channel disconnected")
+c31 = get(31)
+ok(c31.access_lost_at is not None and c31.access_lost_reason == "deletion_requested",
+   "deletion request stamps access_lost_at (reason=deletion_requested)")
+ok(c31.yt_channel_id is None, "deletion request drops the identity")
+_set_lost(31, T7B, "deletion_requested", status=OAuthStatus.DISCONNECTED)
+_assert_deadline(31, T7B, 7, "deletion request")
+
+# --- workspace close (YT III.E.4.g) ---
+T7C = datetime(2020, 5, 1, 12, 0, 0)
+with Session(eng) as s:
+    s.add(Workspace(id=3, slug="closing", name="Closing Co")); s.commit()
+mk_channel(32, ws=3, name="Close 7d")
+with Session(eng) as s:
+    s.add(ChannelMetric(channel_id=32, subscriber_count=5)); s.commit()
+app_p3.dependency_overrides[current_workspace] = _ws_for(3)
+r = client_p3.post("/api/workspace/close")
+ok(r.status_code == 200 and r.json().get("ok") and r.json().get("channels") >= 1,
+   "workspace close 200 stamps the workspace channels")
+c32 = get(32)
+ok(c32.access_lost_at is not None and c32.access_lost_reason == "workspace_closed",
+   "workspace close stamps access_lost_at (reason=workspace_closed)")
+with Session(eng) as s:
+    ok(s.get(Workspace, 3).closed_at is not None, "workspace.closed_at is set")
+_set_lost(32, T7C, "workspace_closed", status=OAuthStatus.DISCONNECTED)
+_assert_deadline(32, T7C, 7, "workspace close")
+app_p3.dependency_overrides[current_workspace] = _ws_for(2)
 
 # ======================= P7: access-lost email =============================
 print("P7: access-lost email")
