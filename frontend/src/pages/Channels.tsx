@@ -7,6 +7,7 @@ import { oauthStatusLabel } from "../copy";
 import { intFromBlur } from "../intFromBlur";
 import { ConnectConsentNote, Dot, Empty, Field, Modal, SectionLabel, Toggle } from "../ui";
 import ChannelYoutube from "./ChannelYoutube";
+import { l6ConnectAiLineId, l6ConnectAiLineProps } from "../l6ConnectAiLine";
 
 const OAUTH_HEX: Record<string, string> = {
   connected: "#c9f24e", expired: "#f5a524", error: "#f7768e", disconnected: "#6c7681",
@@ -263,6 +264,17 @@ function ChannelDetail({ channel }: { channel: Channel }) {
   };
 
   const connected = channel.oauth_status === "connected";
+  // L6 AI-consent line (LegalOps, sha 845c22005853): before every button that opens
+  // Google OAuth. One paragraph per ChannelDetail (only one OAuth button renders),
+  // id per channel so aria-describedby stays unique.
+  const l6 = l6ConnectAiLineProps(typeof navigator !== "undefined" ? navigator : undefined);
+  const l6Id = l6ConnectAiLineId(channel.id);
+  const l6Line = (mt: string) => (
+    <p id={l6Id} lang={l6.lang} data-l6-consent-line=""
+      className={`text-sm text-fog-200 ${mt} max-w-xl leading-relaxed`}>
+      {l6.text}
+    </p>
+  );
   const [nicheDraft, setNicheDraft] = useState(channel.niche ?? "");
   useEffect(() => {
     setNicheDraft(channel.niche ?? "");
@@ -293,8 +305,12 @@ function ChannelDetail({ channel }: { channel: Channel }) {
             Sign in with Google so Channels Manager can upload videos, create playlists, and read basic channel stats.
             {platformOauth ? " Early access uses Owera's shared Google sign-in — no JSON key upload." : " Upload your Google Cloud client secret if prompted, then connect."}
           </p>
+          {l6Line("mt-3")}
         </div>
       )}
+      {/* L6: the line shows whenever the button that opens Google OAuth is present —
+          also on Reconnect YouTube (connected channel), not only on the panel above. */}
+      {connected && l6Line("mt-5")}
 
       {channel.oauth_error && <div className="mt-4 text-sm text-amber leading-relaxed">{channel.oauth_error}</div>}
 
@@ -308,7 +324,7 @@ function ChannelDetail({ channel }: { channel: Channel }) {
             </button>
           </>
         )}
-        <button className="btn btn-signal"
+        <button className="btn btn-signal" aria-describedby={l6Id} data-google-oauth=""
           disabled={(platformOauth ? m.platformOauthStart : m.oauthStart).isPending || connecting}
           onClick={async () => {
             try {
