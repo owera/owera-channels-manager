@@ -239,13 +239,14 @@ function BudgetsStep({ state }: { state: WizardState }) {
   );
 }
 
-function ConsentsStep() {
+function ConsentsStep({ state }: { state: WizardState }) {
   const m = useWizardMut();
   const [terms, setTerms] = useState(false);
   const [ai, setAi] = useState(false);
   const l6 = l6ConnectAiLineProps(navLocale());
   const glu = googleLimitedUse(navLocale());
-  const tc = termsConsent(navLocale());   // single Terms + Privacy box (LegalOps FIX 14/11)
+  // Single Terms + Privacy box (LegalOps FIX 14/11). PT gate from the server (MANAGER_TERMS_PT_LIVE).
+  const tc = termsConsent(navLocale(), state.terms?.pt_live === true);
   const box = "mt-0.5 h-4 w-4 accent-[#c9f24e] shrink-0";
   return (
     <Panel title={t("wizard.consents.title")} step="consents">
@@ -347,7 +348,7 @@ export default function Wizard() {
       {step === "youtube" && <YoutubeStep state={state} />}
       {step === "topics" && <TopicsStep state={state} />}
       {step === "budgets" && <BudgetsStep state={state} />}
-      {step === "consents" && <ConsentsStep />}
+      {step === "consents" && <ConsentsStep state={state} />}
       {(step === "ideas" || step === "first_draft") && <FirstDraftStep state={state} />}
     </div>
   );

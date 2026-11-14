@@ -558,6 +558,11 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
         return "not_paid_or_test"
     if getattr(row, "terms_accepted_at", None) is None or getattr(row, "privacy_accepted_at", None) is None:
         return "terms_privacy_not_accepted"
+    # CTO / LegalOps 14/11: a PT acceptance isn't consent until /terms/pt/ is live.
+    from app.services import terms_consent as _tc
+    r = _tc.block_reason(row)
+    if r is not None:
+        return r
     # S2 (PO CM condition ii + LegalOps 14/11): Google Limited Use consent — the
     # user ticked the exact LegalOps text (EN/PT); a sha of a text we no longer
     # show is stale and asked again (app/services/google_limited_use.py).
@@ -644,6 +649,9 @@ def _paused(step: str) -> dict[str, str]:
 
 BLOCK_USER_TEXT: dict[str, tuple[str, dict[str, str]]] = {
     "terms_privacy_not_accepted": ("terms_privacy", _paused("terms_privacy")),
+    # CTO / LegalOps 14/11: accepted under the PT text while MANAGER_TERMS_PT_LIVE is false;
+    # same "Terms and privacy" step (asked again in EN).
+    "terms_pt_not_live": ("terms_privacy", _paused("terms_privacy")),
     "not_paid_or_test": ("payment", _paused("payment")),
     # S2 wizard: Google Limited Use consent (Workspace.ai_data_ack_*), emitted by
     # release_block_reason after terms/privacy. A stale consent (text changed)

@@ -17,7 +17,7 @@ and the Google Limited Use checkbox (EN / PT by browser locale).
 | `02-youtube-{en,pt}.png` | Connect YouTube: help line, L6 line, #215 consent note |
 | `03-topics-{en,pt}.png` | Niche + 3 topics, first CMO preset picked (PT presets in PT) |
 | `04-budgets-{en,pt}.png` | Daily budgets: buyer week-1 defaults 2 / 2 |
-| `05-consents-{en,pt}.png` | ONE Terms + Privacy box + the AI-data box, both unchecked by default (PT shows the EN Terms sentence while `TERMS_PT_LIVE=false`) |
+| `05-consents-{en,pt}.png` | ONE Terms + Privacy box + the AI-data box, both unchecked by default (PT shows the EN Terms sentence while `MANAGER_TERMS_PT_LIVE=false`) |
 | `06-consents-checked-{en,pt}.png` | Same, ticked |
 | `07-ideas-{en,pt}.png` | Generating ideas (1 per topic × 3) |
 | `08-first-draft-queued-{en,pt}.png` | First draft queued at top render priority |

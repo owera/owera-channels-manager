@@ -227,8 +227,10 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
     # First acceptance is kept (an audit timestamp is never moved forward).
     ws.terms_accepted_at = ws.terms_accepted_at or now
     ws.privacy_accepted_at = ws.privacy_accepted_at or now
-    if not ws.terms_accepted_version:
-        ws.terms_accepted_version = body.terms_text_sha
+    # Stored once; replaced only when the stored one doesn't count (a PT acceptance
+    # while the PT gate is closed), so the record shows the sentence that does.
+    if not ws.terms_accepted_version or terms_consent.block_reason(ws) == "terms_pt_not_live":
+        ws.terms_accepted_version = (body.terms_text_sha or "").strip().lower()
         ws.terms_accepted_locale = terms_loc
     session.add(ws)
     session.commit()

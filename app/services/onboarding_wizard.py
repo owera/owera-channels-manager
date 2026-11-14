@@ -77,8 +77,13 @@ def is_first_login(session: Session, ws: Workspace) -> bool:
 
 def consents_done(ws: Workspace) -> bool:
     from app.services import google_limited_use
-    return (ws.terms_accepted_at is not None and ws.privacy_accepted_at is not None
-            and google_limited_use.is_valid(ws))
+    from app.services import terms_consent
+    return terms_consent.is_valid(ws) and google_limited_use.is_valid(ws)
+
+
+def _terms_flags() -> dict:
+    from app.services import terms_consent
+    return terms_consent.public_flags()
 
 
 def _topics(session: Session, ch: Channel | None) -> list[Topic]:
@@ -164,6 +169,8 @@ def state(session: Session, ws: Workspace, locale: str | None = None) -> dict:
             "ai_data_ack_version": ws.ai_data_ack_version,
             "ai_data_ack_locale": ws.ai_data_ack_locale,
         },
+        # CTO / LegalOps gate: the SPA reads the PT terms gate from here (MANAGER_TERMS_PT_LIVE).
+        "terms": _terms_flags(),
         "ai_data_line_version": AI_DATA_LINE_SHA,
         # Google Limited Use consent: the shas the server accepts (per locale).
         "ai_data_text_shas": {loc: google_limited_use.text_sha(t)

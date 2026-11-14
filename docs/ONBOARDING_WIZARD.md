@@ -139,9 +139,18 @@ Links on the document names (EN `owera.com/terms/`, `owera.com/privacy/`; PT
 `frontend/src/termsConsent.ts`; the SPA sends the sha256 of the sentence shown + its locale;
 the server accepts only known shas (409 `terms_text_changed` / `terms_locale_mismatch`).
 
-**PT gate:** `TERMS_PT_LIVE = False` (both files) until `owera.com/terms/pt/` is live. While
-false, a PT browser sees the EN sentence with the EN links and the server accepts only the
-EN sha. Flag ON for PT users requires owera.com/terms/pt/ live; PO CM decides EN-only vs
+**Configurable version (CTO / LegalOps 14/11):** the server accepts and stores ONLY
+`MANAGER_TERMS_VERSION_SHA_EN` / `MANAGER_TERMS_VERSION_SHA_PT` (code defaults = sha256 of
+the FIX4 sentences; `.env.example` commented). The final text (CM v2 EN+PT) is still under
+the equivalence check: when it changes, update both files' sentences and these shas; a
+mismatch fails closed (409 `terms_text_changed`, "reload and accept again").
+
+**PT gate:** `MANAGER_TERMS_PT_LIVE` (default false) until `owera.com/terms/pt/` is live. The
+SPA reads it from `GET /api/onboarding/wizard` → `terms.pt_live` (missing = closed; no
+constant in the bundle). While false, a PT browser sees the EN sentence with the EN links,
+the server accepts only the EN sha, and a stored PT acceptance does not count as consent:
+`consents_done` is false (the wizard asks again, in EN, and the EN record replaces the PT one;
+the first timestamp is kept) and the S8 external release refuses with `terms_pt_not_live`. Flag ON for PT users requires owera.com/terms/pt/ live; PO CM decides EN-only vs
 wait if not live by Mon 16.
 
 CMO v3 also localizes the footer links (Privacidade · Termos · Termos de Serviço do YouTube,

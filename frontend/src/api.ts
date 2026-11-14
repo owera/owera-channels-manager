@@ -365,6 +365,8 @@ export interface WizardState {
     terms_accepted_version: string | null; terms_accepted_locale: string | null;
     ai_data_ack_at: string | null; ai_data_ack_version: string | null; ai_data_ack_locale: string | null;
   };
+  /** CTO / LegalOps gate: MANAGER_TERMS_PT_LIVE + the Terms shas the server accepts now. */
+  terms: { pt_live: boolean; accepted_shas: { en?: string; pt?: string } };
   ai_data_line_version: string;
   ai_data_text_shas: { en: string; pt: string };
   google_limited_use: GoogleLimitedUseStatus;

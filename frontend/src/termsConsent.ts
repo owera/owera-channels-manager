@@ -6,11 +6,12 @@
  * shown + its locale; the server stores it as terms_accepted_version.
  *
  * PT gate: the PT sentence links to https://owera.com/terms/pt/, not live yet.
- * While TERMS_PT_LIVE is false the PT locale shows the EN sentence + EN links.
+ * The flag comes from the server (MANAGER_TERMS_PT_LIVE → GET /api/onboarding/wizard
+ * `terms.pt_live`); while it is false (or unknown) the PT locale shows the EN
+ * sentence + EN links. The server accepts only its configured shas
+ * (MANAGER_TERMS_VERSION_SHA_EN / _PT).
  */
 import { L6Locale } from "./l6ConnectAiLine";
-
-export const TERMS_PT_LIVE = false;
 
 export const TERMS_TEXT_EN = "I accept the Owera Terms of Service and have read the Privacy Notice.";
 export const TERMS_TEXT_PT = "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade.";
@@ -41,10 +42,10 @@ const PT: TermsCopy = {
   ],
 };
 
-/** The sentence a browser locale sees (PT only once /terms/pt/ is live). */
-export function termsConsent(nav?: L6Locale, ptLive: boolean = TERMS_PT_LIVE): TermsCopy {
+/** The sentence a browser locale sees (PT only once the server says /terms/pt/ is live). */
+export function termsConsent(nav: L6Locale | undefined, ptLive: boolean): TermsCopy {
   const fromLanguage = (nav?.language ?? "").trim();
   const fromList = (nav?.languages && nav.languages.length > 0 ? nav.languages[0] : "") || "";
   const pt = (fromLanguage || fromList).toLowerCase().startsWith("pt");
-  return pt && ptLive ? PT : EN;
+  return pt && ptLive === true ? PT : EN;
 }

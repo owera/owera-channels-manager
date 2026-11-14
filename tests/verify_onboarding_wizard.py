@@ -298,7 +298,7 @@ ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed" a
    "unknown Terms text sha → 409 terms_text_changed, nothing written")
 r = post(WA, "consents", dict(CONSENTS, terms_text_sha=terms_consent.SHA_PT, terms_locale="pt"))
 ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed" and row(WA).terms_accepted_at is None,
-   "PT gate closed (TERMS_PT_LIVE=False): PT Terms sha refused")
+   "PT gate closed (MANAGER_TERMS_PT_LIVE=false): PT Terms sha refused")
 r = post(WA, "consents", CONSENTS)
 w = row(WA)
 ok(r.status_code == 200 and w.terms_accepted_at and w.privacy_accepted_at and w.ai_data_ack_at,
@@ -314,6 +314,35 @@ post(WA, "consents", CONSENTS)
 w = row(WA)
 ok((w.terms_accepted_at, w.privacy_accepted_at, w.ai_data_ack_at) == T0, "re-submit keeps the first acceptance")
 ok(r.json()["current_step"] == "ideas", "next = ideas")
+
+print("CTO / LegalOps gates: API flag, configured sha, PT acceptance not consent")
+st = get_state(WA)
+ok(st["terms"] == {"pt_live": False, "accepted_shas": {"en": terms_consent.SHA_EN}},
+   "GET wizard → terms.pt_live false + the EN sha the server accepts (the SPA reads the gate here)")
+with patch.object(settings, "terms_pt_live", True):
+    ok(get_state(WA)["terms"]["pt_live"] is True, "MANAGER_TERMS_PT_LIVE=true reaches the SPA flag")
+# (a) a row consented under the PT text while the gate is closed: not consent, asked again in EN.
+with Session(eng) as s_:
+    w_ = s_.get(Workspace, WA)
+    SAVED = (w_.terms_accepted_version, w_.terms_accepted_locale)
+    w_.terms_accepted_version, w_.terms_accepted_locale = terms_consent.SHA_PT, "pt"
+    s_.add(w_); s_.commit()
+st = get_state(WA)
+ok(st["current_step"] == "consents" and not {x["id"]: x["done"] for x in st["steps"]}["consents"],
+   "stored PT acceptance with the gate closed → consents step not done (asked again)")
+ok(onboarding_wizard.consents_done(row(WA)) is False, "consents_done False")
+with patch.object(settings, "terms_pt_live", True):
+    ok(onboarding_wizard.consents_done(row(WA)) is True, "gate open → the same PT acceptance counts")
+with patch.object(settings, "terms_version_sha_en", "c" * 64):
+    r = post(WA, "consents", CONSENTS)
+    ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed"
+       and row(WA).terms_accepted_locale == "pt",
+       "(b) configured EN sha moved → the code-default sha is refused, nothing written")
+r = post(WA, "consents", CONSENTS)
+w = row(WA)
+ok(r.status_code == 200 and w.terms_accepted_version == terms_consent.SHA_EN and w.terms_accepted_locale == "en"
+   and w.terms_accepted_at == T0[0], "re-accept in EN replaces the PT record (first timestamp kept)")
+ok(r.json()["current_step"] == "ideas", "back to ideas")
 
 # ---- 2. E2E: paid + wizard + flag ON → allowed, first draft at top priority -----
 print("E2E: paid (S1) + wizard complete + MANAGER_LLM_EXTERNAL_RELEASE ON (LLM mocked)")
