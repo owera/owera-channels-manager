@@ -22,6 +22,7 @@ publish proceeds without chapters.
 
 import html as _html
 import re
+from pathlib import Path
 
 # YouTube's own thresholds for rendering a chapter list.
 _MIN_CHAPTER_SECONDS = 10
@@ -141,8 +142,18 @@ def chapter_lines_for_video(video) -> list[str] | None:
         if not video.mpt_task_id:
             return None
         from app.services.engines import get_engine
-        index = (get_engine(video.engine).final_path(video.mpt_task_id).parent
-                 / "index.html")
+        engine = get_engine(video.engine)
+        if getattr(engine, "name", None) == "mpt":
+            # S2 / PO CM 14/11: never read the MPT scratch (mpt_storage_dir/<task_id>)
+            # after the render — mpt_retention deletes it 7 days after the job
+            # finished. _finalize copies index.html (if MPT ever wrote one) next to
+            # video.mp4 in storage/videos/<id>/. HyperFrames is unchanged.
+            vp = getattr(video, "video_path", None)
+            if not vp:
+                return None
+            index = Path(vp).parent / "index.html"
+        else:
+            index = engine.final_path(video.mpt_task_id).parent / "index.html"
         if not index.is_file():
             return None
         return chapter_lines(index.read_text())
