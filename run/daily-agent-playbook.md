@@ -179,7 +179,7 @@ Treat it as your standing instructions.
 - `GET /api/agent/state` — one call: settings, dashboard, per-topic/format analytics,
   the topic control surface (active/weight/pending/published), and recent runs.
 - For each connected channel, `GET /api/channels/{id}/video-analytics?sort=views` and
-  `?sort=ctr` and `?sort=avg_view_pct` for the per-video leaderboard. If `measured` is
+  `?sort=avg_view_pct` for the per-video leaderboard. If `measured` is
   0, analytics aren't flowing yet (channel not reconsented for the analytics scope) —
   note it in the report and skip analytics-driven actions this run.
 - **Board inventory:** read `state.issues.board_inventory` (or `GET /api/agent/issues`).
@@ -194,24 +194,17 @@ Treat it as your standing instructions.
   recurring synthesis error means the scheduled replenish job is broken and needs a code
   fix (counts toward the ≤ 2 code-change cap).
 
-### 1.1 Monetization milestone check
-`state.monetization_by_channel[channel_id]` gives subscriber count, watch hours, and
-Shorts views — plus pre-computed `lower_tier` and `full_tier` progress for each channel.
+### 1.1 Channel statistics (raw only)
+`state.channel_stats_by_channel[channel_id]` gives the latest stored `channels.list`
+statistics for each channel — `subscriber_count`, `view_count`, `video_count`,
+`captured_at` — exactly as the YouTube Data API returned them (`null` if no snapshot yet).
 
-**Each run:**
-- Identify the **binding constraint** per channel: the metric with the highest `needed`
-  relative to its threshold. That is where content strategy investment pays off most.
-- Map constraint to action:
-  - **subscribers binding:** boost topics with high `subscribers_gained`; weight them up.
-  - **watch hours binding:** prioritize long-form (`"long"`) topics with high `avg_view_pct`.
-  - **Shorts views binding:** maximize volume and virality of `"short"` topics; adopt fast-
-    trending terms.
-- **Target Lower Tier first.** Only shift focus to Full Tier constraints once
-  `lower_tier.tier_achieved` is `true` for a channel.
-- Include a `## Monetization` table in every report (current / needed / pct per metric per
-  channel). Call out when any metric hits 100% for the first time.
-- Don't override a working analytics-driven approach purely for milestone math — if the data
-  disagrees, say so and prefer the analytics.
+**LegalOps L4 (YouTube Developer Policies III.E.4.h) — hard rule:** never compute, and never
+write in a report, a number or score derived from YouTube API data: no YPP progress
+percentages, "needed"/"left" counts, tier status, summed watch hours, shorts-view totals,
+growth deltas, averages, rankings or engagement scores. Quote raw API numbers as-is; ideas
+and text are fine. If you want to mention YPP, use the static policy text ("YPP asks for
+1,000 subscribers"), never a computed gap.
 
 ### 1.5 Triage & fix issues — FIX THE PIPELINE BEFORE GROWING IT
 The background loops already self-heal *transient* states (orphaned renders, stuck
@@ -283,11 +276,12 @@ an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
 (`summary.clean:true`) is a good day — note it and move on.
 
 ### 2. Learn
-- Rank **topics and formats** by `avg_views`, `avg_ctr`, `avg_view_pct` (from
-  `by_topic`/`by_format`), considering only mature videos.
-- Identify **winners** (top performers) and **losers** (consistently low CTR or
-  retention). Look for patterns: which themes, which format (short vs long), which
-  title/thumbnail styles correlate with higher CTR and watch %.
+- Read the raw per-topic / per-format counts (`views`, `likes`, `comments`,
+  `subscribers_gained`, `video_count`, `measured` from `by_topic`/`by_format`) and the
+  per-video raw fields in the leaderboard, considering only mature videos. Do not compute
+  averages, rates or scores from them (L4, see 1.1); compare raw numbers side by side.
+- Look for patterns qualitatively: which themes, which format (short vs long), which
+  title/thumbnail styles go with more views or a higher API-reported `avg_view_pct`.
 - Write down 1–3 concrete, falsifiable hypotheses for this run.
 - **Creative-attribution signals** (use as data matures): the per-video leaderboard
   (`GET /api/channels/{id}/video-analytics`) now carries `average_view_duration` (seconds
@@ -295,8 +289,8 @@ an approved video with no `video_path` is a bug). If `scheduler_paused:true`, do
   engagement) and `creation_config` (the beat mix, hook style, theme, voice, bgm each video was
   made with). When several published videos share a creative choice, compare their engagement to
   attribute what actually works — this is how a rubric lever graduates from render-judged
-  (SIGNAL-SCARCE) to data-measured (SIGNAL-RICH). `by_topic`/`by_format` also now report
-  `avg_view_duration`.
+  (SIGNAL-SCARCE) to data-measured (SIGNAL-RICH). `by_topic`/`by_format` carry raw sums only
+  (no averages).
 
 **Settle matured experiments.** For each `status:"running"` line in `run/experiments.jsonl`
 whose ship date is ≥ 72h ago, judge it and mark `promoted` (keep) or `reverted`:
@@ -557,10 +551,9 @@ the high-volume shorts. These directives OVERRIDE any conflicting older habit in
 | Re-publish / promote a rendered video | `POST /api/videos/{id}/retry` |
 | Reject a bad video | `POST /api/videos/{id}/reject` `{reason}` |
 | Delete a dead failed/rejected video (>7d) | `DELETE /api/videos/{id}` |
-| Per-video leaderboard | `GET /api/channels/{id}/video-analytics?sort=views\|ctr\|avg_view_pct` |
+| Per-video leaderboard | `GET /api/channels/{id}/video-analytics?sort=views\|avg_view_pct` |
 | By topic/format | `GET /api/channels/{id}/video-analytics/by-topic` |
 | Force-refresh analytics | `POST /api/channels/{id}/video-analytics/refresh` |
-| Monetization milestone status | `GET /api/channels/{id}/monetization` |
 | List/record a trend | `GET /api/trends?status=&channel_id=` · `POST /api/trends` `{term,description,source,channel_id,language,content_format,momentum,score,status,decision_reason}` |
 | Adopt a trend (topic+auto-produce) | `POST /api/trends/{id}/adopt` `{channel_id?,content_format?,idea_count,produce_count}` |
 | Weight / pause / retarget a topic | `PATCH /api/topics/{id}` `{weight,active,theme_prompt,content_format}` |

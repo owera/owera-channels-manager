@@ -1005,9 +1005,9 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
     NOT exposed by the YouTube Analytics API v2 targeted queries — every query form
     returns 400 "Unknown identifier (impressions)". The old second query silently
     failed forever, so every impressions/ctr=0 stored before this date was a
-    fabricated default, not a measurement. Impressions/CTR stay 0 in VideoMetric
-    (Studio-only data); use traffic_json (browse/suggested/search views) as the
-    discovery signal instead.
+    fabricated default, not a measurement. Impressions/CTR are returned as None
+    (S8a/L4: never an invented 0); use traffic_json (browse/suggested/search
+    views) as the discovery signal instead.
 
     ``empty`` is True when the API returned no row at all (values stay
     zero-filled for callers that want numbers); analytics_loop stores NULL
@@ -1031,8 +1031,9 @@ def fetch_video_analytics(analytics, channel_yt_id: str, video_id: str,
     return {
         "empty": not raw,
         "views": _n("views"),
-        "impressions": _n("impressions"),
-        "ctr": _n("impressionClickThroughRate", float),
+        # Not exposed by the Analytics API v2 (Studio-only) -> None, never 0.
+        "impressions": None,
+        "ctr": None,
         "avg_view_pct": _n("averageViewPercentage", float),
         "average_view_duration": _n("averageViewDuration", float),
         "watch_time_minutes": _n("estimatedMinutesWatched"),

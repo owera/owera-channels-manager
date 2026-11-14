@@ -172,8 +172,10 @@ def list_subscribers(channel_id: int, session: Session = Depends(get_session),
 
 # ---- Per-video analytics (the performance leaderboard) -------------------
 
-_SORTABLE = {"views", "ctr", "avg_view_pct", "average_view_duration", "watch_time_minutes",
-             "impressions", "likes", "comments", "subscribers_gained", "published_at"}
+# Studio-only impression / click-through fields are not sortable: the Analytics
+# API v2 does not expose them (2026-07-09 audit), so they are never served (S8a/L4).
+_SORTABLE = {"views", "avg_view_pct", "average_view_duration", "watch_time_minutes",
+             "likes", "comments", "subscribers_gained", "published_at"}
 
 
 def _parse_json(s):
@@ -224,59 +226,40 @@ def _age_hours(published_at, now) -> float | None:
     return round((now - pub).total_seconds() / 3600, 1)
 
 
-def _compute_monetization(session: Session, channel_id: int) -> dict:
-    """YouTube Partner Program milestone progress from stored snapshots."""
-    latest_cm = session.exec(
+def _latest_channel_stats(session: Session, channel_id: int) -> dict | None:
+    """Latest stored ``channels.list`` statistics snapshot, as the API returned it.
+
+    S8a / LegalOps L4 (YT Developer Policies III.E.4.h): no derived or computed
+    metric (YPP progress or tier, summed watch hours, shorts-view totals,
+    growth deltas). Only the raw counts from the Data API, plus when they were
+    captured. ``None`` when no snapshot exists — never a zero-filled stand-in."""
+    cm = session.exec(
         select(ChannelMetric).where(ChannelMetric.channel_id == channel_id)
         .order_by(ChannelMetric.captured_at.desc())
     ).first()
-    subscriber_count = latest_cm.subscriber_count if latest_cm else 0
-
-    latest_metrics = _latest_metrics(session, channel_id)
-    total_watch_hours = sum(m.watch_time_minutes or 0 for m in latest_metrics.values()) / 60
-
-    topics = _topics_map(session, channel_id)
-    # Same != "long" gate as render/issues/publish/autofill — empty/"LONG" are shorts.
-    short_topic_ids = {tid for tid, t in topics.items() if t.content_format != "long"}
-    video_topic_map = {v.id: v.topic_id for v in _published_videos(session, channel_id)}
-    shorts_views = sum(
-        m.views for vid_id, m in latest_metrics.items()
-        if video_topic_map.get(vid_id) in short_topic_ids
-    )
-
-    def _tier(current, threshold):
-        needed = max(0, threshold - current)
-        pct = min(100.0, round(current / threshold * 100, 1)) if threshold else 100.0
-        return {"current": current, "needed": needed, "achieved": needed == 0, "pct": pct}
-
-    wh = round(total_watch_hours, 1)
+    if cm is None:
+        return None
     return {
-        "channel_id": channel_id,
-        "subscriber_count": subscriber_count,
-        "total_watch_hours": wh,
-        "shorts_views": shorts_views,
-        "lower_tier": {
-            "subscribers":  _tier(subscriber_count, 500),
-            "watch_hours":  _tier(wh, 3000),
-            "shorts_views": _tier(shorts_views, 3_000_000),
-            "tier_achieved": subscriber_count >= 500 and wh >= 3000 and shorts_views >= 3_000_000,
-        },
-        "full_tier": {
-            "subscribers":  _tier(subscriber_count, 1000),
-            "watch_hours":  _tier(wh, 4000),
-            "shorts_views": _tier(shorts_views, 10_000_000),
-            "tier_achieved": subscriber_count >= 1000 and wh >= 4000 and shorts_views >= 10_000_000,
-        },
+        "subscriber_count": cm.subscriber_count,
+        "view_count": cm.view_count,
+        "video_count": cm.video_count,
+        "captured_at": cm.captured_at,
+        "source": "youtube.channels.list statistics",
     }
 
 
 @router.get("/monetization")
 def get_monetization(channel_id: int, session: Session = Depends(get_session),
         ws: Workspace = Depends(current_workspace)):
-    """YouTube Partner Program milestone progress for both tiers (fan funding and ad revenue).
-    Computed from stored snapshots — no live API call needed."""
+    """Removed in S8a (L4): the YPP milestone widget computed progress and tier
+    status and summed watch hours / shorts views from our snapshots — derived
+    metrics the YouTube API does not return. 410 (not a SPA-fallback 200) so a
+    stale client or agent learns the contract changed. S4: the workspace-scoped
+    channel check runs first, so a missing or foreign channel is still 404.
+    Raw counts: ``GET /api/channels/{id}/metrics`` and ``/youtube``."""
     require_channel(session, ws, channel_id)
-    return _compute_monetization(session, channel_id)
+    raise HTTPException(410, "monetization milestones removed (S8a/L4): no derived "
+                             "metrics; use /metrics for raw channel statistics")
 
 
 @router.get("/video-analytics")
@@ -304,19 +287,19 @@ def video_analytics(channel_id: int, sort: str = "views",
             "content_format": t.content_format if t else None,
             "published_at": v.published_at,
             "age_hours": _age_hours(v.published_at, now),
-            "views": m.views if m else 0,
-            "impressions": m.impressions if m else 0,
-            "ctr": m.ctr if m else 0.0,
-            "avg_view_pct": m.avg_view_pct if m else 0.0,
-            "average_view_duration": m.average_view_duration if m else 0.0,
-            "watch_time_minutes": m.watch_time_minutes if m else 0,
-            "likes": m.likes if m else 0,
-            "comments": m.comments if m else 0,
-            "subscribers_gained": m.subscribers_gained if m else 0,
+            # Raw Analytics API fields only; None (not 0) when unmeasured (S8a/L4).
+            # Studio-only impression / click-through fields are omitted (never returned by the API).
+            "views": m.views if m else None,
+            "avg_view_pct": m.avg_view_pct if m else None,
+            "average_view_duration": m.average_view_duration if m else None,
+            "watch_time_minutes": m.watch_time_minutes if m else None,
+            "likes": m.likes if m else None,
+            "comments": m.comments if m else None,
+            "subscribers_gained": m.subscribers_gained if m else None,
             "captured_at": m.captured_at if m else None,
             "has_data": m is not None,
-            # discovery signal (directive-1): browse/suggested/search/shorts mix —
-            # CTR/impressions are unmeasurable; traffic_json is how we tell if YT is testing
+            # discovery signal (directive-1): browse/suggested/search/shorts mix
+            # (impression / click-through data is not exposed by the API; traffic_json is)
             "traffic_json": _parse_json(m.traffic_json) if m else None,
             # the "treatment" signal — how this video was made — for creative attribution
             "creation_config": _parse_json(v.creation_config),
@@ -329,17 +312,20 @@ def video_analytics(channel_id: int, sort: str = "views",
 @router.get("/video-analytics/by-topic")
 def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_session),
         ws: Workspace = Depends(current_workspace)):
-    """Aggregate latest analytics by topic and by content format — the core signal
-    the growth agent learns from (which themes / formats actually perform)."""
+    """Raw per-topic / per-format counts from the latest analytics snapshots.
+
+    S8a / LegalOps L4: only plain sums of raw Analytics API counts (views,
+    likes, comments, subscribersGained) plus how many videos were published /
+    measured. No per-topic means of any field, no impression / click-through data (never
+    measured) and no ranking —
+    rows come back in a stable, neutral order (topic id / format name)."""
     require_channel(session, ws, channel_id)
     latest = _latest_metrics(session, channel_id)
     topics = _topics_map(session, channel_id)
 
     def _blank(extra: dict) -> dict:
         return {**extra, "video_count": 0, "measured": 0, "views": 0,
-                "impressions": 0, "watch_time_minutes": 0, "likes": 0,
-                "comments": 0, "subscribers_gained": 0, "_ctr_sum": 0.0,
-                "_avp_sum": 0.0, "_avd_sum": 0.0}
+                "likes": 0, "comments": 0, "subscribers_gained": 0}
 
     by_topic: dict[int, dict] = {}
     by_format: dict[str, dict] = {}
@@ -355,31 +341,12 @@ def video_analytics_by_topic(channel_id: int, session: Session = Depends(get_ses
             if m:
                 bucket["measured"] += 1
                 bucket["views"] += m.views or 0
-                bucket["impressions"] += m.impressions or 0
-                bucket["watch_time_minutes"] += m.watch_time_minutes or 0
                 bucket["likes"] += m.likes or 0
                 bucket["comments"] += m.comments or 0
                 bucket["subscribers_gained"] += m.subscribers_gained or 0
-                bucket["_ctr_sum"] += m.ctr or 0.0
-                bucket["_avp_sum"] += m.avg_view_pct or 0.0
-                bucket["_avd_sum"] += m.average_view_duration or 0.0
 
-    def _finish(bucket: dict) -> dict:
-        n = bucket.pop("measured")
-        ctr_sum = bucket.pop("_ctr_sum")
-        avp_sum = bucket.pop("_avp_sum")
-        avd_sum = bucket.pop("_avd_sum")
-        bucket["measured"] = n
-        bucket["avg_ctr"] = round(ctr_sum / n, 4) if n else 0.0
-        bucket["avg_view_pct"] = round(avp_sum / n, 2) if n else 0.0
-        bucket["avg_view_duration"] = round(avd_sum / n, 1) if n else 0.0
-        bucket["avg_views"] = round(bucket["views"] / n, 1) if n else 0.0
-        return bucket
-
-    topic_rows = sorted((_finish(b) for b in by_topic.values()),
-                        key=lambda r: r["avg_views"], reverse=True)
-    format_rows = sorted((_finish(b) for b in by_format.values()),
-                         key=lambda r: r["avg_views"], reverse=True)
+    topic_rows = sorted(by_topic.values(), key=lambda r: (r["topic_id"] is None, r["topic_id"] or 0))
+    format_rows = sorted(by_format.values(), key=lambda r: str(r["content_format"]))
     return {"by_topic": topic_rows, "by_format": format_rows}
 
 
