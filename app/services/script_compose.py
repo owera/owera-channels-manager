@@ -137,8 +137,9 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
                   channel_id=channel_id, detail=f"compose refused: {e}"[:500])
         session.commit()
         return {"error": f"compose refused: {e}", "http": 403}
-    except Exception as e:  # grok.Timeout / nonzero / missing binary
-        err = f"{type(e).__name__}: {e}"[:500]
+    except Exception as e:  # grok.Timeout / nonzero / missing binary / insufficient_credit
+        from app.services.llm import format_failure
+        err = format_failure(e)[:500]
         quota.log(session, kind=JOB_KIND, status="error", video_id=video_id,
                   channel_id=channel_id, detail=f"compose failed: {err}")
         session.commit()

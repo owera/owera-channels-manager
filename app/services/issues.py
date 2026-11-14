@@ -77,6 +77,9 @@ def review_age_ref(v: Video) -> datetime | None:
 
 def _is_transient(error: str | None) -> bool:
     err = error or ""
+    from app.services.llm import is_insufficient_credit
+    if is_insufficient_credit(err):
+        return False
     return any(sig in err for sig in TRANSIENT_SIGNATURES)
 
 
@@ -92,6 +95,11 @@ def _signature(detail: str | None) -> str:
 def _failed_action(v: Video, age_hours: float | None) -> tuple[str, bool]:
     """(suggested_action, auto) for a FAILED video. With full autonomy the agent fixes
     all of these; the action tells it *how*."""
+    from app.services.llm import is_insufficient_credit
+    # 402 / insufficient_credit is an external credit failure, not craft.
+    # Never auto-requeue (that would loop until the cap is lifted).
+    if is_insufficient_credit(v.error):
+        return "hold", False
     if v.video_path:
         if v.retry_count >= settings.publish_max_retries:
             # Upload stalled past the timeout on every attempt (see publish_loop recovery

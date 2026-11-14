@@ -29,8 +29,121 @@ _OIDC_HINT = (
 )
 
 
-class GrokCLIError(RuntimeError):
-    """grok -p failed (nonzero, missing binary, or timeout)."""
+class LLMError(RuntimeError):
+    """An LLM call failed (grok CLI or xAI API)."""
+
+
+GrokCLIError = LLMError  # backward-compatible alias
+
+
+INSUFFICIENT_CREDIT = "insufficient_credit"
+
+
+class LLMInsufficientCredit(LLMError):
+    """The LLM provider refused for credit / spending-limit reasons. Not transient.
+
+    Raised for xAI API HTTP 402, for HTTP 403/429 whose body carries billing text
+    or a billing error code (team prepaid accounts out of credit or at the monthly
+    spending limit), and for grok CLI stderr with the same billing text. Do not
+    retry and do not fall back to another backend. Render failures record this as
+    reason ``insufficient_credit``.
+    """
+    code = INSUFFICIENT_CREDIT
+
+
+# Case-insensitive billing phrases (body text / CLI stderr / stored error text).
+# A plain "Rate limit exceeded" contains none of these and stays a rate limit.
+_CREDIT_TEXT = (
+    "used all available credits",
+    "monthly spending limit",
+    "spending limit",
+    "insufficient credit",          # also "insufficient credits"
+    "insufficient_credit",          # also "insufficient_credits"
+    "spending_limit",
+    "run out of credits",           # xAI 402 text seen on 1478–1481
+    "out of credits",
+)
+# JSON error codes (exact, lower-cased) that mean credit / spending limit.
+_CREDIT_CODES = frozenset({
+    "insufficient_credits", "insufficient_credit", "spending_limit",
+    "spending_limit_reached", "monthly_spending_limit", "credit_limit_exceeded",
+})
+
+
+def _has_credit_text(text: str | None) -> bool:
+    t = (text or "").lower()
+    return any(p in t for p in _CREDIT_TEXT)
+
+
+def _json_error_codes(payload) -> set[str]:
+    """Error codes/types found in an xAI-style error body, lower-cased.
+
+    Shapes seen: {"error": {"code": ..., "type": ...}}, {"code": ..., "error": "..."}."""
+    out: set[str] = set()
+    if not isinstance(payload, dict):
+        return out
+    for k in ("code", "type"):
+        if isinstance(payload.get(k), str):
+            out.add(payload[k].strip().lower())
+    err = payload.get("error")
+    if isinstance(err, dict):
+        for k in ("code", "type"):
+            if isinstance(err.get(k), str):
+                out.add(err[k].strip().lower())
+    return out
+
+
+def is_credit_response(status: int, body_text: str | None = None, payload=None) -> bool:
+    """HTTP response means insufficient credit / spending limit?
+
+    402 always. 403 / 429 only with billing text or a billing JSON code, so a plain
+    429 "Rate limit exceeded" is NOT credit (it keeps its rate-limit behavior)."""
+    if status == 402:
+        return True
+    if status not in (403, 429):
+        return False
+    if _json_error_codes(payload) & _CREDIT_CODES:
+        return True
+    msg = ""
+    if isinstance(payload, dict):
+        err = payload.get("error")
+        parts = [err if isinstance(err, str) else "",
+                 (err.get("message") or "") if isinstance(err, dict) else "",
+                 payload.get("message") if isinstance(payload.get("message"), str) else ""]
+        msg = " ".join(p for p in parts if isinstance(p, str))
+    return _has_credit_text(msg) or _has_credit_text(body_text)
+
+
+# Label kept for plain LLMError failures in stored error text. Before the rename
+# every grok/xAI failure was stored as "GrokCLIError: ..."; ops greps, agent
+# reports and the OIDC test match that prefix. Subclasses keep their own names
+# (LLMBudgetExceeded, LLMConfigError, ...) exactly as before.
+_LEGACY_LABEL = "GrokCLIError"
+
+
+def format_failure(exc: BaseException) -> str:
+    """Reason stored on a failed video / engine status. No prompt or body content."""
+    if isinstance(exc, LLMInsufficientCredit) or getattr(exc, "code", None) == INSUFFICIENT_CREDIT:
+        return INSUFFICIENT_CREDIT
+    name = _LEGACY_LABEL if type(exc) is LLMError else type(exc).__name__
+    text = f"{name}: {exc}"
+    if is_insufficient_credit(text):
+        return INSUFFICIENT_CREDIT
+    return text
+
+
+def is_insufficient_credit(err: str | None) -> bool:
+    """True for the new reason, the historical 1478–1481 HTTP 402 text, and any
+    stored error / CLI stderr with credit or spending-limit text (no "HTTP 402"
+    needed). A plain rate-limit message is not credit."""
+    e = err or ""
+    if INSUFFICIENT_CREDIT in e:
+        return True
+    # Videos 1478–1481 (2026-11-13) were marked:
+    # "GrokCLIError: xai api HTTP 402: You have run out of credits or need a Grok subscription..."
+    if "http 402" in e.lower():
+        return True
+    return _has_credit_text(e)
 
 
 def scratch_dir() -> Path:
@@ -157,6 +270,11 @@ def _complete_cli(prompt: str, system: str | None, *, model: str | None,
         ) from e
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip()[-800:]
+        if is_insufficient_credit(tail):
+            # Credit / spending limit in CLI stderr (with or without "HTTP 402").
+            # Not transient; no body in the log or the error.
+            logger.warning("insufficient_credit backend=grok-cli exit=%s", proc.returncode)
+            raise LLMInsufficientCredit(INSUFFICIENT_CREDIT)
         raise GrokCLIError(
             f"grok -p exited {proc.returncode}: {tail or '(no stderr)'}. {_OIDC_HINT}"
         )
@@ -193,7 +311,7 @@ DEFAULT_PRICES: dict[str, dict[str, float]] = {
 BUDGET_EVENT = "llm_budget_blocked"
 
 
-class LLMRetentionNotAcknowledged(GrokCLIError):
+class LLMRetentionNotAcknowledged(LLMError):
     """LLM_BACKEND=api without a valid XAI_DATA_RETENTION_ACK. Not transient."""
 
 
@@ -259,11 +377,11 @@ def _assert_stateless(body: dict) -> None:
         raise LLMConfigError(f"xai api request is not stateless (keys={sorted(body)})")
 
 
-class LLMBudgetExceeded(GrokCLIError):
+class LLMBudgetExceeded(LLMError):
     """api backend refused: monthly cap reached or not configured. Not transient."""
 
 
-class LLMConfigError(GrokCLIError):
+class LLMConfigError(LLMError):
     """api backend misconfigured (no key, unknown model/price). Not transient."""
 
 
@@ -444,15 +562,27 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
     if r.status_code >= 400:
         record_usage({**row, "status": f"http_{r.status_code}", "cost_usd": 0.0,
                       "duration_s": dur})
-        detail = ""
         try:
-            err = (r.json() or {}).get("error")
-            detail = (err.get("code") or err.get("type") or "") if isinstance(err, dict) else str(err or "")
+            payload = r.json()
         except ValueError:
-            pass
+            payload = None
+        try:
+            body_text = r.text
+        except Exception:  # noqa: BLE001 - undecodable body: classify on status/JSON only
+            body_text = ""
+        if is_credit_response(r.status_code, body_text, payload):
+            # 402, or 403/429 with billing text / code (team prepaid out of credit
+            # or at the monthly spending limit). No body/content in the log.
+            # Never retried (not transient).
+            logger.warning("insufficient_credit workspace_id=%s route=%s http=%s",
+                           workspace_id, call_type, r.status_code)
+            raise LLMInsufficientCredit(INSUFFICIENT_CREDIT)
+        detail = ""
+        err = (payload or {}).get("error") if isinstance(payload, dict) else None
+        detail = (err.get("code") or err.get("type") or "") if isinstance(err, dict) else str(err or "")
         # Same shape as "grok -p exited N: <tail>"; status code kept so 503/529 stay
         # transient in render_loop exactly as a CLI stderr with them would.
-        raise GrokCLIError(f"xai api HTTP {r.status_code}: {str(detail)[:200] or '(no detail)'}")
+        raise LLMError(f"xai api HTTP {r.status_code}: {str(detail)[:200] or '(no detail)'}")
     try:
         data = r.json()
     except ValueError as e:

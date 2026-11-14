@@ -178,6 +178,25 @@ v = Video(channel_id=1, topic_id=1, subject="x", video_path=None,
 ok(issues._failed_action(v, None) == ("requeue", True),
    "unknown age is treated as not-old -> requeue rather than delete")
 
+# 402 / insufficient_credit: external credit failure, never auto-requeue (or delete)
+v = Video(channel_id=1, topic_id=1, subject="x", video_path=None,
+          error="insufficient_credit", retry_count=0)
+ok(issues._failed_action(v, 1.0) == ("hold", False),
+   "insufficient_credit (new reason) → hold, needs operator, not a craft requeue")
+ok(issues._is_transient("insufficient_credit") is False,
+   "insufficient_credit is not transient")
+v = Video(channel_id=1, topic_id=1, subject="x", video_path=None,
+          error="GrokCLIError: xai api HTTP 402: You have run out of credits or need a Grok subscription.",
+          retry_count=0)
+ok(issues._failed_action(v, 1.0) == ("hold", False),
+   "historical 1478–1481 HTTP 402 error text → hold, not auto-requeue")
+ok(issues._failed_action(v, DEAD_DAYS * 24 + 1) == ("hold", False),
+   "insufficient_credit is not auto-deleted when old (operator holds until credit returns)")
+v = Video(channel_id=1, topic_id=1, subject="x", video_path="/tmp/x.mp4",
+          error="insufficient_credit", retry_count=0)
+ok(issues._failed_action(v, 1.0) == ("hold", False),
+   "insufficient_credit wins over the has-file auto-retry branch")
+
 
 # The BGM-pool bucket reads the real filesystem (settings.bgm_dir), which is
 # not part of the in-memory DB. Neutralize it for the DB-focused cases below by

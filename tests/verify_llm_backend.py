@@ -7,7 +7,7 @@ shape (POST /responses, Bearer header, model mapping, effort, store=false); outp
 text; usage JSONL row (tokens/model/call type/workspace/ts/cost, NO content, NO key);
 cost from the price table and from cost_in_usd_ticks; monthly cap reached → blocked,
 no cap → blocked, unreadable ledger → blocked; missing key → clear error; timeout →
-"grok.Timeout" (transient, like the CLI); HTTP 4xx/5xx → GrokCLIError, one attempt
+"grok.Timeout" (transient, like the CLI); HTTP 4xx/5xx → LLMError (GrokCLIError alias), one attempt; HTTP 402 → LLMInsufficientCredit / insufficient_credit, never retried
 (no in-client retry, like the CLI); the (B) guard still applies in api mode; agent
 exec plan (always the CLI, also with backend=api); XAI_DATA_RETENTION_ACK gate.
 """
@@ -374,6 +374,177 @@ for status, transient in ((429, False), (503, True), (401, False)):
             is_t = any(sig in str(e) for sig in _TRANSIENT)
             ok(is_t == transient and len(attempts) == 1 and PROMPT not in str(e),
                f"HTTP {status} → GrokCLIError (transient={transient}), 1 attempt, no echo of content")
+
+# 402 insufficient credit: subclass, clear reason, one attempt, not transient, no content
+print("HTTP 402 insufficient_credit")
+attempts.clear()
+cap.lines.clear()
+HIST = ("GrokCLIError: xai api HTTP 402: You have run out of credits or need a "
+        "Grok subscription. Add credits at https://grok.com/?_s=usage")
+
+
+def _402(req):
+    attempts.append(req)
+    return httpx.Response(402, json={"error": {"code": "insufficient_credits",
+                                               "message": PROMPT + " add credits at https://grok.com"}})
+
+
+with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_402)):
+    try:
+        with llm_guard.scope(1, "storyboard_compose"):
+            llm.complete(PROMPT)
+        ok(False, "HTTP 402 must raise")
+    except llm.LLMInsufficientCredit as e:
+        from app.services.render_loop import _TRANSIENT, _is_transient_error
+        from app.services import issues as _issues
+        ok(e.code == "insufficient_credit" and str(e) == "insufficient_credit",
+           "402 raises LLMInsufficientCredit with reason insufficient_credit")
+        ok(isinstance(e, llm.LLMError) and isinstance(e, llm.GrokCLIError),
+           "LLMInsufficientCredit is an LLMError (GrokCLIError alias kept)")
+        ok(llm.format_failure(e) == "insufficient_credit",
+           "format_failure stores reason insufficient_credit (no class prefix, no body)")
+        ok(not any(sig in str(e) for sig in _TRANSIENT)
+           and _is_transient_error(str(e)) is False
+           and _is_transient_error("insufficient_credit") is False
+           and _is_transient_error(HIST) is False,
+           "402 / insufficient_credit is not a transient render retry")
+        ok(len(attempts) == 1 and PROMPT not in str(e) and "grok.com" not in str(e),
+           "402: one attempt, no fallback, no content and no upgrade URL in the error")
+        ok(_issues._is_transient("insufficient_credit") is False
+           and _issues._is_transient(HIST) is False,
+           "issues digest does not treat 402 as transient")
+        v = __import__("app.models", fromlist=["Video"]).Video(
+            channel_id=1, topic_id=1, subject="x", error="insufficient_credit")
+        ok(_issues._failed_action(v, 1.0) == ("hold", False),
+           "video list: insufficient_credit → hold, not auto-requeue (external/credit, not craft)")
+        v.error = HIST
+        ok(_issues._failed_action(v, 1.0) == ("hold", False),
+           "historical 1478–1481 'xai api HTTP 402: … credits' text also holds")
+    except llm.GrokCLIError as e:
+        ok(False, f"402 must raise LLMInsufficientCredit, got {type(e).__name__}: {e}")
+ok(len(attempts) == 1, "402 is not retried in the client")
+ok(any("insufficient_credit" in line and "workspace_id=1" in line
+       and "route=storyboard_compose" in line and PROMPT not in line
+       for line in cap.lines),
+   "one clear log line: workspace, route, insufficient_credit, no content")
+ok(rows()[-1]["status"] == "http_402" and rows()[-1]["cost_usd"] == 0.0,
+   "402 recorded in usage as http_402 (cost 0, no content)")
+
+# Credit / spending limit beyond 402 (team prepaid accounts: 403 / 429 + billing text
+# or code). Plain 429 "Rate limit exceeded" stays a rate limit (not credit).
+print("credit detection: 402 / 403 / 429 billing text or code, CLI stderr; plain 429 is not credit")
+CREDIT_CASES = (
+    ("402 (no body)", 402, {}),
+    ("403 + billing text", 403,
+     {"code": "permission_denied",
+      "error": "Your team has used all available credits or reached its monthly spending limit."}),
+    ("429 + JSON code insufficient_credits", 429, {"error": {"code": "insufficient_credits"}}),
+    ("429 + JSON code spending_limit", 429, {"error": {"type": "spending_limit"}}),
+    ("429 + text (INSUFFICIENT CREDITS, any case)", 429,
+     {"error": {"code": "e429", "message": "Insufficient Credits for this team"}}),
+    ("429 + top-level code insufficient_credit", 429, {"code": "insufficient_credit", "error": "x"}),
+)
+for label, status, payload in CREDIT_CASES:
+    attempts.clear()
+
+    def _cr(req, status=status, payload=payload):
+        attempts.append(req)
+        return httpx.Response(status, json=payload)
+
+    with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_cr)):
+        try:
+            with llm_guard.scope(1, "ideas"):
+                llm.complete(PROMPT)
+            ok(False, f"{label} must raise")
+        except llm.LLMInsufficientCredit as e:
+            ok(str(e) == "insufficient_credit" and len(attempts) == 1
+               and llm.format_failure(e) == "insufficient_credit",
+               f"{label} → LLMInsufficientCredit, 1 attempt, reason insufficient_credit")
+        except llm.LLMError as e:
+            ok(False, f"{label} must be insufficient_credit, got {e}")
+    ok(rows()[-1]["status"] == f"http_{status}" and rows()[-1]["cost_usd"] == 0.0,
+       f"{label}: usage row http_{status}, cost 0")
+
+# the 402 mock's JSON code alone (no 402, no text) drives detection
+ok(llm.is_credit_response(429, "", {"error": {"code": "insufficient_credits", "message": "nope"}}),
+   "mocked insufficient_credits JSON code alone classifies a 429 as credit")
+ok(llm.is_credit_response(403, '{"error":"You have used all available credits"}', None),
+   "403 with billing text in a non-JSON-parsed body is credit")
+ok(not llm.is_credit_response(500, "used all available credits", None),
+   "only 402/403/429 are classified from an HTTP response")
+
+for label, payload in (("429 plain 'Rate limit exceeded'",
+                        {"error": {"code": "rate_limit_exceeded", "message": "Rate limit exceeded"}}),
+                       ("429 plain text error", {"error": "Rate limit exceeded"}),
+                       ("429 no body", {})):
+    attempts.clear()
+
+    def _rl(req, payload=payload):
+        attempts.append(req)
+        return httpx.Response(429, json=payload)
+
+    with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_rl)):
+        try:
+            with llm_guard.scope(1, "ideas"):
+                llm.complete(PROMPT)
+            ok(False, f"{label} must raise")
+        except llm.LLMInsufficientCredit:
+            ok(False, f"{label} must NOT be insufficient_credit")
+        except llm.LLMError as e:
+            from app.services.render_loop import _TRANSIENT
+            ok(str(e).startswith("xai api HTTP 429") and not llm.is_insufficient_credit(str(e))
+               and llm.format_failure(e) != "insufficient_credit" and len(attempts) == 1
+               and any(sig in str(e) for sig in _TRANSIENT) is False,
+               f"{label} → plain LLMError (rate limit, unchanged behavior), not credit")
+ok(not llm.is_insufficient_credit("GrokCLIError: xai api HTTP 429: rate_limit_exceeded")
+   and not llm.is_insufficient_credit("RateLimitError: Rate limit exceeded"),
+   "stored rate-limit text is not credit")
+
+# CLI stderr with credit text but no "HTTP 402"
+from app.services import issues as _issues_c
+for stderr in ("Error: your team has used all available credits or reached its monthly spending limit",
+               "error: Insufficient credits. Add credits to continue.",
+               "You have run out of credits or need a Grok subscription."):
+    proc = subprocess.CompletedProcess(["grok"], 1, stdout="", stderr=stderr)
+    with patch.object(settings, "llm_backend", "cli"), patch.object(subprocess, "run", return_value=proc):
+        try:
+            with llm_guard.scope(1, "ideas"):
+                llm.complete(PROMPT)
+            ok(False, "CLI credit stderr must raise")
+        except llm.LLMInsufficientCredit as e:
+            ok(str(e) == "insufficient_credit" and "credits" not in str(e),
+               f"CLI stderr {stderr[:40]!r}… → LLMInsufficientCredit (no 'HTTP 402' needed)")
+    v = __import__("app.models", fromlist=["Video"]).Video(
+        channel_id=1, topic_id=1, subject="x", error=f"GrokCLIError: grok -p exited 1: {stderr}")
+    ok(_issues_c._failed_action(v, 1.0) == ("hold", False) and _issues_c._is_transient(v.error) is False,
+       "stored CLI credit text (no HTTP 402) → digest hold, auto=false")
+proc = subprocess.CompletedProcess(["grok"], 1, stdout="", stderr="Rate limit exceeded")
+with patch.object(settings, "llm_backend", "cli"), patch.object(subprocess, "run", return_value=proc):
+    try:
+        with llm_guard.scope(1, "ideas"):
+            llm.complete(PROMPT)
+    except llm.LLMInsufficientCredit:
+        ok(False, "CLI 'Rate limit exceeded' must NOT be credit")
+    except llm.LLMError as e:
+        ok("Rate limit exceeded" in str(e), "CLI plain rate-limit stderr stays a plain LLMError")
+
+# Alias identity + worker re-raise (worker._generate_composition except path)
+print("GrokCLIError alias + worker re-raise")
+ok(llm.GrokCLIError is llm.LLMError, "GrokCLIError is LLMError (identity alias)")
+ok(issubclass(llm.LLMInsufficientCredit, llm.GrokCLIError), "LLMInsufficientCredit subclasses GrokCLIError")
+ok(llm.format_failure(llm.LLMError("grok -p exited 1: boom")) == "GrokCLIError: grok -p exited 1: boom",
+   "plain LLMError keeps the historical 'GrokCLIError:' stored label")
+ok(llm.format_failure(llm.LLMBudgetExceeded("llm_budget_blocked: x")).startswith("LLMBudgetExceeded:"),
+   "subclasses keep their own name in the stored label (unchanged)")
+from app.services.engines import storyboard as _sb, worker as _worker
+for exc in (llm.LLMInsufficientCredit("insufficient_credit"), llm.LLMError("grok.Timeout: x")):
+    with patch.object(settings, "composition_version", "storyboard"), \
+            patch.object(_sb, "compose", side_effect=exc):
+        try:
+            _worker._generate_composition("s", "script", [], "1080x1920", 1080, 1920, 10.0)
+            ok(False, f"{type(exc).__name__} must be re-raised")
+        except llm.GrokCLIError as e:
+            ok(e is exc, f"worker re-raises {type(exc).__name__} (no kinetic fallback)")
 
 # ------------------------------------------------------------------ guard in api mode
 print("(B) guard still applies in api mode")

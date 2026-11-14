@@ -412,7 +412,8 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             cc["sentence_pace_post"] = pace_post
         _status(handle, progress=100, state=STATE_COMPLETE, creation_config=cc)
     except Exception as e:  # any failure -> the render loop sees STATE_FAILED
-        _status(handle, state=STATE_FAILED, error=f"{type(e).__name__}: {e}")
+        from app.services.llm import format_failure
+        _status(handle, state=STATE_FAILED, error=format_failure(e))
     finally:
         _llm_guard.unbind(_guard_tok)
 
