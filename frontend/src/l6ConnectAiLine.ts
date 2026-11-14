@@ -21,3 +21,14 @@ export function l6ConnectAiLine(nav?: L6Locale): string {
   const lang = (fromLanguage || fromList).toLowerCase();
   return lang.startsWith("pt") ? L6_CONNECT_AI_LINE_PT : L6_CONNECT_AI_LINE_EN;
 }
+
+/** Text plus lang for the paragraph: lang="pt" only when the PT text shows. */
+export function l6ConnectAiLineProps(nav?: L6Locale): { text: string; lang?: "pt" } {
+  const text = l6ConnectAiLine(nav);
+  return text === L6_CONNECT_AI_LINE_PT ? { text, lang: "pt" } : { text };
+}
+
+/** id of the L6 paragraph for one channel's OAuth button (aria-describedby target). */
+export function l6ConnectAiLineId(channelId: number | string): string {
+  return `l6-connect-ai-line-${channelId}`;
+}
