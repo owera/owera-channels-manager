@@ -8,7 +8,8 @@ from app.db import app_settings, get_session
 from app.models import (Channel, Playlist, Topic, Video, VideoStatus, Workspace, utcnow)
 from app.schemas import GenerateBody, TopicCreate, TopicReorderBody, TopicUpdate
 from app.services import llm_guard, quota, video_gen, youtube
-from app.workspace import current_workspace, require_channel
+from app.workspace import (current_workspace, require_channel, require_profile,
+                           require_topic)
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
@@ -41,6 +42,19 @@ def _canonical_format(fmt) -> str:
     return "long" if fmt == "long" else "short"
 
 
+def _check_refs(session: Session, ws: Workspace, channel_id: int, fields: dict) -> None:
+    """S4: a topic may only link a playlist of its own channel and a render
+    profile that is shared or owned by its workspace (foreign → 404)."""
+    pid = fields.get("playlist_id")
+    if pid:
+        pl = session.get(Playlist, pid)
+        if not pl or pl.channel_id != channel_id:
+            raise HTTPException(404, "playlist not found")
+    rpid = fields.get("render_profile_id")
+    if rpid:
+        require_profile(session, ws, rpid)
+
+
 def _topic_out(session: Session, t: Topic) -> dict:
     counts = dict(session.exec(
         select(Video.status, func.count(Video.id))
@@ -57,7 +71,9 @@ def _topic_out(session: Session, t: Topic) -> dict:
 
 
 @router.get("")
-def list_topics(channel_id: int, session: Session = Depends(get_session)):
+def list_topics(channel_id: int, session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
+    require_channel(session, ws, channel_id)
     topics = session.exec(
         select(Topic).where(Topic.channel_id == channel_id).order_by(Topic.position, Topic.id)
     ).all()
@@ -65,10 +81,11 @@ def list_topics(channel_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("", status_code=201)
-def create_topic(body: TopicCreate, session: Session = Depends(get_session)):
-    ch = session.get(Channel, body.channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+def create_topic(body: TopicCreate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    ch = require_channel(session, ws, body.channel_id)
+    _check_refs(session, ws, ch.id, {"playlist_id": body.playlist_id,
+                                     "render_profile_id": body.render_profile_id})
     mx = session.exec(select(func.max(Topic.position)).where(Topic.channel_id == ch.id)).one()
     topic = Topic(
         channel_id=ch.id, name=body.name.strip(), theme_prompt=body.theme_prompt,
@@ -86,19 +103,18 @@ def create_topic(body: TopicCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/{topic_id}")
-def get_topic(topic_id: int, session: Session = Depends(get_session)):
-    t = session.get(Topic, topic_id)
-    if not t:
-        raise HTTPException(404, "topic not found")
+def get_topic(topic_id: int, session: Session = Depends(get_session),
+              ws: Workspace = Depends(current_workspace)):
+    t = require_topic(session, ws, topic_id)
     return _topic_out(session, t)
 
 
 @router.patch("/{topic_id}")
-def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(get_session)):
-    t = session.get(Topic, topic_id)
-    if not t:
-        raise HTTPException(404, "topic not found")
+def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    t = require_topic(session, ws, topic_id)
     fields = body.model_dump(exclude_unset=True)
+    _check_refs(session, ws, t.channel_id, fields)
     if "content_format" in fields:
         fields["content_format"] = _canonical_format(fields["content_format"])
     _require_int(fields, "weight", 0,
@@ -115,10 +131,11 @@ def update_topic(topic_id: int, body: TopicUpdate, session: Session = Depends(ge
 
 
 @router.delete("/{topic_id}", status_code=204)
-def delete_topic(topic_id: int, session: Session = Depends(get_session)):
-    t = session.get(Topic, topic_id)
-    if not t:
-        return
+def delete_topic(topic_id: int, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    # S4: missing and foreign both 404 (was: missing → silent 204). A foreign
+    # 404 next to a missing 204 would leak that the id exists elsewhere.
+    t = require_topic(session, ws, topic_id)
     # Refuse if it still has videos, to avoid orphaning the queue.
     n = session.exec(select(func.count(Video.id)).where(Video.topic_id == topic_id)).one()
     if n:
@@ -156,11 +173,10 @@ def _steer_notes_from_body(body: GenerateBody) -> str | None:
 
 
 @router.post("/{topic_id}/generate")
-def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depends(get_session)):
+def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depends(get_session),
+                    ws: Workspace = Depends(current_workspace)):
     """Generate video ideas from the topic theme; they land as draft videos."""
-    t = session.get(Topic, topic_id)
-    if not t:
-        raise HTTPException(404, "topic not found")
+    t = require_topic(session, ws, topic_id)
     # weight 0 is a soft-pause (same gate as autofill/overflow); do not treat 0 as 1.
     weight = t.weight if t.weight is not None else 1
     if weight <= 0:

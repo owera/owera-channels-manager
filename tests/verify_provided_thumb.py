@@ -36,6 +36,19 @@ from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
 from app.services import provided_thumb as pt
 from app.services import publish_loop, render_loop, youtube
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -116,6 +129,7 @@ ok(info["warnings"] and "landscape" in info["warnings"][0],
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
+_seed_ws1(engine)
 with Session(engine) as s:
     s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
     s.commit()

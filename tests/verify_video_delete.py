@@ -19,7 +19,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import get_session
-from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus
+from app.models import Channel, JobRun, OAuthStatus, Topic, Video, VideoStatus, Workspace
 
 _checks = 0
 
@@ -37,7 +37,11 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 with Session(engine) as s:
-    s.add(Channel(slug="a", name="A", oauth_status=OAuthStatus.CONNECTED))
+    # S4: the route resolves the caller's workspace (ws 1, slug owera) and the
+    # video's channel must belong to it.
+    s.add(Workspace(id=1, slug="owera", name="Owera"))
+    s.commit()
+    s.add(Channel(slug="a", name="A", workspace_id=1, oauth_status=OAuthStatus.CONNECTED))
     s.commit()
     s.add(Topic(channel_id=1, name="T"))
     s.commit()
@@ -72,7 +76,7 @@ with Session(engine) as s:
        "detail records the pre-delete status, subject, and yt id")
 
 r2 = client.delete("/api/videos/999", auth=("x", "testpw"))
-ok(r2.status_code == 204, "deleting a missing id is still a 204 no-op")
+ok(r2.status_code == 404, "deleting a missing id is 404 (S4: same as a foreign id, no existence leak)")
 with Session(engine) as s:
     n = len(s.exec(select(JobRun).where(JobRun.kind == "delete")).all())
     ok(n == 1, "a no-op delete writes no JobRun")

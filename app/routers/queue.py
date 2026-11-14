@@ -8,7 +8,8 @@ from app.db import app_settings, get_session
 from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendStatus,
                         Video, VideoStatus, Workspace)
 from app.services import issues, quota
-from app.workspace import channels_for_workspace, current_workspace
+from app.workspace import (channels_for_workspace, current_workspace, job_run_scope,
+                           require_channel, require_video, trend_scope)
 from app.services.mpt_client import mpt
 from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
@@ -126,11 +127,16 @@ def dashboard(session: Session = Depends(get_session), ws: Workspace = Depends(c
 
 @router.get("/runs")
 def runs(channel_id: int | None = None, video_id: int | None = None, limit: int = 100,
-         session: Session = Depends(get_session)):
-    q = select(JobRun)
+         session: Session = Depends(get_session),
+         ws: Workspace = Depends(current_workspace)):
+    """Run audit, scoped to the caller's workspace (S4, ``job_run_scope``). A foreign
+    or missing ``channel_id`` / ``video_id`` filter is the same 404."""
+    q = select(JobRun).where(job_run_scope(ws))
     if channel_id is not None:
+        require_channel(session, ws, channel_id)
         q = q.where(JobRun.channel_id == channel_id)
     if video_id is not None:
+        require_video(session, ws, video_id)
         q = q.where(JobRun.video_id == video_id)
     return session.exec(q.order_by(JobRun.created_at.desc()).limit(limit)).all()
 
@@ -153,6 +159,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     through the existing PATCH/POST endpoints; this is its single observation call."""
     # Lazy import avoids any import-order coupling with the youtube-admin router.
     from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
+    from app.routers.settings import _workspace_view as _settings_workspace_view
+    from app.workspace import is_admin_workspace
 
     cfg = app_settings(session)
     channels = session.exec(channels_for_workspace(ws)).all()
@@ -161,7 +169,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     analytics_by_topic = {}
     for ch in channels:
         if ch.oauth_status == OAuthStatus.CONNECTED:
-            analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session)
+            analytics_by_topic[ch.id] = video_analytics_by_topic(ch.id, session, ws)
 
     topics = []
     topic_rows = (
@@ -188,24 +196,24 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
             "pending": pending, "published": published,
         })
 
-    recent_runs_q = select(JobRun).order_by(JobRun.created_at.desc()).limit(runs_limit * 3)
-    recent_runs = [
-        r for r in session.exec(recent_runs_q).all()
-        if r.channel_id is None or r.channel_id in ch_ids
-    ][:runs_limit]
+    # S4: same scope as GET /api/runs (channel-less global runs are admin-only).
+    recent_runs = session.exec(
+        select(JobRun).where(job_run_scope(ws))
+        .order_by(JobRun.created_at.desc()).limit(runs_limit)
+    ).all()
 
     # Active trends (so the agent dedupes + learns from prior research each run).
+    # S4: same scope as GET /api/trends (channel-less research is admin-only),
+    # filtered in SQL before the LIMIT.
     trends_q = (
         select(TrendSignal)
+        .where(trend_scope(ws))
         .where(TrendSignal.status.in_(
             [TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED]))
         .order_by(TrendSignal.updated_at.desc())
         .limit(30)
     )
-    trends = [
-        t for t in session.exec(trends_q).all()
-        if t.channel_id is None or t.channel_id in ch_ids
-    ]
+    trends = list(session.exec(trends_q).all())
 
     monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
 
@@ -225,7 +233,8 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
 
     return {
         "now": datetime.now(timezone.utc).isoformat(),
-        "settings": cfg,
+        # S4: global Settings only for the admin workspace (ws 1).
+        "settings": cfg if is_admin_workspace(ws) else _settings_workspace_view(ws),
         "dashboard": _dashboard_for_workspace(session, ws),
         "analytics_by_topic": analytics_by_topic,
         "monetization_by_channel": monetization_by_channel,

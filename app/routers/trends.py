@@ -8,9 +8,11 @@ from sqlmodel import Session, func, select
 
 from app.db import app_settings, get_session
 from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoStatus,
-                        utcnow)
+                        Workspace, utcnow)
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 from app.services import llm_guard, quota, video_gen
+from app.workspace import (current_workspace, is_admin_workspace, require_channel,
+                           require_trend, trend_scope)
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -46,11 +48,33 @@ def _norm(term: str) -> str:
     return " ".join((term or "").strip().lower().split())
 
 
+def _check_channel_field(session: Session, ws: Workspace, fields: dict) -> None:
+    """S4: a trend can only point at this workspace's channels. Channel-less
+    trends are admin-owned research rows, so a buyer cannot create or move
+    one there (it would vanish from its own list and land in ws 1's)."""
+    if "channel_id" not in fields:
+        return
+    cid = fields["channel_id"]
+    if cid is None:
+        if not is_admin_workspace(ws):
+            raise HTTPException(400, "channel_id is required")
+        return
+    require_channel(session, ws, cid)
+
+
+def _visible_filter(ws: Workspace):
+    return trend_scope(ws)
+
+
 @router.get("")
 def list_trends(status: str | None = None, channel_id: int | None = None,
-                sort: str = "score", session: Session = Depends(get_session)):
-    """Trends, newest-scored first. Filter by status/channel; sort by score|updated."""
-    q = select(TrendSignal)
+                sort: str = "score", session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
+    """Trends, newest-scored first. Filter by status/channel; sort by score|updated.
+    S4: only this workspace's trends (+ channel-less research for the admin)."""
+    if channel_id is not None:
+        require_channel(session, ws, channel_id)
+    q = select(TrendSignal).where(_visible_filter(ws))
     if status:
         q = q.where(TrendSignal.status == status)
     if channel_id is not None:
@@ -60,16 +84,19 @@ def list_trends(status: str | None = None, channel_id: int | None = None,
 
 
 @router.post("", status_code=201)
-def upsert_trend(body: TrendCreate, session: Session = Depends(get_session)):
+def upsert_trend(body: TrendCreate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
     """Record a researched trend. Upserts by normalized term so re-seeing a trend
     refreshes it (momentum/score/source) instead of creating a duplicate."""
     norm = _norm(body.term)
     if not norm:
         raise HTTPException(400, "term is required")
-    if body.channel_id is not None and not session.get(Channel, body.channel_id):
-        raise HTTPException(404, "channel not found")
+    _check_channel_field(session, ws, {"channel_id": body.channel_id})
+    # S4: dedupe only within this workspace, or a buyer's sighting would
+    # overwrite ws 1's research row (and vice versa).
     existing = session.exec(
-        select(TrendSignal).where(TrendSignal.term_norm == norm)).first()
+        select(TrendSignal).where(TrendSignal.term_norm == norm, _visible_filter(ws))
+        .order_by(TrendSignal.id)).first()
     data = body.model_dump(exclude_unset=True)
     if "content_format" in data:
         data["content_format"] = _canonical_format(data["content_format"])
@@ -98,19 +125,18 @@ def upsert_trend(body: TrendCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/{trend_id}")
-def get_trend(trend_id: int, session: Session = Depends(get_session)):
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
+def get_trend(trend_id: int, session: Session = Depends(get_session),
+              ws: Workspace = Depends(current_workspace)):
+    t = require_trend(session, ws, trend_id)
     return t
 
 
 @router.patch("/{trend_id}")
-def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(get_session)):
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
+def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    t = require_trend(session, ws, trend_id)
     fields = body.model_dump(exclude_unset=True)
+    _check_channel_field(session, ws, fields)
     if "content_format" in fields:
         fields["content_format"] = _canonical_format(fields["content_format"])
     for k, v in fields.items():
@@ -124,22 +150,19 @@ def update_trend(trend_id: int, body: TrendUpdate, session: Session = Depends(ge
 
 @router.post("/{trend_id}/adopt")
 def adopt_trend(trend_id: int, body: TrendAdoptBody | None = None,
-                session: Session = Depends(get_session)):
+                session: Session = Depends(get_session),
+                ws: Workspace = Depends(current_workspace)):
     """Smart-adopt: create a topic from the trend, seed ideas, and auto-produce a few
     (queued to render). Links the trend → topic so its performance can be tracked."""
     body = body or TrendAdoptBody()
-    t = session.get(TrendSignal, trend_id)
-    if not t:
-        raise HTTPException(404, "trend not found")
+    t = require_trend(session, ws, trend_id)
     if t.status == TrendStatus.ADOPTED and t.adopted_topic_id:
         raise HTTPException(409, f"trend already adopted (topic {t.adopted_topic_id})")
 
     channel_id = body.channel_id or t.channel_id
     if channel_id is None:
         raise HTTPException(400, "no target channel — set the trend's channel_id or pass one")
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
+    ch = require_channel(session, ws, channel_id)   # S4: foreign channel → 404
 
     # Empty/typed 0 used to coerce to a one-idea adopt before generate.
     # Generate already 400s count<=0; same growth-agent path.

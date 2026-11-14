@@ -47,6 +47,19 @@ from app.models import (Channel, JobRun, OAuthStatus, Topic, Video, VideoMetric,
 from app.routers import youtube_admin
 from app.services import analytics_loop, youtube
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -153,6 +166,7 @@ ok(traf["sources"] == {"SHORTS": {"views": 9, "watch_min": 3}} and sleeps == [0.
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
+_seed_ws1(engine)
 s = Session(engine)
 ch = Channel(slug="ana", name="Ana", oauth_status=OAuthStatus.CONNECTED,
              yt_channel_id="UC1", daily_publish_budget=0)
@@ -203,11 +217,11 @@ s.commit()
 latest = youtube_admin._latest_metrics(s, ch.id)
 ok(v30.id not in latest and latest[v40.id].views == 9 and latest[v80.id].views == 0,
    "_latest_metrics skips NULL snapshots (unmeasured), keeps the latest measured row")
-lb = youtube_admin.video_analytics(ch.id, "avg_view_pct", s)
+lb = youtube_admin.video_analytics(ch.id, "avg_view_pct", s, _WS1)
 by = {it["video_id"]: it for it in lb["items"]}
 ok(by[v30.id]["has_data"] is False and lb["measured"] == 2,
    "leaderboard: NULL-only video is unmeasured, measured count 2")
-agg = youtube_admin.video_analytics_by_topic(ch.id, s)
+agg = youtube_admin.video_analytics_by_topic(ch.id, s, _WS1)
 t = agg["by_topic"][0]
 ok(t["measured"] == 2 and t["avg_views"] == 4.5 and t["avg_view_pct"] == 20.0,
    "by-topic averages over measured videos only (NULL is not a zero)")
@@ -325,6 +339,7 @@ with Session(old) as so:
        "a NULL snapshot can be inserted after the rebuild")
 fresh = create_engine("sqlite://", poolclass=StaticPool)
 SQLModel.metadata.create_all(fresh)
+_seed_ws1(fresh)
 with patch.object(app_db, "engine", fresh):
     ok(app_db._relax_videometric_notnull() is False, "fresh (model-created) table: no rebuild")
 

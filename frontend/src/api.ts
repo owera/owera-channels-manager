@@ -160,6 +160,8 @@ export interface ParamsOptions {
 }
 
 export interface AppSettings {
+  // S4: "global" = admin workspace (full row); "workspace" = buyer view (own pause only).
+  scope?: "global" | "workspace";
   render_concurrency: number;
   publish_drip_minutes: number;
   topic_autogen_enabled: boolean;

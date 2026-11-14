@@ -27,7 +27,8 @@ import logging
 from sqlmodel import Session, func, select
 
 from app.config import settings
-from app.db import app_settings, session_scope
+from app.db import (app_settings, channel_workspace_paused, paused_workspace_ids,
+                    session_scope)
 from app.models import Channel, Topic, Video, VideoStatus
 from app.services import llm_guard, quota, review_guard, video_gen
 
@@ -137,6 +138,11 @@ def tick() -> None:
 
         channels = {ch.id: ch for ch in session.exec(select(Channel)).all()}
         topics = list(session.exec(select(Topic).where(Topic.active == True)).all())  # noqa: E712
+        # S4: a workspace that paused its own automation gets no new ideas (LLM spend).
+        ws_paused = paused_workspace_ids(session)
+        if ws_paused:
+            topics = [t for t in topics
+                      if not channel_workspace_paused(session, channels.get(t.channel_id), ws_paused)]
         # High-weight topics must claim board space first: the horizon cap is shared
         # per channel, so id-order iteration let low-id anchor topics drain it before
         # the weighted winners were ever reached (07-26: t2/t5 filled both boards

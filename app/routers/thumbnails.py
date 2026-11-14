@@ -9,18 +9,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session
 
 from app.db import get_session
-from app.models import Topic, Video, VideoStatus, utcnow
+from app.models import Topic, Video, VideoStatus, Workspace, utcnow
 from app.services import quota
+from app.workspace import current_workspace, require_video
 
 router = APIRouter(prefix="/api/videos", tags=["thumbnails"])
 
 _THUMB_LOCKED = {VideoStatus.PUBLISHING, VideoStatus.PUBLISHED}
 
 
-def _thumb_target(session: Session, video_id: int) -> Video:
-    v = session.get(Video, video_id)
-    if not v:
-        raise HTTPException(404, "video not found")
+def _thumb_target(session: Session, video_id: int, ws: Workspace) -> Video:
+    v = require_video(session, ws, video_id)   # S4: foreign video → 404
     if v.status in _THUMB_LOCKED:
         raise HTTPException(409, f"cannot change the thumbnail from status '{v.status}' "
                                  "(already uploading/published)")
@@ -29,14 +28,15 @@ def _thumb_target(session: Session, video_id: int) -> Video:
 
 @router.post("/{video_id}/thumbnail")
 async def set_provided_thumbnail(video_id: int, request: Request,
-                                 session: Session = Depends(get_session)):
+                                 session: Session = Depends(get_session),
+                                 ws: Workspace = Depends(current_workspace)):
     """Set an operator-provided thumbnail.
 
     - multipart/form-data with a `file` field (PNG or JPEG), or
     - JSON `{"path": "<file under the manager storage dir>"}`.
     """
     from app.services import provided_thumb as pt
-    v = _thumb_target(session, video_id)
+    v = _thumb_target(session, video_id, ws)
     ctype = (request.headers.get("content-type") or "").lower()
     source = ""
     try:
@@ -88,10 +88,11 @@ async def set_provided_thumbnail(video_id: int, request: Request,
 
 
 @router.delete("/{video_id}/thumbnail")
-def clear_provided_thumbnail(video_id: int, session: Session = Depends(get_session)):
+def clear_provided_thumbnail(video_id: int, session: Session = Depends(get_session),
+                                 ws: Workspace = Depends(current_workspace)):
     """Clear the provided thumbnail; publish goes back to the template."""
     from app.services import provided_thumb as pt
-    v = _thumb_target(session, video_id)
+    v = _thumb_target(session, video_id, ws)
     had = pt.clear(v)
     v.updated_at = utcnow()
     session.add(v)

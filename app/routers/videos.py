@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session, func, select
 
 from app.config import settings as cfg
-from app.db import app_settings, get_session
+from app.db import app_settings, channel_workspace_paused, get_session
 from app.models import Channel, JobRun, Topic, Video, VideoStatus, Workspace, utcnow
 from app.workspace import current_workspace, require_channel, require_video
 from app.schemas import (
@@ -221,6 +221,8 @@ def queue_plan(channel_id: int, session: Session = Depends(get_session),
     # Global / channel-wide stops apply to every queued video.
     if cfg_row.scheduler_paused:
         return {str(v.id): entry("scheduler paused") for v in queued}
+    if channel_workspace_paused(session, ch):
+        return {str(v.id): entry("workspace paused") for v in queued}
     if ch.paused:
         return {str(v.id): entry("channel paused") for v in queued}
 
@@ -550,20 +552,17 @@ def set_script(video_id: int, body: VideoScriptSet,
 @router.delete("/{video_id}", status_code=204)
 def delete_video(video_id: int, session: Session = Depends(get_session),
                  ws: Workspace = Depends(current_workspace)):
-    v = session.get(Video, video_id)
-    if v:
-        ch = session.get(Channel, v.channel_id)
-        if not ch or ch.workspace_id != ws.id:
-            raise HTTPException(404, "video not found")
-    if v:
-        # Deletion is the one lifecycle exit with no other trace (the row itself is
-        # the record) — log it so bulk deletes are visible in /api/runs.
-        quota.log(session, kind="delete", status="success", video_id=video_id,
-                  channel_id=v.channel_id,
-                  detail=f"deleted: status={v.status} subject={v.subject!r} "
-                         f"yt={v.yt_video_id or '-'}")
-        session.delete(v)
-        session.commit()
+    # S4: missing and foreign ids are the same 404 (was 204 for a missing id,
+    # which leaked existence).
+    v = require_video(session, ws, video_id)
+    # Deletion is the one lifecycle exit with no other trace (the row itself is
+    # the record) — log it so bulk deletes are visible in /api/runs.
+    quota.log(session, kind="delete", status="success", video_id=video_id,
+              channel_id=v.channel_id,
+              detail=f"deleted: status={v.status} subject={v.subject!r} "
+                     f"yt={v.yt_video_id or '-'}")
+    session.delete(v)
+    session.commit()
 
 
 def _set_status(session, video_id, new, **fields):

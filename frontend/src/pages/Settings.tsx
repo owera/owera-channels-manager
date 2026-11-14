@@ -45,6 +45,25 @@ export default function Settings() {
     patch({ [key]: n });
   };
 
+  if (s.scope === "workspace") {
+    // S4: non-admin workspaces only own their pause; global knobs are ws 1's.
+    return (
+      <div className="p-4 md:p-8 max-w-[760px]">
+        <header className="mb-6 md:mb-8">
+          <div className="label mb-2">// settings</div>
+          <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-fog-50 tracking-tight">Settings</h1>
+        </header>
+        <div className="panel p-6">
+          <SectionLabel>// scheduler</SectionLabel>
+          <div className="flex items-center justify-between">
+            <div><div className="text-sm text-fog-100">Pause automation</div><div className="label">stops render + publish for this workspace only</div></div>
+            <Toggle on={s.scheduler_paused} onChange={(v) => patch({ scheduler_paused: v })} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 md:p-8 max-w-[760px]">
       <header className="mb-6 md:mb-8">

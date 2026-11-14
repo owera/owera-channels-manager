@@ -53,6 +53,19 @@ from app.models import Channel, JobRun, OAuthStatus, Playlist, Topic, Video, Vid
 from app.routers import topics as topics_router
 from app.schemas import GenerateBody, TopicCreate, TopicUpdate
 
+# S4: routes resolve the caller's workspace (single-tenant → ws 1 "owera").
+from app.models import Workspace as _Workspace  # noqa: E402
+_WS1 = _Workspace(id=1, slug="owera", name="Owera")
+
+
+def _seed_ws1(_engine):
+    from sqlmodel import Session as _S
+    with _S(_engine) as _s:
+        if _s.get(_Workspace, 1) is None:
+            _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+            _s.commit()
+
+
 _checks = 0
 
 
@@ -74,6 +87,7 @@ engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                        poolclass=StaticPool)
 SQLModel.metadata.create_all(engine)
 
+_seed_ws1(engine)
 # High render budget so the board-horizon cap (budget × 2 = 40) does not
 # bind before the per-topic idea ceiling (target 6 × weight).
 with Session(engine) as s:
@@ -102,6 +116,11 @@ with Session(engine) as s:
                    title="Series One"))
     s.add(Playlist(channel_id=1, yt_playlist_id="PLseriestwo0000000000000002",
                    title="Series Two"))
+    # S4: topics may only link a profile that exists and is shared/own, so
+    # seed shared ids 1 (true→1 coercion target) and 2 (the integer case).
+    from app.models import RenderProfile as _RP
+    s.add(_RP(name="Shared One"))
+    s.add(_RP(name="Shared Two"))
     s.commit()
 
 

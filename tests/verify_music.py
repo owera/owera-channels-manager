@@ -86,6 +86,17 @@ settings.app_password = "testpw"
 settings.bgm_dir = str(_TMP)
 
 client = TestClient(main.app)
+
+# S4: /api/music is admin-only (ws 1, the shared BGM pool). The caller's workspace
+# is resolved from the DB, so seed ws 1 (slug owera) in this test's temp DB.
+from sqlmodel import Session as _S, SQLModel as _SQLModel  # noqa: E402
+from app.db import engine as _engine  # noqa: E402
+from app.models import Workspace as _Workspace  # noqa: E402
+_SQLModel.metadata.create_all(_engine)
+with _S(_engine) as _s:
+    if _s.get(_Workspace, 1) is None:
+        _s.add(_Workspace(id=1, slug="owera", name="Owera"))
+        _s.commit()
 auth = ("x", "testpw")
 
 _orig_save = music_gen.generate_and_save

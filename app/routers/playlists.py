@@ -4,29 +4,30 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.db import get_session
-from app.models import Channel, OAuthStatus, Playlist, utcnow
+from app.models import Channel, OAuthStatus, Playlist, Workspace, utcnow
 from app.schemas import PlaylistCreate
 from app.services import notify, youtube
+from app.workspace import current_workspace, require_channel
 
 router = APIRouter(prefix="/api/channels/{channel_id}/playlists", tags=["playlists"])
 
 
-def _require_channel(channel_id: int, session: Session) -> Channel:
-    ch = session.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "channel not found")
-    return ch
+def _require_channel(channel_id: int, session: Session, ws: Workspace) -> Channel:
+    # S4: another workspace's channel is the same 404 as a missing one.
+    return require_channel(session, ws, channel_id)
 
 
 @router.get("")
-def list_local(channel_id: int, session: Session = Depends(get_session)):
-    _require_channel(channel_id, session)
+def list_local(channel_id: int, session: Session = Depends(get_session),
+           ws: Workspace = Depends(current_workspace)):
+    _require_channel(channel_id, session, ws)
     return session.exec(select(Playlist).where(Playlist.channel_id == channel_id)).all()
 
 
 @router.post("/sync")
-def sync(channel_id: int, session: Session = Depends(get_session)):
-    ch = _require_channel(channel_id, session)
+def sync(channel_id: int, session: Session = Depends(get_session),
+           ws: Workspace = Depends(current_workspace)):
+    ch = _require_channel(channel_id, session, ws)
     try:
         service = youtube.get_service(ch.slug, channel=ch, session=session)
     except youtube.NeedsConnect as e:
@@ -51,8 +52,9 @@ def sync(channel_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("", status_code=201)
-def create(channel_id: int, body: PlaylistCreate, session: Session = Depends(get_session)):
-    ch = _require_channel(channel_id, session)
+def create(channel_id: int, body: PlaylistCreate, session: Session = Depends(get_session),
+           ws: Workspace = Depends(current_workspace)):
+    ch = _require_channel(channel_id, session, ws)
     try:
         service = youtube.get_service(ch.slug, channel=ch, session=session)
     except youtube.NeedsConnect as e:
