@@ -271,6 +271,11 @@ ok(r.status_code == 200 and _details == {"global run"},
 r = client.get("/api/agent/state", headers=A)
 ok(r.status_code == 200 and {x["detail"] for x in r.json()["recent_runs"]} == {"A channel run"},
    "agent/state recent_runs uses the same scope (A sees only A's run)")
+ok(r.status_code == 200 and {x["term"] for x in r.json()["trends"]} == {"A trend"},
+   "agent/state trends: A sees only A's trend (no B, no admin research)")
+r = client.get("/api/agent/state", headers=ADMIN)
+ok(r.status_code == 200 and {x["term"] for x in r.json()["trends"]} == {"Research", "Owera trend"},
+   "agent/state trends: ws 1 sees its own + channel-less research, no buyer rows")
 
 # ---- DELETE /api/videos/{id}: missing == foreign ------------------------------
 print("videos: DELETE on a foreign id and on a missing id look the same")

@@ -30,6 +30,7 @@ Helpers (`app/workspace.py`): `require_channel`, `require_video` (existing),
 | media | `GET /api/videos/{id}/video`, `GET /api/videos/{id}/thumb` |
 | thumbnails | `POST/DELETE /api/videos/{id}/thumbnail` |
 | trends | list (filtered), `POST` (upsert dedupe per workspace), `GET/PATCH /{id}`, `POST /{id}/adopt` (target channel checked) |
+| agent | `GET /api/agent/state`: `recent_runs` via `job_run_scope`, `trends` via `trend_scope` (same rule as `GET /api/trends`, filtered in SQL before the LIMIT) |
 | profiles | list (shared + own), `POST`, `GET/PATCH/DELETE /{id}` |
 | settings | `GET/PATCH /api/settings`, and the `settings` block of `/api/agent/state` |
 

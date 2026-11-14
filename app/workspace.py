@@ -211,6 +211,17 @@ def require_topic(session: Session, ws: Workspace, topic_id: int) -> Topic:
     return t
 
 
+def trend_scope(ws: Workspace):
+    """SQL filter matching trend_visible: channel-bound trends belong to the
+    channel's workspace; channel-less (growth-agent research) trends are
+    admin-only. Apply it before any LIMIT so other tenants can't crowd out
+    the caller's rows."""
+    own = select(Channel.id).where(Channel.workspace_id == ws.id)
+    if is_admin_workspace(ws):
+        return (TrendSignal.channel_id == None) | (TrendSignal.channel_id.in_(own))  # noqa: E711
+    return TrendSignal.channel_id.in_(own)
+
+
 def trend_visible(session: Session, ws: Workspace, t: TrendSignal) -> bool:
     """Channel-bound trends belong to the channel's workspace; channel-less
     (growth-agent research) trends belong to the admin workspace."""

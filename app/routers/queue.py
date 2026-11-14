@@ -9,7 +9,7 @@ from app.models import (Channel, JobRun, OAuthStatus, Topic, TrendSignal, TrendS
                         Video, VideoStatus, Workspace)
 from app.services import issues, quota
 from app.workspace import (channels_for_workspace, current_workspace, job_run_scope,
-                           require_channel, require_video)
+                           require_channel, require_video, trend_scope)
 from app.services.mpt_client import mpt
 from app.services.publish_loop import next_window_open
 from app.services.youtube import QUOTA_UPLOAD
@@ -203,17 +203,17 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     ).all()
 
     # Active trends (so the agent dedupes + learns from prior research each run).
+    # S4: same scope as GET /api/trends (channel-less research is admin-only),
+    # filtered in SQL before the LIMIT.
     trends_q = (
         select(TrendSignal)
+        .where(trend_scope(ws))
         .where(TrendSignal.status.in_(
             [TrendStatus.RESEARCHED, TrendStatus.WATCHING, TrendStatus.ADOPTED]))
         .order_by(TrendSignal.updated_at.desc())
         .limit(30)
     )
-    trends = [
-        t for t in session.exec(trends_q).all()
-        if t.channel_id is None or t.channel_id in ch_ids
-    ]
+    trends = list(session.exec(trends_q).all())
 
     monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
 

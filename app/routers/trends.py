@@ -12,7 +12,7 @@ from app.models import (Channel, Topic, TrendSignal, TrendStatus, Video, VideoSt
 from app.schemas import TrendAdoptBody, TrendCreate, TrendUpdate
 from app.services import llm_guard, quota, video_gen
 from app.workspace import (current_workspace, is_admin_workspace, require_channel,
-                           require_trend)
+                           require_trend, trend_scope)
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -63,10 +63,7 @@ def _check_channel_field(session: Session, ws: Workspace, fields: dict) -> None:
 
 
 def _visible_filter(ws: Workspace):
-    own = select(Channel.id).where(Channel.workspace_id == ws.id)
-    if is_admin_workspace(ws):
-        return (TrendSignal.channel_id == None) | (TrendSignal.channel_id.in_(own))  # noqa: E711
-    return TrendSignal.channel_id.in_(own)
+    return trend_scope(ws)
 
 
 @router.get("")
