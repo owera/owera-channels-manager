@@ -7,7 +7,7 @@ shape (POST /responses, Bearer header, model mapping, effort, store=false); outp
 text; usage JSONL row (tokens/model/call type/workspace/ts/cost, NO content, NO key);
 cost from the price table and from cost_in_usd_ticks; monthly cap reached → blocked,
 no cap → blocked, unreadable ledger → blocked; missing key → clear error; timeout →
-"grok.Timeout" (transient, like the CLI); HTTP 4xx/5xx → GrokCLIError, one attempt
+"grok.Timeout" (transient, like the CLI); HTTP 4xx/5xx → LLMError (GrokCLIError alias), one attempt; HTTP 402 → LLMInsufficientCredit / insufficient_credit, never retried
 (no in-client retry, like the CLI); the (B) guard still applies in api mode; agent
 exec plan (always the CLI, also with backend=api); XAI_DATA_RETENTION_ACK gate.
 """
@@ -374,6 +374,61 @@ for status, transient in ((429, False), (503, True), (401, False)):
             is_t = any(sig in str(e) for sig in _TRANSIENT)
             ok(is_t == transient and len(attempts) == 1 and PROMPT not in str(e),
                f"HTTP {status} → GrokCLIError (transient={transient}), 1 attempt, no echo of content")
+
+# 402 insufficient credit: subclass, clear reason, one attempt, not transient, no content
+print("HTTP 402 insufficient_credit")
+attempts.clear()
+cap.lines.clear()
+HIST = ("GrokCLIError: xai api HTTP 402: You have run out of credits or need a "
+        "Grok subscription. Add credits at https://grok.com/?_s=usage")
+
+
+def _402(req):
+    attempts.append(req)
+    return httpx.Response(402, json={"error": {"code": "insufficient_credits",
+                                               "message": PROMPT + " add credits at https://grok.com"}})
+
+
+with _Multi(api_env()), patch.object(llm, "_http_client", side_effect=_client_with(_402)):
+    try:
+        with llm_guard.scope(1, "storyboard_compose"):
+            llm.complete(PROMPT)
+        ok(False, "HTTP 402 must raise")
+    except llm.LLMInsufficientCredit as e:
+        from app.services.render_loop import _TRANSIENT, _is_transient_error
+        from app.services import issues as _issues
+        ok(e.code == "insufficient_credit" and str(e) == "insufficient_credit",
+           "402 raises LLMInsufficientCredit with reason insufficient_credit")
+        ok(isinstance(e, llm.LLMError) and isinstance(e, llm.GrokCLIError),
+           "LLMInsufficientCredit is an LLMError (GrokCLIError alias kept)")
+        ok(llm.format_failure(e) == "insufficient_credit",
+           "format_failure stores reason insufficient_credit (no class prefix, no body)")
+        ok(not any(sig in str(e) for sig in _TRANSIENT)
+           and _is_transient_error(str(e)) is False
+           and _is_transient_error("insufficient_credit") is False
+           and _is_transient_error(HIST) is False,
+           "402 / insufficient_credit is not a transient render retry")
+        ok(len(attempts) == 1 and PROMPT not in str(e) and "grok.com" not in str(e),
+           "402: one attempt, no fallback, no content and no upgrade URL in the error")
+        ok(_issues._is_transient("insufficient_credit") is False
+           and _issues._is_transient(HIST) is False,
+           "issues digest does not treat 402 as transient")
+        v = __import__("app.models", fromlist=["Video"]).Video(
+            channel_id=1, topic_id=1, subject="x", error="insufficient_credit")
+        ok(_issues._failed_action(v, 1.0) == ("hold", False),
+           "video list: insufficient_credit → hold, not auto-requeue (external/credit, not craft)")
+        v.error = HIST
+        ok(_issues._failed_action(v, 1.0) == ("hold", False),
+           "historical 1478–1481 'xai api HTTP 402: … credits' text also holds")
+    except llm.GrokCLIError as e:
+        ok(False, f"402 must raise LLMInsufficientCredit, got {type(e).__name__}: {e}")
+ok(len(attempts) == 1, "402 is not retried in the client")
+ok(any("insufficient_credit" in line and "workspace_id=1" in line
+       and "route=storyboard_compose" in line and PROMPT not in line
+       for line in cap.lines),
+   "one clear log line: workspace, route, insufficient_credit, no content")
+ok(rows()[-1]["status"] == "http_402" and rows()[-1]["cost_usd"] == 0.0,
+   "402 recorded in usage as http_402 (cost 0, no content)")
 
 # ------------------------------------------------------------------ guard in api mode
 print("(B) guard still applies in api mode")

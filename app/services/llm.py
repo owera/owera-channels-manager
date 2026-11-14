@@ -29,8 +29,43 @@ _OIDC_HINT = (
 )
 
 
-class GrokCLIError(RuntimeError):
-    """grok -p failed (nonzero, missing binary, or timeout)."""
+class LLMError(RuntimeError):
+    """An LLM call failed (grok CLI or xAI API)."""
+
+
+GrokCLIError = LLMError  # backward-compatible alias
+
+
+INSUFFICIENT_CREDIT = "insufficient_credit"
+
+
+class LLMInsufficientCredit(LLMError):
+    """xAI API returned HTTP 402 (insufficient credit). Not transient.
+
+    Do not retry and do not fall back to another backend. Render failures
+    record this as reason ``insufficient_credit``.
+    """
+    code = INSUFFICIENT_CREDIT
+
+
+def format_failure(exc: BaseException) -> str:
+    """Reason stored on a failed video / engine status. No prompt or body content."""
+    if isinstance(exc, LLMInsufficientCredit) or getattr(exc, "code", None) == INSUFFICIENT_CREDIT:
+        return INSUFFICIENT_CREDIT
+    text = f"{type(exc).__name__}: {exc}"
+    if is_insufficient_credit(text):
+        return INSUFFICIENT_CREDIT
+    return text
+
+
+def is_insufficient_credit(err: str | None) -> bool:
+    """True for the new reason and for the historical 1478–1481 error text."""
+    e = err or ""
+    if INSUFFICIENT_CREDIT in e:
+        return True
+    # Videos 1478–1481 (2026-11-13) were marked:
+    # "GrokCLIError: xai api HTTP 402: You have run out of credits or need a Grok subscription..."
+    return "HTTP 402" in e or "http 402" in e.lower()
 
 
 def scratch_dir() -> Path:
@@ -193,7 +228,7 @@ DEFAULT_PRICES: dict[str, dict[str, float]] = {
 BUDGET_EVENT = "llm_budget_blocked"
 
 
-class LLMRetentionNotAcknowledged(GrokCLIError):
+class LLMRetentionNotAcknowledged(LLMError):
     """LLM_BACKEND=api without a valid XAI_DATA_RETENTION_ACK. Not transient."""
 
 
@@ -259,11 +294,11 @@ def _assert_stateless(body: dict) -> None:
         raise LLMConfigError(f"xai api request is not stateless (keys={sorted(body)})")
 
 
-class LLMBudgetExceeded(GrokCLIError):
+class LLMBudgetExceeded(LLMError):
     """api backend refused: monthly cap reached or not configured. Not transient."""
 
 
-class LLMConfigError(GrokCLIError):
+class LLMConfigError(LLMError):
     """api backend misconfigured (no key, unknown model/price). Not transient."""
 
 
@@ -444,6 +479,11 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
     if r.status_code >= 400:
         record_usage({**row, "status": f"http_{r.status_code}", "cost_usd": 0.0,
                       "duration_s": dur})
+        if r.status_code == 402:
+            # No body/content in the log. 402 is never retried (not transient).
+            logger.warning("insufficient_credit workspace_id=%s route=%s",
+                           workspace_id, call_type)
+            raise LLMInsufficientCredit(INSUFFICIENT_CREDIT)
         detail = ""
         try:
             err = (r.json() or {}).get("error")
@@ -452,7 +492,7 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
             pass
         # Same shape as "grok -p exited N: <tail>"; status code kept so 503/529 stay
         # transient in render_loop exactly as a CLI stderr with them would.
-        raise GrokCLIError(f"xai api HTTP {r.status_code}: {str(detail)[:200] or '(no detail)'}")
+        raise LLMError(f"xai api HTTP {r.status_code}: {str(detail)[:200] or '(no detail)'}")
     try:
         data = r.json()
     except ValueError as e:

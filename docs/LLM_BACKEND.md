@@ -62,8 +62,9 @@ A model missing from the price table → `LLMConfigError` (fail closed).
 ## Behavior kept from the CLI
 
 - One attempt per call, with no retry in the client. The CLI doesn't retry either, and `render_loop._TRANSIENT` owns retries.
-- Timeout is the caller's (`grok_timeout_seconds` 600 / `_light`), and it fails as `GrokCLIError("grok.Timeout: …")`, the same transient token.
-- HTTP ≥400 → `GrokCLIError("xai api HTTP <status>: <error code>")`. A 503 or 529 is transient, as a CLI stderr carrying those codes would be. 401, 403 and 429 are not.
+- Timeout is the caller's (`grok_timeout_seconds` 600 / `_light`), and it fails as `LLMError("grok.Timeout: …")` (the `GrokCLIError` name is kept as a backward-compatible alias), the same transient token.
+- HTTP 402 → `LLMInsufficientCredit` with reason `insufficient_credit`. One warning line logs `workspace_id`, `route` (call type), and `insufficient_credit` — no prompt or body. It is not transient: the client does not retry, `render_loop` marks the video failed with reason `insufficient_credit` (craft_review stays pending), and the issues digest / video list classifies it as an external credit failure (`hold`, not auto-requeue).
+- Other HTTP ≥400 → `LLMError("xai api HTTP <status>: <error code>")`. A 503 or 529 is transient, as a CLI stderr carrying those codes would be. 401, 403 and 429 are not.
 - Missing key → `LLMConfigError`, with a clear message and **no fallback to the CLI**.
 - Guard B applies in both modes.
 

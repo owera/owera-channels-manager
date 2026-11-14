@@ -54,6 +54,14 @@ _GROK_TIMEOUT_BACKOFF_HI_S = 60
 _grok_timeout_not_before: dict[int, float] = {}
 
 
+def _is_transient_error(err: str) -> bool:
+    """Retryable render failure? 402 / insufficient_credit never is."""
+    from app.services.llm import is_insufficient_credit
+    if is_insufficient_credit(err):
+        return False
+    return any(sig in (err or "") for sig in _TRANSIENT)
+
+
 def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool) -> None:
     """Re-queue a failed-to-finish render, or mark FAILED once the budget is spent.
 
@@ -64,6 +72,10 @@ def _retry_or_fail(session: Session, video: Video, err: str, *, transient: bool)
     grok.Timeout gets an extra 30–60s cool-down before re-submit (see
     ``_grok_timeout_not_before``); other transients re-queue immediately.
     """
+    from app.services.llm import INSUFFICIENT_CREDIT, is_insufficient_credit
+    if is_insufficient_credit(err):
+        err = INSUFFICIENT_CREDIT
+        transient = False
     if transient and video.retry_count < 2:
         video.status = VideoStatus.QUEUED
         video.retry_count += 1
@@ -345,9 +357,10 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
                                          language=video_gen.channel_language(session, video.channel_id),
                                          niche=_niche)
         except Exception as e:
-            err = f"{type(e).__name__}: {e}"
+            from app.services.llm import format_failure
+            err = format_failure(e)
             _retry_or_fail(session, video, err,
-                           transient=any(sig in err for sig in _TRANSIENT))
+                           transient=_is_transient_error(err))
             return
         from app.services import craft as _meta_craft
         prior = (video.title or "").strip()
@@ -457,7 +470,7 @@ def _advance_in_flight(session: Session) -> None:
         elif task.get("state") == STATE_FAILED:
             err = task.get("error") or f"{video.engine or 'mpt'} reported render failure"
             _retry_or_fail(session, video, err,
-                           transient=any(sig in err for sig in _TRANSIENT))
+                           transient=_is_transient_error(err))
         elif timed_out:
             # Still PROCESSING past the cap — no artifact, bounded re-queue.
             # A just-finished COMPLETE/FAILED is handled above (poll first),
