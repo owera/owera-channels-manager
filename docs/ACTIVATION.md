@@ -33,10 +33,27 @@ older than 24 h) plus `jobrun` render errors in the last 24 h, per workspace
 `provision_test_workspace` runs `init_db()` (same additive migration as startup),
 writes one row (`owner_email`, `is_test=1`), no Stripe call, no email, no
 `paid_at`; idempotent (returns the existing row, never flips a paid workspace to
-test); refuses ws 1, the owera SPA allowlist email and every non-internal
-email: only `name+test@owera.com` (optional suffix: `name+test2`,
-`name+test-osi`; case-insensitive) is accepted, a plain `name@owera.com` is
-refused (exit 2).
+test); refuses ws 1, the owera SPA allowlist email (even if listed below) and
+every other email (exit 2). Accepted:
+
+- `name+test@owera.com` (optional suffix: `name+test2`, `name+test-osi`;
+  case-insensitive), for non-browser tests. A plain `name@owera.com` is refused.
+- an email in **`MANAGER_TEST_WORKSPACE_EMAILS`** (comma-separated,
+  case-insensitive, trimmed, default empty), for browser E2E through SPA Google
+  login. PO CM 14/11 (option b): 1–2 free dedicated Gmail accounts, added as
+  consent-screen test users, created by CTO and kept in the vault. No new
+  Google Workspace seat.
+
+### SPA Google login on test workspaces
+
+`spa_google_login.workspace_for_email` (used by the OAuth callback and by every
+session check) resolves an `is_test` workspace only for its provisioned
+`owner_email` or an email in `MANAGER_TEST_WORKSPACE_EMAILS`, and never for an
+owera allowlist email (that one always maps to `owera`). An email that owns more
+than one workspace resolves to none, so one account never maps to two
+workspaces. The `+test` alias is deliberately **not** mapped from the base
+address: that would let `rodrigo@owera.com` into a test workspace (the
+cross-workspace leak S4 closes).
 
 ### Test → paid transition
 

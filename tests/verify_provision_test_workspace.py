@@ -122,7 +122,7 @@ with patch.object(httpx, "post", _boom), patch.object(httpx, "get", _boom), \
                 "name+test@owera.com.evil.io", "name+test@sub.owera.com", "+test@owera.com",
                 "name+prod@owera.com"):
         rc, out = run("--email", bad)
-        ok(rc == 2 and not out["ok"] and "internal test emails only" in out["error"],
+        ok(rc == 2 and not out["ok"] and "test emails only" in out["error"],
            f"non-internal email refused (exit 2): {bad}")
     rc, out = run("--email", "Ops.Bot+Test2@OWERA.com")
     ok(rc == 0 and out["created"] is True and out["owner_email"] == "ops.bot+test2@owera.com",
@@ -262,6 +262,58 @@ with Session(engine) as s:
     w.is_test = False
     s.add(w)
     s.commit()
+
+print("MANAGER_TEST_WORKSPACE_EMAILS (PO CM option b: dedicated Gmail test users)")
+ok(settings.test_workspace_emails == "", "default empty")
+ok(spa_google_login.test_workspace_emails() == frozenset(), "empty → no extra test emails")
+with patch.object(settings, "test_workspace_emails",
+                  " E2E.Buyer@Gmail.com , other.tester@gmail.com,, rodrigo@owera.com "):
+    ok(spa_google_login.test_workspace_emails() ==
+       {"e2e.buyer@gmail.com", "other.tester@gmail.com", "rodrigo@owera.com"},
+       "parsed: comma-separated, trimmed, case-insensitive")
+    with patch.object(httpx, "post", _boom), patch.object(stripe_email, "send_welcome_email", _boom):
+        rc, out = run("--email", "e2e.buyer@GMAIL.com")
+        ok(rc == 0 and out["created"] is True and out["is_test"] is True
+           and out["owner_email"] == "e2e.buyer@gmail.com", "allowlisted Gmail accepted by the CLI")
+        GW, GSLUG = out["workspace_id"], out["slug"]
+        rc, out = run("--email", "stranger@gmail.com")
+        ok(rc == 2 and not out["ok"] and "MANAGER_TEST_WORKSPACE_EMAILS" in out["error"],
+           "non-allowlisted email refused (exit 2)")
+        rc, out = run("--email", "rodrigo@owera.com")
+        ok(rc == 2 and "allowlist" in out["error"], "owera allowlist email refused even if listed")
+        rc, out = run("--email", "owner1+test@owera.com")
+        ok(rc == 2 and "workspace 1" in out["error"], "ws 1 refusal unchanged")
+
+    print("SPA Google login on is_test workspaces")
+    ok(spa_google_login.workspace_for_email("E2E.Buyer@gmail.com") == GSLUG,
+       "allowlisted account signs in to its own test workspace")
+    ok(spa_google_login.workspace_for_email("other.tester@gmail.com") is None,
+       "another allowlisted account does not get that workspace (owns none)")
+    ok(spa_google_login.workspace_for_email("stranger@gmail.com") is None,
+       "non-allowlisted account: no workspace")
+    with Session(engine) as s:
+        tw = s.get(Workspace, GW)
+        ok(not spa_google_login.may_sign_in_to_test_workspace("stranger@gmail.com", tw),
+           "non-allowlisted, non-owner account refused on the is_test workspace")
+        ok(not spa_google_login.may_sign_in_to_test_workspace("rodrigo@owera.com", tw),
+           "owera email refused on the is_test workspace")
+        # A legacy/hand-made is_test row owned by the owera email: still never mapped.
+        s.add(Workspace(slug="leak-test", name="Leak", owner_email="rodrigo@owera.com", is_test=True))
+        s.add(Workspace(slug="dup-a", name="Dup A", owner_email="dup@gmail.com", is_test=True))
+        s.add(Workspace(slug="dup-b", name="Dup B", owner_email="dup@gmail.com"))
+        s.add(Workspace(slug="legacy-test", name="Legacy", owner_email="legacy@example.com", is_test=True))
+        s.commit()
+    ok(spa_google_login.workspace_for_email("rodrigo@owera.com") == "owera",
+       "owera email maps to owera, never to a test workspace")
+    ok(spa_google_login.workspace_for_email("dup@gmail.com") is None,
+       "one account owning two workspaces resolves to none (never two)")
+    ok(spa_google_login.workspace_for_email("legacy@example.com") == "legacy-test",
+       "provisioned owner email of an is_test workspace may sign in")
+with patch.object(settings, "test_workspace_emails", ""):
+    ok(spa_google_login.workspace_for_email("e2e.buyer@gmail.com") == GSLUG,
+       "owner email still resolves when later removed from the env list")
+    ok(spa_google_login.workspace_for_email("paid+test@owera.com") is not None,
+       "non-test (paid) workspace login unchanged")
 
 print("not exposed over HTTP")
 import app.main as main

@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     spa_google_client_id: str = ""
     spa_google_client_secret: str = ""
     spa_google_redirect_uri: str = "https://channels.owera.com/api/auth/google/callback"
+    # S5 (PO CM 14/11): dedicated Google accounts (e.g. 1–2 free Gmail consent-screen
+    # test users, kept in the vault) that may own / sign in to an is_test workspace.
+    # Comma-separated, case-insensitive, trimmed. Default empty.
+    test_workspace_emails: str = ""           # env: MANAGER_TEST_WORKSPACE_EMAILS
     # Signed session cookie (required when spa_google_login=1 on claw0).
     session_secret: str = ""
     # Match SessionMiddleware https_only (set True behind HTTPS in production).

@@ -46,8 +46,26 @@ def workspace_for_email(email: str) -> str | None:
     return _workspace_slug_from_owner_email(key)
 
 
+def test_workspace_emails() -> frozenset[str]:
+    """``MANAGER_TEST_WORKSPACE_EMAILS`` (comma-separated, trimmed, lower-cased)."""
+    raw = getattr(settings, "test_workspace_emails", "") or ""
+    return frozenset(e for e in (normalized_email(p) for p in str(raw).split(",")) if e)
+
+
+def may_sign_in_to_test_workspace(key: str, ws) -> bool:
+    """S5: an is_test workspace admits only its provisioned owner email or an email
+    in MANAGER_TEST_WORKSPACE_EMAILS, never an owera allowlist email."""
+    if key in _SPA_EMAIL_WORKSPACE:
+        return False
+    return key in test_workspace_emails() or key == normalized_email(ws.owner_email or "")
+
+
 def _workspace_slug_from_owner_email(key: str) -> str | None:
-    """Stripe-provisioned buyers: workspace.owner_email → slug (not workspace id 1)."""
+    """Stripe-provisioned buyers: workspace.owner_email → slug (not workspace id 1).
+
+    Fail closed: an email owning more than one workspace resolves to none (one
+    account never maps to two workspaces), and an is_test workspace admits only
+    ``may_sign_in_to_test_workspace``."""
     try:
         from sqlmodel import Session, select
 
@@ -55,12 +73,16 @@ def _workspace_slug_from_owner_email(key: str) -> str | None:
         from app.models import Workspace
 
         with Session(engine) as session:
-            ws = session.exec(select(Workspace).where(Workspace.owner_email == key)).first()
-            if ws and ws.id != 1:
-                return ws.slug
+            rows = [w for w in session.exec(
+                select(Workspace).where(Workspace.owner_email == key)).all() if w.id != 1]
+            if len(rows) != 1:
+                return None
+            ws = rows[0]
+            if getattr(ws, "is_test", False) and not may_sign_in_to_test_workspace(key, ws):
+                return None
+            return ws.slug
     except Exception:
         return None
-    return None
 
 
 def spa_session_identity(request: Request) -> tuple[str, str] | None:
