@@ -107,10 +107,21 @@ class Settings(BaseSettings):
     # S2 single Terms + Privacy checkbox (CTO / LegalOps gates 14/11, app/services/terms_consent.py).
     # The server accepts + stores ONLY these shas (sha256 of the exact sentence the SPA shows).
     # Defaults = sha of the current LegalOps FIX4 sentences; the wording may still change.
-    terms_version_sha_en: str = "91a6c69ec169f1877ba16cbc00508880116bebf9965c01cdf0646ca3bbf1fea3"
-    terms_version_sha_pt: str = "16d920da6551837b890154f05de232fd48d7cfee409496184d2d294de7a81a19"
-    # PT gate: true only once https://owera.com/terms/pt/ is live. False = PT-locale users see
-    # and accept the EN sentence; a stored PT acceptance does not count as consent.
+    # Defaults = the "Terms of Use" sentences (LegalOps 14/11); the FIX4 "Terms of Service"
+    # sentence shas stay accepted (terms_consent.LEGACY_SHAS) so earlier acceptances stay valid.
+    terms_version_sha_en: str = "f586e08debd5496c1bcf1aee80436e2e4477cbcf38522870217dc5328411fefa"
+    terms_version_sha_pt: str = "646e87d7f4dca1e836c54527c0f9fe81123df869215703040693efcbbfde92ca"
+    # sha256 of the Terms / Privacy DOCUMENT version live at each URL (never fetched by the
+    # app; set per deploy from scripts/archive_legal_docs.py). Empty = not recorded.
+    terms_doc_sha_en: str = ""
+    terms_doc_sha_pt: str = ""
+    privacy_doc_sha_en: str = ""
+    privacy_doc_sha_pt: str = ""
+    # Archive of every served legal document version, one file per sha256.
+    legal_archive_dir: str = str(MANAGER_DIR / "storage" / "legal-archive")
+    # PT gate: true only once https://owera.com/terms/pt/ is live. False = PT-locale users get
+    # no Terms / AI-data box (a "coming soon" notice offering English); switching to English
+    # accepts the EN sentence and records locale en; a stored PT acceptance is not consent.
     terms_pt_live: bool = False
     # Background-music pool shared with MPT; falls back to channel/music/ if absent.
     bgm_dir: str = str(MPT_DIR / "resource" / "songs")

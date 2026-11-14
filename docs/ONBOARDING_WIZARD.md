@@ -129,29 +129,50 @@ code and logs. The dashboard funnel cell uses CMO's fallback "Em render" (PT "Re
 clipped at 70px).
 No Owera topics, no OS/RR series. The user can type free text.
 
-## Terms + Privacy checkbox (LegalOps FIX4 via CMO, sha 6a389cd4d636)
+## Terms + Privacy checkbox (LegalOps 14/11, "Terms of Use")
 
-One box, unchecked by default: EN "I accept the Owera Terms of Service and have read the
-Privacy Notice." / PT "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade."
-Links on "Terms of Service" / "Termos de Serviço" and "Privacy Notice" / "Aviso de Privacidade".
-Links on the document names (EN `owera.com/terms/`, `owera.com/privacy/`; PT
-`owera.com/terms/pt/`, `owera.com/privacy/pt/`). Same strings in `terms_consent.py` and
-`frontend/src/termsConsent.ts`; the SPA sends the sha256 of the sentence shown + its locale;
-the server accepts only known shas (409 `terms_text_changed` / `terms_locale_mismatch`).
+One box, unchecked by default: EN "I accept the Owera Terms of Use and have read the
+Privacy Notice." / PT "Aceito os Termos de Uso da Owera e li o Aviso de Privacidade."
+Links on "Terms of Use" / "Termos de Uso" and "Privacy Notice" / "Aviso de Privacidade"
+(EN `owera.com/terms/`, `owera.com/privacy/`; PT `owera.com/terms/pt/`, `owera.com/privacy/pt/`).
+Same strings in `terms_consent.py` and `frontend/src/termsConsent.ts`; the SPA sends the
+sha256 of the sentence shown + its locale; the server accepts only known shas (409
+`terms_text_changed` / `terms_locale_mismatch`). The FIX4 "Terms of Service" sentence shas
+(CMO sha 6a389cd4d636) stay in `known_shas` (`LEGACY_SHAS`) so earlier acceptances stay valid.
 
-**Configurable version (CTO / LegalOps 14/11):** the server accepts and stores ONLY
-`MANAGER_TERMS_VERSION_SHA_EN` / `MANAGER_TERMS_VERSION_SHA_PT` (code defaults = sha256 of
-the FIX4 sentences; `.env.example` commented). The final text (CM v2 EN+PT) is still under
-the equivalence check: when it changes, update both files' sentences and these shas; a
-mismatch fails closed (409 `terms_text_changed`, "reload and accept again").
+**Configurable version (CTO / LegalOps 14/11):** `MANAGER_TERMS_VERSION_SHA_EN` /
+`MANAGER_TERMS_VERSION_SHA_PT` (code defaults = sha256 of the current sentences;
+`.env.example` commented). When the wording changes, update both files' sentences and these
+shas; an unknown sha fails closed (409 `terms_text_changed`, "reload and accept again").
 
 **PT gate:** `MANAGER_TERMS_PT_LIVE` (default false) until `owera.com/terms/pt/` is live. The
-SPA reads it from `GET /api/onboarding/wizard` → `terms.pt_live` (missing = closed; no
-constant in the bundle). While false, a PT browser sees the EN sentence with the EN links,
-the server accepts only the EN sha, and a stored PT acceptance does not count as consent:
-`consents_done` is false (the wizard asks again, in EN, and the EN record replaces the PT one;
-the first timestamp is kept) and the S8 external release refuses with `terms_pt_not_live`. Flag ON for PT users requires owera.com/terms/pt/ live; PO CM decides EN-only vs
-wait if not live by Mon 16.
+SPA reads it from `GET /api/onboarding/wizard` → `terms.pt_live` (missing = closed). While
+false, a PT-locale user gets NO Terms box and NO AI-data box in the consents step, only:
+"Os termos em português estarão disponíveis em breve. Até lá, a ativação da IA não está
+disponível em português. Se preferir, você pode mudar o idioma do assistente para inglês."
+The last clause is a button: it stores `owera.ui_locale=en` (localStorage) and reloads, so the
+whole assistant, the EN Terms box and the EN AI-data box follow English and the record has
+locale `en`. With the flag true, the PT box appears. Server side unchanged: only EN shas
+accepted, and a stored PT acceptance is not consent (`terms_pt_not_live`). The Limited Use
+box elsewhere (`/ai-data`, Settings) keeps following the locale.
+
+**Consent record (`TermsConsentEvent`, one row per stored acceptance):** checkbox sentence
+sha, Terms URL + `terms_doc_sha`, Privacy URL + `privacy_doc_sha`, locale, `created_at`,
+`user_id` (SPA Google e-mail, else Basic actor), `workspace_id`. The document shas come from
+`MANAGER_TERMS_DOC_SHA_EN/_PT` and `MANAGER_PRIVACY_DOC_SHA_EN/_PT` (default empty; the
+locale's values are recorded; the app never fetches the pages). At each legal-page deploy:
+`PYTHONPATH=. uv run python scripts/archive_legal_docs.py https://owera.com/terms/ --label terms-en`
+stores the exact served bytes as `<MANAGER_LEGAL_ARCHIVE_DIR>/<sha256>.html` (+ `.json`) and
+prints the sha to set.
+
+**Re-acceptance (CTO 14/11):** for a non-internal workspace (internal = `MANAGER_LLM_INTERNAL_WORKSPACE_IDS`
+only, the release check's definition; prod 1,2), once the document shas for its accepted locale are
+configured, a latest `TermsConsentEvent` that is missing or has a blank `terms_doc_sha` /
+`privacy_doc_sha` means the S8 release refuses with `terms_reaccept_required`. The wizard's
+consents step reopens (`consents_done` false) and Settings shows the same single box
+(`TermsReacceptSettings`, `GET /api/onboarding/terms`, `POST /api/onboarding/terms/accept`);
+re-accepting writes a new record with the shas now in force. A later change of the configured
+shas (a document update) does not force re-acceptance (LegalOps decides that separately).
 
 CMO v3 also localizes the footer links (Privacidade · Termos · Termos de Serviço do YouTube,
 `aria-label` "Jurídico") and the Dashboard / Settings bodies (`footer.*`, `dash.*`,

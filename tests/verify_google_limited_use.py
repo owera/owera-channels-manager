@@ -41,6 +41,12 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.db as appdb
 import app.main as main
 from app.config import settings
+# CTO 14/11: the external release needs the legal document shas pinned for the
+# accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+from _terms_fixture import pin_terms_record  # noqa: E402
+PINNED_DOC_SHA = "0" * 64
+for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+    setattr(settings, _k, PINNED_DOC_SHA)
 from app.db import get_session
 from app.models import (Channel, GoogleLimitedUseConsentEvent, OAuthStatus, Settings, Topic, Video,
                         VideoStatus, Workspace)
@@ -99,6 +105,7 @@ with Session(eng) as s:
         r.terms_accepted_at = NOW
         r.privacy_accepted_at = NOW
         s.add(r)
+        pin_terms_record(s, w)   # CTO 14/11: stored consent record with the doc shas
     s.commit()
 
 

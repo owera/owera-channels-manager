@@ -186,8 +186,35 @@ export const WIZARD_STRINGS: Record<string, { en: string; pt: string }> = {
   "settings.glu.give": { en: "Review and agree", pt: "Ler e concordar" },
 };
 
+/** In-app language choice (the PT "terms coming soon" notice offers English). */
+export const LOCALE_OVERRIDE_KEY = "owera.ui_locale";
+
+export function localeOverride(): UiLocale | null {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(LOCALE_OVERRIDE_KEY) : null;
+    return v === "en" || v === "pt" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLocaleOverride(loc: UiLocale): void {
+  try {
+    localStorage.setItem(LOCALE_OVERRIDE_KEY, loc);
+  } catch {
+    /* storage blocked: nothing to persist */
+  }
+}
+
+/** The browser locale, unless the user picked a language in the app. */
+export function effectiveNav(): L6Locale | undefined {
+  const o = localeOverride();
+  if (o) return { language: o, languages: [o] };
+  return typeof navigator !== "undefined" ? navigator : undefined;
+}
+
 export function uiLocale(nav?: L6Locale): UiLocale {
-  const n = nav ?? (typeof navigator !== "undefined" ? navigator : undefined);
+  const n = nav ?? effectiveNav();
   const fromLanguage = (n?.language ?? "").trim();
   const fromList = (n?.languages && n.languages.length > 0 ? n.languages[0] : "") || "";
   return (fromLanguage || fromList).toLowerCase().startsWith("pt") ? "pt" : "en";

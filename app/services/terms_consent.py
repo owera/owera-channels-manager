@@ -1,9 +1,9 @@
-"""S2 — the single Terms + Privacy checkbox (LegalOps FIX4 via CMO, sha 6a389cd4d636, 14/11).
+"""S2 — the single Terms + Privacy checkbox (LegalOps 14/11: "Terms of Use" wording).
 
-One box: the user ACCEPTS the Terms of Service and HAS READ the Privacy Notice
+One box: the user ACCEPTS the Terms of Use and HAS READ the Privacy Notice
 (a notice, not something accepted). Texts are LegalOps', verbatim;
 the SPA renders the same strings (``frontend/src/termsConsent.ts``) with links on
-"Terms of Service" / "Termos de Serviço" and "Privacy Notice" / "Aviso de
+"Terms of Use" / "Termos de Uso" and "Privacy Notice" / "Aviso de
 Privacidade", and sends the sha256 of the exact sentence shown + its locale.
 
 On accept the wizard keeps the existing ``terms_accepted_at`` +
@@ -11,16 +11,21 @@ On accept the wizard keeps the existing ``terms_accepted_at`` +
 ``terms_accepted_locale``. The AI-data (Google Limited Use) checkbox is separate.
 
 CTO / LegalOps gates (14/11):
-- Configurable version: the server accepts and stores ONLY the configured shas
+- Configurable version: the server accepts the configured shas
   ``MANAGER_TERMS_VERSION_SHA_EN`` / ``MANAGER_TERMS_VERSION_SHA_PT`` (defaults =
-  sha256 of the FIX4 sentences below). The SPA sends the sha of the sentence it
-  shows, so a wording change without a matching config change fails closed (409).
+  sha256 of the "Terms of Use" sentences below) plus the FIX4 "Terms of Service"
+  sentence shas (``LEGACY_SHAS``) so earlier acceptances stay valid. The SPA sends
+  the sha of the sentence it shows; an unknown one fails closed (409).
 - PT gate: the PT sentence links to https://owera.com/terms/pt/, which is not live
-  yet. Until ``MANAGER_TERMS_PT_LIVE`` is true the SPA (it reads the flag from
-  ``GET /api/onboarding/wizard`` → ``terms.pt_live``) shows PT-locale users the
-  EN sentence with the EN links, the server accepts only the EN sha, and a stored
-  PT acceptance is NOT consent (``is_valid`` / S8 ``terms_pt_not_live``): the
-  wizard asks again in EN.
+  yet. Until ``MANAGER_TERMS_PT_LIVE`` is true (the SPA reads ``terms.pt_live`` from
+  ``GET /api/onboarding/wizard``) a PT-locale user sees NO Terms box and NO AI-data
+  box in the wizard, only the "coming soon" notice (CTO / LegalOps 14/11) with a way
+  to switch the assistant to English; the server accepts only EN shas, and a
+  stored PT acceptance is NOT consent (``is_valid`` / S8 ``terms_pt_not_live``).
+- Consent record (``record`` → ``TermsConsentEvent``): sentence sha, Terms URL +
+  document sha, Privacy URL + document sha (``MANAGER_TERMS_DOC_SHA_EN/_PT``,
+  ``MANAGER_PRIVACY_DOC_SHA_EN/_PT``; never fetched live, archived per sha by
+  ``scripts/archive_legal_docs.py``), locale, time, user id, workspace id.
 """
 from __future__ import annotations
 
@@ -28,12 +33,17 @@ import hashlib
 
 from app.config import settings
 
-TEXT_EN = "I accept the Owera Terms of Service and have read the Privacy Notice."
-TEXT_PT = "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade."
+TEXT_EN = "I accept the Owera Terms of Use and have read the Privacy Notice."
+TEXT_PT = "Aceito os Termos de Uso da Owera e li o Aviso de Privacidade."
+# FIX4 sentences (CMO sha 6a389cd4d636). Acceptances stored under them stay valid.
+LEGACY_TEXT_EN = "I accept the Owera Terms of Service and have read the Privacy Notice."
+LEGACY_TEXT_PT = "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade."
 
 # sha256 of the sentences in this file (= the code defaults of the config shas).
 SHA_EN = hashlib.sha256(TEXT_EN.encode()).hexdigest()
 SHA_PT = hashlib.sha256(TEXT_PT.encode()).hexdigest()
+LEGACY_SHAS: dict[str, str] = {hashlib.sha256(LEGACY_TEXT_EN.encode()).hexdigest(): "en",
+                               hashlib.sha256(LEGACY_TEXT_PT.encode()).hexdigest(): "pt"}
 
 
 def pt_live() -> bool:
@@ -61,10 +71,42 @@ class TermsError(ValueError):
 def known_shas() -> dict[str, str]:
     """sha → locale the server accepts right now (PT only once /terms/pt/ is live)."""
     cfg = configured_shas()
-    out = {cfg["en"]: "en"} if cfg["en"] else {}
+    if not cfg["en"]:
+        return {}                       # misconfigured: accept nothing (fail closed)
+    out = {sha: loc for sha, loc in LEGACY_SHAS.items() if loc == "en" or pt_live()}
+    out[cfg["en"]] = "en"
     if pt_live() and cfg["pt"]:
         out[cfg["pt"]] = "pt"
     return out
+
+
+def current_shas() -> dict[str, str]:
+    """locale → the sha of the sentence the SPA shows now (no legacy)."""
+    cfg = configured_shas()
+    out = {"en": cfg["en"]} if cfg["en"] else {}
+    if pt_live() and cfg["pt"]:
+        out["pt"] = cfg["pt"]
+    return out
+
+
+def docs_for(locale: str) -> dict[str, str | None]:
+    """URLs shown with the sentence + the configured document shas for that locale."""
+    pt = locale == "pt"
+    return {
+        "terms_url": TERMS_URL_PT if pt else TERMS_URL_EN,
+        "terms_doc_sha": (settings.terms_doc_sha_pt if pt else settings.terms_doc_sha_en).strip().lower() or None,
+        "privacy_url": PRIVACY_URL_PT if pt else PRIVACY_URL_EN,
+        "privacy_doc_sha": (settings.privacy_doc_sha_pt if pt else settings.privacy_doc_sha_en).strip().lower() or None,
+    }
+
+
+def record(session, ws, *, sentence_sha: str, locale: str, user_id: str | None):
+    """Append the consent record (caller commits)."""
+    from app.models import TermsConsentEvent
+    ev = TermsConsentEvent(workspace_id=ws.id, user_id=(user_id or "")[:200] or None, locale=locale,
+                           sentence_sha=(sentence_sha or "").strip().lower(), **docs_for(locale))
+    session.add(ev)
+    return ev
 
 
 def _norm_locale(locale: str | None) -> str:
@@ -103,10 +145,98 @@ def block_reason(ws) -> str | None:
     return None
 
 
+def doc_block_reason(ws) -> str | None:
+    """CTO 14/11 fail closed: ``terms_doc_unpinned`` when the Terms or Privacy document
+    sha for the accepted locale is not configured (MANAGER_TERMS_DOC_SHA_<L> /
+    MANAGER_PRIVACY_DOC_SHA_<L>). Used by the S8 external release only; internal
+    workspaces never reach it."""
+    loc = "pt" if (getattr(ws, "terms_accepted_locale", None) or "").lower().startswith("pt") else "en"
+    d = docs_for(loc)
+    if not d["terms_doc_sha"] or not d["privacy_doc_sha"]:
+        return "terms_doc_unpinned"
+    return None
+
+
+def _internal(ws_id) -> bool:
+    """Exactly the release check's definition: MANAGER_LLM_INTERNAL_WORKSPACE_IDS only
+    (prod 1,2; no hard-coded ids). Unreadable → external (fail closed)."""
+    try:
+        from app.services import llm_guard
+        return int(ws_id) in llm_guard.internal_workspace_ids()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def latest_record(session, ws_id):
+    """The workspace's newest TermsConsentEvent, or None."""
+    from sqlmodel import select
+
+    from app.models import TermsConsentEvent
+    return session.exec(select(TermsConsentEvent).where(TermsConsentEvent.workspace_id == int(ws_id))
+                        .order_by(TermsConsentEvent.id.desc())).first()
+
+
+def reaccept_required(ws, session=None) -> bool:
+    """CTO 14/11: a non-internal workspace whose latest stored acceptance does not
+    say which documents were accepted (no record, or a blank terms / privacy doc
+    sha) must accept again once the shas for its locale are configured; the new
+    record carries the shas now in force. A later
+    change of the configured shas (doc update) does NOT force this (LegalOps)."""
+    if getattr(ws, "terms_accepted_at", None) is None or ws.id is None or _internal(ws.id):
+        return False
+    if doc_block_reason(ws) is not None:
+        # Shas not configured yet: re-accepting would write blanks again (and the
+        # wizard would loop); the release refuses with terms_doc_unpinned instead.
+        return False
+    if session is None:
+        from sqlmodel import Session
+
+        from app.db import engine
+        with Session(engine) as s:
+            rec = latest_record(s, ws.id)
+    else:
+        rec = latest_record(session, ws.id)
+    return rec is None or not rec.terms_doc_sha or not rec.privacy_doc_sha
+
+
+def reaccept_block_reason(ws, session=None) -> str | None:
+    return "terms_reaccept_required" if reaccept_required(ws, session) else None
+
+
+def status(ws, session) -> dict:
+    """GET /api/onboarding/terms: what Settings needs to show the box again."""
+    return {"accepted_at": None if ws.terms_accepted_at is None else ws.terms_accepted_at.isoformat(),
+            "locale": ws.terms_accepted_locale, "version": ws.terms_accepted_version,
+            "valid": is_valid(ws) and not reaccept_required(ws, session),
+            "reaccept_required": reaccept_required(ws, session),
+            "pt_not_live": block_reason(ws) == "terms_pt_not_live",
+            **public_flags()}
+
+
+def accept(session, ws, *, sentence_sha: str | None, locale: str | None, user_id: str | None) -> str:
+    """Store an acceptance (first timestamps kept) and append its record; returns the locale.
+
+    The version / locale are replaced whenever the stored one doesn't count (none, a
+    PT acceptance while gated, or a record that must be re-accepted)."""
+    loc = validate(sentence_sha, locale)
+    from app.models import utcnow
+    now = utcnow()
+    replace = (not ws.terms_accepted_version or block_reason(ws) == "terms_pt_not_live"
+               or reaccept_required(ws, session))
+    ws.terms_accepted_at = ws.terms_accepted_at or now
+    ws.privacy_accepted_at = ws.privacy_accepted_at or now
+    if replace:
+        ws.terms_accepted_version = (sentence_sha or "").strip().lower()
+        ws.terms_accepted_locale = loc
+        record(session, ws, sentence_sha=ws.terms_accepted_version, locale=loc, user_id=user_id)
+    session.add(ws)
+    return loc
+
+
 def is_valid(ws) -> bool:
     return block_reason(ws) is None
 
 
 def public_flags() -> dict:
     """What the SPA needs: the PT gate and the shas the server accepts now."""
-    return {"pt_live": pt_live(), "accepted_shas": {loc: sha for sha, loc in known_shas().items()}}
+    return {"pt_live": pt_live(), "accepted_shas": current_shas()}

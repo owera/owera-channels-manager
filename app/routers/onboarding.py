@@ -194,8 +194,8 @@ def wizard_budgets(body: WizardBudgetsBody, session: Session = Depends(get_sessi
 
 
 class WizardConsentsBody(BaseModel):
-    # LegalOps FIX 14/11: ONE box "accept the Terms of Service and have read the
-    # Privacy Policy" (``terms``) + the sha / locale of the exact sentence shown.
+    # LegalOps 14/11: ONE box "accept the Terms of Use and have read the
+    # Privacy Notice" (``terms``) + the sha / locale of the exact sentence shown.
     terms: bool = False
     terms_text_sha: str | None = None
     terms_locale: str | None = None
@@ -213,8 +213,8 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
                     locale: str = Depends(ui_locale)):
     _need(session, ws, "consents")
     if not (body.terms is True and body.ai_data is True):
-        raise HTTPException(400, "accept the Terms of Service (and confirm you read the "
-                                 "Privacy Policy), and tick the AI data box")
+        raise HTTPException(400, "accept the Terms of Use (and confirm you read the "
+                                 "Privacy Notice), and tick the AI data box")
     from app.services import terms_consent
     try:
         terms_loc = terms_consent.validate(body.terms_text_sha, body.terms_locale)
@@ -223,16 +223,11 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
         raise HTTPException(409, {"code": e.code, "message": e.message})
     except google_limited_use.ConsentError as e:
         raise HTTPException(409, {"code": e.code, "message": e.message})
-    now = utcnow()
-    # First acceptance is kept (an audit timestamp is never moved forward).
-    ws.terms_accepted_at = ws.terms_accepted_at or now
-    ws.privacy_accepted_at = ws.privacy_accepted_at or now
-    # Stored once; replaced only when the stored one doesn't count (a PT acceptance
-    # while the PT gate is closed), so the record shows the sentence that does.
-    if not ws.terms_accepted_version or terms_consent.block_reason(ws) == "terms_pt_not_live":
-        ws.terms_accepted_version = (body.terms_text_sha or "").strip().lower()
-        ws.terms_accepted_locale = terms_loc
-    session.add(ws)
+    # First acceptance timestamps are kept (never moved forward). Version / locale and a
+    # new consent record (sentence + document shas, URLs, who) are written when the
+    # stored one doesn't count: none, PT while gated, or a record to re-accept.
+    terms_consent.accept(session, ws, sentence_sha=body.terms_text_sha, locale=terms_loc,
+                         user_id=google_limited_use.request_user(request))
     session.commit()
     session.refresh(ws)
     if not google_limited_use.is_valid(ws):
@@ -355,3 +350,39 @@ def ai_data_withdraw(request: Request, session: Session = Depends(get_session),
     google_limited_use.withdraw(session, ws, user=google_limited_use.request_user(request),
                                 reason="user")
     return ai_data_status(session=session, ws=ws, locale=locale)
+
+
+# ---- Terms re-acceptance outside the wizard (CTO 14/11, Settings) ---------------
+@router.get("/terms")
+def terms_status(session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    from app.services import terms_consent
+    return terms_consent.status(ws, session)
+
+
+class TermsAcceptBody(BaseModel):
+    terms: bool = False
+    terms_text_sha: str | None = None
+    terms_locale: str | None = None
+
+
+@router.post("/terms/accept")
+def terms_accept(body: TermsAcceptBody, request: Request,
+                 session: Session = Depends(get_session),
+                 ws: Workspace = Depends(current_workspace)):
+    """Re-accept the single Terms + Privacy box (e.g. ``terms_reaccept_required``):
+    writes a new consent record with the document shas now in force."""
+    from app.services import terms_consent
+    if body.terms is not True:
+        raise HTTPException(400, "accept the Terms of Use (and confirm you read the Privacy Notice)")
+    try:
+        loc = terms_consent.accept(session, ws, sentence_sha=body.terms_text_sha, locale=body.terms_locale,
+                                   user_id=google_limited_use.request_user(request))
+    except terms_consent.TermsError as e:
+        raise HTTPException(409, {"code": e.code, "message": e.message})
+    session.commit()
+    session.refresh(ws)
+    logger.info("terms_accept workspace_id=%s locale=%s terms_sha=%s", ws.id, loc,
+                (ws.terms_accepted_version or "")[:12])
+    llm_guard.clear_block(ws.id)
+    return terms_consent.status(ws, session)

@@ -28,6 +28,12 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.db as appdb
 
 from app.config import settings
+# CTO 14/11: the external release needs the legal document shas pinned for the
+# accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+from _terms_fixture import pin_terms_record  # noqa: E402
+PINNED_DOC_SHA = "0" * 64
+for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+    setattr(settings, _k, PINNED_DOC_SHA)
 from app.models import Workspace
 from app.services import llm_guard, onboarding
 
@@ -60,6 +66,9 @@ with Session(eng) as s:
     s.add(Workspace(id=4, slug="ok", name="OK", subscription_status="active",
                     terms_accepted_at=NOW, privacy_accepted_at=NOW, ai_data_ack_at=NOW,
                     ai_data_ack_version=_GLU_SHA))  # S2 AI-data step
+    s.commit()
+    for _w in (3, 4):   # CTO 14/11: a stored consent record with the doc shas
+        pin_terms_record(s, _w)
     s.commit()
 
 appdb_patch = patch.object(appdb, "engine", eng)
@@ -138,6 +147,7 @@ with Session(eng) as s:
     w = s.get(Workspace, 2)
     w.terms_accepted_at = NOW
     s.add(w)
+    pin_terms_record(s, 2)
     s.commit()
 with cfg(**ON):
     ok(row(2).llm_blocked_reason == "terms_privacy_not_accepted", "still shown until the next call")
