@@ -8,7 +8,7 @@ the CLI raises). Workspace 1 plays an external Stripe buyer
 (`MANAGER_LLM_INTERNAL_WORKSPACE_IDS=99`). No network, no `.env`, no Stripe, no paid
 LLM call. Playwright Chromium, locales `en-US` and `pt-BR`, 1280×900.
 
-Copy: CMO CM-WIZARD-COPY.md (sha df45bd814374). Verbatim LegalOps texts: the L6 line
+Copy: CMO CM-WIZARD-COPY.md v2 (sha a8b4aa958efd). Verbatim LegalOps texts: the L6 line
 and the Google Limited Use checkbox (EN / PT by browser locale).
 
 | File | Step |
@@ -26,8 +26,16 @@ and the Google Limited Use checkbox (EN / PT by browser locale).
 | `11-banner-monthly-limit-{en,pt}.png` | Overview with the `workspace_monthly_cap` banner "Monthly draft limit reached" (state forced) |
 | `12-ai-data-page-{en,pt}.png` | Ack-only page `/ai-data` after a withdraw (AuthGate redirect), box unchecked |
 | `13-ai-data-stale-{en,pt}.png` | Ack-only page for a consent given to an older text sha |
-| `14-settings-consent-{en,pt}.png` | Settings: Google Limited Use consent status + Withdraw |
+| `14-settings-consent-{en,pt}.png` | Settings: "AI data" status + Withdraw |
+| `15-withdraw-link-{en,pt}.png` | Overview: always-visible "Withdraw AI consent" / "Retirar consentimento de IA" link in the sidebar account area |
+| `16-withdraw-dialog-{en,pt}.png` | The link's 1-step dialog (Withdraw / Keep); Withdraw then cuts the whole workspace (checked: `valid=false`) |
+| `17-settings-withdraw-dialog-{en,pt}.png` | Settings Withdraw: same dialog |
 
-The ack-only page and the Settings control use Channels Dev placeholder copy
-(`ai_data.*`, `settings.glu.*` in `frontend/src/wizardI18n.ts`) until CMO copy lands. The
-Terms / Privacy checkbox lines, the app nav and status chips stay English.
+All 17 states × EN/PT were re-taken (01–14 with CMO v2 copy: ideas help, ack page,
+Settings "AI data", PT nav and status chips; first-draft chip shows the mapped label, e.g.
+"Na fila" / "Revisão"). Layout check (scrollWidth vs width, every heading, help line,
+button, nav item, chip and dialog element): no overflow. "Renderizando" clipped in the
+70px dashboard funnel cell, so that cell uses CMO's fallback "Em render". Privacy link:
+EN `https://owera.com/privacy/#cm-google`, PT `https://owera.com/privacy/pt/#cm-google`.
+Still English in PT (outside CMO v2): the Terms / Privacy checkbox lines, the policy
+footer links, the dashboard and Settings page bodies.

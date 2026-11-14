@@ -362,7 +362,9 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         try:
             _ch_meta = session.get(Channel, video.channel_id)
             _niche = (_ch_meta.niche or "").strip() if _ch_meta else None
-            with llm_guard.scope(_ch_meta.workspace_id if _ch_meta else None, "metadata"):
+            from app.services import llm_derived as _derived
+            with llm_guard.scope(_ch_meta.workspace_id if _ch_meta else None, "metadata"), \
+                    _derived.draft_scope(video.id):   # S2: only this draft's script
                 meta = metadata.generate(video.subject, video.script or "", fmt,
                                          language=video_gen.channel_language(session, video.channel_id),
                                          niche=_niche)
@@ -787,6 +789,7 @@ def _submit_new(session: Session) -> None:
         # Same title-first claim the pre-check uses (provided_script_hook_reason).
         params["title"] = video.title
         params["workspace_id"] = channel.workspace_id   # llm_guard scope in worker.run_job
+        params["video_id"] = video.id   # S2: draft scope for script/storyboard (llm_derived)
         with llm_guard.scope(channel.workspace_id, "gate_b_preflight"):
             if _gate_b_preflight_block(session, video, channel, provided_script, params):
                 continue

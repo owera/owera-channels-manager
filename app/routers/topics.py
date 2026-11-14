@@ -219,7 +219,8 @@ def generate_videos(topic_id: int, body: GenerateBody, session: Session = Depend
     ch = session.get(Channel, t.channel_id)
     niche = (ch.niche or "").strip() if ch else None
     steer_notes = _steer_notes_from_body(body)
-    existing = session.exec(select(Video.subject).where(Video.topic_id == topic_id)).all()
+    from app.services import llm_derived
+    existing = llm_derived.idea_existing_subjects(session, topic_id, ch)   # S2: per-channel exclusion
     with llm_guard.scope(ch.workspace_id if ch else None, "ideas"):
         try:
             ideas = video_gen.generate_ideas(

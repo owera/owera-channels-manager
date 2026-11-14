@@ -21,9 +21,13 @@ export const GOOGLE_LIMITED_USE_SHA_PT = "a333b8d42296f7232ab8440ff03e9e12a85115
 
 export const GOOGLE_LIMITED_USE_LINK_EN = "Privacy policy";
 export const GOOGLE_LIMITED_USE_LINK_PT = "Política de privacidade";
+/** PO CM 14/11: the link opens the Google section of the privacy page, per locale
+ * (the #cm-google anchors ship with the Mon 16 privacy deploy). */
+export const GOOGLE_LIMITED_USE_HREF_EN = "https://owera.com/privacy/#cm-google";
+export const GOOGLE_LIMITED_USE_HREF_PT = "https://owera.com/privacy/pt/#cm-google";
 
 export type GoogleLimitedUseCopy = {
-  text: string; sha: string; locale: "en" | "pt"; lang?: "pt"; linkLabel: string;
+  text: string; sha: string; locale: "en" | "pt"; lang?: "pt"; linkLabel: string; href: string;
 };
 
 export function googleLimitedUse(nav?: L6Locale): GoogleLimitedUseCopy {
@@ -32,7 +36,7 @@ export function googleLimitedUse(nav?: L6Locale): GoogleLimitedUseCopy {
   const pt = (fromLanguage || fromList).toLowerCase().startsWith("pt");
   return pt
     ? { text: GOOGLE_LIMITED_USE_TEXT_PT, sha: GOOGLE_LIMITED_USE_SHA_PT, locale: "pt", lang: "pt",
-        linkLabel: GOOGLE_LIMITED_USE_LINK_PT }
+        linkLabel: GOOGLE_LIMITED_USE_LINK_PT, href: GOOGLE_LIMITED_USE_HREF_PT }
     : { text: GOOGLE_LIMITED_USE_TEXT_EN, sha: GOOGLE_LIMITED_USE_SHA_EN, locale: "en",
-        linkLabel: GOOGLE_LIMITED_USE_LINK_EN };
+        linkLabel: GOOGLE_LIMITED_USE_LINK_EN, href: GOOGLE_LIMITED_USE_HREF_EN };
 }

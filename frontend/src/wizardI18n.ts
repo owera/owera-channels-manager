@@ -1,8 +1,9 @@
 /** S2 wizard + banner strings, EN / PT-BR.
  *
- * CMO copy: CM-WIZARD-COPY.md (sha df45bd814374), keys as CMO suggested. The
- * "ai_data.*" and "settings.glu.*" keys are Channels Dev placeholders (no CMO copy
- * yet; listed in the PR for CMO). Server banners (llm_guard.BLOCK_USER_TEXT) are
+ * CMO copy: CM-WIZARD-COPY.md v2 (sha a8b4aa958efd; v1 df45bd814374), keys as CMO
+ * suggested, including "ai_data.*", "settings.glu.*", "status.*" and "nav.*".
+ * "glu.footer.withdraw" is PO CM's wording (14/11). Buyer-visible copy says
+ * "AI data"; "Google Limited Use" stays in code and logs only. Server banners (llm_guard.BLOCK_USER_TEXT) are
  * localized server-side; the SPA passes ?locale= on /api/onboarding/*.
  * Locale: same rule as the L6 line (PT when the browser locale starts with "pt").
  * The Google Limited Use checkbox text is NOT here (googleLimitedUse.ts, LegalOps).
@@ -23,7 +24,7 @@ export const WIZARD_STRINGS: Record<string, { en: string; pt: string }> = {
   "wizard.consents.title": { en: "Terms and AI data", pt: "Termos e dados de IA" },
   "wizard.consents.help": { en: "Review and accept the items below to continue.", pt: "Leia e aceite os itens abaixo para continuar." },
   "wizard.ideas.title": { en: "Writing your first ideas", pt: "Escrevendo suas primeiras ideias" },
-  "wizard.ideas.help": { en: "Creating ideas for your first topic and lining up one as your first draft.", pt: "Criando ideias para o seu primeiro tópico e colocando uma delas como seu primeiro rascunho." },
+  "wizard.ideas.help": { en: "Creating one idea for each of your 3 topics and lining up one as your first draft.", pt: "Criando uma ideia para cada um dos seus 3 tópicos e colocando uma delas como seu primeiro rascunho." },
   "wizard.ideas.error": { en: "We could not start your first draft yet.", pt: "Ainda não foi possível começar o seu primeiro rascunho." },
   "wizard.first_draft.queued_title": { en: "Your first draft is on its way", pt: "Seu primeiro rascunho está a caminho" },
   "wizard.first_draft.queued_help": { en: "It is first in line, and it will appear in your review queue when it is ready. Nothing is published until you approve it.", pt: "Ele é o primeiro da fila e aparece na sua fila de revisão quando estiver pronto. Nada é publicado até você aprovar." },
@@ -69,18 +70,63 @@ export const WIZARD_STRINGS: Record<string, { en: string; pt: string }> = {
   "wizard.first_draft.cta_queue": { en: "Open review queue", pt: "Abrir fila de revisão" },
   "wizard.first_draft.cta_overview": { en: "Overview", pt: "Visão geral" },
   "ai_data.title": { en: "AI data", pt: "Dados de IA" },
-  "ai_data.help": { en: "Before Channels Manager writes drafts for this workspace, review and accept the item below.", pt: "Antes de o Channels Manager escrever rascunhos para este workspace, leia e aceite o item abaixo." },
-  "ai_data.stale": { en: "This text changed since you last accepted it. Please review it again.", pt: "Este texto mudou desde a última vez que você aceitou. Leia de novo, por favor." },
+  "ai_data.help": { en: "Review and agree to the note below so Channels Manager can write drafts.", pt: "Leia e concorde com o aviso abaixo para o Channels Manager escrever rascunhos." },
+  "ai_data.stale": { en: "These terms have changed since you last agreed. Please read them and agree again.", pt: "Estes termos mudaram desde a última vez que você concordou. Leia de novo e concorde outra vez." },
   "ai_data.not_now": { en: "Not now", pt: "Agora não" },
-  "ai_data.not_now_help": { en: "You can still connect channels and look around; drafts stay paused until you accept.", pt: "Você ainda pode conectar canais e navegar; os rascunhos ficam pausados até você aceitar." },
-  "ai_data.done": { en: "Thanks. Drafts can start now.", pt: "Obrigado. Os rascunhos já podem começar." },
-  "settings.glu.title": { en: "AI data (Google Limited Use consent)", pt: "Dados de IA (consentimento Google Limited Use)" },
-  "settings.glu.on": { en: "Accepted on {date}.", pt: "Aceito em {date}." },
-  "settings.glu.off": { en: "Not accepted. Drafts are paused.", pt: "Não aceito. Os rascunhos estão pausados." },
-  "settings.glu.exempt": { en: "Internal workspace: not required.", pt: "Workspace interno: não é necessário." },
-  "settings.glu.withdraw": { en: "Withdraw consent", pt: "Retirar consentimento" },
-  "settings.glu.withdraw_help": { en: "Stops new drafts right away. To delete stored YouTube data, disconnect the channel or request deletion in Channels.", pt: "Interrompe novos rascunhos na hora. Para apagar os dados do YouTube guardados, desconecte o canal ou peça a exclusão em Canais." },
-  "settings.glu.give": { en: "Review and accept", pt: "Ler e aceitar" },
+  "ai_data.not_now_help": { en: "You can still connect channels and look around. Drafts stay paused until you agree.", pt: "Você ainda pode conectar canais e navegar. Os rascunhos ficam pausados até você concordar." },
+  "ai_data.done": { en: "Thanks. Drafts are no longer paused.", pt: "Obrigado. Os rascunhos não estão mais pausados." },
+  // CMO copy v2 (sha a8b4aa958efd): status / nav / AI-data dialog; glu.footer.withdraw = PO CM 14/11.
+  "ai_data.cta": { en: "Continue", pt: "Continuar" },
+  "settings.glu.dialog_title": { en: "Withdraw AI data agreement?", pt: "Retirar o acordo de dados de IA?" },
+  "settings.glu.dialog_help": { en: "Drafts will pause until you agree again. Nothing already published on YouTube changes.", pt: "Os rascunhos ficam pausados até você concordar de novo. Nada que já foi publicado no YouTube muda." },
+  "settings.glu.dialog_withdraw": { en: "Withdraw", pt: "Retirar" },
+  "settings.glu.dialog_keep": { en: "Keep", pt: "Manter" },
+  "glu.footer.withdraw": { en: "Withdraw AI consent", pt: "Retirar consentimento de IA" },
+  "status.draft": { en: "Ideas", pt: "Ideias" },
+  "status.queued": { en: "Queued", pt: "Na fila" },
+  "status.rendering": { en: "Rendering", pt: "Renderizando" },
+  // CMO v2 fallback: "Renderizando" clips in the 70px dashboard funnel cell (PT screenshot), so that cell uses "Em render".
+  "status.rendering.short": { en: "Rendering", pt: "Em render" },
+  "status.rendered": { en: "Rendered", pt: "Renderizado" },
+  "status.review": { en: "Review", pt: "Revisão" },
+  "status.approved": { en: "Approved", pt: "Aprovado" },
+  "status.publishing": { en: "Publishing", pt: "Publicando" },
+  "status.published": { en: "Live", pt: "No ar" },
+  "status.failed": { en: "Failed", pt: "Falhou" },
+  "status.rejected": { en: "Rejected", pt: "Recusado" },
+  "status.held": { en: "On hold", pt: "Em espera" },
+  "status.paused": { en: "Paused", pt: "Pausado" },
+  "status.oauth.connected": { en: "Connected", pt: "Conectado" },
+  "status.oauth.expired": { en: "Sign-in expired", pt: "Acesso expirado" },
+  "status.oauth.error": { en: "Connection error", pt: "Erro de conexão" },
+  "status.oauth.disconnected": { en: "Not connected", pt: "Não conectado" },
+  "status.trend.researched": { en: "Researched", pt: "Pesquisado" },
+  "status.trend.watching": { en: "Watching", pt: "Em observação" },
+  "status.trend.adopted": { en: "Adopted", pt: "Adotado" },
+  "status.trend.rejected": { en: "Rejected", pt: "Recusado" },
+  "nav.tagline": { en: "YouTube channel studio", pt: "Estúdio de canais YouTube" },
+  "nav.overview": { en: "Overview", pt: "Visão geral" },
+  "nav.overview.short": { en: "Home", pt: "Início" },
+  "nav.review_queue": { en: "Review queue", pt: "Fila de revisão" },
+  "nav.review_queue.short": { en: "Queue", pt: "Fila" },
+  "nav.channels": { en: "Channels", pt: "Canais" },
+  "nav.channels.short": { en: "Channels", pt: "Canais" },
+  "nav.onboarding": { en: "Onboarding", pt: "Início" },
+  "nav.onboarding.short": { en: "Start", pt: "Começar" },
+  "nav.trends": { en: "Trends", pt: "Tendências" },
+  "nav.trends.short": { en: "Trends", pt: "Tendências" },
+  "nav.profiles": { en: "Render Profiles", pt: "Perfis de render" },
+  "nav.profiles.short": { en: "Profiles", pt: "Perfis" },
+  "nav.settings": { en: "Settings", pt: "Configurações" },
+  "nav.settings.short": { en: "Config", pt: "Ajustes" },
+  "nav.sign_out": { en: "Sign out", pt: "Sair" },
+  "settings.glu.title": { en: "AI data", pt: "Dados de IA" },
+  "settings.glu.on": { en: "Agreed on {date}.", pt: "De acordo desde {date}." },
+  "settings.glu.off": { en: "Not agreed. Drafts are paused.", pt: "Ainda não há acordo. Os rascunhos estão pausados." },
+  "settings.glu.exempt": { en: "Not required here.", pt: "Não é necessário aqui." },
+  "settings.glu.withdraw": { en: "Withdraw", pt: "Retirar" },
+  "settings.glu.withdraw_help": { en: "Drafts pause until you agree again. Nothing already published on YouTube changes.", pt: "Os rascunhos ficam pausados até você concordar de novo. Nada que já foi publicado no YouTube muda." },
+  "settings.glu.give": { en: "Review and agree", pt: "Ler e concordar" },
 };
 
 export function uiLocale(nav?: L6Locale): UiLocale {

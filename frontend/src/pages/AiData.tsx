@@ -52,7 +52,7 @@ export default function AiData() {
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <button className="btn btn-signal" disabled={!ai || m.ack.isPending}>
-                {m.ack.isPending ? t("wizard.consents.cta_pending") : t("wizard.consents.cta")}
+                {m.ack.isPending ? t("wizard.consents.cta_pending") : t("ai_data.cta")}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => {
                 try { sessionStorage.setItem(AI_DATA_DISMISS_KEY, "1"); } catch { /* private mode */ }
@@ -69,9 +69,48 @@ export default function AiData() {
 }
 
 /** Settings control: status + withdraw (cuts the LLM at the next call). */
+/** PO CM 14/11: 1-step confirmation (CMO v2 dialog copy, Withdraw / Keep) for a
+ * manual withdrawal. Withdraw cuts the LLM for the WHOLE workspace at once (even
+ * with channels still connected); only a new ack on /ai-data brings it back. */
+export function WithdrawAiConsentDialog({ onDone }: { onDone: () => void }) {
+  const m = useAiDataMut();
+  return (
+    <div role="alertdialog" aria-labelledby="glu-withdraw-title" aria-describedby="glu-withdraw-help"
+      className="panel p-4 max-w-sm border border-ink-line" data-glu-withdraw-dialog="">
+      <div id="glu-withdraw-title" className="text-sm text-fog-50 font-medium">{t("settings.glu.dialog_title")}</div>
+      <p id="glu-withdraw-help" className="mt-2 text-xs text-fog-300 leading-relaxed">{t("settings.glu.dialog_help")}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="btn btn-signal text-xs" disabled={m.withdraw.isPending}
+          data-glu-withdraw-confirm=""
+          onClick={() => m.withdraw.mutate(undefined, { onSuccess: onDone })}>
+          {t("settings.glu.dialog_withdraw")}</button>
+        <button type="button" className="btn btn-ghost text-xs" data-glu-withdraw-keep=""
+          onClick={onDone}>{t("settings.glu.dialog_keep")}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Always-visible account-footer link (PO CM 14/11), independent of Settings:
+ * shown whenever this workspace has a current ack, also before the first draft. */
+export function WithdrawAiConsentLink({ className = "" }: { className?: string }) {
+  const { data } = useAiData();
+  const [asking, setAsking] = useState(false);
+  if (!data || data.exempt || !data.valid) return null;
+  return (
+    <div className={className} data-glu-withdraw-link="">
+      {asking ? <WithdrawAiConsentDialog onDone={() => setAsking(false)} /> : (
+        <button type="button" className="text-[11px] text-fog-400 hover:text-fog-100 underline"
+          data-glu-withdraw-open="footer" onClick={() => setAsking(true)}>
+          {t("glu.footer.withdraw")}</button>
+      )}
+    </div>
+  );
+}
+
 export function GoogleLimitedUseSettings() {
   const { data } = useAiData();
-  const m = useAiDataMut();
+  const [asking, setAsking] = useState(false);
   if (!data) return null;
   return (
     <div className="panel p-6 mt-6" data-google-limited-use-settings="">
@@ -83,8 +122,10 @@ export function GoogleLimitedUseSettings() {
       </div>
       {data.valid && !data.exempt && (
         <>
-          <button className="btn btn-ghost" disabled={m.withdraw.isPending}
-            onClick={() => m.withdraw.mutate()}>{t("settings.glu.withdraw")}</button>
+          {asking ? <WithdrawAiConsentDialog onDone={() => setAsking(false)} /> : (
+            <button className="btn btn-ghost" data-glu-withdraw-open="settings"
+              onClick={() => setAsking(true)}>{t("settings.glu.withdraw")}</button>
+          )}
           <p className="mt-3 text-xs text-fog-400 max-w-xl leading-relaxed">{t("settings.glu.withdraw_help")}</p>
         </>
       )}

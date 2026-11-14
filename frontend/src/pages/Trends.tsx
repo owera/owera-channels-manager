@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useTrends, useChannels, useMut, type TrendSignal, type TrendStatus } from "../api";
 import { Dot, Empty } from "../ui";
+import { trendStatusLabel } from "../status";
 
 const STATUS_HEX: Record<TrendStatus, string> = {
   researched: "#56c8e6", watching: "#f5a524", adopted: "#c9f24e", rejected: "#6c7681",
@@ -48,7 +49,7 @@ function TrendRow({ t, channelName, channels, i }: {
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-display font-bold text-fog-50 text-sm">{t.term}</span>
-          <Badge text={t.status} hex={STATUS_HEX[t.status]} />
+          <Badge text={trendStatusLabel(t.status)} hex={STATUS_HEX[t.status]} />
           {t.momentum && <Badge text={t.momentum} hex={MOMENTUM_HEX[t.momentum] || "#6c7681"} />}
           <span className="label">{t.content_format}{t.language ? ` · ${t.language}` : ""}</span>
           {t.channel_id && <span className="label text-fog-300">→ {channelName(t.channel_id)}</span>}
@@ -135,7 +136,7 @@ export default function Trends() {
             className={`font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-sm border transition-colors ${
               filter === f ? "text-signal border-signal/40 bg-signal/5" : "text-fog-400 border-ink-line hover:text-fog-200"
             }`}>
-            {f}{f !== "all" ? ` ${count(f as TrendStatus)}` : ""}
+            {f === "all" ? f : trendStatusLabel(f)}{f !== "all" ? ` ${count(f as TrendStatus)}` : ""}
           </button>
         ))}
       </div>

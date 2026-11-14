@@ -162,8 +162,12 @@ ok(json.dumps(EN, ensure_ascii=False) in ts_src and json.dumps(PT, ensure_ascii=
 ok(f'"{SHA_EN}"' in ts_src and f'"{SHA_PT}"' in ts_src, "SPA shas = sha256 of the strings")
 ok('"Privacy policy"' in ts_src and '"Política de privacidade"' in ts_src, "link labels EN/PT")
 box = (ROOT / "frontend/src/GoogleLimitedUseBox.tsx").read_text()
-ok('target="_blank"' in box and "POLICY_LINKS.privacy" in box and "noopener" in box,
-   "privacy link next to the text opens in a new tab")
+ok('target="_blank"' in box and "href={copy.href}" in box and "noopener" in box
+   and "POLICY_LINKS" not in box, "privacy link next to the text opens in a new tab (per-locale href)")
+ok('GOOGLE_LIMITED_USE_HREF_EN = "https://owera.com/privacy/#cm-google"' in ts_src
+   and 'GOOGLE_LIMITED_USE_HREF_PT = "https://owera.com/privacy/pt/#cm-google"' in ts_src
+   and "href: GOOGLE_LIMITED_USE_HREF_PT" in ts_src and "href: GOOGLE_LIMITED_USE_HREF_EN" in ts_src,
+   "PO CM: privacy link by locale (EN /privacy/#cm-google, PT /privacy/pt/#cm-google)")
 
 # ---- (a) unchecked by default -----------------------------------------------------
 print("(a) checkbox unchecked by default")
@@ -330,6 +334,16 @@ ok(allowlist_matches_text(llm_guard.YT_FIELDS), "llm_guard.YT_FIELDS == {titles,
 ok(not allowlist_matches_text(set(llm_guard.YT_FIELDS) | {"video_comments"}), "an extra Google field fails the check")
 ok(llm_guard.ALLOWED_FIELDS - llm_guard.YT_FIELDS == llm_guard.CM_FIELDS,
    "every other allowed field is a CM-authored field (CM_FIELDS), not Google data")
+# PO CM 14/11: pin the FULL L3 allowlist. Any new field of any kind fails here.
+PINNED_ALLOWLIST = frozenset({
+    "video_title", "video_description", "video_tags", "channel_stats",            # Google (the text)
+    "topic", "theme_prompt", "niche", "steer_notes", "language", "script",       # CM-authored
+    "storyboard", "craft_rules"})
+ok(llm_guard.ALLOWED_FIELDS == PINNED_ALLOWLIST and len(llm_guard.ALLOWED_FIELDS) == 12,
+   f"L3 allowlist pinned to exactly the 12 fields (got {sorted(llm_guard.ALLOWED_FIELDS)})")
+ok(llm_guard.CM_FIELDS == PINNED_ALLOWLIST - set(TEXT_WORDS), "the 8 non-Google fields pinned")
+ok(frozenset(llm_guard.ALLOWED_FIELDS | {"steer_history"}) != PINNED_ALLOWLIST,
+   "a new non-Google field would fail the pin")
 declared = set()
 for p in (ROOT / "app").rglob("*.py"):
     for m_ in re.finditer(r"llm_guard\.declare\(([^)]*)\)", p.read_text()):
@@ -481,17 +495,17 @@ wiz_banner = (ROOT / "frontend/src/ui.tsx").read_text()
 ok("LlmBlockedBanner" in wiz_banner and "blocked.message" in wiz_banner, "SPA renders the server banner text")
 
 # ---- CMO copy ---------------------------------------------------------------------------
-print("CMO copy (CM-WIZARD-COPY.md sha df45bd814374)")
+print("CMO copy v2 (CM-WIZARD-COPY.md sha a8b4aa958efd)")
 cmo = Path("/workspace/cm-onboarding-wizard-2026-11-14/CM-WIZARD-COPY.md")
 dict_src = (ROOT / "frontend/src/wizardI18n.ts").read_text()
 if cmo.exists():
     raw = cmo.read_bytes()
-    ok(hashlib.sha256(raw).hexdigest().startswith("df45bd814374"), "CMO file sha df45bd814374")
-    rows = re.findall(r'^\| `((?:wizard|banner)\.[a-z_.]+)` \| (.*?) \| (?:\d+|—) \| (.*?) \| (?:\d+|—) \|$',
+    ok(hashlib.sha256(raw).hexdigest().startswith("a8b4aa958efd"), "CMO file v2 sha a8b4aa958efd")
+    rows = re.findall(r'^\| `((?:wizard|banner|ai_data|settings\.glu|status|nav)\.[a-z_.]+)` \| (.*?) \| (?:\d+|—) \| (.*?) \| (?:\d+|—) \|(?: [^|]*\|)?$',
                       raw.decode(), re.M)
     missing = [k for k, en, pt in rows if "[LegalOps" not in en and (
         f'"{k}": {{ en: {json.dumps(en, ensure_ascii=False)}, pt: {json.dumps(pt, ensure_ascii=False)} }}' not in dict_src)]
-    ok(len(rows) >= 50 and missing == [], f"every CMO key in wizardI18n.ts, EN + PT verbatim ({missing})")
+    ok(len(rows) >= 100 and missing == [], f"every CMO key in wizardI18n.ts, EN + PT verbatim ({missing})")
 else:
     print("  (CMO file not on this box: verbatim check skipped)")
 ok(len(topic_presets.NICHE_PRESETS_EN) == 5 and len(topic_presets.NICHE_PRESETS_PT) == 5

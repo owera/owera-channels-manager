@@ -2,7 +2,6 @@
  * Unchecked by default; the parent owns the checked state and sends
  * `copy.sha` / `copy.locale` (the exact string displayed) to the server. */
 import { GoogleLimitedUseCopy } from "./googleLimitedUse";
-import { POLICY_LINKS } from "./ui";
 
 export function GoogleLimitedUseBox({ copy, checked, onChange, describedBy }: {
   copy: GoogleLimitedUseCopy; checked: boolean; onChange: (v: boolean) => void; describedBy?: string;
@@ -14,7 +13,7 @@ export function GoogleLimitedUseBox({ copy, checked, onChange, describedBy }: {
         onChange={(e) => onChange(e.target.checked)} />
       <span lang={copy.lang}>
         <span data-google-limited-use-text="">{copy.text}</span>{" "}
-        <a href={POLICY_LINKS.privacy} target="_blank" rel="noopener noreferrer" className="underline"
+        <a href={copy.href} target="_blank" rel="noopener noreferrer" className="underline"
           data-google-limited-use-privacy="">{copy.linkLabel}</a>
       </span>
     </label>

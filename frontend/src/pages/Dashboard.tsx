@@ -4,6 +4,8 @@ import { useDashboard, useOnboarding, useRuns, useSettings, type DashboardRow, t
 import { oauthStatusLabel } from "../copy";
 import { STATUS_META } from "../status";
 import { Dot, Empty, LlmBlockedBanner } from "../ui";
+import { wizardT as t } from "../wizardI18n";
+import { statusLabel } from "../status";
 
 function relTime(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now();
@@ -17,12 +19,11 @@ function relTime(iso: string): string {
 
 // The pipeline stages summarized on each channel card.
 const FUNNEL: Status[] = ["draft", "queued", "rendering", "review", "approved", "published"];
-const FUNNEL_LABEL: Record<string, string> = {
-  draft: "ideas", queued: "queued", rendering: "rendering",
-  review: "review", approved: "approved", published: "live",
-};
+// CMO v2: same label map as the status chips (EN unchanged, PT added).
+const FUNNEL_LABEL: Record<string, string> = Object.fromEntries(
+  FUNNEL.map((s) => [s, (s === "rendering" ? t("status.rendering.short") : statusLabel(s)).toLowerCase()]));
 const HOLD_LABEL: Record<string, string> = {
-  paused: "paused",
+  paused: t("status.paused").toLowerCase(),
   budget: "budget 0",
   oauth: "reconnect",
 };
@@ -64,7 +65,7 @@ function ChannelCard({ row, i }: { row: DashboardRow; i: number }) {
             <Dot hex={c.paused ? "#f5a524" : oauthHex} pulse={!c.paused && c.oauth_status === "connected"} />
             <Link to={`/board/${c.id}`} className="font-display font-bold text-fog-50 text-lg hover:text-signal transition-colors">{c.name}</Link>
           </div>
-          <div className="label mt-1 normal-case tracking-normal">{c.paused ? "Paused" : oauthStatusLabel(c.oauth_status)} · {row.counts.published || 0} live</div>
+          <div className="label mt-1 normal-case tracking-normal">{c.paused ? t("status.paused") : oauthStatusLabel(c.oauth_status)} · {row.counts.published || 0} live</div>
         </div>
         {review > 0 && (
           <Link to={`/board/${c.id}`} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm"

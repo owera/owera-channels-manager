@@ -152,3 +152,36 @@ PT; a sha not in `google_limited_use.KNOWN_SHAS` is stale and asked again; banne
 banner "Monthly draft limit reached.").
 **The policy is not decided** (CTO/LegalOps/CoS/PO, due Wed 18); the flag stays OFF until it is
 and L1 (no training at the provider) is proven. Headless agents are unchanged (internal only).
+
+## S2: derived data and per-channel exclusion (PO CM / LegalOps 2026-11-14)
+
+`app/services/llm_derived.py`.
+
+- **L3 allowlist pinned**: `tests/verify_google_limited_use.py` pins `ALLOWED_FIELDS` to
+  exactly 12 names: the 4 Google fields (`video_title`, `video_description`, `video_tags`,
+  `channel_stats`) and the 8 CM-authored ones (`topic`, `theme_prompt`, `niche`,
+  `steer_notes`, `language`, `script`, `storyboard`, `craft_rules`). Any new field fails.
+- **Per-channel exclusion**: `channel_data_allowed(ch)` = CONNECTED and no `access_lost_at`.
+  `llm_context.youtube_context` returns `{}` for any other channel (log
+  `llm_channel_excluded`); for an external workspace the ideas "existing" list drops
+  YouTube-sourced titles (`yt_video_id` set) of a disconnected channel.
+- **Same draft + workspace**: `draft_scope(video_id)` is bound by `worker.run_job` (render
+  params carry `video_id`), the render-loop metadata step and `script_compose`.
+  `llm.complete` → `llm_derived.check_prompt`: when `script` / `storyboard` are declared, the
+  normalized first 60 chars of the most recent 2000 stored scripts (other drafts, any
+  workspace) are searched in the prompt. External workspace → `LLMCrossDraft`
+  (`foreign_draft_data`; `foreign_draft_unverifiable` if the check itself fails, fail
+  closed). Internal → warning `llm_foreign_draft_data` only (OS/RR never blocked).
+- **No channel numbers**: `external_system(system)` appends `NO_CHANNEL_NUMBERS_RULE` to the
+  system prompt of `worker._llm` / `_llm_compose` only when the bound workspace is external.
+  Chosen external-only so OS/RR craft and Gate B prompts stay byte-identical (their
+  quality gates were tuned on them); external workspaces get the rule on top of the same
+  unchanged craft prompt.
+- **Stats echo**: `flag_stats_echo(text, kind=script|storyboard, …)` after the script
+  (worker + `script_compose`) and after the composition (visible HTML text) logs
+  `llm_stats_echo workspace_id channel_id video_id kind stats=…` (WARNING) when a channel
+  statistic ≥ 100 (latest `ChannelMetric`) appears literally (plain, `12,345`, `12.345`,
+  `12 345`). Never raises, never blocks.
+- **#214 scope**: `youtube_purge.purge_channel` also runs `purge_derived` (scripts,
+  `creation_config`, job text files) when the reason is `deletion_requested` or
+  `workspace_closed`. A plain disconnect keeps the draft.

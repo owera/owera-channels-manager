@@ -106,6 +106,11 @@ class LLMFieldRejected(LLMBlocked):
     """L3: a field outside the L6 allowlist was declared for a prompt."""
 
 
+class LLMCrossDraft(LLMBlocked):
+    """S2 (PO CM 14/11): another draft's script / storyboard (derived from Google
+    data) was about to enter this draft's prompt (app/services/llm_derived.py)."""
+
+
 class LLMRawDump(LLMBlocked):
     """L7: a raw YouTube API payload was about to enter a prompt."""
 

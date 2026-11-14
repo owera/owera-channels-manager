@@ -30,6 +30,12 @@ def youtube_context(session: Session, channel_id: int, *, max_videos: int = 20,
     if ch is None:
         raise ValueError(f"channel {channel_id} not found")
     llm_guard.assert_data_workspace(ch.workspace_id)       # L2: before any data read
+    # S2 (PO CM 14/11): a disconnected channel (or one on the #214 clock) gives no
+    # Google data at once, even while the workspace's other channels keep consent.
+    from app.services import llm_derived
+    if not llm_derived.channel_data_allowed(ch):
+        llm_derived.note_excluded(ch, "youtube_context")
+        return {}
     n = max(0, min(int(max_videos), llm_guard.MAX_VIDEOS))
     vids = session.exec(
         select(Video).where(Video.channel_id == ch.id).order_by(Video.id.desc()).limit(n)

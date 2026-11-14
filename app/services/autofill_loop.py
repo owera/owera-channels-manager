@@ -75,8 +75,9 @@ def _refill_topic(session: Session, topic: Topic, batch: int) -> int:
         # CMO 2026-10-06: no Shipping row without a source CM PR (#1400-#1402).
         logger.info("autofill skipped for topic '%s': %s", topic.name, blocked)
         return 0
-    existing = session.exec(select(Video.subject).where(Video.topic_id == topic.id)).all()
     _ch = session.get(Channel, topic.channel_id)
+    from app.services import llm_derived
+    existing = llm_derived.idea_existing_subjects(session, topic.id, _ch)   # S2: per-channel exclusion
     _niche = (_ch.niche or "").strip() if _ch else None
     try:
         with llm_guard.scope(_ch.workspace_id if _ch else None, "ideas"):

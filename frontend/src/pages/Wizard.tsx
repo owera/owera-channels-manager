@@ -18,6 +18,7 @@ import { googleLimitedUse } from "../googleLimitedUse";
 import { GoogleLimitedUseBox } from "../GoogleLimitedUseBox";
 import { ConnectConsentNote, Dot, LlmBlockedBanner, POLICY_LINKS } from "../ui";
 import { wizardT as t } from "../wizardI18n";
+import { statusLabel } from "../status";
 
 const STEPS: { id: string; covers: string[] }[] = [
   { id: "channel", covers: ["channel"] },
@@ -305,7 +306,7 @@ function FirstDraftStep({ state }: { state: WizardState }) {
         <div className="panel mt-5 px-4 py-3 flex items-center gap-3 max-w-xl">
           <Dot hex="#c9f24e" pulse={!rendered} />
           <span className="text-fog-100 text-sm">{fd.subject}</span>
-          <span className="ml-auto font-mono text-[11px] uppercase text-fog-400">{fd.status}</span>
+          <span className="ml-auto font-mono text-[11px] uppercase text-fog-400" data-fd-status={fd.status}>{statusLabel(fd.status)}</span>
         </div>
         <div className="mt-6 flex gap-3">
           <Link to={`/board/${ch.id}`} className="btn btn-signal">{t("wizard.first_draft.cta_queue")}</Link>

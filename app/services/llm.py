@@ -232,6 +232,9 @@ def complete(
     decl = tuple(fields) if fields is not None else llm_guard.declared_fields()
     ws = llm_guard.require(call_type, fields=decl)
     llm_guard.check_prompt(prompt, system, call_type)
+    # S2: a Google-derived script / storyboard only for its own draft + workspace.
+    from app.services import llm_derived
+    llm_derived.check_prompt(prompt, system, decl, ws)
     model = model if model is not None else (settings.grok_model or None)
     timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
     sc = llm_guard.current()

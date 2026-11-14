@@ -7,22 +7,24 @@ import Profiles from "./pages/Profiles";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Trends from "./pages/Trends";
-import AiData from "./pages/AiData";
+import AiData, { WithdrawAiConsentLink } from "./pages/AiData";
 import Wizard from "./pages/Wizard";
 import { HeldToasts, PolicyLinks } from "./ui";
+import { wizardT as t } from "./wizardI18n";
 
 type NavItem = { to: string; label: string; short: string; code: string; end?: boolean;
   /** S2: hidden on the first login (setup wizard until the first draft rendered). */
   hideOnFirstLogin?: boolean };
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Overview", short: "Home", end: true, code: "00" },
-  { to: "/board", label: "Review queue", short: "Queue", code: "01" },
-  { to: "/channels", label: "Channels", short: "Channels", code: "02" },
-  { to: "/onboarding", label: "Onboarding", short: "Start", code: "06" },
-  { to: "/trends", label: "Trends", short: "Trends", code: "03", hideOnFirstLogin: true },
-  { to: "/profiles", label: "Render Profiles", short: "Profiles", code: "04" },
-  { to: "/settings", label: "Settings", short: "Config", code: "05", hideOnFirstLogin: true },
+  // CMO v2: labels via nav.* keys (EN unchanged, PT added).
+  { to: "/", label: t("nav.overview"), short: t("nav.overview.short"), end: true, code: "00" },
+  { to: "/board", label: t("nav.review_queue"), short: t("nav.review_queue.short"), code: "01" },
+  { to: "/channels", label: t("nav.channels"), short: t("nav.channels.short"), code: "02" },
+  { to: "/onboarding", label: t("nav.onboarding"), short: t("nav.onboarding.short"), code: "06" },
+  { to: "/trends", label: t("nav.trends"), short: t("nav.trends.short"), code: "03", hideOnFirstLogin: true },
+  { to: "/profiles", label: t("nav.profiles"), short: t("nav.profiles.short"), code: "04" },
+  { to: "/settings", label: t("nav.settings"), short: t("nav.settings.short"), code: "05", hideOnFirstLogin: true },
 ];
 
 function navItems(firstLogin?: boolean): NavItem[] {
@@ -42,7 +44,7 @@ function SignOut({ email }: { email?: string }) {
         </div>
       )}
       <button type="button" onClick={() => void logout()} className="btn w-full text-xs">
-        Sign out
+        {t("nav.sign_out")}
       </button>
     </div>
   );
@@ -58,7 +60,7 @@ function Sidebar({ spaLogin, userEmail, firstLogin }: { spaLogin?: boolean; user
             Owera <span className="text-signal">Channels Manager</span>
           </span>
         </div>
-        <div className="text-[10px] text-fog-400 mt-1.5 pl-[18px] tracking-wide">YouTube channel studio</div>
+        <div className="text-[10px] text-fog-400 mt-1.5 pl-[18px] tracking-wide">{t("nav.tagline")}</div>
       </div>
 
       <nav className="flex-1 py-4">
@@ -81,6 +83,7 @@ function Sidebar({ spaLogin, userEmail, firstLogin }: { spaLogin?: boolean; user
         ))}
       </nav>
       <PolicyLinks className={`px-5 py-3 ${spaLogin ? "" : "mt-auto border-t border-ink-line"}`} />
+      <WithdrawAiConsentLink className="px-5 pb-3 -mt-1" />
       {spaLogin && <SignOut email={userEmail} />}
     </aside>
   );
@@ -129,6 +132,7 @@ export default function App({ spaLogin, userEmail, firstLogin }: {
           <Route path="/settings" element={<Settings />} />
         </Routes>
         <footer className="md:hidden px-4 py-6 border-t border-ink-line mt-8">
+          <WithdrawAiConsentLink className="mb-3" />
           <PolicyLinks />
         </footer>
       </main>
