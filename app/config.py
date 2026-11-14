@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # Optional HTTP Basic Auth password for public access. Any username + this
     # password is accepted. Empty string = no auth (safe for local-only use).
     app_password: str = ""
+    # V3 per-actor auth (app/actor_auth.py, docs/ACCESS_AUDIT.md). The shared
+    # app_password keeps working as actor "legacy-shared" while this is on; the CTO
+    # cuts it with MANAGER_LEGACY_SHARED_PASSWORD=0.
+    legacy_shared_password: bool = True       # env: MANAGER_LEGACY_SHARED_PASSWORD
+    # JSON registry of per-actor token SHA-256 hashes + workspace scope. Empty =
+    # <repo>/credentials/actor-tokens.json (gitignored).
+    actor_tokens_file: str = ""               # env: MANAGER_ACTOR_TOKENS_FILE
+    # Append-only access audit log (JSONL). Empty = <repo>/audit/access.jsonl.
+    audit_log_path: str = ""                  # env: MANAGER_AUDIT_LOG_PATH
 
     # OAuth grant verification: empty = use youtube.CONSENT_SCOPES (WS4 v1 tier).
     oauth_required_scopes: list[str] = []
