@@ -563,6 +563,11 @@ def release_block_reason(ws: int, ct: str, fields=_UNSET) -> str | None:
     r = _tc.block_reason(row)
     if r is not None:
         return r
+    # CTO 14/11: the legal documents shown must be pinned by sha for that locale
+    # (deploy config), or the acceptance can't say what was accepted → refuse.
+    r = _tc.doc_block_reason(row)
+    if r is not None:
+        return r
     # S2 (PO CM condition ii + LegalOps 14/11): Google Limited Use consent — the
     # user ticked the exact LegalOps text (EN/PT); a sha of a text we no longer
     # show is stale and asked again (app/services/google_limited_use.py).
@@ -652,6 +657,8 @@ BLOCK_USER_TEXT: dict[str, tuple[str, dict[str, str]]] = {
     # CTO / LegalOps 14/11: accepted under the PT text while MANAGER_TERMS_PT_LIVE is false;
     # same "Terms and privacy" step (asked again in EN).
     "terms_pt_not_live": ("terms_privacy", _paused("terms_privacy")),
+    # terms_doc_unpinned (ops: MANAGER_TERMS_DOC_SHA_* / MANAGER_PRIVACY_DOC_SHA_* unset) is
+    # not the user's to fix → the generic "contact support" banner (_SUPPORT).
     "not_paid_or_test": ("payment", _paused("payment")),
     # S2 wizard: Google Limited Use consent (Workspace.ai_data_ack_*), emitted by
     # release_block_reason after terms/privacy. A stale consent (text changed)

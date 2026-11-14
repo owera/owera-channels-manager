@@ -28,6 +28,11 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.db as appdb
 
 from app.config import settings
+# CTO 14/11: the external release needs the legal document shas pinned for the
+# accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+PINNED_DOC_SHA = "0" * 64
+for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+    setattr(settings, _k, PINNED_DOC_SHA)
 from app.models import Workspace
 from app.services import llm_guard, onboarding
 

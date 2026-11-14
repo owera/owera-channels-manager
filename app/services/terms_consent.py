@@ -145,6 +145,18 @@ def block_reason(ws) -> str | None:
     return None
 
 
+def doc_block_reason(ws) -> str | None:
+    """CTO 14/11 fail closed: ``terms_doc_unpinned`` when the Terms or Privacy document
+    sha for the accepted locale is not configured (MANAGER_TERMS_DOC_SHA_<L> /
+    MANAGER_PRIVACY_DOC_SHA_<L>). Used by the S8 external release only; internal
+    workspaces never reach it."""
+    loc = "pt" if (getattr(ws, "terms_accepted_locale", None) or "").lower().startswith("pt") else "en"
+    d = docs_for(loc)
+    if not d["terms_doc_sha"] or not d["privacy_doc_sha"]:
+        return "terms_doc_unpinned"
+    return None
+
+
 def is_valid(ws) -> bool:
     return block_reason(ws) is None
 

@@ -65,6 +65,7 @@ env = {**os.environ, "PYTHONPATH": str(ROOT), "MANAGER_LEGAL_ARCHIVE_DIR": str(t
 r = subprocess.run([sys.executable, str(ROOT / "scripts/archive_legal_docs.py"), str(page), "--label", "terms-en"],
                    capture_output=True, text=True, env=env, timeout=60)
 ok(r.returncode == 0 and r.stdout.strip() == SHA, "CLI prints only the sha on stdout (for the deploy config)")
+ok(__import__("re").fullmatch(r"[0-9a-f]{64}\n", r.stdout) is not None, "stdout is the full 64-hex sha256 + newline")
 ok((tmp / "env-dir" / f"{SHA}.html").is_file(), "CLI default dir = MANAGER_LEGAL_ARCHIVE_DIR")
 r = subprocess.run([sys.executable, str(ROOT / "scripts/archive_legal_docs.py"), str(tmp / "nope.html"),
                     "--dir", str(arch)], capture_output=True, text=True, env=env, timeout=60)

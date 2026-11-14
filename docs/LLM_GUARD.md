@@ -146,6 +146,8 @@ thumbnail, gate_b_preflight, render, render_submit, mpt_render, mpt_social_metad
 → `terms_privacy_not_accepted` (`terms_accepted_at` and `privacy_accepted_at`, written by the
 S2 onboarding wizard) → `terms_pt_not_live` (the acceptance was under the PT sentence while
 `MANAGER_TERMS_PT_LIVE` is false: not consent until /terms/pt/ is live; asked again in EN)
+→ `terms_doc_unpinned` (the Terms or Privacy document sha for the accepted locale is not
+configured: `MANAGER_TERMS_DOC_SHA_<EN|PT>` / `MANAGER_PRIVACY_DOC_SHA_<EN|PT>`; fail closed, support banner)
 → `ai_data_not_acknowledged` / `ai_data_ack_stale` (Google Limited Use
 consent: `ai_data_ack_at` + `ai_data_ack_version` = sha256 of the exact LegalOps text shown, EN or
 PT; a sha not in `google_limited_use.KNOWN_SHAS` is stale and asked again; banner step "AI data")

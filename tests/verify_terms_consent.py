@@ -143,6 +143,48 @@ with _release(ws_pt):
     ok(llm_guard.release_block_reason(9, "ideas", fields=("subject",)) == "terms_pt_not_live",
        "S8 release: an external workspace consented only under the PT text is blocked (terms_pt_not_live)")
 
+print("CTO 14/11 fail closed: legal document shas must be pinned for the accepted locale")
+from app.services import google_limited_use as _glu  # noqa: E402
+P = "9" * 64
+ws_ext = NS(terms_accepted_at=T, privacy_accepted_at=T, terms_accepted_version=tc.SHA_EN, terms_accepted_locale="en",
+            llm_disabled=False, is_test=True, paid_at=None, subscription_status=None,
+            ai_data_ack_at=T, ai_data_ack_version=_glu.text_sha(_glu.TEXT_EN), ai_data_ack_locale="en",
+            ai_data_ack_user="buyer@example.com", ai_data_ack_withdrawn_at=None)
+
+
+def _pins(**kw):
+    st = __import__("contextlib").ExitStack()
+    for k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+        st.enter_context(patch.object(settings, k, kw.get(k, P)))
+    return st
+
+
+def _rel(row, **pins):
+    with _pins(**pins), _release(row), patch.object(llm_guard, "workspace_monthly_cap_reached", lambda ws: False):
+        return llm_guard.release_block_reason(9, "ideas", fields=("subject",))
+
+
+ok(_rel(ws_ext, terms_doc_sha_en="") == "terms_doc_unpinned",
+   "external, EN acceptance, empty MANAGER_TERMS_DOC_SHA_EN → terms_doc_unpinned")
+ok(_rel(ws_ext, privacy_doc_sha_en="") == "terms_doc_unpinned",
+   "external, EN acceptance, empty MANAGER_PRIVACY_DOC_SHA_EN → terms_doc_unpinned")
+ok(_rel(ws_ext, terms_doc_sha_en="", privacy_doc_sha_en="") == "terms_doc_unpinned", "both empty → terms_doc_unpinned")
+ok(_rel(ws_ext) is None, "external with both EN shas set (and every other condition met) → allowed")
+ok(_rel(ws_ext, terms_doc_sha_pt="", privacy_doc_sha_pt="") is None,
+   "only the accepted locale's shas matter (empty PT shas don't block an EN acceptance)")
+with patch.object(settings, "terms_pt_live", True):
+    ws_ptl = NS(**{**vars(ws_ext), "terms_accepted_version": tc.SHA_PT, "terms_accepted_locale": "pt"})
+    ok(_rel(ws_ptl, terms_doc_sha_pt="") == "terms_doc_unpinned" and _rel(ws_ptl) is None,
+       "PT acceptance (gate open): the PT shas apply")
+ok(llm_guard.block_message("terms_doc_unpinned", "en")["step"] == "support",
+   "ops misconfig → the generic 'contact support' banner (never silent)")
+with _pins(terms_doc_sha_en="", privacy_doc_sha_en="", terms_doc_sha_pt="", privacy_doc_sha_pt=""), \
+     patch.object(settings, "llm_external_release", True), patch.object(settings, "llm_internal_workspace_ids", "1,2"), \
+     patch.object(llm_guard, "_workspace_row", return_value=(NS(llm_disabled=False), None)):
+    ok(llm_guard.block_reason(1, "ideas") is False and llm_guard.block_reason(2, "ideas") is False,
+       "internal ws 1 / 2 with every doc sha empty: unaffected (allowed)")
+    ok(_rel(ws_ext, terms_doc_sha_en="") == "terms_doc_unpinned", "…while an external one is refused")
+
 ok(llm_guard.BLOCK_USER_TEXT["terms_pt_not_live"][0] == "terms_privacy",
    "banner sends the user back to the 'Terms and privacy' step (never silent)")
 

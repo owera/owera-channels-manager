@@ -35,6 +35,11 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.db as appdb
 import app.main as main
 from app.config import settings
+# CTO 14/11: the external release needs the legal document shas pinned for the
+# accepted locale (else terms_doc_unpinned; pinned in tests/verify_terms_consent.py).
+PINNED_DOC_SHA = "0" * 64
+for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+    setattr(settings, _k, PINNED_DOC_SHA)
 from app.db import get_session
 from app.models import (Channel, OAuthStatus, Settings, Topic, Video, VideoStatus, Workspace)
 from app.services import (activation, google_limited_use, llm, llm_guard, onboarding_wizard,
@@ -359,8 +364,8 @@ ok(len(evs) == 2, f"one record per stored acceptance (first accept + EN re-accep
 e0, e1 = evs
 ok(e0.sentence_sha == terms_consent.SHA_EN and e0.locale == "en" and e0.workspace_id == WA
    and e0.terms_url == "https://owera.com/terms/" and e0.privacy_url == "https://owera.com/privacy/"
-   and e0.terms_doc_sha is None and e0.privacy_doc_sha is None and e0.created_at is not None,
-   "record: sentence sha, EN URLs, doc shas empty by default, locale, time, workspace")
+   and e0.terms_doc_sha == PINNED_DOC_SHA and e0.privacy_doc_sha == PINNED_DOC_SHA and e0.created_at is not None,
+   "record: sentence sha, EN URLs, the configured EN doc shas, locale, time, workspace")
 ok(e0.user_id == w.ai_data_ack_user, f"record: user id = who ticked (same identity as the AI-data ack: {e0.user_id!r})")
 ok(e1.locale == "en" and e1.terms_doc_sha == "d" * 64 and e1.privacy_doc_sha == "e" * 64,
    "record: the locale's configured document shas (MANAGER_TERMS_DOC_SHA_EN / MANAGER_PRIVACY_DOC_SHA_EN), not PT's")

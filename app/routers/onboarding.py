@@ -194,8 +194,8 @@ def wizard_budgets(body: WizardBudgetsBody, session: Session = Depends(get_sessi
 
 
 class WizardConsentsBody(BaseModel):
-    # LegalOps FIX 14/11: ONE box "accept the Terms of Service and have read the
-    # Privacy Policy" (``terms``) + the sha / locale of the exact sentence shown.
+    # LegalOps 14/11: ONE box "accept the Terms of Use and have read the
+    # Privacy Notice" (``terms``) + the sha / locale of the exact sentence shown.
     terms: bool = False
     terms_text_sha: str | None = None
     terms_locale: str | None = None
@@ -213,8 +213,8 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
                     locale: str = Depends(ui_locale)):
     _need(session, ws, "consents")
     if not (body.terms is True and body.ai_data is True):
-        raise HTTPException(400, "accept the Terms of Service (and confirm you read the "
-                                 "Privacy Policy), and tick the AI data box")
+        raise HTTPException(400, "accept the Terms of Use (and confirm you read the "
+                                 "Privacy Notice), and tick the AI data box")
     from app.services import terms_consent
     try:
         terms_loc = terms_consent.validate(body.terms_text_sha, body.terms_locale)

@@ -119,8 +119,9 @@ class Settings(BaseSettings):
     privacy_doc_sha_pt: str = ""
     # Archive of every served legal document version, one file per sha256.
     legal_archive_dir: str = str(MANAGER_DIR / "storage" / "legal-archive")
-    # PT gate: true only once https://owera.com/terms/pt/ is live. False = PT-locale users see
-    # and accept the EN sentence; a stored PT acceptance does not count as consent.
+    # PT gate: true only once https://owera.com/terms/pt/ is live. False = PT-locale users get
+    # no Terms / AI-data box (a "coming soon" notice offering English); switching to English
+    # accepts the EN sentence and records locale en; a stored PT acceptance is not consent.
     terms_pt_live: bool = False
     # Background-music pool shared with MPT; falls back to channel/music/ if absent.
     bgm_dir: str = str(MPT_DIR / "resource" / "songs")
