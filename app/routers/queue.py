@@ -158,7 +158,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     control surface (active/weight/pending), and the recent run audit. The agent acts
     through the existing PATCH/POST endpoints; this is its single observation call."""
     # Lazy import avoids any import-order coupling with the youtube-admin router.
-    from app.routers.youtube_admin import video_analytics_by_topic, _compute_monetization
+    from app.routers.youtube_admin import video_analytics_by_topic, _latest_channel_stats
     from app.routers.settings import _workspace_view as _settings_workspace_view
     from app.workspace import is_admin_workspace
 
@@ -215,7 +215,9 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
     )
     trends = list(session.exec(trends_q).all())
 
-    monetization_by_channel = {ch.id: _compute_monetization(session, ch.id) for ch in channels}
+    # S8a / L4: raw channels.list counts only (no YPP progress or tier, no
+    # summed watch hours or shorts views).
+    channel_stats_by_channel = {ch.id: _latest_channel_stats(session, ch.id) for ch in channels}
 
     # BGM pool — surface pool health so the agent can top it up on demand.
     # bgm_dir/bgm_pool_min/bgm_pool_target live on app.config.settings, not the DB model.
@@ -237,7 +239,7 @@ def agent_state(runs_limit: int = 40, session: Session = Depends(get_session),
         "settings": cfg if is_admin_workspace(ws) else _settings_workspace_view(ws),
         "dashboard": _dashboard_for_workspace(session, ws),
         "analytics_by_topic": analytics_by_topic,
-        "monetization_by_channel": monetization_by_channel,
+        "channel_stats_by_channel": channel_stats_by_channel,
         "topics": topics,
         "trends": trends,
         "recent_runs": recent_runs,

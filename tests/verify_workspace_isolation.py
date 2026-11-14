@@ -195,7 +195,9 @@ r = client.get(f"{c}/metrics", headers=B)
 ok(r.status_code == 200 and r.json()["latest"]["subscriber_count"] == 7,
    "positive control: B reads its own metrics (200)")
 r = client.get(f"{c}/monetization", headers=B)
-ok(r.status_code == 200, "positive control: B reads its own monetization (200)")
+# S8a (L4) removed the YPP milestones: B's own channel answers 410 Gone (the
+# workspace check runs first, so A→B above is still the 404).
+ok(r.status_code == 410, "own channel: B's /monetization is 410 Gone after S8a (L4)")
 
 # ---- topics -----------------------------------------------------------------
 print("topics: buyer A on buyer B's topic/channel")

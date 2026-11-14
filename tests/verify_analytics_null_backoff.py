@@ -19,7 +19,7 @@ Pins:
   failures with no success stop the pass; tick isolates channel exceptions
 - VideoMetric columns nullable; _relax_videometric_notnull rebuilds a pre-P1
   NOT NULL table once (rows / ids / indexes kept, idempotent)
-- consumers (leaderboard, by-topic, monetization, backfill helper) treat NULL
+- consumers (leaderboard, by-topic, raw channel stats, backfill helper) treat NULL
   as "no data", never as zero, and never TypeError
 
 In-memory / temp-file SQLite, stubbed analytics client, no network, never the
@@ -223,10 +223,12 @@ ok(by[v30.id]["has_data"] is False and lb["measured"] == 2,
    "leaderboard: NULL-only video is unmeasured, measured count 2")
 agg = youtube_admin.video_analytics_by_topic(ch.id, s, _WS1)
 t = agg["by_topic"][0]
-ok(t["measured"] == 2 and t["avg_views"] == 4.5 and t["avg_view_pct"] == 20.0,
-   "by-topic averages over measured videos only (NULL is not a zero)")
-mon = youtube_admin._compute_monetization(s, ch.id)
-ok(isinstance(mon, dict), "monetization summary tolerates NULL rows (no TypeError)")
+# S8a/L4: by-topic carries raw sums only (no avg_*); NULL rows still add nothing.
+ok(t["measured"] == 2 and t["views"] == 9 and "avg_views" not in t
+   and "avg_view_pct" not in t,
+   "by-topic sums measured videos only, no averages (NULL is not a zero)")
+cs = youtube_admin._latest_channel_stats(s, ch.id)
+ok(cs is None or isinstance(cs, dict), "raw channel stats tolerate NULL rows (no TypeError)")
 _bf = Path(__file__).resolve().parents[1] / "run" / "backfill_ch2_metadata.py"
 ok("if m.views is None" in _bf.read_text(), "backfill helper skips NULL views before sorting")
 
@@ -247,7 +249,7 @@ def fetch_first_fails(analytics, ch_yt, vid, start, end):
     attempts.append(vid)
     if vid == "c2_0":
         raise http_error(503)
-    return {"empty": False, "views": 1, "impressions": 0, "ctr": 0.0, "avg_view_pct": 1.0,
+    return {"empty": False, "views": 1, "impressions": None, "ctr": None, "avg_view_pct": 1.0,
             "average_view_duration": 1.0, "watch_time_minutes": 1, "likes": 0,
             "comments": 0, "subscribers_gained": 0}
 

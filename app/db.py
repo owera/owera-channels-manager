@@ -156,11 +156,32 @@ def _ensure_unique_stripe_subscription() -> None:
             "ux_workspace_stripe_subscription not created: %s", type(e).__name__)
 
 
+def _null_fabricated_impressions_ctr() -> int:
+    """S8a / LegalOps L4: impressions / ctr were never measured (the Analytics
+    API v2 rejects them, 2026-07-09 audit), so every stored 0 is a fabricated
+    default. Turn those zeros into NULL ("no data"). Only exact zeros are
+    touched; idempotent (a no-op once applied). Returns rows changed."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        info = list(conn.execute(text("PRAGMA table_info(videometric)")))
+        cols = {r[1] for r in info}
+        n = 0
+        if "impressions" in cols:
+            n += conn.execute(text(
+                "UPDATE videometric SET impressions = NULL WHERE impressions = 0")).rowcount or 0
+        if "ctr" in cols:
+            n += conn.execute(text(
+                "UPDATE videometric SET ctr = NULL WHERE ctr = 0")).rowcount or 0
+        return n
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _ensure_unique_stripe_subscription()
     _relax_videometric_notnull()
+    _null_fabricated_impressions_ctr()
     with Session(engine) as s:
         _ensure_default_workspace(s)
         if s.get(models.Settings, 1) is None:

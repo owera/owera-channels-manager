@@ -113,7 +113,7 @@ def add_vmetric(session, video_id: int, channel_id: int, captured_at: datetime,
         video_id=video_id,
         channel_id=channel_id,
         views=counts.get("views", 0),
-        impressions=counts.get("impressions", 0),
+        impressions=counts.get("impressions"),
         captured_at=captured_at,
     )
     session.add(m)
@@ -142,8 +142,8 @@ def jobruns(session, *, kind=None, status=None, video_id=None):
 def _ana_payload(**overrides):
     base = {
         "views": 100,
-        "impressions": 0,
-        "ctr": 0.0,
+        "impressions": None,   # S8a/L4: fetch_video_analytics never invents 0
+        "ctr": None,
         "avg_view_pct": 42.5,
         "average_view_duration": 33.0,
         "watch_time_minutes": 55,
@@ -291,6 +291,8 @@ try:
     ok(m.avg_view_pct == 42.5 and m.average_view_duration == 33.0
        and m.watch_time_minutes == 55,
        "watch metrics taken from fetch_video_analytics")
+    ok(m.impressions is None and m.ctr is None,
+       "impressions/ctr persisted as NULL, never a fabricated 0 (S8a/L4)")
     ok(m.traffic_json is not None, "views>0 → traffic_json populated")
     traffic = json.loads(m.traffic_json)
     ok(traffic["sources"]["YT_SEARCH"]["views"] == 40

@@ -1082,8 +1082,9 @@ ok(got["avg_view_pct"] == 40.0, "averageViewPercentage -> avg_view_pct (float)")
 ok(got["average_view_duration"] == 12.5, "averageViewDuration float")
 ok(got["likes"] == 2 and got["comments"] == 1, "likes/comments")
 ok(got["subscribers_gained"] == 0, "subscribersGained")
-ok(got["impressions"] == 0 and got["ctr"] == 0.0,
-   "impressions/ctr stay 0 (API does not expose them; 07-09 fabricated-default audit)")
+ok(got["impressions"] is None and got["ctr"] is None,
+   "impressions/ctr are None, never an invented 0 (API does not expose them; "
+   "07-09 audit; S8a/L4)")
 metrics_arg = ana.queries[0]["metrics"]
 ok(metrics_arg == (
     "views,estimatedMinutesWatched,averageViewPercentage,averageViewDuration,"

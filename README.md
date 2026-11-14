@@ -218,10 +218,11 @@ itself** — measure → learn → act → improve, once a day, unattended. Thre
 this work:
 
 - **Per-video analytics.** The app records a daily YouTube Analytics snapshot per
-  published video (views, impressions, CTR, average view %, watch time, likes,
-  comments, subscribers gained) and exposes a leaderboard:
-  `GET /api/channels/{id}/video-analytics` and `…/video-analytics/by-topic` (the core
-  "which themes/formats actually perform" signal).
+  published video (views, average view %, watch time, likes, comments, subscribers
+  gained — raw Analytics API fields; impressions/CTR are not exposed by the API and
+  are never stored as 0) and exposes a leaderboard:
+  `GET /api/channels/{id}/video-analytics` and `…/video-analytics/by-topic` (raw
+  per-theme/format sums; no averages or scores — LegalOps L4).
 - **Custom thumbnails.** On publish, a bold high-contrast "hook card" is generated and
   uploaded to YouTube (the biggest unused CTR lever) — best-effort, never blocks a
   publish.

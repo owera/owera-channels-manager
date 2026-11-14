@@ -334,8 +334,10 @@ class VideoMetric(SQLModel, table=True):
     # SQLAlchemy fires a column default for an explicit None (NULL would be
     # silently written as 0).
     views: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
-    impressions: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
-    ctr: Optional[float] = Field(default=0.0, sa_column_kwargs=_NULLABLE_METRIC)  # (0..1)
+    # impressions / ctr: the Analytics API v2 does not expose them (2026-07-09
+    # audit). Default NULL, never an invented 0 (S8a / LegalOps L4).
+    impressions: Optional[int] = Field(default=None, sa_column_kwargs=_NULLABLE_METRIC)
+    ctr: Optional[float] = Field(default=None, sa_column_kwargs=_NULLABLE_METRIC)  # (0..1)
     avg_view_pct: Optional[float] = Field(default=0.0, sa_column_kwargs=_NULLABLE_METRIC)  # (0..100)
     watch_time_minutes: Optional[int] = Field(default=0, sa_column_kwargs=_NULLABLE_METRIC)
     # seconds watched per view (avg); pairs with avg_view_pct
