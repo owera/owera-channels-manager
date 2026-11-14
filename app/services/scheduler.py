@@ -19,6 +19,7 @@ from app.services import (
     publish_loop,
     render_loop,
     youtube_purge,
+    token_refresh_age,
 )
 
 logger = logging.getLogger("manager.scheduler")
@@ -114,6 +115,14 @@ def start() -> None:
         id="youtube_purge", max_instances=1, coalesce=True,
         misfire_grace_time=3600,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    # S7 is DB-only: observe renewal age without refreshing or calling Google.
+    _scheduler.add_job(
+        _safe(token_refresh_age.tick, "token_refresh_age"),
+        "interval", hours=token_refresh_age.TICK_HOURS,
+        id="token_refresh_age", max_instances=1, coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6),
     )
     _scheduler.start()
     logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "

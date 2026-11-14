@@ -19,7 +19,7 @@ from google.oauth2.credentials import Credentials
 from sqlmodel import Session, select
 
 from app.config import settings
-from app.models import Channel, OAuthCredential
+from app.models import Channel, OAuthCredential, utcnow
 
 logger = logging.getLogger("manager.token_store")
 
@@ -136,7 +136,12 @@ def save_credentials(session: Session, channel: Channel, creds: Credentials) -> 
     row.key_id = kid
     row.ciphertext_b64 = base64.b64encode(blob).decode("ascii")
     row.workspace_id = channel.workspace_id
+    row.updated_at = utcnow()
     session.add(row)
+    from app.services.token_refresh_age import record_success
+
+    # S7: connect and refresh both land here only after Google returned a token.
+    record_success(session, channel, now=row.updated_at)
 
 
 def load_token_info(session: Session, channel: Channel) -> Optional[dict]:

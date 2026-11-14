@@ -66,6 +66,18 @@ def _next_publish_eta(session: Session, ch: Channel, cfg) -> str | None:
     return next_window_open(ch, now if not last else max(now, last + drip)).isoformat()
 
 
+def _token_refresh_entry(ch) -> dict:
+    from app.services import token_refresh_age
+
+    return {
+        "last_refresh_ok_at": ch.last_refresh_ok_at,
+        "stale_at": ch.token_refresh_stale_at,
+        "stale": ch.token_refresh_stale_at is not None,
+        "age_days": (token_refresh_age.age_days(ch)
+                     if ch.oauth_status == OAuthStatus.CONNECTED else None),
+    }
+
+
 def _dashboard_for_workspace(session: Session, ws: Workspace):
     cfg = app_settings(session)
     out = []
@@ -98,6 +110,9 @@ def _dashboard_for_workspace(session: Session, ws: Workspace):
             "publish_hold": _publish_hold(ch, counts.get(VideoStatus.APPROVED, 0) - held),
             # Runway / under-publish signals (same computation as the issues digest).
             "publish_signals": issues.publish_signals(session, ch),
+            # S7 day-6 token-renewal check (DB-only; no tokens). stale_at is set by
+            # the token_refresh_age job and cleared by the next good refresh.
+            "token_refresh": _token_refresh_entry(ch),
             "active": [{"id": v.id, "subject": v.subject, "status": v.status,
                         "render_progress": v.render_progress} for v in active],
         })

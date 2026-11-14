@@ -80,3 +80,37 @@ to the `NeedsConnect` message: `… reconnect required (refresh failed: invalid_
 `/health` adds two aggregate counts (status logic unchanged):
 `channels_expired` and `channels_never_connected` (disconnected, no identity,
 access never lost, i.e. onboarding not finished).
+
+## Day-6 token-renewal check (S7)
+
+`Channel.last_refresh_ok_at` (naive UTC) is stamped on every successful
+platform-OAuth refresh (`token_store.save_credentials`, which now also bumps
+`OAuthCredential.updated_at`) and on every verified connect/reconnect
+(`notify.mark_connected`). A failed refresh (`RefreshError`) never stamps it.
+Legacy `token.json` refreshes (internal ch1/ch2) are not stamped.
+
+`app/services/token_refresh_age.py`, APScheduler job `token_refresh_age`, every
+6 h (first run 6 min after start). DB only: it never refreshes, never calls
+Google, never changes `oauth_status`. For each `connected` channel outside
+`MANAGER_TOKEN_AGE_INTERNAL_WORKSPACE_IDS` (default `1`; malformed or empty means
+every workspace is watched; deliberately separate from the LLM allowlist) whose
+reference time (`last_refresh_ok_at`, else `oauth_status_changed_at`, else
+`created_at`) is more than 6 days old:
+
+- one WARNING per stale episode, e.g.
+  `token_refresh_stale channel_id=11 workspace_id=2 days=7.0` (no token, name or email);
+- `Channel.token_refresh_stale_at` is set, and cleared by the next successful refresh or reconnect.
+
+Internal workspaces get an INFO `token_refresh_stale_internal …` line and no marker.
+Closed workspaces are skipped. Test channels (`is_test`) and paused channels are
+watched, because the E2E day-8 check runs on a test workspace.
+
+Ops surface: each channel entry in `/api/dashboard` and `/api/agent/state` has
+`token_refresh: {last_refresh_ok_at, stale_at, stale, age_days}`.
+
+**Testing mode:** while the Google OAuth app is in Testing, refresh tokens die
+7 days after the grant, so this WARNING is expected for every external channel
+around day 6 until the app is in Production. In Production, a flag means
+renewal is broken. A channel nobody uses for 6+ days can also be flagged,
+because refreshes only happen on use. In practice the metrics loop builds a
+client for every connected channel every few hours, so this is rare.

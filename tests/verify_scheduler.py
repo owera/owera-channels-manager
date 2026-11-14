@@ -221,10 +221,12 @@ try:
 
     jobs = {j.id: j for j in sch.get_jobs()}
     ok(set(jobs) == {"render", "publish", "metrics", "analytics", "autofill",
-                     "music_replenish", "youtube_purge"},
-       "exactly the seven loops are registered, by id")
+                     "music_replenish", "youtube_purge", "token_refresh_age"},
+       "exactly the eight loops are registered, by id")
     ok(jobs["youtube_purge"].trigger.interval == timedelta(hours=6),
        "youtube_purge (P3) runs every 6h")
+    ok(jobs["token_refresh_age"].trigger.interval == timedelta(hours=6),
+       "token_refresh_age (S7) runs every 6h")
 
     ok(jobs["render"].trigger.interval == timedelta(seconds=1111),
        "render interval comes from render_tick_seconds")
@@ -246,7 +248,8 @@ try:
     # Staggered first runs: the snapshot/refill loops start within minutes of
     # boot (trend data accumulates right away); render/publish wait one interval.
     for jid, offset in (("metrics", 30), ("analytics", 60), ("autofill", 45),
-                        ("music_replenish", 120), ("youtube_purge", 300)):
+                        ("music_replenish", 120), ("youtube_purge", 300),
+                        ("token_refresh_age", 360)):
         lo = t0 + timedelta(seconds=offset - 1)
         hi = t1 + timedelta(seconds=offset + 1)
         ok(lo <= jobs[jid].next_run_time <= hi,
@@ -300,7 +303,7 @@ try:
 
     scheduler.start()
     ok(scheduler._scheduler is sch, "a second start() keeps the same scheduler")
-    ok(len(sch.get_jobs()) == 7, "a second start() registers no duplicate jobs")
+    ok(len(sch.get_jobs()) == 8, "a second start() registers no duplicate jobs")
 
     scheduler.shutdown()
     ok(not sch.running, "shutdown() actually stops the scheduler, not just the global")
@@ -315,8 +318,8 @@ try:
     scheduler.start()
     ok(scheduler._scheduler is not None and scheduler._scheduler is not sch,
        "start() after shutdown() builds a fresh scheduler")
-    ok(len(scheduler._scheduler.get_jobs()) == 7,
-       "the fresh scheduler carries all seven jobs again")
+    ok(len(scheduler._scheduler.get_jobs()) == 8,
+       "the fresh scheduler carries all eight jobs again")
     scheduler.shutdown()
     ok(scheduler._scheduler is None, "final shutdown leaves no scheduler behind")
 finally:
