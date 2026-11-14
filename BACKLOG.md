@@ -686,6 +686,25 @@ flag the operator step in the commit body.
   `make_thumbnail_png` so an un-stubbed `_publish_one`
   cannot hang on the live LLM. Discovered follow-up
   shipped as #23.
+  `stripe_email.py` (previously zero direct coverage;
+  provision suites stub `send_welcome_email`) —
+  `tests/verify_stripe_email.py` (55 checks, 2026-11-14):
+  the post-checkout welcome choke point. Module contracts
+  (Resend URL / from / reply-to / sign-in URL, blocklist
+  is the normalized operator email, `deliver_welcome`
+  wiring identity); `welcome_email_html` body pins;
+  early returns that must NOT POST (empty / whitespace /
+  None email, blocked operator exact + case-insensitive,
+  unset and whitespace-only API key); happy path (padded
+  key is stripped into the Bearer token, `to` is a
+  one-item list of the normalized email, html IS
+  `welcome_email_html()`, `raise_for_status` counted);
+  HTTP 500 / ConnectError / unexpected Exception return
+  False and never raise; logs redact the full recipient.
+  Mutation-verified: 21/21 hand-built semantic mutants
+  killed from an isolated copy (bytecode caching off),
+  including ignore-subject / ignore-html / ignore-label
+  on the shared ``send_email`` forwarder.
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
