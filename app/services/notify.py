@@ -131,6 +131,9 @@ def mark_connected(session, channel: Channel, identity: dict) -> None:
     channel.access_lost_reason = None
     channel.youtube_data_purged_at = None
     channel.updated_at = utcnow()
+    from app.services.token_refresh_age import record_success
+
+    record_success(session, channel, now=channel.updated_at, persist=False)
     session.add(channel)
     session.commit()
 

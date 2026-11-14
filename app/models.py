@@ -161,6 +161,9 @@ class Channel(SQLModel, table=True):
     youtube_data_purged_at: Optional[datetime] = None
     # When oauth_status last flipped (dedupe key for the access-lost email).
     oauth_status_changed_at: Optional[datetime] = None
+    # S7: successful grant/refresh only; stale is an observation, not OAuth status.
+    last_refresh_ok_at: Optional[datetime] = None
+    token_refresh_stale_at: Optional[datetime] = None
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

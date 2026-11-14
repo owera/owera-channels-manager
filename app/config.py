@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     # the run is refused (fail closed). Empty / malformed → nothing allowed.
     # env: MANAGER_AGENT_RUN_WORKSPACE_IDS
     agent_run_workspace_ids: str = "1"
+    # S7 day-6 token-renewal check: workspaces logged info-only (no stale marker).
+    # Separate from the LLM allowlist on purpose: approved buyers join that list,
+    # and must still be watched here. Malformed/empty → every workspace is external.
+    token_age_internal_workspace_ids: str = "1"  # env: MANAGER_TOKEN_AGE_INTERNAL_WORKSPACE_IDS
     # LLM backend (docs/LLM_BACKEND.md). "cli" (default) = Grok CLI `grok -p` on the
     # consumer `grok login` session — unchanged behavior. "api" = xAI API
     # POST {llm_api_base_url}/responses with XAI_API_KEY for llm.complete() only,
