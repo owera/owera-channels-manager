@@ -157,13 +157,12 @@ def doc_block_reason(ws) -> str | None:
     return None
 
 
-INTERNAL_FLOOR = frozenset({1, 2})
-
-
 def _internal(ws_id) -> bool:
+    """Exactly the release check's definition: MANAGER_LLM_INTERNAL_WORKSPACE_IDS only
+    (prod 1,2; no hard-coded ids). Unreadable → external (fail closed)."""
     try:
         from app.services import llm_guard
-        return int(ws_id) in INTERNAL_FLOOR or int(ws_id) in llm_guard.internal_workspace_ids()
+        return int(ws_id) in llm_guard.internal_workspace_ids()
     except Exception:  # noqa: BLE001
         return False
 

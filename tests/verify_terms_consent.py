@@ -193,9 +193,15 @@ ok(_rel(ws_ext, rec=NS(terms_doc_sha=None, privacy_doc_sha=None), terms_doc_sha_
    "shas not configured yet → terms_doc_unpinned first (re-accepting would write blanks again)")
 with _pins(), patch.object(tc, "latest_record", lambda session, ws_id: NS(terms_doc_sha=None, privacy_doc_sha=None)):
     ok(tc.reaccept_required(ws_ext, session=object()) is True, "reaccept_required: external + blank record")
-    for iid in (1, 2):
-        ok(tc.reaccept_required(NS(**{**vars(ws_ext), "id": iid}), session=object()) is False,
-           f"(c) internal ws {iid}: never asked to re-accept")
+    with patch.object(settings, "llm_internal_workspace_ids", "1,2"):   # prod value
+        for iid in (1, 2):
+            ok(tc.reaccept_required(NS(**{**vars(ws_ext), "id": iid}), session=object()) is False,
+               f"(c) internal ws {iid} (on MANAGER_LLM_INTERNAL_WORKSPACE_IDS=1,2): never asked to re-accept")
+    with patch.object(settings, "llm_internal_workspace_ids", "1"):
+        ok(tc.reaccept_required(NS(**{**vars(ws_ext), "id": 2}), session=object()) is True,
+           "ws 2 NOT on the list (=1) counts as external: re-accept required (no hard-coded 1/2)")
+    ok("INTERNAL_FLOOR" not in Path(tc.__file__).read_text() and "{1, 2}" not in Path(tc.__file__).read_text(),
+       "terms_consent hard-codes no internal ids (same definition as the release check)")
     with patch.object(settings, "llm_internal_workspace_ids", "1,9"):
         ok(tc.reaccept_required(ws_ext, session=object()) is False, "(c) a workspace in MANAGER_LLM_INTERNAL_WORKSPACE_IDS: unaffected")
 ok(llm_guard.BLOCK_USER_TEXT["terms_reaccept_required"][0] == "terms_privacy",

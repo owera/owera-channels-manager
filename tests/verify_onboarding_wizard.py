@@ -571,7 +571,8 @@ ok(render_loop._finalize.__code__.co_names.count("stamp_first_draft") >= 1
 
 # ---- 6. per instance, copy flag, frontend wiring ------------------------------------
 print("CTO 14/11: re-acceptance when the latest consent record names no document sha")
-# WC is ws 2 here, inside the internal floor {1, 2} of terms_consent; use buyer C (id > 2).
+# Internal = MANAGER_LLM_INTERNAL_WORKSPACE_IDS only (ON pins "1"): buyer A is ws 2 here and
+# counts as external; the full flow below runs on buyer C.
 ok(WC > 2, "buyer C is an external workspace id")
 client.post("/api/onboarding/ai-data/ack", headers=H(WC),
             json={"ai_data": True, "text_sha": google_limited_use.text_sha(google_limited_use.TEXT_EN), "locale": "en"})
@@ -605,6 +606,18 @@ with cfg(**ON):
     ok({x["id"]: x["done"] for x in get_state(WC)["steps"]}["consents"] is True, "wizard consents step done again")
     with patch.object(settings, "terms_doc_sha_en", "7" * 64):
         ok(llm_guard.block_reason(WC, "ideas") is False, "a later doc update (new configured sha) does not force it")
+    # ws 2 (buyer A) is not on the list ("1") → external: a blank latest record → re-accept.
+    with Session(eng) as s_:
+        s_.add(TermsConsentEvent(workspace_id=WA, user_id="x", locale="en", sentence_sha=terms_consent.SHA_EN,
+                                 terms_url=terms_consent.TERMS_URL_EN, privacy_url=terms_consent.PRIVACY_URL_EN))
+        s_.commit()
+    ok(WA == 2 and llm_guard.block_reason(WA, "ideas") == "terms_reaccept_required"
+       and client.get("/api/onboarding/terms", headers=H(WA)).json()["reaccept_required"] is True,
+       "ws 2 not on MANAGER_LLM_INTERNAL_WORKSPACE_IDS → external: terms_reaccept_required")
+    with cfg(llm_internal_workspace_ids="1,2"):
+        ok(llm_guard.block_reason(WA, "ideas") is False
+           and client.get("/api/onboarding/terms", headers=H(WA)).json()["reaccept_required"] is False,
+           "the same ws 2 on the list (prod 1,2) → internal: unaffected")
     with Session(eng) as s_:   # (c) internal ws 1 with a blank record
         s_.add(TermsConsentEvent(workspace_id=1, user_id="x", locale="en", sentence_sha=terms_consent.SHA_EN,
                                  terms_url=terms_consent.TERMS_URL_EN, privacy_url=terms_consent.PRIVACY_URL_EN))
