@@ -61,6 +61,26 @@ only serves ws 1 (Rodrigo's operation), so it stays global and becomes
   Renders already in flight finish (`_advance_in_flight` is not gated), so a
   paid render is not orphaned. The queue plan labels cards
   "workspace paused". The global pause still stops everything first.
+- **Not gated by any pause (global or per workspace), on purpose:**
+  `metrics_loop` (one read-only `channels.list` snapshot per connected channel
+  per day; no LLM, no upload), `token_refresh_age` (DB-only day-6 token check,
+  no Google call) and `youtube_purge` (the 30-day / 7-day data deletion must run
+  regardless). A pause stops automation that acts on a channel, not observation
+  or compliance jobs. Documented in each `tick()`.
+
+### Runs (`GET /api/runs`, `recent_runs` in `/api/agent/state`)
+
+`JobRun` has no `workspace_id`; ownership comes from the row's channel (or, for
+a channel-less row, its video's channel). `job_run_scope(ws)` in
+`app/workspace.py` applies that in SQL. Rows with neither channel nor video
+(global maintenance) are visible to ws 1 only. A foreign or missing
+`channel_id` / `video_id` filter → the same 404.
+
+### Shared BGM pool (`/api/music`)
+
+`settings.bgm_dir` is one directory of background tracks used by every render;
+it is not workspace data. All `/api/music` routes are **admin-only (ws 1)**
+(router dependency `require_admin_workspace`); any other workspace gets 404.
 
 Tests: `tests/verify_workspace_isolation.py` (buyer A on buyer B's resources,
 one check per route, plus settings, pause and ws 1 regressions).

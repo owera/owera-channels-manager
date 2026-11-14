@@ -57,6 +57,12 @@ def record_snapshot(session: Session, channel: Channel) -> ChannelMetric | None:
 
 
 def tick() -> None:
+    # Pause: NOT gated by Settings.scheduler_paused (global) nor
+    # Workspace.scheduler_paused (S4, per workspace) on purpose. It is one
+    # read-only channels.list snapshot per connected channel per day (no LLM, no
+    # upload, no render) that feeds the channel screen. Pausing a workspace
+    # pauses automation that acts (render/publish/analytics/autofill), not this
+    # observation.
     with session_scope() as session:
         channels = session.exec(
             select(Channel).where(Channel.oauth_status == OAuthStatus.CONNECTED)

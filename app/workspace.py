@@ -169,6 +169,33 @@ def is_admin_workspace(ws: Workspace) -> bool:
     return ws.id == ADMIN_WORKSPACE_ID
 
 
+def job_run_scope(ws: Workspace):
+    """S4: SQL condition for the JobRuns a workspace may read.
+
+    A run belongs to the workspace that owns its channel; a channel-less run that
+    names a video belongs to that video's channel's workspace. Runs with neither
+    (global maintenance, e.g. music replenish) are admin-only (ws 1), like the
+    global settings row."""
+    from sqlalchemy import and_, or_
+
+    from app.models import JobRun
+    ch_ids = select(Channel.id).where(Channel.workspace_id == ws.id)
+    vid_ids = select(Video.id).where(Video.channel_id.in_(ch_ids))
+    cond = or_(JobRun.channel_id.in_(ch_ids),
+               and_(JobRun.channel_id.is_(None), JobRun.video_id.in_(vid_ids)))
+    if is_admin_workspace(ws):
+        cond = or_(cond, and_(JobRun.channel_id.is_(None), JobRun.video_id.is_(None)))
+    return cond
+
+
+def require_admin_workspace(ws: Workspace = Depends(current_workspace)) -> Workspace:
+    """S4: global (non-workspace) resources such as the shared BGM pool are
+    admin-only (ws 1). Any other workspace gets the same 404 as a missing route."""
+    if not is_admin_workspace(ws):
+        raise HTTPException(404, "Not Found")
+    return ws
+
+
 def workspace_channel_ids(session: Session, ws: Workspace) -> list[int]:
     return [int(i) for i in session.exec(
         select(Channel.id).where(Channel.workspace_id == ws.id)).all()]

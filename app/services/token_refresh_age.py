@@ -121,7 +121,12 @@ def check(session: Session, at: datetime | None = None) -> list[int]:
 
 
 def tick(now: datetime | None = None) -> int:
-    """Scheduler entry point. Returns how many channels were newly flagged."""
+    """Scheduler entry point. Returns how many channels were newly flagged.
+
+    Pause: NOT gated by Settings.scheduler_paused or Workspace.scheduler_paused
+    (S4) on purpose. It only reads our DB (no Google call, no LLM) and flags
+    tokens about to expire, which an operator needs to see even while a
+    workspace's automation is paused."""
     from app.db import session_scope
 
     with session_scope() as session:

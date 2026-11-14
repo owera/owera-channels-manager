@@ -72,7 +72,7 @@ with Session(engine) as s:
        "detail records the pre-delete status, subject, and yt id")
 
 r2 = client.delete("/api/videos/999", auth=("x", "testpw"))
-ok(r2.status_code == 204, "deleting a missing id is still a 204 no-op")
+ok(r2.status_code == 404, "deleting a missing id is 404 (S4: same as a foreign id, no existence leak)")
 with Session(engine) as s:
     n = len(s.exec(select(JobRun).where(JobRun.kind == "delete")).all())
     ok(n == 1, "a no-op delete writes no JobRun")

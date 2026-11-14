@@ -21,7 +21,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.main as main
 from app.config import settings
 from app.db import channel_workspace_paused, get_session, paused_workspace_ids
-from app.models import (Channel, ChannelMetric, OAuthStatus, Playlist, RenderProfile,
+from app.models import (Channel, ChannelMetric, JobRun, OAuthStatus, Playlist, RenderProfile,
                         Settings, Topic, TrendSignal, Video, VideoStatus, Workspace)
 from app.services import analytics_loop, metrics_loop, video_gen, youtube
 
@@ -89,6 +89,16 @@ with Session(engine) as s:
         s.refresh(o)
     VB, PLB, PB, PSH, TRB, TRNULL, TR1, TRA = (vb.id, plb.id, pb.id, p_shared.id,
                                               trb.id, tr_null.id, tr1.id, tra.id)
+    # JobRun has no workspace_id: ownership is the channel, else the video's channel.
+    s.add_all([
+        JobRun(channel_id=CHB, kind="render", status="success", detail="B channel run"),
+        JobRun(channel_id=None, video_id=VB, kind="delete", status="success",
+               detail="B video-only run"),
+        JobRun(channel_id=CHA, kind="render", status="success", detail="A channel run"),
+        JobRun(channel_id=None, video_id=None, kind="music_replenish", status="success",
+               detail="global run"),
+    ])
+    s.commit()
 
 
 def _override_session():
@@ -236,6 +246,45 @@ print("thumbnails: buyer A on buyer B's video")
 cross("POST", f"/api/videos/{VB}/thumbnail", "provided thumbnail set",
       json={"path": "nope.png"})
 cross("DELETE", f"/api/videos/{VB}/thumbnail", "provided thumbnail clear")
+
+# ---- runs (GET /api/runs) ----------------------------------------------------
+print("runs: buyer A does not see buyer B's runs")
+r = client.get("/api/runs", headers=A)
+_details = {x["detail"] for x in r.json()} if r.status_code == 200 else set()
+ok(r.status_code == 200 and _details == {"A channel run"},
+   f"A's /api/runs lists only A's run (got {sorted(_details)})")
+cross("GET", f"/api/runs?channel_id={CHB}", "runs filtered by B's channel")
+cross("GET", f"/api/runs?video_id={VB}", "runs filtered by B's video")
+r_missing = client.get("/api/runs?channel_id=999999", headers=A)
+r_foreign = client.get(f"/api/runs?channel_id={CHB}", headers=A)
+ok(r_missing.status_code == r_foreign.status_code == 404
+   and r_missing.json() == r_foreign.json(),
+   "runs: foreign channel filter 404 body == missing channel 404 body")
+r = client.get("/api/runs", headers=B)
+_details = {x["detail"] for x in r.json()}
+ok(r.status_code == 200 and _details == {"B channel run", "B video-only run"},
+   "positive control: B sees its channel run and its channel-less video run, not the global one")
+r = client.get("/api/runs", headers=ADMIN)
+_details = {x["detail"] for x in r.json()}
+ok(r.status_code == 200 and _details == {"global run"},
+   "ws 1: only its own + global (channel- and video-less) runs, no buyer rows")
+r = client.get("/api/agent/state", headers=A)
+ok(r.status_code == 200 and {x["detail"] for x in r.json()["recent_runs"]} == {"A channel run"},
+   "agent/state recent_runs uses the same scope (A sees only A's run)")
+
+# ---- DELETE /api/videos/{id}: missing == foreign ------------------------------
+print("videos: DELETE on a foreign id and on a missing id look the same")
+r_missing = client.delete("/api/videos/999999", headers=A)
+r_foreign = client.delete(f"/api/videos/{VB}", headers=A)
+ok(r_missing.status_code == r_foreign.status_code == 404
+   and r_missing.json() == r_foreign.json(),
+   "DELETE video: foreign 404 body == missing 404 body (missing was 204)")
+
+# ---- music (shared BGM pool, admin-only) --------------------------------------
+print("music: the shared BGM pool is admin-only")
+cross("GET", "/api/music", "music list")
+cross("POST", "/api/music/generate", "music generate", json={"count": 1})
+cross("DELETE", "/api/music/x.wav", "music delete")
 
 # ---- trends -------------------------------------------------------------------
 print("trends: buyer A on buyer B's / admin's trends")

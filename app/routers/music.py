@@ -3,13 +3,18 @@
 import random
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.config import settings
 from app.services import music_gen
+from app.workspace import require_admin_workspace
 
-router = APIRouter(prefix="/api/music", tags=["music"])
+# S4: the BGM pool (settings.bgm_dir) is one shared asset directory used by every
+# render, not per-workspace data. Listing, generating or deleting tracks is
+# therefore admin-only (ws 1); any other workspace gets a 404.
+router = APIRouter(prefix="/api/music", tags=["music"],
+                   dependencies=[Depends(require_admin_workspace)])
 
 
 class GenerateBody(BaseModel):
