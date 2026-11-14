@@ -66,6 +66,14 @@ class Workspace(SQLModel, table=True):
     stripe_subscription_id: Optional[str] = Field(default=None, index=True)
     welcome_email_sent: bool = False
     closed_at: Optional[datetime] = None
+    # Subscription state from Stripe webhooks (P6). stripe_state_event_created is
+    # the Stripe `event.created` (unix s) of the last applied state change; an
+    # older event that arrives late is ignored, so state follows Stripe's order.
+    stripe_state_event_created: Optional[int] = None
+    stripe_raw_status: Optional[str] = None
+    subscription_current_period_end: Optional[datetime] = None
+    subscription_cancel_at_period_end: bool = False
+    last_invoice_paid_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

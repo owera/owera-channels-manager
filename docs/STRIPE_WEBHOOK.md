@@ -24,9 +24,10 @@ Load via the repo-root `.env` on claw0 (same as other `MANAGER_*` settings). Do 
 | Event | Action |
 |-------|--------|
 | `checkout.session.completed` | Find/create workspace for buyer email (`customer_details.email` or `customer_email`); set `subscription_status=active`; store Stripe customer/subscription ids; send welcome email once |
-| `customer.subscription.created` / `.updated` | Sync plan status from Stripe (`active`/`trialing` → `active`; `past_due`/`unpaid`/`canceled`/`incomplete_expired` mapped accordingly) |
-| `customer.subscription.deleted` | Set `subscription_status=canceled` (data retained) |
-| `invoice.payment_failed` | Set `subscription_status=past_due` |
+| `customer.subscription.created` / `.updated` | Sync plan status (`active`/`trialing` → `active`; `past_due`, `unpaid`; `canceled`/`incomplete_expired` → `canceled`), raw Stripe status, `cancel_at_period_end`, current period end |
+| `customer.subscription.deleted` | `subscription_status=canceled` (data retained) |
+| `invoice.payment_failed` | `past_due` (a canceled subscription stays `canceled`) |
+| `invoice.paid` | `last_invoice_paid_at`, paid-through period end; `past_due`/`unpaid` → `active`. One-time invoices (no subscription) ignored |
 | Other types | Ignored (`200`) |
 
 Idempotency (two layers, both race-safe):
@@ -39,6 +40,22 @@ Under concurrent delivery on SQLite, a racing request either waits for the write
 ### Which checkouts provision
 
 The live Stripe account is shared with OSI (one-time Payment Links), and every webhook endpoint receives every `checkout.session.completed`. Only sessions whose `payment_link` is in `MANAGER_STRIPE_CM_PAYMENT_LINKS` (default: the CM link `plink_1UL1ccADrWLjH4u9HD9GC4n4`) provision. A session with no `payment_link` provisions only when `mode=subscription`. Everything else is acknowledged with `200` and ignored.
+
+### Ordering (P6)
+
+Stripe does not guarantee delivery order. Each state change stores the event's
+`created` (unix seconds) in `Workspace.stripe_state_event_created`; an event
+older than that is acknowledged (`200`) and ignored. Same-second events apply.
+Invoice/subscription ids are read from both API shapes (top-level
+`subscription` / `current_period_end` and the newer
+`parent.subscription_details.subscription` / `items.data[].current_period_end`).
+
+New `workspace` columns: `stripe_state_event_created`, `stripe_raw_status`,
+`subscription_current_period_end`, `subscription_cancel_at_period_end`,
+`last_invoice_paid_at`.
+
+**Live endpoint note:** `we_1Uag41…` (claw0) is not subscribed to `invoice.paid`
+today. Adding it is a live Stripe change (Rodrigo's yes).
 
 ## Google Sign-In mapping
 
