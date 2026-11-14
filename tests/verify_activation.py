@@ -350,4 +350,29 @@ with redirect_stdout(buf):
     rc = ar.main(["--workspace", "nope"])
 ok(rc == 2, "CLI unknown workspace → exit 2")
 
+print("A5 llm_blocked (S8 guard refusal) read")
+from types import SimpleNamespace as _NS
+from unittest.mock import patch as _patch
+from app.services import llm_guard as _lg
+ok(activation.llm_blocked(_NS()) is None, "no llm_blocked columns (pre-S8) → None")
+ok(activation.llm_blocked(_NS(llm_blocked_reason=None)) is None, "no reason → None")
+_b = activation.llm_blocked(_NS(llm_blocked_reason="not_paid_or_test",
+                                llm_blocked_at=datetime(2026, 11, 14, 3, 0)))
+ok(_b == {"reason": "not_paid_or_test", "step": None, "at": "2026-11-14T03:00:00Z"},
+   "raw columns read (reason, at ISO UTC)")
+with _patch.object(_lg, "blocked_status", create=True,
+                   new=lambda ws: {"reason": "terms_privacy_not_accepted", "step": "terms_privacy",
+                                   "message": "Drafts paused: …", "at": "2026-11-14T03:00:00+00:00"}):
+    _b = activation.llm_blocked(_NS())
+    ok(_b == {"reason": "terms_privacy_not_accepted", "step": "terms_privacy",
+              "at": "2026-11-14T03:00:00+00:00"}, "after S8 merge: uses llm_guard.blocked_status")
+    with Session(engine) as s:
+        _r = activation.report(s, s.get(Workspace, 1), now=now)
+    ok(_r["A5"]["done"] is False and _r["A5"]["llm_blocked"]["reason"] == "terms_privacy_not_accepted",
+       "A5 not done while a guard refusal is active")
+with _patch.object(_lg, "blocked_status", create=True, new=lambda ws: None):
+    with Session(engine) as s:
+        _r = activation.report(s, s.get(Workspace, 1), now=now)
+    ok(_r["A5"]["llm_blocked"] is None, "A5 llm_blocked null when allowed / flag OFF")
+
 print(f"\nALL {_checks} CHECKS PASSED")

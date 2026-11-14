@@ -7,7 +7,8 @@ A0–A6 follow the PO's quality bar (QUALITY-BAR-ANTI-REFUND §3):
   A2 Niche + topics     a channel niche set and >= 3 active topics
   A3 Drafts             >= 5 videos rendered (reached review); first = first_draft_at
   A4 Buyer decision     >= 1 video approved by a person (approved_by set, not auto:)
-  A5 No blocking fail   0 videos FAILED for more than 24 h (+ render-failed signal)
+  A5 No blocking fail   0 videos FAILED for more than 24 h and no active S8 LLM
+                        guard refusal ("llm_blocked"), + render-failed signal
   A6 Published          >= 1 video published
 
 Read-only except ``stamp_first_draft`` (called by the render loop on success).
@@ -117,6 +118,27 @@ def render_failed_signal(session: Session, ws: Workspace,
     return out
 
 
+def llm_blocked(ws) -> dict[str, Any] | None:
+    """A5 "llm_blocked": the S8 guard's last refusal for this workspace, or None.
+
+    Uses ``llm_guard.blocked_status`` once S8 is merged (None with the release
+    flag OFF); until then it reads ``llm_blocked_reason/at`` if the columns
+    exist, so this branch works before and after the S8 merge."""
+    try:
+        from app.services import llm_guard
+        fn = getattr(llm_guard, "blocked_status", None)
+        if fn is not None:
+            out = fn(ws)
+            return ({"reason": out["reason"], "step": out.get("step"), "at": out.get("at")}
+                    if out else None)
+    except Exception:  # noqa: BLE001 - the report must never crash on this
+        return None
+    reason = getattr(ws, "llm_blocked_reason", None)
+    if not reason:
+        return None
+    return {"reason": str(reason), "step": None, "at": iso_utc(getattr(ws, "llm_blocked_at", None))}
+
+
 def _step(done: bool, at: datetime | None = None, **extra) -> dict[str, Any]:
     d = {"done": bool(done), "at": iso_utc(at) if done else None}
     d.update(extra)
@@ -181,7 +203,9 @@ def report(session: Session, ws: Workspace, now: datetime | None = None) -> dict
 
     # A5
     sig = render_failed_signal(session, ws, now)
-    a5 = {"done": sig["failed_over_24h"] == 0, "at": None, **sig}
+    blk = llm_blocked(ws)
+    a5 = {"done": sig["failed_over_24h"] == 0 and blk is None,
+          "at": blk["at"] if blk else None, **sig, "llm_blocked": blk}
 
     # A6
     pubs = []

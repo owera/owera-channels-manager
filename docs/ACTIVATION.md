@@ -22,7 +22,7 @@ older than 24 h) plus `jobrun` render errors in the last 24 h, per workspace
 | A2 Niche + topics | a channel niche and ≥ 3 active topics | 3rd active topic `created_at` |
 | A3 Drafts | ≥ 5 videos rendered | 5th render success (+ `first_draft_at`) |
 | A4 Buyer decision | ≥ 1 approval with `approved_by` not `auto:*` | first such `approved_at` |
-| A5 No blocking failure | 0 videos `FAILED` for > 24 h | — (state) |
+| A5 No blocking failure | 0 videos `FAILED` for > 24 h **and** no active S8 LLM guard refusal (`A5.llm_blocked`) | `llm_blocked.at` while refused, else — (state) |
 | A6 Published | ≥ 1 published | first `published_at` |
 
 ## Ops CLIs (not exposed over HTTP)
