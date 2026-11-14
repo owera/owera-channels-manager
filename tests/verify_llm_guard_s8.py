@@ -157,6 +157,24 @@ with patch.object(llm_guard, "_workspace_row", return_value=(None, "OperationalE
     with cfg(**ON):
         e = blocked(lambda: llm_guard.require("ideas", workspace_id=2, fields=F))
         ok(e is not None and e.reason == "workspace_unreadable", "external + unreadable → blocked")
+# CTO 2026-11-14: unreadable row is countable on the llm_call line (ws_read=fail),
+# and the guard read uses a short busy_timeout (~200 ms) restored afterwards.
+class _BoomEngine:
+    dialect = SimpleNamespace(name="sqlite")
+with patch.object(appdb, "engine", _BoomEngine()):
+    row, err = llm_guard._workspace_row(1)
+    ok(row is None and err is not None and llm_guard.ws_read_state() == "fail",
+       "real read failure → ws_read=fail in context")
+    cap.lines.clear()
+    llm_guard.log_call(1, "ideas", ["video_title"], backend="api",
+                       input_tokens=1, output_tokens=1, estimated=False)
+    ok(any("ws_read=fail" in ln for ln in cap.lines), "llm_call line carries ws_read=fail")
+row, err = llm_guard._workspace_row(1)
+ok(err is None and llm_guard.ws_read_state() == "ok", "good read → ws_read=ok")
+ok(llm_guard.WS_READ_BUSY_TIMEOUT_MS == 200, "guard read busy_timeout = 200 ms")
+with eng.connect() as c:
+    bt = c.exec_driver_sql("PRAGMA busy_timeout").scalar()
+ok(bt != 200, f"busy_timeout restored after guard read (now {bt})")
 from app import llm_kill_switch as ks  # noqa: E402
 
 with patch.object(ks, "engine", eng), patch.object(ks, "init_db", lambda: None):
@@ -226,7 +244,7 @@ with cfg(**ON):
             ok(llm.complete("SECRET-PROMPT-BODY ALPHA") == "draft", "released ws2 complete() works")
     line = [l for l in cap.lines if l.startswith("llm_call ")]
     ok(line == ["llm_call workspace_id=2 call_type=ideas fields=topic,video_title backend=api "
-                "input_tokens=42 output_tokens=7 tokens=reported"], f"llm_call line: {line}")
+                "input_tokens=42 output_tokens=7 tokens=reported ws_read=ok"], f"llm_call line: {line}")
     ok(all("SECRET-PROMPT" not in l and "draft" not in l for l in cap.lines), "no content in logs")
     with patch.object(llm, "_complete_api", side_effect=fake_api):
         with llm_guard.scope(2, "ideas"):

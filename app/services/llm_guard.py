@@ -423,14 +423,33 @@ def log_call(workspace_id, call_type: str, fields, *, backend: str,
     """L3 per-call log: workspace, route (call type), field NAMES and token counts.
     Never the prompt or the response."""
     logger.info("llm_call workspace_id=%s call_type=%s fields=%s backend=%s "
-                "input_tokens=%s output_tokens=%s tokens=%s", workspace_id, call_type,
+                "input_tokens=%s output_tokens=%s tokens=%s ws_read=%s", workspace_id, call_type,
                 ",".join(fields) if fields else "undeclared", backend,
                 "na" if input_tokens is None else input_tokens,
                 "na" if output_tokens is None else output_tokens,
-                "estimated" if estimated else "reported")
+                "estimated" if estimated else "reported", ws_read_state())
+
+
+def ws_read_state() -> str:
+    """``ok`` / ``fail`` / ``na`` (no row read in this context)."""
+    try:
+        return _WS_READ.get()
+    except Exception:  # noqa: BLE001
+        return "na"
 
 
 # ------------------------------------------------------------------ kill switch + release
+
+import contextvars as _cv
+
+# S8 (CTO 2026-11-14): last workspace-row read result in this context, surfaced as
+# ``ws_read=ok|fail|na`` on the llm_call line so unreadable-row passes are countable.
+_WS_READ: _cv.ContextVar[str] = _cv.ContextVar("llm_guard_ws_read", default="na")
+
+# Short SQLite busy_timeout for the guard's row read (CTO: ~200 ms) so a writer
+# lock doesn't stall an LLM call; on timeout internal passes with a warning,
+# external is blocked.
+WS_READ_BUSY_TIMEOUT_MS = 200
 
 def external_release_enabled() -> bool:
     """``MANAGER_LLM_EXTERNAL_RELEASE`` (default OFF). OFF = #217 allowlist only."""
@@ -453,11 +472,25 @@ def _workspace_row(ws: int):
         from app.models import Workspace
 
         with Session(engine) as s:
-            row = s.get(Workspace, int(ws))
-            if row is not None:
-                s.expunge(row)
+            prev = None
+            try:
+                if engine.dialect.name == "sqlite":
+                    conn = s.connection()
+                    prev = conn.exec_driver_sql("PRAGMA busy_timeout").scalar()
+                    conn.exec_driver_sql(f"PRAGMA busy_timeout={int(WS_READ_BUSY_TIMEOUT_MS)}")
+                row = s.get(Workspace, int(ws))
+                if row is not None:
+                    s.expunge(row)
+            finally:
+                if prev is not None:
+                    try:
+                        s.connection().exec_driver_sql(f"PRAGMA busy_timeout={int(prev)}")
+                    except Exception:  # noqa: BLE001
+                        pass
+            _WS_READ.set("ok")
             return row, None
     except Exception as e:  # noqa: BLE001
+        _WS_READ.set("fail")
         return None, type(e).__name__
 
 
