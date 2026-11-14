@@ -78,6 +78,14 @@ class Workspace(SQLModel, table=True):
     # analytics, autofill skip this workspace's channels). The global
     # Settings.scheduler_paused stays the admin (ws 1) kill switch for everyone.
     scheduler_paused: bool = False
+    # S5: ops-provisioned E2E workspace (app.provision_test_workspace), no Stripe.
+    # Never has a fake paid_at; activation_report flags it.
+    is_test: bool = Field(default=False)
+    # S1 activation timestamps (tz-aware UTC). paid_at = first CM checkout's
+    # Stripe event.created (A0); first_draft_at = first successful render of any
+    # video in this workspace (A3). Both written once, never overwritten.
+    paid_at: Optional[datetime] = None
+    first_draft_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -280,6 +288,10 @@ class Video(SQLModel, table=True):
     tags_json: Optional[str] = None
     metadata_generated: bool = False
     approved_at: Optional[datetime] = None
+    # S1/A4: who approved (review_guard.actor_of — SPA session / Basic actor;
+    # "auto:skip_gate" for the render loop's auto-approve). Null when unknown or
+    # when approved_at is cleared.
+    approved_by: Optional[str] = None
     rejected_reason: Optional[str] = None
 
     # publish results

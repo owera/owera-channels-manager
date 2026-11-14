@@ -487,6 +487,7 @@ def persist_craft(video_id: int, body: VideoCraftPersist,
         if v.status == VideoStatus.APPROVED:
             v.status = VideoStatus.REVIEW
             v.approved_at = None
+            v.approved_by = None
             stale_note += "; approval reset to review"
     # Re-score durable craft_review after honesty edits.
     topic = session.get(Topic, v.topic_id)
@@ -659,7 +660,8 @@ def _clear_render_artifact(v: Video) -> dict:
     from pathlib import Path as _P
     from app.services import craft
     fields = dict(video_path=None, mpt_task_id=None, render_progress=0, error=None,
-                  approved_at=None, craft_review=craft.CRAFT_REVIEW_PENDING,
+                  approved_at=None, approved_by=None,
+                  craft_review=craft.CRAFT_REVIEW_PENDING,
                   retry_count=0, held=False, held_at=None)
     if v.thumb_path and _P(v.thumb_path).name in _DERIVED_THUMBS:
         fields["thumb_path"] = None
@@ -776,6 +778,7 @@ def approve(video_id: int, request: Request, body: VideoUpdate | None = None,
     v.status = VideoStatus.APPROVED
     v.craft_review = craft.CRAFT_REVIEW_PASS
     v.approved_at = utcnow()
+    v.approved_by = review_guard.approver_of(actor)
     v.rejected_reason = None
     v.held, v.held_at = False, None
     session.add(v)
@@ -845,7 +848,7 @@ def vm_pass(video_id: int, request: Request, body: dict | None = None,
 
 
 @router.post("/{video_id}/retry")
-def retry(video_id: int, session: Session = Depends(get_session),
+def retry(video_id: int, request: Request, session: Session = Depends(get_session),
           ws: Workspace = Depends(current_workspace)):
     v = require_video(session, ws, video_id)
     _require_from(v, RETRY_FROM, "retry")
@@ -878,7 +881,9 @@ def retry(video_id: int, session: Session = Depends(get_session),
         # root cause (token parse, network) gets a full publish_max_retries budget
         # instead of one hang and an immediate give-up (retry_count already at cap).
         return _set_status(session, video_id, VideoStatus.APPROVED, error=None,
-                           approved_at=utcnow(), retry_count=0,
+                           approved_at=utcnow(),
+                           approved_by=review_guard.approver_of(review_guard.actor_of(request)),
+                           retry_count=0,
                            craft_review=craft.CRAFT_REVIEW_PASS, held=False, held_at=None)
     quota.log(session, kind="retry", status="success", video_id=v.id,
               channel_id=v.channel_id,

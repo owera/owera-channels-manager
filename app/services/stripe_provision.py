@@ -133,11 +133,27 @@ def _checkout_email(obj: dict[str, Any]) -> str | None:
     return spa_google_login.normalized_email(str(email or "")) or None
 
 
+def _paid_at(event_created: Any, data_object: dict[str, Any]) -> datetime:
+    """A0 payment time: Stripe ``event.created`` (unix seconds), else the
+    session's own ``created``, else now. Always tz-aware UTC."""
+    for raw in (event_created, data_object.get("created")):
+        try:
+            if raw is not None and int(raw) > 0:
+                return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+    return utcnow()
+
+
 def handle_checkout_completed(
-    session: Session, data_object: dict[str, Any], event_id: str = ""
+    session: Session, data_object: dict[str, Any], event_id: str = "",
+    event_created: Any = None,
 ) -> int | None:
     """Provision for a CM checkout. Returns the workspace id that may need the
-    welcome email (sent after commit by ``deliver_welcome``), or None."""
+    welcome email (sent after commit by ``deliver_welcome``), or None.
+
+    ``event_created`` is the Stripe event's ``created`` (unix seconds); it sets
+    ``Workspace.paid_at`` once (first paid checkout wins, never overwritten)."""
     if not is_cm_checkout(data_object):
         logger.info(
             "checkout.session.completed ignored: not a CM checkout (payment_link=%s mode=%s)",
@@ -171,6 +187,7 @@ def handle_checkout_completed(
             subscription_status="active",
             stripe_customer_id=customer_id,
             stripe_subscription_id=subscription_id,
+            paid_at=_paid_at(event_created, data_object),
         )
         session.add(ws)
         session.flush()
@@ -186,6 +203,12 @@ def handle_checkout_completed(
         if subscription_id:
             ws.stripe_subscription_id = subscription_id
         ws.subscription_status = "active"
+        if ws.paid_at is None and ws.id != OWERA_WORKSPACE_ID:
+            ws.paid_at = _paid_at(event_created, data_object)
+        if ws.is_test:
+            # A real payment landed on an S5 test workspace (same owner_email).
+            # Keep is_test so activation_report still flags it; ops decide.
+            logger.warning("paid checkout attached to is_test workspace id=%s", ws.id)
         ws.updated_at = utcnow()
         session.add(ws)
 
@@ -377,7 +400,8 @@ def dispatch_event(session: Session, event: dict[str, Any]) -> int | None:
         created = None
 
     if ev_type == "checkout.session.completed":
-        return handle_checkout_completed(session, obj, str(event.get("id") or ""))
+        return handle_checkout_completed(session, obj, str(event.get("id") or ""),
+                                         event_created=event.get("created"))
     elif ev_type in (
         "customer.subscription.created",
         "customer.subscription.updated",

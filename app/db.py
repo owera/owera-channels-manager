@@ -54,7 +54,8 @@ def _add_missing_columns() -> None:
         "video": [("engine", "VARCHAR"), ("creation_config", "VARCHAR"),
                   ("craft_review", "VARCHAR DEFAULT 'pending'"),
                   ("held", "BOOLEAN DEFAULT 0"), ("held_at", "DATETIME"),
-                  ("measurement_streak", "INTEGER DEFAULT 0")],
+                  ("measurement_streak", "INTEGER DEFAULT 0"),
+                  ("approved_by", "VARCHAR")],
         "videometric": [("average_view_duration", "FLOAT DEFAULT 0"),
                         ("traffic_json", "VARCHAR")],
         "channel": [("cooldown_until", "DATETIME"),
@@ -86,7 +87,10 @@ def _add_missing_columns() -> None:
                       ("subscription_current_period_end", "DATETIME"),
                       ("subscription_cancel_at_period_end", "BOOLEAN DEFAULT 0"),
                       ("last_invoice_paid_at", "DATETIME"),
-                      ("scheduler_paused", "BOOLEAN DEFAULT 0")],
+                      ("scheduler_paused", "BOOLEAN DEFAULT 0"),
+                      ("is_test", "BOOLEAN DEFAULT 0"),
+                      ("paid_at", "DATETIME"),
+                      ("first_draft_at", "DATETIME")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

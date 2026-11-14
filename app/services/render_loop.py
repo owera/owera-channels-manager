@@ -28,6 +28,9 @@ from app.services.topic_playlist import ensure_topic_playlist
 
 logger = logging.getLogger("manager.render")
 
+# S1/A4: Video.approved_by for the skip-gate auto-approve (not a human decision).
+AUTO_APPROVER = "auto:skip_gate"
+
 # Engine-reported errors that did not produce an artifact. Same class as the
 # loop wall-clock timeout: the work never finished, so a bounded re-queue is
 # cheaper than a permanent FAILED (observed 2026-08-12..14: 16× "render timed
@@ -412,6 +415,7 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
             video.status = VideoStatus.REVIEW
             video.error = blocked
             video.approved_at = None
+            video.approved_by = None
     elif video.held and ch_brand == "os":
         # OS held never auto-promotes — skip_gate + Gate B PASS stays review.
         # RR operator-hold keeps the pre-PR skip_gate path (held stays True
@@ -419,6 +423,7 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.status = VideoStatus.REVIEW
         video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = None
+        video.approved_by = None
     elif _effective_skip_gate(video, channel) and _vm_pass_missing(video):
         # vm_pass required (default: every topic): skip-gate never auto-approves
         # without the VM's Gate B PASS; it waits in review (#1449/#1450).
@@ -426,15 +431,20 @@ def _finalize(session: Session, video: Video, channel: Channel, engine, task: di
         video.craft_review = craft.CRAFT_REVIEW_PENDING
         video.error = _vm_pass_missing(video)
         video.approved_at = None
+        video.approved_by = None
     elif _effective_skip_gate(video, channel):
         video.status = VideoStatus.APPROVED
         video.craft_review = craft.CRAFT_REVIEW_PASS
         video.approved_at = utcnow()
+        video.approved_by = AUTO_APPROVER
     else:
         video.status = VideoStatus.REVIEW
         # Pending operator approve — not yet an explicit pass.
         video.craft_review = craft.CRAFT_REVIEW_PENDING
     quota.log(session, kind="render", status="success", video_id=video.id, channel_id=channel.id)
+    # S1/A3: first rendered draft of this workspace (once; never overwritten).
+    from app.services import activation
+    activation.stamp_first_draft(session, channel)
 
 
 def _past_timeout(video: Video) -> bool:
