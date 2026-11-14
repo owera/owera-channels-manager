@@ -15,12 +15,14 @@ access, and the refresh-error logging.
 | User asks us to delete (`POST /api/channels/{id}/request-deletion`) | `notify.mark_deletion_requested` | `deletion_requested` | 7 days (III.E.4.g) |
 | Workspace closed (`POST /api/workspace/close`) | `notify.mark_workspace_closed` | `workspace_closed` | 7 days (III.E.4.g) |
 | A token refresh fails with `invalid_grant` (revoked on Google's security page, or the token will not renew) | `notify.mark_dead` via the `NeedsConnect` message | `invalid_grant` | 30 days (III.D.2.3.b) |
+| Any other `connected → expired/disconnected` flip (P3b) | `notify.mark_dead` | `expired` / `disconnected` | 30 days |
+| Already dead before this shipped: `expired`, or `disconnected` still holding metrics/credential (P3b) | `youtube_purge.backfill_lost_access`, each tick | `expired_backfill` / `disconnected_backfill` | 30 days from first tick after deploy |
 
 The first stamp wins. A later user-initiated event (disconnect, deletion
 request, workspace close) can only *shorten* a 30-day clock to 7 days from
 the original stamp. A reconnect (`notify.mark_connected`) clears the clock,
-which cancels a pending purge. An `EXPIRED` flip **without** `invalid_grant`
-(e.g. token row missing) does not start the clock in this PR (follow-up P3b).
+which cancels a pending purge. `error` (failed consent) never starts the
+clock. The backfill starts the 30-day clock at the first tick after deploy.
 
 The access token is dropped immediately on disconnect, a deletion request
 and a workspace close (revoked at Google once #213 is stacked).
