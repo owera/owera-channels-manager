@@ -149,6 +149,15 @@ class Settings(BaseSettings):
     # session may train on prompts, so Google-sourced data from any other workspace
     # must never reach it (Google Limited Use). "1" = slug "owera". Empty → all blocked.
     llm_internal_workspace_ids: str = "1"     # env: MANAGER_LLM_INTERNAL_WORKSPACE_IDS
+    # Headless agent runs (growth, code, run-check) only observe and act on this
+    # comma-separated set of workspace ids. Default "1" (slug owera). The injected
+    # run context is filtered to these workspaces, so the LLM guard does not block
+    # the global run just because another workspace (e.g. tenant-b id 2) exists.
+    # Ids that are not also in llm_internal_workspace_ids are dropped (logged with
+    # llm_blocked_external_google_data) and never reach the LLM; if none remain,
+    # the run is refused (fail closed). Empty / malformed → nothing allowed.
+    # env: MANAGER_AGENT_RUN_WORKSPACE_IDS
+    agent_run_workspace_ids: str = "1"
     # LLM backend (docs/LLM_BACKEND.md). "cli" (default) = Grok CLI `grok -p` on the
     # consumer `grok login` session — unchanged behavior. "api" = xAI API
     # POST {llm_api_base_url}/responses with XAI_API_KEY for llm.complete() only,

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from app.config import settings
@@ -622,22 +623,65 @@ def _complete_api(prompt: str, system: str | None, *, model: str | None,
 # Headless grok agents (run/growth-agent.sh, code-agent.sh, run-check.sh) exec
 # through this module:
 #   python -m app.services.llm agent-exec <call_type> -- grok --prompt-file ...
-# Guard preflight, then exec the command unchanged on the Grok CLI (consumer
-# ``grok login`` session) in BOTH backends: LLM_BACKEND=api moves only
-# ``complete()`` to the xAI API (CTO, 2026-11-13). API keys are stripped from the
-# child env so the CLI can never silently bill XAI_API_KEY outside the cap/ledger.
+# Guard preflight, then exec on the Grok CLI (consumer ``grok login`` session)
+# in BOTH backends: LLM_BACKEND=api moves only ``complete()`` to the xAI API
+# (CTO, 2026-11-13). API keys are stripped from the child env so the CLI can
+# never silently bill XAI_API_KEY outside the cap/ledger.
+#
+# Agent runs are scoped to MANAGER_AGENT_RUN_WORKSPACE_IDS (default "1"): the
+# preflight no longer blocks the global run because another workspace exists,
+# and a workspace-filtered preamble is prepended to --prompt-file. The LLM
+# allowlist stays a defense (unallowlisted ids are dropped / fail closed).
 
-def agent_exec_plan(call_type: str, cmd: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Return (argv, env) for an agent run (always the CLI), or raise (guard)."""
+def _with_scope_prompt(cmd: list[str], scope_text: str, dest: Path) -> list[str]:
+    """Prepend the workspace-scope preamble to --prompt-file (or add one)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    out = list(cmd)
+    original = ""
+    if "--prompt-file" in out:
+        i = out.index("--prompt-file")
+        if i + 1 < len(out):
+            src = Path(out[i + 1])
+            if src.is_file():
+                original = src.read_text(encoding="utf-8")
+            body = scope_text + (("\n\n---\n\n" + original) if original else "")
+            dest.write_text(body, encoding="utf-8")
+            out[i + 1] = str(dest)
+            return out
+    dest.write_text(scope_text, encoding="utf-8")
+    out[1:1] = ["--prompt-file", str(dest)]
+    return out
+
+
+def agent_exec_plan(call_type: str, cmd: list[str], session=None
+                    ) -> tuple[list[str], dict[str, str]]:
+    """Return (argv, env) for an agent run (always the CLI), or raise (guard).
+
+    The argv's ``--prompt-file`` is rewritten to a combined file that starts
+    with the workspace-scope preamble (ws2 / other tenants excluded). The child
+    env also carries ``MANAGER_AGENT_RUN_WORKSPACE_IDS`` (effective ids only).
+    """
     from app.services import llm_guard
     if not cmd:
         raise LLMConfigError("agent-exec: no command")
-    if not llm_guard.agent_preflight(call_type):
+    if not llm_guard.agent_preflight(call_type, session=session):
         raise llm_guard.LLMBlocked("external", call_type)
+    ctx = llm_guard.agent_run_context(session=session)
+    if ctx is None:
+        raise llm_guard.LLMBlocked("unknown", call_type)
+    ids = ",".join(str(i) for i in ctx.get("workspace_ids") or [])
+    dest = Path(tempfile.gettempdir()) / f"cm-agent-run-scope-{call_type}-{os.getpid()}.md"
+    argv = _with_scope_prompt(cmd, llm_guard.agent_run_scope_prompt(ctx), dest)
+    env = dict(_child_env())
+    env["MANAGER_AGENT_RUN_WORKSPACE_IDS"] = ids
+    env["MANAGER_AGENT_RUN_CONTEXT"] = str(dest)
     if backend() == "api":
         logger.info("llm agent-exec call_type=%s backend=grok-cli (LLM_BACKEND=api applies "
-                    "to complete() only)", call_type)
-    return cmd, _child_env()
+                    "to complete() only) agent_run_workspace_ids=%s", call_type, ids or "none")
+    else:
+        logger.info("llm agent-exec call_type=%s agent_run_workspace_ids=%s",
+                    call_type, ids or "none")
+    return argv, env
 
 
 def main(argv: list[str] | None = None) -> int:

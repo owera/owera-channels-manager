@@ -567,19 +567,30 @@ ok(len(seen) == n_before, "no HTTP for blocked workspaces")
 # ------------------------------------------------------------------ agents
 print("headless agents: always the Grok CLI (agent-exec), also with LLM_BACKEND=api")
 cmd = ["grok", "--prompt-file", "p.md"]
+_CTX = {"workspace_ids": [1],
+        "workspaces": [{"id": 1, "slug": "owera", "name": "Owera"}],
+        "channels": [{"id": 1, "workspace_id": 1, "slug": "os", "name": "Owera Software"}]}
+_ctx_patch = dict(agent_preflight=True)  # placeholder so the block is easy to read
 with patch.object(llm_guard, "agent_preflight", return_value=True), \
+        patch.object(llm_guard, "agent_run_context", return_value=_CTX), \
         patch.dict(os.environ, {"XAI_API_KEY": FAKE_KEY, "GROK_API_KEY": "g-fake"}):
     argv, env = llm.agent_exec_plan("growth_agent", cmd)
-    ok(argv == cmd and env.get("GROK_HOME") == os.environ.get("GROK_HOME")
+    ok(argv[0] == "grok" and "--prompt-file" in argv
+       and env.get("GROK_HOME") == os.environ.get("GROK_HOME")
+       and env.get("MANAGER_AGENT_RUN_WORKSPACE_IDS") == "1"
        and "XAI_API_KEY" not in env and "GROK_API_KEY" not in env,
-       "cli: command unchanged, consumer session, API keys stripped")
+       "cli: grok CLI, consumer session, API keys stripped, scope env set")
+    scope = Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+    ok("slug=owera" in scope and "Owera Software" in scope,
+       "cli: injected scope prompt carries ws1 only")
     for ct in ("growth_agent", "code_agent", "run_check"):
         with _Multi(api_env(storage_dir=str(tmp), llm_monthly_usd_cap=0.0,
                             xai_data_retention_ack="")):
             n = len(rows())
             argv, env = llm.agent_exec_plan(ct, cmd)   # no cap, no ack: still not refused
-            ok(argv == cmd and "XAI_API_KEY" not in env and "GROK_API_KEY" not in env
+            ok(argv[0] == "grok" and "XAI_API_KEY" not in env and "GROK_API_KEY" not in env
                and env.get("GROK_HOME") == os.environ.get("GROK_HOME")
+               and env.get("MANAGER_AGENT_RUN_WORKSPACE_IDS") == "1"
                and not (tmp / "grok-api-home").exists() and len(rows()) == n,
                f"api: {ct} stays on the CLI (no refusal, no API key, no GROK_HOME, no ledger row)")
     # end to end: backend=api, agent-exec execs the CLI subprocess
@@ -587,8 +598,9 @@ with patch.object(llm_guard, "agent_preflight", return_value=True), \
             patch.object(llm, "_http_client", side_effect=AssertionError("agents never POST")):
         rc = llm.main(["agent-exec", "growth_agent", "--", "grok", "--prompt-file", "p.md"])
     ok(rc == 0 and _ex.call_count == 1 and _ex.call_args[0][0] == "grok"
-       and _ex.call_args[0][1] == ["grok", "--prompt-file", "p.md"]
-       and "XAI_API_KEY" not in _ex.call_args[0][2],
+       and _ex.call_args[0][1][0] == "grok" and "--prompt-file" in _ex.call_args[0][1]
+       and "XAI_API_KEY" not in _ex.call_args[0][2]
+       and _ex.call_args[0][2].get("MANAGER_AGENT_RUN_WORKSPACE_IDS") == "1",
        "api: agent-exec execs the grok CLI subprocess (no HTTP, no key in env)")
 ok(not hasattr(llm, "_write_agent_grok_home") and "STATELESS_VERIFIED" not in inspect.getsource(llm),
    "agent api path (GROK_HOME, STATELESS_VERIFIED refusal) removed")

@@ -131,8 +131,17 @@ Treat it as your standing instructions.
   audit use **only** the Basic username — do **not** rely on `X-Actor` (ignored on tip). Local
   dev with no app password: `X-Actor` header, else Basic username, else `unknown` (see README).
   Without valid Basic auth the API returns `401` and your call does nothing.
-- **Channels:** currently *Owera Software* (id 1) and *Rodrigo Recio* (id 2). Don't
-  hardcode — read them from `GET /api/agent/state`.
+- **Workspace scope:** this run is limited to the workspaces listed in the injected
+  "Agent run workspace scope" preamble and in `MANAGER_AGENT_RUN_WORKSPACE_IDS`
+  (default `1` = `owera`; see `docs/LLM_GUARD.md`). Only observe and act on those
+  workspaces and their channels. For Basic Auth, use those slugs (`owera`,
+  `owera+channels`, `owera+vm`). Legacy bare `channels` / `vm` / `admin` map to
+  `owera` (id 1) — use them only if id 1 is in the allowed list. Do not curl or
+  read `manager.db` for any other workspace (including tenant-b). If a tool
+  returns data for a workspace or channel not in the preamble, discard it.
+- **Channels:** currently *Owera Software* (id 1) and *Rodrigo Recio* (id 2) when
+  the run is scoped to workspace 1. Don't hardcode — read them from the injected
+  preamble and from `GET /api/agent/state` **using an allowed workspace slug**.
 - **Analytics maturity:** YouTube Analytics lags 24–72h. Only draw conclusions from
   videos with `age_hours >= 72`. Newer videos are "too early to tell."
 - **Reports:** append one dated markdown file per run under `run/agent-reports/`.

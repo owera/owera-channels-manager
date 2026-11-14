@@ -20,11 +20,15 @@ The headless agents (growth agent — the analytics path —, code agent, run-ch
 go through the same module:
 `run/*.sh` → `python -m app.services.llm agent-exec <call_type> -- grok …`.
 
-In **both** `cli` and `api`: guard preflight, then the same `grok` command on the
-consumer `grok login` session. `LLM_BACKEND=api` moves **only `complete()`** to the
+In **both** `cli` and `api`: guard preflight, then the `grok` command on the
+consumer `grok login` session, with a workspace-scope preamble prepended to
+`--prompt-file`. Agents are scoped to `MANAGER_AGENT_RUN_WORKSPACE_IDS`
+(default `1`; see [`docs/LLM_GUARD.md`](LLM_GUARD.md)) so a tenant workspace
+does not block the global run. `LLM_BACKEND=api` moves **only `complete()`** to the
 API (CTO, 2026-11-13); agents are never refused because of the backend. The agent
 child env has `XAI_API_KEY` / `GROK_API_KEY` / `ANTHROPIC_API_KEY` stripped, so the
-CLI cannot bill the API key outside the cap and ledger. Agent runs write no
+CLI cannot bill the API key outside the cap and ledger, and carries the effective
+`MANAGER_AGENT_RUN_WORKSPACE_IDS`. Agent runs write no
 `llm-usage.jsonl` row and are not charged against `LLM_MONTHLY_USD_CAP`.
 
 MoneyPrinterTurbo runs its own LLM provider (its own config). This PR doesn't

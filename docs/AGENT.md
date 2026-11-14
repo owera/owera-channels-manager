@@ -153,6 +153,17 @@ With Basic Auth:
 curl -su "owera:$MANAGER_APP_PASSWORD" "$BASE/openapi.json" | head
 ```
 
+## Headless growth / code / run-check workspace scope
+
+The launchd agents (`run/growth-agent.sh`, `run/code-agent.sh`, `run/run-check.sh`)
+are limited to `MANAGER_AGENT_RUN_WORKSPACE_IDS` (default `1` = `owera`). See
+[`docs/LLM_GUARD.md`](LLM_GUARD.md). `llm agent-exec` injects the allowed
+workspaces and channels into the prompt; use only those slugs as the Basic
+username (`owera`, `owera+channels`, `owera+vm`). Do not curl or read
+`manager.db` for another workspace. An id in that env that is not also on
+`MANAGER_LLM_INTERNAL_WORKSPACE_IDS` is dropped (logged) and never reaches the
+LLM; an empty effective set refuses the run.
+
 ## Explicit non-goals (A1 + A2)
 
 - MCP tools or agent-specific alternate transports
