@@ -232,6 +232,9 @@ def complete(
     decl = tuple(fields) if fields is not None else llm_guard.declared_fields()
     ws = llm_guard.require(call_type, fields=decl)
     llm_guard.check_prompt(prompt, system, call_type)
+    # S2: a Google-derived script / storyboard only for its own draft + workspace.
+    from app.services import llm_derived
+    llm_derived.check_prompt(prompt, system, decl, ws)
     model = model if model is not None else (settings.grok_model or None)
     timeout = int(timeout if timeout is not None else settings.grok_timeout_seconds)
     sc = llm_guard.current()
@@ -469,8 +472,9 @@ def record_usage(row: dict) -> None:
         logger.warning("llm usage JSONL write failed (%s): %s", path, type(e).__name__)
 
 
-def month_to_date_usd(now=None) -> float:
-    """Sum of cost_usd over the current UTC month. Unreadable rows are skipped;
+def month_to_date_usd(now=None, workspace_id=None) -> float:
+    """Sum of cost_usd over the current UTC month (only rows of ``workspace_id``
+    when given — S2 per-workspace subcap). Unreadable rows are skipped;
     an unreadable FILE raises (caller fails closed)."""
     import json
     from datetime import datetime, timezone
@@ -487,6 +491,8 @@ def month_to_date_usd(now=None) -> float:
             except ValueError:
                 continue
             if str(r.get("ts", "")).startswith(prefix):
+                if workspace_id is not None and str(r.get("workspace_id")) != str(workspace_id):
+                    continue
                 try:
                     total += float(r.get("cost_usd") or 0.0)
                 except (TypeError, ValueError):

@@ -5,6 +5,7 @@ import { STATUS_META } from "./status";
 import type { Status } from "./api";
 import { humanizeHeldReason } from "./copy";
 import { dismissHeld, heldSnapshot, subscribeHeld, type HeldNotice } from "./held";
+import { wizardT as t } from "./wizardI18n";
 
 export function StatusChip({ status, sm }: { status: Status; sm?: boolean }) {
   const m = STATUS_META[status];
@@ -145,7 +146,7 @@ export function HeldBadge({ reason }: { reason: string }) {
       style={{ color: HELD_HEX, borderColor: `${HELD_HEX}40`, background: `${HELD_HEX}14` }}
       title={text} data-held="1">
       <span className="shrink-0">⏸</span>
-      <span className="line-clamp-3"><span className="font-medium text-fog-100">On hold.</span> {text}</span>
+      <span className="line-clamp-3"><span className="font-medium text-fog-100">{t("status.held")}.</span> {text}</span>
     </div>
   );
 }
@@ -167,7 +168,7 @@ export function HeldToasts() {
           style={{ color: HELD_HEX, borderColor: `${HELD_HEX}55` }}>
           <span>⏸</span>
           <span className="flex-1 leading-snug">
-            <span className="font-medium text-fog-100">On hold</span>
+            <span className="font-medium text-fog-100">{t("status.held")}</span>
             {n.videoId != null ? ` · video ${n.videoId}` : ""}: {humanizeHeldReason(n.reason)}
           </span>
           <button className="text-fog-300 hover:text-white" onClick={() => dismissHeld(n.id)}>×</button>
@@ -197,12 +198,12 @@ function ExtLink({ href, children }: { href: string; children: ReactNode }) {
 
 export function PolicyLinks({ className = "" }: { className?: string }) {
   return (
-    <nav aria-label="Legal" className={`text-[11px] text-fog-400 flex flex-wrap gap-x-2 gap-y-1 ${className}`}>
-      <ExtLink href={POLICY_LINKS.privacy}>Privacy</ExtLink>
+    <nav aria-label={t("footer.legal_aria")} className={`text-[11px] text-fog-400 flex flex-wrap gap-x-2 gap-y-1 ${className}`}>
+      <ExtLink href={POLICY_LINKS.privacy}>{t("footer.privacy")}</ExtLink>
       <span aria-hidden>·</span>
-      <ExtLink href={POLICY_LINKS.terms}>Terms</ExtLink>
+      <ExtLink href={POLICY_LINKS.terms}>{t("footer.terms")}</ExtLink>
       <span aria-hidden>·</span>
-      <ExtLink href={POLICY_LINKS.youtubeTerms}>YouTube Terms of Service</ExtLink>
+      <ExtLink href={POLICY_LINKS.youtubeTerms}>{t("footer.youtube_terms")}</ExtLink>
     </nav>
   );
 }

@@ -26,6 +26,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.db as appdb
+
 from app.config import settings
 from app.models import Workspace
 from app.services import llm_guard, onboarding
@@ -44,16 +45,21 @@ def ok(cond, msg):
 
 
 NOW = datetime(2026, 11, 14, tzinfo=timezone.utc)
+# S2: Google Limited Use consent = sha of the exact LegalOps text (EN).
+from app.services.google_limited_use import TEXT_EN as _GLU_EN, text_sha as _glu_sha  # noqa: E402
+_GLU_SHA = _glu_sha(_GLU_EN)
 eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(eng)
 with Session(eng) as s:
     s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Workspace(id=2, slug="buyer", name="Buyer", subscription_status="active",
-                    privacy_accepted_at=NOW))                      # paid, terms missing
+                    privacy_accepted_at=NOW, ai_data_ack_at=NOW,
+                    ai_data_ack_version=_GLU_SHA))  # S2 AI-data step                      # paid, terms missing
     s.add(Workspace(id=3, slug="trial", name="Trial", terms_accepted_at=NOW,
                     privacy_accepted_at=NOW))                      # not paid
     s.add(Workspace(id=4, slug="ok", name="OK", subscription_status="active",
-                    terms_accepted_at=NOW, privacy_accepted_at=NOW))
+                    terms_accepted_at=NOW, privacy_accepted_at=NOW, ai_data_ack_at=NOW,
+                    ai_data_ack_version=_GLU_SHA))  # S2 AI-data step
     s.commit()
 
 appdb_patch = patch.object(appdb, "engine", eng)
@@ -121,7 +127,7 @@ with cfg(**ON):
     ok(st is not None and st["step"] == "terms_privacy" and st["reason"] == "terms_privacy_not_accepted",
        "onboarding status: llm_blocked step terms_privacy")
     ok(st["message"].startswith("Drafts paused: finish setup step") and "Terms" in st["message"]
-       and "Privacy" in st["message"], "user text names the setup step")
+       and "privacy" in st["message"].lower(), "user text names the setup step (CMO copy)")
     ok(st["at"] and st["at"].endswith("+00:00"), "at is ISO UTC")
     AT1 = row(2).llm_blocked_at
     refused(2)

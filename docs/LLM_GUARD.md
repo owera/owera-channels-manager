@@ -143,6 +143,71 @@ session may train) → `purpose_not_released` (call type ∉ ideas, script_compo
 thumbnail, gate_b_preflight, render, render_submit, mpt_render, mpt_social_metadata) →
 `fields_undeclared` → `workspace_unreadable` / `workspace_unknown` → `kill_switch` →
 `not_paid_or_test` (paid = `paid_at` (S1) or `subscription_status == "active"`; or `is_test`)
-→ `terms_privacy_not_accepted` (`terms_accepted_at` and `privacy_accepted_at`, no UI yet).
+→ `terms_privacy_not_accepted` (`terms_accepted_at` and `privacy_accepted_at`, written by the
+S2 onboarding wizard) → `terms_pt_not_live` (the acceptance was under the PT sentence while
+`MANAGER_TERMS_PT_LIVE` is false: not consent until /terms/pt/ is live; asked again in EN)
+→ `ai_data_not_acknowledged` / `ai_data_ack_stale` (Google Limited Use
+consent: `ai_data_ack_at` + `ai_data_ack_version` = sha256 of the exact LegalOps text shown, EN or
+PT; a sha not in `google_limited_use.KNOWN_SHAS` is stale and asked again; banner step "AI data")
+→ `workspace_monthly_cap` (ledger cost of this workspace this UTC month ≥
+`MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP`, default 5; unreadable ledger or cap ≤ 0 = refused;
+banner "Monthly draft limit reached.").
 **The policy is not decided** (CTO/LegalOps/CoS/PO, due Wed 18); the flag stays OFF until it is
 and L1 (no training at the provider) is proven. Headless agents are unchanged (internal only).
+
+## S2: derived data and per-channel exclusion (PO CM / LegalOps 2026-11-14)
+
+`app/services/llm_derived.py`.
+
+- **L3 allowlist pinned**: `tests/verify_google_limited_use.py` pins `ALLOWED_FIELDS` to
+  exactly 12 names: the 4 Google fields (`video_title`, `video_description`, `video_tags`,
+  `channel_stats`) and the 8 CM-authored ones (`topic`, `theme_prompt`, `niche`,
+  `steer_notes`, `language`, `script`, `storyboard`, `craft_rules`). Any new field fails.
+- **Per-channel exclusion**: `channel_data_allowed(ch)` = CONNECTED and no `access_lost_at`.
+  `llm_context.youtube_context` returns `{}` for any other channel (log
+  `llm_channel_excluded`); for an external workspace the ideas "existing" list drops
+  YouTube-sourced titles (`yt_video_id` set) of a disconnected channel.
+- **Same draft + workspace**: `draft_scope(video_id)` is bound by `worker.run_job` (render
+  params carry `video_id`), the render-loop metadata step and `script_compose`.
+  `llm.complete` → `llm_derived.check_prompt`: when `script` / `storyboard` are declared, the
+  normalized first 60 chars of the most recent 2000 stored scripts (other drafts, any
+  workspace) are searched in the prompt. External workspace → `LLMCrossDraft`
+  (`foreign_draft_data`; `foreign_draft_unverifiable` if the check itself fails, fail
+  closed). Internal → warning `llm_foreign_draft_data` only (OS/RR never blocked).
+- **No channel numbers**: `external_system(system)` appends `NO_CHANNEL_NUMBERS_RULE` to the
+  system prompt of `worker._llm` / `_llm_compose` only when the bound workspace is external.
+  Chosen external-only so OS/RR craft and Gate B prompts stay byte-identical (their
+  quality gates were tuned on them); external workspaces get the rule on top of the same
+  unchanged craft prompt.
+- **Stats echo**: `flag_stats_echo(text, kind=script|storyboard, …)` after the script
+  (worker + `script_compose`) and after the composition (visible HTML text) logs
+  `llm_stats_echo workspace_id channel_id video_id kind stats=…` (WARNING) when a channel
+  statistic ≥ 100 (latest `ChannelMetric`) appears literally (plain, `12,345`, `12.345`,
+  `12 345`). Never raises, never blocks.
+- **#214 scope**: `youtube_purge.purge_channel` also runs `purge_derived` (scripts,
+  `creation_config`, job text files) when the reason is `deletion_requested` or
+  `workspace_closed`. A plain disconnect keeps the draft.
+- **Render media (PO CM round 3)**: for the same two reasons, `youtube_purge.purge_media`
+  deletes the render artifacts of NOT-published drafts (status not PUBLISHED, no
+  `yt_video_id`, no `published_at`): everything in `<storage_dir>/videos/<video_id>/`
+  (video.mp4, thumb.jpg, provided thumbnail, other files) and in the render job dir
+  `<hyperframes_storage_dir>/<handle>/` (final.mp4, narration.mp3, …). Safe paths only:
+  the name must be one plain segment, the resolved dir a direct child of the configured
+  root, symlinked dirs are skipped and symlinks are unlinked without following them, a job
+  dir shared with another video is kept. The plan and every file are logged first
+  (`youtube_purge_media plan … / delete …`); `MANAGER_PURGE_MEDIA_DRY_RUN=true` logs
+  `would_delete` and deletes nothing. Published videos and YouTube are never touched; other
+  workspaces' and internal OS/RR media only go on that workspace's own deletion request.
+- **MPT task folders (PO CM round 4)**: the deletion-request / closure media purge also
+  covers `<mpt_storage_dir>/<task_id>/` of unpublished drafts (same guards).
+  Separately, `app/services/mpt_retention.py` deletes an EXTERNAL workspace's MPT task
+  folder 7 days after its job finished (ok or failed; finish time = newest file mtime in
+  the folder), even without a deletion request. Never: internal ws 1 / 2 (hard floor) or
+  any workspace in `MANAGER_LLM_INTERNAL_WORKSPACE_IDS`, a draft / queued / rendering job,
+  a folder shared by two videos or with no video row, symlinks / traversal. Same plan
+  logging and `MANAGER_PURGE_MEDIA_DRY_RUN`. Published videos' MPT folders are included
+  (scratch: publishing uses the Manager's own copy in `storage/videos/<id>/`). Runs as its
+  own scheduler job `mpt_task_retention` every 6 h (same cycle as S7 `token_refresh_age`,
+  not a step inside it: S7's tick stays DB-only and the two fail independently).
+- **Follow-up (after 27/11)**: bind script/storyboard to video_id+workspace in DB instead of
+  text prefix. Until then the text-prefix check stays fail-closed for external workspaces.

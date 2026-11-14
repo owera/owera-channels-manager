@@ -14,7 +14,7 @@ def _step(step_id: str, label: str, done: bool) -> dict:
     return {"id": step_id, "label": label, "done": done}
 
 
-def evaluate(session: Session, ws: Workspace) -> dict:
+def evaluate(session: Session, ws: Workspace, locale: str | None = None) -> dict:
     channels = list(session.exec(
         select(Channel).where(Channel.workspace_id == ws.id)
     ).all())
@@ -88,5 +88,5 @@ def evaluate(session: Session, ws: Workspace) -> dict:
         },
         "render_failed": activation.render_failed_signal(session, ws),
         # S8: last LLM guard refusal ("Drafts paused: …"), None when allowed or flag OFF.
-        "llm_blocked": llm_guard.blocked_status(ws),
+        "llm_blocked": llm_guard.blocked_status(ws, locale),
     }

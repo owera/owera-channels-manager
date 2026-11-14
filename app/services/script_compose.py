@@ -129,8 +129,12 @@ def compose_into(session: Session, video_id: int, *, force: bool = False) -> dic
     from app.services import sentence_pace as _sp
     _ch = session.get(Channel, channel_id) if channel_id is not None else None
     try:
-        with llm_guard.scope(_ch.workspace_id if _ch else None, "script_compose"):
+        from app.services import llm_derived
+        with llm_guard.scope(_ch.workspace_id if _ch else None, "script_compose"), \
+                llm_derived.draft_scope(video_id):   # S2: only this draft's script
             text = (generate(subject, params) or "").strip()
+        llm_derived.flag_stats_echo(text, kind="script", channel_id=channel_id, video_id=video_id,
+                                    workspace_id=_ch.workspace_id if _ch else None)
         pace_post = _sp.warn_summary(_sp.take_last_report())
     except llm_guard.LLMBlocked as e:
         quota.log(session, kind=JOB_KIND, status="error", video_id=video_id,

@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     hyperframes_version: str = "0.6.97"           # pinned; CLI contract validated against it
     hyperframes_render_quality: str = "standard"  # draft | standard | high
     hyperframes_storage_dir: str = str(MANAGER_DIR / "storage" / "hyperframes")
+    # #214 media purge (PO CM 14/11): log the plan but delete nothing when true.
+    purge_media_dry_run: bool = False
+    # S2 single Terms + Privacy checkbox (CTO / LegalOps gates 14/11, app/services/terms_consent.py).
+    # The server accepts + stores ONLY these shas (sha256 of the exact sentence the SPA shows).
+    # Defaults = sha of the current LegalOps FIX4 sentences; the wording may still change.
+    terms_version_sha_en: str = "91a6c69ec169f1877ba16cbc00508880116bebf9965c01cdf0646ca3bbf1fea3"
+    terms_version_sha_pt: str = "16d920da6551837b890154f05de232fd48d7cfee409496184d2d294de7a81a19"
+    # PT gate: true only once https://owera.com/terms/pt/ is live. False = PT-locale users see
+    # and accept the EN sentence; a stored PT acceptance does not count as consent.
+    terms_pt_live: bool = False
     # Background-music pool shared with MPT; falls back to channel/music/ if absent.
     bgm_dir: str = str(MPT_DIR / "resource" / "songs")
 
@@ -199,6 +209,14 @@ class Settings(BaseSettings):
     # account limit is USD 250 shared with Grok Bot + Cursor).
     llm_monthly_usd_cap: float = Field(default=0.0, validation_alias=AliasChoices(
         "MANAGER_LLM_MONTHLY_USD_CAP", "LLM_MONTHLY_USD_CAP"))
+    # S2 (PO CM 14/11): per-workspace monthly (UTC month) LLM subcap in USD for
+    # NON-internal workspaces, summed from the same usage ledger (cost_usd rows
+    # with that workspace_id). Internal allowlisted workspaces are exempt. Reached
+    # → release reason ``workspace_monthly_cap`` ("Monthly draft limit reached").
+    # 0 or negative = every external call refused (fail closed). The global
+    # llm_monthly_usd_cap above still applies on top.
+    llm_workspace_monthly_usd_cap: float = Field(default=5.0, validation_alias=AliasChoices(
+        "MANAGER_LLM_WORKSPACE_MONTHLY_USD_CAP", "LLM_WORKSPACE_MONTHLY_USD_CAP"))
     # One JSON line per api complete() call: tokens, model, call type, workspace,
     # UTC ts, cost — never prompt/response content. Empty = storage_dir/llm-usage.jsonl.
     llm_usage_path: str = ""                  # env: MANAGER_LLM_USAGE_PATH

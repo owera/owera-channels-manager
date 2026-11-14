@@ -100,8 +100,44 @@ class Workspace(SQLModel, table=True):
     # allowed call. Written only by llm_guard (never by request handlers).
     llm_blocked_reason: Optional[str] = None
     llm_blocked_at: Optional[datetime] = None
+    # S2 guided onboarding (wizard). ai_data_ack_at = the user acknowledged the L6
+    # AI-data line (CM-CONNECT-AI-LINE.md) inside onboarding; ai_data_ack_version =
+    # the line's sha it was shown (845c22005853). S8's release check requires it
+    # ("AI data" step). wizard_* mark the wizard's own progress; the other steps are
+    # derived from the data (channel, OAuth, topics, consents, videos).
+    # first_draft_video_id = the draft the wizard queued at top render priority
+    # (render_loop._queued_candidates) until first_draft_at is stamped (S1).
+    ai_data_ack_at: Optional[datetime] = None
+    # Google Limited Use consent (LegalOps 14/11): sha256 of the EXACT checkbox
+    # text shown (EN or PT, app/services/google_limited_use.py), its locale and
+    # who ticked it. A sha not in the current known texts = stale → asked again.
+    ai_data_ack_version: Optional[str] = None
+    ai_data_ack_locale: Optional[str] = None
+    ai_data_ack_user: Optional[str] = None
+    ai_data_ack_withdrawn_at: Optional[datetime] = None
+    # Single Terms + Privacy checkbox (LegalOps FIX 14/11, app/services/terms_consent.py):
+    # sha256 of the exact sentence shown and its locale, stored with terms/privacy_accepted_at.
+    terms_accepted_version: Optional[str] = None
+    terms_accepted_locale: Optional[str] = None
+    wizard_started_at: Optional[datetime] = None
+    wizard_budgets_at: Optional[datetime] = None
+    wizard_completed_at: Optional[datetime] = None
+    first_draft_video_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GoogleLimitedUseConsentEvent(SQLModel, table=True):
+    """Append-only history of the Google Limited Use consent per workspace
+    (ack / withdraw). The current state lives on ``Workspace.ai_data_ack_*``."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="workspace.id", index=True)
+    action: str                      # "ack" | "withdraw"
+    reason: Optional[str] = None     # withdraw: "user" | "disconnect" | "deletion_requested"
+    user: Optional[str] = None
+    locale: Optional[str] = None
+    text_sha: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class StripeEvent(SQLModel, table=True):

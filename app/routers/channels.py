@@ -98,6 +98,13 @@ def create_channel(
                  "daily_publish_budget must be >= 0 "
                  "(null TypeErrors the publish tick: "
                  "published_today >= budget)")
+    # S2 (PO CM 14/11): a buyer workspace (wizard / Stripe, not internal) gets the
+    # week-1 2/day defaults unless the caller set the budgets explicitly.
+    from app.services import buyer_budget
+    if buyer_budget.is_buyer(ws):
+        for key, val in buyer_budget.buyer_budgets().items():
+            if key not in body.model_fields_set:
+                setattr(body, key, val)
     from app.db import ensure_default_profile
     default_profile = ensure_default_profile(session)
     niche = None
@@ -332,6 +339,10 @@ def disconnect(
     # YT III.D.2.3.a) and sends the one access-lost email to contact@ for a
     # real channel (P3/P7).
     notify.mark_operator_disconnect(session, ch)
+    # S2 (PO CM 14/11): this channel's data leaves every prompt at once; the
+    # workspace's Google Limited Use consent is withdrawn only when this was the
+    # last connected channel. Data deletion stays on the #214 clock started above.
+    _withdraw_google_limited_use(session, ws, "disconnect")
     session.refresh(ch)
     return ch
 
@@ -350,8 +361,29 @@ def request_deletion(
     ch = require_ws_channel(session, ws, channel_id)
     youtube.disconnect_channel(session, ch)
     notify.mark_deletion_requested(session, ch)
+    _withdraw_google_limited_use(session, ws, "deletion_requested")
     session.refresh(ch)
     return ch
+
+
+def _withdraw_google_limited_use(session: Session, ws: Workspace, reason: str) -> bool:
+    """Automatic withdrawal by disconnect / deletion request (PO CM 14/11): the
+    workspace consent goes only when NO connected channel remains. The
+    disconnected channel itself is out of every prompt at once
+    (``llm_derived.channel_data_allowed``) and its #214 clock is already running.
+    A manual 'Withdraw AI consent' (onboarding /ai-data/withdraw) always cuts the
+    whole workspace."""
+    from app.services import google_limited_use
+    row = session.get(type(ws), ws.id) if ws is not None and ws.id is not None else None
+    if row is None:
+        return False
+    connected = session.exec(select(Channel).where(
+        Channel.workspace_id == row.id, Channel.oauth_status == OAuthStatus.CONNECTED,
+        Channel.access_lost_at.is_(None))).first()
+    if connected is not None:
+        return False
+    google_limited_use.withdraw(session, row, user=None, reason=reason)
+    return True
 
 
 def _probe_connected(session: Session, ch: Channel, service) -> None:

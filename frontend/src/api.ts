@@ -1,3 +1,4 @@
+import { uiLocale } from "./wizardI18n";
 import { HeldError, heldReason, pushHeld, videoIdOf } from "./held";
 import {
   useMutation,
@@ -173,8 +174,14 @@ export interface AppSettings {
 }
 
 // ---- fetch wrapper ----
+/** S2: /api/onboarding/* answers in the SPA locale (presets, banners). */
+function withLocale(path: string): string {
+  if (!path.startsWith("/onboarding")) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}locale=${uiLocale()}`;
+}
+
 async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`/api${withLocale(path)}`, {
     credentials: "include",
     headers: opts.body ? { "content-type": "application/json" } : {},
     ...opts,
@@ -330,6 +337,118 @@ export const useOnboarding = () =>
     queryFn: () => api<OnboardingStatus>("/onboarding/status"),
     refetchInterval: 8000,
   });
+
+// ---- S2 onboarding wizard (GET/POST /api/onboarding/wizard*) ----
+export type WizardStepId =
+  | "channel" | "youtube" | "topics" | "budgets" | "consents" | "ideas" | "first_draft";
+
+export interface WizardPresetTopic { name: string; theme_prompt: string | null; content_format: string }
+export interface WizardPreset { id: string; label: string; niche: string; topics: WizardPresetTopic[] }
+
+export interface WizardState {
+  workspace_id: number;
+  active: boolean;
+  /** Wizard active, or done but the first draft hasn't rendered: Trends/Settings hidden. */
+  first_login: boolean;
+  current_step: WizardStepId | null;
+  steps: { id: WizardStepId; done: boolean }[];
+  channel: {
+    id: number; name: string; niche: string | null; oauth_status: OAuthStatus;
+    yt_channel_title: string | null; daily_render_budget: number; daily_publish_budget: number;
+  } | null;
+  topics: { id: number; name: string; theme_prompt: string | null }[];
+  default_budgets: { daily_render_budget: number; daily_publish_budget: number };
+  presets: { copy_status: string; topic_count: number; locale: "en" | "pt"; niches: WizardPreset[] };
+  locale: "en" | "pt";
+  consents: {
+    terms_accepted_at: string | null; privacy_accepted_at: string | null;
+    terms_accepted_version: string | null; terms_accepted_locale: string | null;
+    ai_data_ack_at: string | null; ai_data_ack_version: string | null; ai_data_ack_locale: string | null;
+  };
+  /** CTO / LegalOps gate: MANAGER_TERMS_PT_LIVE + the Terms shas the server accepts now. */
+  terms: { pt_live: boolean; accepted_shas: { en?: string; pt?: string } };
+  ai_data_line_version: string;
+  ai_data_text_shas: { en: string; pt: string };
+  google_limited_use: GoogleLimitedUseStatus;
+  first_draft: { video_id: number; status: Status; subject: string; priority: boolean } | null;
+  first_draft_at: string | null;
+  llm_blocked: LlmBlocked | null;
+}
+
+export const useWizard = (enabled = true, poll = false) =>
+  useQuery({
+    queryKey: ["wizard"],
+    queryFn: () => api<WizardState>("/onboarding/wizard"),
+    enabled,
+    retry: false,
+    refetchInterval: poll ? 3000 : false,
+  });
+
+export const useWizardMut = () => {
+  const qc = useQueryClient();
+  const post = (path: string) => (body: any) =>
+    api<WizardState>(`/onboarding/wizard/${path}`, { method: "POST", body: j(body) });
+  const done = (data: WizardState) => {
+    qc.setQueryData(["wizard"], data);
+    invalidate(qc, ["channels", "onboarding", "dashboard"]);
+  };
+  return {
+    channel: useMutation({ mutationFn: post("channel"), onSuccess: done }),
+    topics: useMutation({ mutationFn: post("topics"), onSuccess: done }),
+    budgets: useMutation({ mutationFn: post("budgets"), onSuccess: done }),
+    consents: useMutation({ mutationFn: post("consents"), onSuccess: done }),
+    firstDraft: useMutation({
+      mutationFn: post("first-draft"),
+      onSuccess: done,
+      onError: () => invalidate(qc, ["wizard"]),   // refusal → refetch S8's banner
+    }),
+  };
+};
+
+// ---- S2 Google Limited Use consent (GET/POST /api/onboarding/ai-data*) ----
+export interface GoogleLimitedUseStatus {
+  /** Flag ON, external workspace, no current consent → show the ack-only page. */
+  required: boolean;
+  exempt: boolean;
+  valid: boolean;
+  /** Accepted for a text that changed since → asked again. */
+  stale: boolean;
+  acked_at: string | null;
+  locale: string | null;
+  text_sha: string | null;
+  withdrawn_at: string | null;
+}
+export interface AiDataStatus extends GoogleLimitedUseStatus {
+  text_shas: { en: string; pt: string };
+  llm_blocked: LlmBlocked | null;
+}
+
+export const useAiData = (enabled = true) =>
+  useQuery({
+    queryKey: ["ai-data"],
+    queryFn: () => api<AiDataStatus>("/onboarding/ai-data"),
+    enabled,
+    retry: false,
+  });
+
+export const useAiDataMut = () => {
+  const qc = useQueryClient();
+  const done = (data: AiDataStatus) => {
+    qc.setQueryData(["ai-data"], data);
+    invalidate(qc, ["wizard", "onboarding"]);
+  };
+  return {
+    ack: useMutation({
+      mutationFn: (body: { ai_data: boolean; text_sha: string; locale: string }) =>
+        api<AiDataStatus>("/onboarding/ai-data/ack", { method: "POST", body: j(body) }),
+      onSuccess: done,
+    }),
+    withdraw: useMutation({
+      mutationFn: () => api<AiDataStatus>("/onboarding/ai-data/withdraw", { method: "POST" }),
+      onSuccess: done,
+    }),
+  };
+};
 
 export const useTrends = (status?: string) =>
   useQuery({

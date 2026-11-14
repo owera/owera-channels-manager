@@ -307,7 +307,9 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
     # params["workspace_id"]) for every LLM step of this job; none → each step is
     # refused (fail closed) and the job ends STATE_FAILED (not transient).
     from app.services import llm_guard as _llm_guard
+    from app.services import llm_derived as _derived
     _guard_tok = _llm_guard.bind(params.get("workspace_id"), "render")
+    _draft_tok = _derived.bind_draft(params.get("video_id"))   # S2: this draft only
     try:
         aspect = params.get("video_aspect") or "9:16"
         resolution, width, height = _ASPECTS.get(aspect, _ASPECTS["9:16"])
@@ -324,6 +326,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             script = _generate_script(subject, params)
             from app.services import sentence_pace as _sp
             pace_post = _sp.warn_summary(_sp.take_last_report())
+            # S2: flag (never block) a channel statistic copied into the script.
+            _derived.flag_stats_echo(script, kind="script", channel_id=params.get("channel_id"),
+                                     video_id=params.get("video_id"),
+                                     workspace_id=params.get("workspace_id"))
         _status(handle, script=script, progress=12)
 
         # 2. Voiceover (edge-tts) -> narration.mp3 (+ per-word timing for visual sync)
@@ -365,6 +371,10 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
             provided=bool(provided),
         )
         used_fallback = False
+        _derived.flag_stats_echo(_derived.html_text(html), kind="storyboard",
+                                 channel_id=params.get("channel_id"),
+                                 video_id=params.get("video_id"),
+                                 workspace_id=params.get("workspace_id"))
         if not _looks_valid(html):
             html = _fallback_composition(subject, script, resolution, width, height, duration,
                                          brand=brand, topic_id=params.get("topic_id"))
@@ -415,6 +425,7 @@ def run_job(handle: str, job_dir: Path, subject: str, params: dict) -> None:
         from app.services.llm import format_failure
         _status(handle, state=STATE_FAILED, error=format_failure(e))
     finally:
+        _derived.unbind_draft(_draft_tok)
         _llm_guard.unbind(_guard_tok)
 
 
@@ -549,8 +560,10 @@ def _llm(prompt: str, system: str | None = None, max_tokens: int = 2000) -> str:
     from app.services import llm_guard
     from app.services.llm import complete
 
+    from app.services import llm_derived
     with llm_guard.declare(*_WORKER_LLM_FIELDS):
-        return complete(prompt, system=system, max_tokens=max_tokens)
+        # S2: external workspaces only get the no-channel-numbers rule (OS/RR unchanged).
+        return complete(prompt, system=llm_derived.external_system(system), max_tokens=max_tokens)
 
 
 # S8/L3: what the render worker's prompts (script, storyboard, legacy composition,
@@ -573,8 +586,10 @@ def _llm_compose(prompt: str, system: str | None = None, max_tokens: int = 2000)
     from app.services import llm_guard
 
     effort = settings.grok_compose_reasoning_effort or None
+    from app.services import llm_derived
     with llm_guard.declare(*_WORKER_LLM_FIELDS):
-        return complete(prompt, system=system, max_tokens=max_tokens,
+        # S2: external workspaces only get the no-channel-numbers rule (OS/RR unchanged).
+        return complete(prompt, system=llm_derived.external_system(system), max_tokens=max_tokens,
                         reasoning_effort=effort)
 
 

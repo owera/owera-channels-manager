@@ -31,8 +31,9 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.db as appdb
+
 from app.config import settings
-from app.models import Channel, ChannelMetric, Topic, Video, Workspace
+from app.models import Channel, ChannelMetric, OAuthStatus, Topic, Video, Workspace
 from app.services import llm, llm_context, llm_guard, mpt_client, render_loop
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,14 +64,21 @@ for name in ("manager.llm_guard",):
     logging.getLogger(name).setLevel(logging.INFO)
 
 NOW = datetime(2026, 11, 14, tzinfo=timezone.utc)
+# S2: Google Limited Use consent = sha of the exact LegalOps text (EN).
+from app.services.google_limited_use import TEXT_EN as _GLU_EN, text_sha as _glu_sha  # noqa: E402
+_GLU_SHA = _glu_sha(_GLU_EN)
 eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(eng)
 with Session(eng) as s:
     s.add(Workspace(id=1, slug="owera", name="Owera"))
     s.add(Workspace(id=2, slug="paid-a", name="A", subscription_status="active",
-                    terms_accepted_at=NOW, privacy_accepted_at=NOW))
+                    terms_accepted_at=NOW, privacy_accepted_at=NOW,
+                    ai_data_ack_at=NOW,
+                    ai_data_ack_version=_GLU_SHA))  # S2 AI-data step
     s.add(Workspace(id=3, slug="test-b", name="B", is_test=True,
-                    terms_accepted_at=NOW, privacy_accepted_at=NOW))
+                    terms_accepted_at=NOW, privacy_accepted_at=NOW,
+                    ai_data_ack_at=NOW,
+                    ai_data_ack_version=_GLU_SHA))  # S2 AI-data step
     s.add(Workspace(id=4, slug="trial-c", name="C"))                       # trialing, nothing
     s.add(Workspace(id=5, slug="paid-noterms", name="D", subscription_status="active",
                     privacy_accepted_at=NOW))
@@ -78,9 +86,12 @@ with Session(eng) as s:
     s.add(Workspace(id=7, slug="pastdue", name="F", subscription_status="past_due",
                     terms_accepted_at=NOW, privacy_accepted_at=NOW))
     s.commit()
-    chA = Channel(workspace_id=2, slug="a", name="A ch", default_skip_gate=True)
-    chB = Channel(workspace_id=3, slug="b", name="B ch", default_skip_gate=True)
-    ch1 = Channel(workspace_id=1, slug="o", name="O ch", default_skip_gate=True)
+    chA = Channel(workspace_id=2, slug="a", name="A ch", default_skip_gate=True,
+                  oauth_status=OAuthStatus.CONNECTED)  # S2: only connected channels give data
+    chB = Channel(workspace_id=3, slug="b", name="B ch", default_skip_gate=True,
+                  oauth_status=OAuthStatus.CONNECTED)  # S2: only connected channels give data
+    ch1 = Channel(workspace_id=1, slug="o", name="O ch", default_skip_gate=True,
+                  oauth_status=OAuthStatus.CONNECTED)  # S2: only connected channels give data
     s.add(chA); s.add(chB); s.add(ch1); s.commit()
     for ch, word in ((chA, "ALPHA"), (chB, "BRAVO")):
         t = Topic(channel_id=ch.id, name=f"{word} topic"); s.add(t); s.commit()

@@ -1,15 +1,17 @@
+import { wizardT as t } from "./wizardI18n";
+
 /** Buyer-facing labels — plain English, no internal jargon. */
 
 export function oauthStatusLabel(status: string): string {
   switch (status) {
     case "connected":
-      return "Connected";
+      return t("status.oauth.connected");
     case "expired":
-      return "Sign-in expired";
+      return t("status.oauth.expired");
     case "error":
-      return "Connection error";
+      return t("status.oauth.error");
     case "disconnected":
-      return "Not connected";
+      return t("status.oauth.disconnected");
     default:
       return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }

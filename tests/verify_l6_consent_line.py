@@ -94,8 +94,14 @@ ok("l6ConnectAiLineId(channel.id)" in CHANNELS,
 suspect = [p for p in (ROOT / "frontend/src").rglob("*")
            if "node_modules" not in p.parts
            and p.suffix in {".ts", ".tsx", ".js", ".json"}
-           and "i18n" in p.name.lower()]
+           and "i18n" in p.name.lower()
+           # S2 (parent/PO 14/11): the one sanctioned minimal dictionary for the
+           # wizard + banner strings (CMO copy), same locale rule as this line.
+           and p.name != "wizardI18n.ts"]
 ok(suspect == [], f"no other i18n modules added ({[p.name for p in suspect]})")
+_wi = (ROOT / "frontend/src/wizardI18n.ts").read_text()
+ok("l6ConnectAiLine" in _wi and "To write your drafts" not in _wi,
+   "wizardI18n.ts reuses the L6 locale type and never carries the L6 text")
 ok("i18next" not in CHANNELS and "useTranslation" not in CHANNELS
    and "react-intl" not in CHANNELS,
    "no general i18n library hooked into Channels.tsx")
