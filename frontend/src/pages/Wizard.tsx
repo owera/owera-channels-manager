@@ -17,9 +17,9 @@ import { l6ConnectAiLineId, l6ConnectAiLineProps } from "../l6ConnectAiLine";
 import { googleLimitedUse } from "../googleLimitedUse";
 import { GoogleLimitedUseBox } from "../GoogleLimitedUseBox";
 import { ConnectConsentNote, Dot, LlmBlockedBanner } from "../ui";
-import { wizardT as t } from "../wizardI18n";
+import { effectiveNav, setLocaleOverride, wizardT as t } from "../wizardI18n";
 import { statusLabel } from "../status";
-import { termsConsent } from "../termsConsent";
+import { termsConsent, termsPtBlocked, TERMS_PT_SOON_BEFORE, TERMS_PT_SOON_SWITCH } from "../termsConsent";
 
 const STEPS: { id: string; covers: string[] }[] = [
   { id: "channel", covers: ["channel"] },
@@ -40,7 +40,7 @@ function errText(e: unknown): string {
 }
 
 function navLocale() {
-  return typeof navigator !== "undefined" ? navigator : undefined;
+  return effectiveNav();   // browser locale, or the in-app choice (PT terms notice → English)
 }
 
 function Stepper({ state }: { state: WizardState }) {
@@ -246,8 +246,23 @@ function ConsentsStep({ state }: { state: WizardState }) {
   const l6 = l6ConnectAiLineProps(navLocale());
   const glu = googleLimitedUse(navLocale());
   // Single Terms + Privacy box (LegalOps FIX 14/11). PT gate from the server (MANAGER_TERMS_PT_LIVE).
-  const tc = termsConsent(navLocale(), state.terms?.pt_live === true);
+  const ptLive = state.terms?.pt_live === true;
+  const tc = termsConsent(navLocale(), ptLive);
   const box = "mt-0.5 h-4 w-4 accent-[#c9f24e] shrink-0";
+  if (termsPtBlocked(navLocale(), ptLive)) {
+    // CTO / LegalOps 14/11: no EN box for PT users — neither Terms nor AI activation.
+    return (
+      <Panel title={t("wizard.consents.title")} step="consents">
+        <p className="text-sm text-fog-200 max-w-xl leading-relaxed" lang="pt" data-terms-pt-soon="">
+          {TERMS_PT_SOON_BEFORE}
+          <button type="button" className="underline text-signal" data-switch-locale="en"
+            onClick={() => { setLocaleOverride("en"); window.location.reload(); }}>
+            {TERMS_PT_SOON_SWITCH}
+          </button>.
+        </p>
+      </Panel>
+    );
+  }
   return (
     <Panel title={t("wizard.consents.title")} step="consents">
       <p className="text-sm text-fog-300 max-w-xl leading-relaxed">{t("wizard.consents.help")}</p>

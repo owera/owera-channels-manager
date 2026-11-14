@@ -338,10 +338,32 @@ with patch.object(settings, "terms_version_sha_en", "c" * 64):
     ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed"
        and row(WA).terms_accepted_locale == "pt",
        "(b) configured EN sha moved → the code-default sha is refused, nothing written")
-r = post(WA, "consents", CONSENTS)
+# A pt-BR browser that switched the assistant to English: the SPA shows and sends the EN
+# sentence (?locale=en / no PT box); even with a PT Accept-Language the record is locale en.
+DOCS = dict(terms_doc_sha_en="d" * 64, privacy_doc_sha_en="e" * 64, terms_doc_sha_pt="f" * 64)
+with contextlib.ExitStack() as _st:
+    for k_, v_ in DOCS.items():
+        _st.enter_context(patch.object(settings, k_, v_))
+    r = client.post("/api/onboarding/wizard/consents", headers={**H(WA), "Accept-Language": "pt-BR,pt;q=0.9"},
+                    json=CONSENTS)
 w = row(WA)
 ok(r.status_code == 200 and w.terms_accepted_version == terms_consent.SHA_EN and w.terms_accepted_locale == "en"
-   and w.terms_accepted_at == T0[0], "re-accept in EN replaces the PT record (first timestamp kept)")
+   and w.terms_accepted_at == T0[0], "re-accept in EN replaces the PT record (first timestamp kept); locale en")
+
+print("consent record (TermsConsentEvent)")
+from app.models import TermsConsentEvent  # noqa: E402
+with Session(eng) as s_:
+    evs = list(s_.exec(select(TermsConsentEvent).where(TermsConsentEvent.workspace_id == WA)
+                       .order_by(TermsConsentEvent.id)).all())
+ok(len(evs) == 2, f"one record per stored acceptance (first accept + EN re-accept; re-submits add none) ({len(evs)})")
+e0, e1 = evs
+ok(e0.sentence_sha == terms_consent.SHA_EN and e0.locale == "en" and e0.workspace_id == WA
+   and e0.terms_url == "https://owera.com/terms/" and e0.privacy_url == "https://owera.com/privacy/"
+   and e0.terms_doc_sha is None and e0.privacy_doc_sha is None and e0.created_at is not None,
+   "record: sentence sha, EN URLs, doc shas empty by default, locale, time, workspace")
+ok(e0.user_id == w.ai_data_ack_user, f"record: user id = who ticked (same identity as the AI-data ack: {e0.user_id!r})")
+ok(e1.locale == "en" and e1.terms_doc_sha == "d" * 64 and e1.privacy_doc_sha == "e" * 64,
+   "record: the locale's configured document shas (MANAGER_TERMS_DOC_SHA_EN / MANAGER_PRIVACY_DOC_SHA_EN), not PT's")
 ok(r.json()["current_step"] == "ideas", "back to ideas")
 
 # ---- 2. E2E: paid + wizard + flag ON → allowed, first draft at top priority -----

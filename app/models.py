@@ -100,10 +100,10 @@ class Workspace(SQLModel, table=True):
     # allowed call. Written only by llm_guard (never by request handlers).
     llm_blocked_reason: Optional[str] = None
     llm_blocked_at: Optional[datetime] = None
-    # S2 guided onboarding (wizard). ai_data_ack_at = the user acknowledged the L6
-    # AI-data line (CM-CONNECT-AI-LINE.md) inside onboarding; ai_data_ack_version =
-    # the line's sha it was shown (845c22005853). S8's release check requires it
-    # ("AI data" step). wizard_* mark the wizard's own progress; the other steps are
+    # S2 guided onboarding (wizard). ai_data_ack_at = the user ticked the Google
+    # Limited Use (AI data) checkbox; ai_data_ack_version = sha256 of that exact
+    # checkbox text (EN or PT, google_limited_use.KNOWN_SHAS), not the L6 line's
+    # sha. S8's release check requires a current one ("AI data" step). wizard_* mark the wizard's own progress; the other steps are
     # derived from the data (channel, OAuth, topics, consents, videos).
     # first_draft_video_id = the draft the wizard queued at top render priority
     # (render_loop._queued_candidates) until first_draft_at is stamped (S1).
@@ -137,6 +137,26 @@ class GoogleLimitedUseConsentEvent(SQLModel, table=True):
     user: Optional[str] = None
     locale: Optional[str] = None
     text_sha: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class TermsConsentEvent(SQLModel, table=True):
+    """Append-only record of each Terms + Privacy acceptance (LegalOps 14/11).
+
+    The checkbox sentence sha, the Terms / Privacy URLs shown with the sha of the
+    document version live at those URLs (configured per deploy:
+    MANAGER_TERMS_DOC_SHA_EN/_PT, MANAGER_PRIVACY_DOC_SHA_EN/_PT; archived by
+    scripts/archive_legal_docs.py), the locale, the time, who and which workspace.
+    The current state stays on ``Workspace.terms_accepted_*``."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="workspace.id", index=True)
+    user_id: Optional[str] = None            # SPA Google e-mail, else the Basic Auth actor
+    locale: str
+    sentence_sha: str
+    terms_url: str
+    terms_doc_sha: Optional[str] = None
+    privacy_url: str
+    privacy_doc_sha: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 

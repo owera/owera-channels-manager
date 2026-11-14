@@ -1,4 +1,4 @@
-"""S2 — single Terms + Privacy checkbox (LegalOps FIX4, CMO sha 6a389cd4d636, 14/11) + PT gate.
+"""S2 — single Terms + Privacy checkbox (LegalOps 14/11 "Terms of Use"; FIX4 kept as legacy) + PT gate.
 
 Run: PYTHONPATH=. uv run python tests/verify_terms_consent.py
 
@@ -34,15 +34,22 @@ def ok(cond, msg):
     print("  ok:", msg)
 
 
-print("LegalOps sentences (FIX4, CMO sha 6a389cd4d636)")
-ok(tc.TEXT_EN == "I accept the Owera Terms of Service and have read the Privacy Notice.", "EN verbatim")
-ok(tc.TEXT_PT == "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade.", "PT verbatim")
+print("LegalOps sentences (14/11 'Terms of Use'; FIX4 'Terms of Service' = legacy)")
+ok(tc.TEXT_EN == "I accept the Owera Terms of Use and have read the Privacy Notice.", "EN verbatim")
+ok(tc.TEXT_PT == "Aceito os Termos de Uso da Owera e li o Aviso de Privacidade.", "PT verbatim")
+ok(tc.LEGACY_TEXT_EN == "I accept the Owera Terms of Service and have read the Privacy Notice."
+   and tc.LEGACY_TEXT_PT == "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade.", "FIX4 sentences kept as legacy")
+ok(tc.SHA_EN == "f586e08debd5496c1bcf1aee80436e2e4477cbcf38522870217dc5328411fefa"
+   and tc.SHA_PT == "646e87d7f4dca1e836c54527c0f9fe81123df869215703040693efcbbfde92ca", "new sentence shas pinned")
 ok(tc.SHA_EN == hashlib.sha256(tc.TEXT_EN.encode()).hexdigest()
    and tc.SHA_PT == hashlib.sha256(tc.TEXT_PT.encode()).hexdigest(), "server shas = sha256 of the sentences")
 cmo = Path("/workspace/cm-onboarding-wizard-2026-11-14/CM-WIZARD-COPY.md")
 if cmo.exists():
     raw = cmo.read_text()
-    ok(f'EN: "{tc.TEXT_EN}"' in raw and f'PT: "{tc.TEXT_PT}"' in raw, "same strings as the LegalOps FIX4 (CMO file)")
+    # The CMO file still carries FIX4; the "Terms of Use" wording is LegalOps' 14/11 change.
+    ok((f'EN: "{tc.TEXT_EN}"' in raw and f'PT: "{tc.TEXT_PT}"' in raw)
+       or (f'EN: "{tc.LEGACY_TEXT_EN}"' in raw and f'PT: "{tc.LEGACY_TEXT_PT}"' in raw),
+       "CMO file carries the current or the legacy (FIX4) sentences")
 ts = (ROOT / "frontend/src/termsConsent.ts").read_text()
 ok(json.dumps(tc.TEXT_EN) in ts and json.dumps(tc.TEXT_PT, ensure_ascii=False) in ts, "SPA carries the same sentences")
 ok(f'"{tc.SHA_EN}"' in ts and f'"{tc.SHA_PT}"' in ts, "SPA shas = server shas")
@@ -54,15 +61,15 @@ def parts(block):
 
 
 en_block = ts[ts.index("const EN: TermsCopy"):ts.index("const PT: TermsCopy")]
-pt_block = ts[ts.index("const PT: TermsCopy"):ts.index("export function termsConsent")]
+pt_block = ts[ts.index("const PT: TermsCopy"):ts.index("/** The sentence a browser locale sees")]
 pe, pp = parts(en_block), parts(pt_block)
 ok("".join(t for t, _ in pe) == tc.TEXT_EN and "".join(t for t, _ in pp) == tc.TEXT_PT,
    "rendered parts join to exactly the sentence (before + link + middle + link + after)")
-ok([(t, h) for t, h in pe if h] == [("Terms of Service", tc.TERMS_URL_EN), ("Privacy Notice", tc.PRIVACY_URL_EN)],
-   "EN links on 'Terms of Service' and 'Privacy Notice'")
-ok([(t, h) for t, h in pp if h] == [("Termos de Serviço", "https://owera.com/terms/pt/"),
+ok([(t, h) for t, h in pe if h] == [("Terms of Use", tc.TERMS_URL_EN), ("Privacy Notice", tc.PRIVACY_URL_EN)],
+   "EN links on 'Terms of Use' and 'Privacy Notice'")
+ok([(t, h) for t, h in pp if h] == [("Termos de Uso", "https://owera.com/terms/pt/"),
                                     ("Aviso de Privacidade", tc.PRIVACY_URL_PT)],
-   "PT links on 'Termos de Serviço' (→ owera.com/terms/pt/) and 'Aviso de Privacidade'")
+   "PT links on 'Termos de Uso' (→ owera.com/terms/pt/) and 'Aviso de Privacidade'")
 
 print("single checkbox, unchecked by default")
 wiz = (ROOT / "frontend/src/pages/Wizard.tsx").read_text()
@@ -88,11 +95,13 @@ with patch.dict("os.environ", {"MANAGER_TERMS_PT_LIVE": "true"}):
 ok("export const TERMS_PT_LIVE" not in ts and "= TERMS_PT_LIVE" not in ts and "export function termsConsent(nav: L6Locale | undefined, ptLive: boolean)" in ts,
    "SPA: no hard-coded gate constant; the flag is a required argument")
 ok("return pt && ptLive === true ? PT : EN;" in ts, "SPA: PT sentence only when the server flag is exactly true")
-ok("termsConsent(navLocale(), state.terms?.pt_live === true)" in wiz,
+ok("const ptLive = state.terms?.pt_live === true;" in wiz and "termsConsent(navLocale(), ptLive)" in wiz,
    "wizard reads the gate from the API (GET /api/onboarding/wizard → terms.pt_live; missing = closed)")
 ok('terms: { pt_live: boolean; accepted_shas:' in (ROOT / "frontend/src/api.ts").read_text(), "WizardState.terms typed")
 ok(tc.displayed_locale("pt-BR") == "en" and tc.displayed_locale("en-US") == "en", "server: pt-BR → EN sentence")
-ok(tc.known_shas() == {tc.SHA_EN: "en"}, "server accepts only the EN sha")
+L_EN, L_PT = "91a6c69ec169f1877ba16cbc00508880116bebf9965c01cdf0646ca3bbf1fea3", "16d920da6551837b890154f05de232fd48d7cfee409496184d2d294de7a81a19"
+ok(tc.LEGACY_SHAS == {L_EN: "en", L_PT: "pt"}, "legacy = sha256 of the FIX4 sentences")
+ok(tc.known_shas() == {tc.SHA_EN: "en", L_EN: "en"}, "server accepts the EN sha + the legacy EN sha (no PT)")
 ok(tc.public_flags() == {"pt_live": False, "accepted_shas": {"en": tc.SHA_EN}}, "API flag: pt_live false, EN sha only")
 for sha, loc, code in ((tc.SHA_PT, "pt", "terms_text_changed"), ("0" * 64, "en", "terms_text_changed"),
                        (None, "en", "terms_text_changed"), (tc.SHA_EN, "pt", "terms_locale_mismatch")):
@@ -107,7 +116,8 @@ with patch.object(settings, "terms_pt_live", True):
     ok(tc.displayed_locale("pt-BR") == "pt" and tc.validate(tc.SHA_PT, "pt-BR") == "pt",
        "gate open (after /terms/pt/ is live): PT sentence shown and accepted")
     ok(tc.public_flags()["pt_live"] is True and tc.public_flags()["accepted_shas"] == {"en": tc.SHA_EN, "pt": tc.SHA_PT},
-       "gate open: API flag true, both shas")
+       "gate open: API flag true, both current shas")
+    ok(tc.known_shas() == {tc.SHA_EN: "en", tc.SHA_PT: "pt", L_EN: "en", L_PT: "pt"}, "gate open: legacy PT sha valid too")
 
 print("(a) a PT acceptance is not consent while the PT gate is closed")
 T = datetime(2026, 11, 14, tzinfo=timezone.utc)
@@ -139,13 +149,13 @@ ok(llm_guard.BLOCK_USER_TEXT["terms_pt_not_live"][0] == "terms_privacy",
 print("(b) configurable accepted sha (MANAGER_TERMS_VERSION_SHA_EN / _PT)")
 ok(_AppSettings.model_fields["terms_version_sha_en"].default == tc.SHA_EN
    and _AppSettings.model_fields["terms_version_sha_pt"].default == tc.SHA_PT,
-   "code defaults = sha256 of the current FIX4 sentences")
+   "code defaults = sha256 of the current 'Terms of Use' sentences")
 NEW = "a" * 64
 with patch.dict("os.environ", {"MANAGER_TERMS_VERSION_SHA_EN": NEW, "MANAGER_TERMS_VERSION_SHA_PT": "b" * 64}):
     ok(_AppSettings().terms_version_sha_en == NEW and _AppSettings().terms_version_sha_pt == "b" * 64,
        "both shas are read from the env")
 with patch.object(settings, "terms_version_sha_en", NEW):
-    ok(tc.known_shas() == {NEW: "en"}, "server accepts ONLY the configured EN sha")
+    ok(tc.known_shas() == {NEW: "en", L_EN: "en"}, "server accepts the configured EN sha (+ legacy EN)")
     try:
         tc.validate(tc.SHA_EN, "en"); got = None
     except tc.TermsError as e:
@@ -153,12 +163,63 @@ with patch.object(settings, "terms_version_sha_en", NEW):
     ok(got == "terms_text_changed", "the old (code) sha is refused once the config moves → reload + accept again")
     ok(tc.validate(NEW.upper(), "en") == "en", "configured sha accepted (case-insensitive)")
 with patch.object(settings, "terms_version_sha_pt", NEW), patch.object(settings, "terms_pt_live", True):
-    ok(tc.known_shas() == {tc.SHA_EN: "en", NEW: "pt"}, "configured PT sha used once the gate opens")
+    ok(tc.known_shas() == {tc.SHA_EN: "en", NEW: "pt", L_EN: "en", L_PT: "pt"}, "configured PT sha used once the gate opens")
 with patch.object(settings, "terms_version_sha_en", ""):
     ok(tc.known_shas() == {}, "empty EN sha → nothing accepted (fail closed)")
 env = (ROOT / ".env.example").read_text()
 ok(f"# MANAGER_TERMS_VERSION_SHA_EN={tc.SHA_EN}" in env and f"# MANAGER_TERMS_VERSION_SHA_PT={tc.SHA_PT}" in env
    and "# MANAGER_TERMS_PT_LIVE=false" in env, ".env.example documents the three settings (commented)")
+
+print("old (FIX4) sentence shas keep existing acceptances valid")
+ok(tc.validate(L_EN, "en") == "en", "a stale SPA sending the FIX4 EN sha is still accepted")
+ws_legacy = NS(terms_accepted_at=T, privacy_accepted_at=T, terms_accepted_version=L_EN, terms_accepted_locale="en")
+ok(tc.is_valid(ws_legacy), "a workspace that accepted the FIX4 EN sentence stays consented")
+try:
+    tc.validate(L_PT, "pt"); got = None
+except tc.TermsError as e:
+    got = e.code
+ok(got == "terms_text_changed", "legacy PT sha still refused while the PT gate is closed")
+
+print("record fields per locale (no live fetch)")
+_added = []
+_sess = NS(add=_added.append)
+with patch.object(settings, "terms_doc_sha_pt", "AB" * 32), patch.object(settings, "privacy_doc_sha_pt", "cd" * 32), \
+     patch.object(settings, "terms_doc_sha_en", "11" * 32):
+    ev = tc.record(_sess, NS(id=5), sentence_sha=tc.SHA_PT.upper(), locale="pt", user_id="buyer@example.com")
+ok(_added == [ev] and ev.workspace_id == 5 and ev.user_id == "buyer@example.com" and ev.locale == "pt"
+   and ev.sentence_sha == tc.SHA_PT, "record: workspace, user, locale, sentence sha (normalized)")
+ok(ev.terms_url == "https://owera.com/terms/pt/" and ev.privacy_url == "https://owera.com/privacy/pt/"
+   and ev.terms_doc_sha == "ab" * 32 and ev.privacy_doc_sha == "cd" * 32,
+   "PT record: PT URLs + the PT document shas (MANAGER_TERMS_DOC_SHA_PT / MANAGER_PRIVACY_DOC_SHA_PT)")
+for k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privacy_doc_sha_pt"):
+    ok(_AppSettings.model_fields[k].default == "", f"{k} defaults to empty")
+with patch.dict("os.environ", {"MANAGER_TERMS_DOC_SHA_EN": "x1", "MANAGER_PRIVACY_DOC_SHA_PT": "x2"}):
+    _s2 = _AppSettings()
+    ok(_s2.terms_doc_sha_en == "x1" and _s2.privacy_doc_sha_pt == "x2", "doc shas read from the env")
+src = Path(tc.__file__).read_text()
+ok("httpx" not in src and "urllib" not in src and "requests" not in src, "terms_consent never fetches the pages")
+
+print("PT locale, gate closed: no Terms box, no AI box, exact notice; switch to English")
+ok(ts.count("Os termos em português estarão disponíveis em breve. Até lá, a ativação da IA não está disponível em português. Se preferir, você pode ") == 1
+   and 'TERMS_PT_SOON_SWITCH = "mudar o idioma do assistente para inglês"' in ts
+   and "export const TERMS_PT_SOON = `${TERMS_PT_SOON_BEFORE}${TERMS_PT_SOON_SWITCH}.`;" in ts,
+   "notice text exact (before + switch link + '.')")
+blocked_i = cons.index("if (termsPtBlocked(navLocale(), ptLive))")
+blocked = cons[blocked_i:cons.index("return (", cons.index("return (", blocked_i) + 1)]
+ok('type="checkbox"' not in blocked and "GoogleLimitedUseBox" not in blocked and "m.consents" not in blocked,
+   "PT-blocked branch renders no Terms box, no AI-data box and no submit")
+ok("{TERMS_PT_SOON_BEFORE}" in blocked and "{TERMS_PT_SOON_SWITCH}" in blocked and "</button>." in blocked,
+   "PT-blocked branch renders exactly the notice")
+ok('setLocaleOverride("en"); window.location.reload();' in blocked, "the switch link sets the assistant to English")
+ok(blocked_i < cons.index("<GoogleLimitedUseBox"), "the check runs before any box renders")
+ok('&& ptLive !== true;' in ts and 'startsWith("pt")' in ts[ts.index("export function termsPtBlocked"):],
+   "termsPtBlocked = PT locale and gate not exactly true")
+i18 = (ROOT / "frontend/src/wizardI18n.ts").read_text()
+ok('LOCALE_OVERRIDE_KEY = "owera.ui_locale"' in i18 and "const n = nav ?? effectiveNav();" in i18
+   and "function navLocale() {\n  return effectiveNav();" in wiz,
+   "after the switch every string, box (EN Terms + EN AI data) and API ?locale= follow English")
+ok(len([m for m in re.finditer(r"googleLimitedUse\(navLocale\(\)\)", wiz)]) >= 1,
+   "the Limited Use box keeps following the (effective) locale")
 
 print("CMO v3 footer links (PT)")
 ui = (ROOT / "frontend/src/ui.tsx").read_text()

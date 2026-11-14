@@ -232,6 +232,9 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
     if not ws.terms_accepted_version or terms_consent.block_reason(ws) == "terms_pt_not_live":
         ws.terms_accepted_version = (body.terms_text_sha or "").strip().lower()
         ws.terms_accepted_locale = terms_loc
+        # LegalOps 14/11: the full consent record (sentence + document shas, URLs, who).
+        terms_consent.record(session, ws, sentence_sha=ws.terms_accepted_version, locale=terms_loc,
+                             user_id=google_limited_use.request_user(request))
     session.add(ws)
     session.commit()
     session.refresh(ws)
