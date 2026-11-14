@@ -124,6 +124,16 @@ def start() -> None:
         misfire_grace_time=3600,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6),
     )
+    # S2 / PO CM 14/11: external workspaces' MPT task folders, 7 days after the job
+    # finished. Own job on the same 6 h cycle as S7 token_refresh_age / youtube_purge.
+    from app.services import mpt_retention
+    _scheduler.add_job(
+        _safe(mpt_retention.tick, "mpt_task_retention"),
+        "interval", hours=mpt_retention.TICK_HOURS,
+        id="mpt_task_retention", max_instances=1, coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+    )
     _scheduler.start()
     logger.info("scheduler started (render %ss / publish %ss / metrics %sh / "
                 "analytics %sh / autofill %smin / music_replenish 24h)",

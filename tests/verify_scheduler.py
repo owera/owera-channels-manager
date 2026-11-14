@@ -13,7 +13,7 @@ It never had a direct test. Covers:
   - `_music_replenish_tick`: replenishes strictly below bgm_pool_min, not at or
     above it, counting the pool through the real music_gen.pool_count (only
     `techno_*.wav` counts — mp3s/foreign wavs don't; a missing dir counts 0)
-  - start(): all seven jobs registered, each interval wired to ITS settings field
+  - start(): all nine jobs registered, each interval wired to ITS settings field
     (distinct sentinel values so a crossed wire fails), max_instances=1 +
     coalesce=True on every job, the staggered first runs (metrics/analytics/
     autofill/music within minutes of startup; render/publish wait a full
@@ -221,12 +221,15 @@ try:
 
     jobs = {j.id: j for j in sch.get_jobs()}
     ok(set(jobs) == {"render", "publish", "metrics", "analytics", "autofill",
-                     "music_replenish", "youtube_purge", "token_refresh_age"},
-       "exactly the eight loops are registered, by id")
+                     "music_replenish", "youtube_purge", "token_refresh_age",
+                     "mpt_task_retention"},
+       "exactly the nine loops are registered, by id")
     ok(jobs["youtube_purge"].trigger.interval == timedelta(hours=6),
        "youtube_purge (P3) runs every 6h")
     ok(jobs["token_refresh_age"].trigger.interval == timedelta(hours=6),
        "token_refresh_age (S7) runs every 6h")
+    ok(jobs["mpt_task_retention"].trigger.interval == timedelta(hours=6),
+       "mpt_task_retention (S2) runs every 6h (same cycle as S7 token_refresh_age)")
 
     ok(jobs["render"].trigger.interval == timedelta(seconds=1111),
        "render interval comes from render_tick_seconds")
@@ -249,7 +252,7 @@ try:
     # boot (trend data accumulates right away); render/publish wait one interval.
     for jid, offset in (("metrics", 30), ("analytics", 60), ("autofill", 45),
                         ("music_replenish", 120), ("youtube_purge", 300),
-                        ("token_refresh_age", 360)):
+                        ("token_refresh_age", 360), ("mpt_task_retention", 420)):
         lo = t0 + timedelta(seconds=offset - 1)
         hi = t1 + timedelta(seconds=offset + 1)
         ok(lo <= jobs[jid].next_run_time <= hi,
@@ -303,7 +306,7 @@ try:
 
     scheduler.start()
     ok(scheduler._scheduler is sch, "a second start() keeps the same scheduler")
-    ok(len(sch.get_jobs()) == 8, "a second start() registers no duplicate jobs")
+    ok(len(sch.get_jobs()) == 9, "a second start() registers no duplicate jobs")
 
     scheduler.shutdown()
     ok(not sch.running, "shutdown() actually stops the scheduler, not just the global")
@@ -318,8 +321,8 @@ try:
     scheduler.start()
     ok(scheduler._scheduler is not None and scheduler._scheduler is not sch,
        "start() after shutdown() builds a fresh scheduler")
-    ok(len(scheduler._scheduler.get_jobs()) == 8,
-       "the fresh scheduler carries all eight jobs again")
+    ok(len(scheduler._scheduler.get_jobs()) == 9,
+       "the fresh scheduler carries all nine jobs again")
     scheduler.shutdown()
     ok(scheduler._scheduler is None, "final shutdown leaves no scheduler behind")
 finally:

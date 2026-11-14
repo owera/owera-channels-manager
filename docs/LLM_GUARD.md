@@ -196,5 +196,16 @@ and L1 (no training at the provider) is proven. Headless agents are unchanged (i
   (`youtube_purge_media plan … / delete …`); `MANAGER_PURGE_MEDIA_DRY_RUN=true` logs
   `would_delete` and deletes nothing. Published videos and YouTube are never touched; other
   workspaces' and internal OS/RR media only go on that workspace's own deletion request.
+- **MPT task folders (PO CM round 4)**: the deletion-request / closure media purge also
+  covers `<mpt_storage_dir>/<task_id>/` of unpublished drafts (same guards).
+  Separately, `app/services/mpt_retention.py` deletes an EXTERNAL workspace's MPT task
+  folder 7 days after its job finished (ok or failed; finish time = newest file mtime in
+  the folder), even without a deletion request. Never: internal ws 1 / 2 (hard floor) or
+  any workspace in `MANAGER_LLM_INTERNAL_WORKSPACE_IDS`, a draft / queued / rendering job,
+  a folder shared by two videos or with no video row, symlinks / traversal. Same plan
+  logging and `MANAGER_PURGE_MEDIA_DRY_RUN`. Published videos' MPT folders are included
+  (scratch: publishing uses the Manager's own copy in `storage/videos/<id>/`). Runs as its
+  own scheduler job `mpt_task_retention` every 6 h (same cycle as S7 `token_refresh_age`,
+  not a step inside it: S7's tick stays DB-only and the two fail independently).
 - **Follow-up (after 27/11)**: bind script/storyboard to video_id+workspace in DB instead of
   text prefix. Until then the text-prefix check stays fail-closed for external workspaces.

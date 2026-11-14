@@ -167,9 +167,9 @@ def purge_derived(session: Session, channel: Channel) -> dict:
 #
 # On a deletion request / workspace closure the same 7-day purge also deletes the
 # render artifacts of drafts that were never published: the video output dir
-# ``<storage_dir>/videos/<video_id>/`` (video.mp4, thumb.jpg, provided thumbnail…)
-# and the render job dir ``<hyperframes_storage_dir>/<handle>/`` (final.mp4,
-# narration.mp3, …). Published videos (status PUBLISHED, yt_video_id or
+# ``<storage_dir>/videos/<video_id>/`` (video.mp4, thumb.jpg, provided thumbnail…),
+# the render job dir ``<hyperframes_storage_dir>/<handle>/`` (final.mp4,
+# narration.mp3, …) and the MPT task folder ``<mpt_storage_dir>/<task_id>/``. Published videos (status PUBLISHED, yt_video_id or
 # published_at set) are never touched, nor anything on YouTube. Every planned
 # deletion is logged first (``youtube_purge_media plan``); with
 # ``MANAGER_PURGE_MEDIA_DRY_RUN=1`` nothing is deleted.
@@ -251,9 +251,13 @@ def media_targets(session: Session, channel: Channel, video) -> list:
     if h:
         # a job dir shared with any other video (other channel / workspace) is never touched
         shared = session.exec(select(Video.id).where(Video.mpt_task_id == h, Video.id != video.id)).first()
-        jd = None if shared is not None else _safe_dir(getattr(settings, "hyperframes_storage_dir", ""), h)
-        if jd is not None:
-            dirs.append(jd)
+        if shared is None:
+            # HyperFrames job dir and (PO CM round 4) the MPT task folder, same guards.
+            for root in (getattr(settings, "hyperframes_storage_dir", ""),
+                         getattr(settings, "mpt_storage_dir", "")):
+                jd = _safe_dir(root, h)
+                if jd is not None and jd not in dirs:
+                    dirs.append(jd)
     return dirs
 
 

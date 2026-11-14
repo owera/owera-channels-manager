@@ -20,6 +20,9 @@ Stripe call, no real LLM (``llm._complete_api`` mocked, CLI raises). Covers:
       artifacts) of NOT-published drafts deleted; published kept; path-traversal /
       symlink / shared-handle guards; other workspaces + internal OS/RR untouched;
       dry-run logs the plan and deletes nothing.
+  (4c) MPT task-folder retention (external only): finished > 7 d deleted, < 7 d,
+      running / queued, internal ws 1/2, shared, orphan, symlink and traversal kept;
+      dry-run; scheduler job on the 6 h cycle.
   (5) no-channel-numbers instruction: external workspaces only; OS/RR system
       prompts byte-identical.
   (6) stats echo: post-generation warning (never blocks) when a raw channel
@@ -68,12 +71,14 @@ SHA_EN = hashlib.sha256(glu.TEXT_EN.encode()).hexdigest()
 NOW = datetime.now(timezone.utc)
 HF = tempfile.mkdtemp(prefix="s2-hf-")
 SD = tempfile.mkdtemp(prefix="s2-storage-")
+MP = tempfile.mkdtemp(prefix="s2-mpt-")
 
 eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(eng)
 patches = [patch.object(appdb, "engine", eng),
            patch.object(settings, "hyperframes_storage_dir", HF),
            patch.object(settings, "storage_dir", SD),
+           patch.object(settings, "mpt_storage_dir", MP),
            patch.object(notify, "email_access_lost", lambda *a, **k: None),
            patch.object(youtube, "disconnect_channel", lambda s, ch: None),
            patch.object(llm, "_complete_api", lambda *a, **k: "ok"),
@@ -412,6 +417,11 @@ def media(vid, handle, extra=True):
         for n in ("final.mp4", "narration.mp3", "index.html"):
             (jd / n).write_bytes(b"\0")
         files += [jd / "final.mp4", jd / "narration.mp3"]
+        md = Path(MP) / handle                                    # MPT task folder (round 4)
+        (md / "clips").mkdir(parents=True, exist_ok=True)
+        for n in ("final-1.mp4", "audio.mp3", "script.json", "clips/c1.mp4"):
+            (md / n).write_bytes(b"\0")
+        files += [md / "final-1.mp4", md / "audio.mp3", md / "script.json", md / "clips/c1.mp4"]
     return files
 
 
@@ -424,6 +434,7 @@ CI, TI = mk_channel(1, "os-int")
 outside = Path(tempfile.mkdtemp(prefix="s2-outside-"))
 (outside / "victim.mp4").write_bytes(b"\0")
 os.symlink(outside, Path(HF) / "linkjob")                      # symlinked job dir
+os.symlink(outside, Path(MP) / "linkjob")                      # symlinked MPT task folder
 with Session(eng) as s:
     def V(ch, tp, **kw):
         v = Video(channel_id=ch, topic_id=tp, subject=kw.pop("subject", "v"), **kw)
@@ -478,14 +489,19 @@ ok(all(f.exists() for f in f_p + f_p2) and res.get("media_published_kept") == 3,
    "published videos (status PUBLISHED / yt_video_id / published_at) keep every file")
 ok((outside / "victim.mp4").exists() and outside.exists(),
    "path traversal: '../x' handle never resolves outside; evil.mp4 symlink removed, its target kept")
-ok((outside / "victim.mp4").exists() and (Path(HF) / "linkjob").is_symlink(),
-   "symlinked job dir is not followed or deleted")
+ok((outside / "victim.mp4").exists() and (Path(HF) / "linkjob").is_symlink()
+   and (Path(MP) / "linkjob").is_symlink(), "symlinked job dir / MPT task folder is not followed or deleted")
 ok(all(f.exists() for f in f_sh[-2:]) and not (VROOT / str(SH)).exists(),
    "job dir shared with another workspace's video kept; the draft's own output dir deleted")
-ok(all(f.exists() for f in f_o), "another workspace's media untouched")
-ok(all(f.exists() for f in f_i), "internal ws 1 OS/RR media untouched")
+ok(not (Path(MP) / "job-u").exists(), "unpublished draft: its MPT task folder deleted too")
+ok(all(f.exists() for f in f_o) and (Path(MP) / "job-o" / "final-1.mp4").exists(),
+   "another workspace's media untouched (incl. its MPT task folder)")
+ok(all(f.exists() for f in f_i) and (Path(MP) / "job-i" / "final-1.mp4").exists(),
+   "internal ws 1 OS/RR media untouched (incl. its MPT task folder)")
+ok((Path(MP) / "job-p" / "final-1.mp4").exists(), "published draft's MPT task folder kept")
 ok(youtube_purge._safe_dir(str(VROOT), "..") is None and youtube_purge._safe_dir(str(VROOT), "../videos") is None
-   and youtube_purge._safe_dir(str(Path(HF)), "linkjob") is None and youtube_purge._safe_dir("", "1") is None,
+   and youtube_purge._safe_dir(str(Path(HF)), "linkjob") is None and youtube_purge._safe_dir("", "1") is None
+   and youtube_purge._safe_dir(MP, "linkjob") is None and youtube_purge._safe_dir(MP, "a/b") is None,
    "_safe_dir rejects '..', multi-segment names, symlinks and an unset root")
 # plain disconnect (and the 30-day dead-token reason) never deletes media
 with Session(eng) as s:
@@ -504,8 +520,89 @@ with Session(eng) as s:
     ci = s.get(Channel, CI)
     la = ci.access_lost_at if ci.access_lost_at.tzinfo else ci.access_lost_at.replace(tzinfo=timezone.utc)
     youtube_purge.purge_channel(s, ci, la + timedelta(days=8))
-ok(not any(f.exists() for f in f_i) and all(f.exists() for f in f_o),
-   "internal ws 1 media deleted only by ws 1's own deletion request (others untouched)")
+ok(not any(f.exists() for f in f_i) and not (Path(MP) / "job-i").exists() and all(f.exists() for f in f_o),
+   "internal ws 1 media (incl. MPT folder) deleted only by ws 1's own deletion request (others untouched)")
+
+
+# ---- (4c) MPT task-folder retention (external, 7 d after the job finished) ------------
+print("(4c) MPT retention: external task folders deleted 7 d after the job finished")
+from app.services import mpt_retention  # noqa: E402
+
+RNOW = datetime.now(timezone.utc)
+WR, SLUG_R = provision("buyer-r@example.com", "cs_r")
+SLUG[WR] = SLUG_R
+ok(WR > 2, "test buyer workspace is not ws 1 / 2")
+CR, TR_ = mk_channel(WR, "r-one")
+ok(WA == 2, "ws 2 exists here (the first provisioned buyer) — it must still count as internal")
+CA2, TA2 = mk_channel(2, "ws2-ch")
+
+
+def task(handle, age_days):
+    d = Path(MP) / handle
+    (d / "sub").mkdir(parents=True, exist_ok=True)
+    for n in ("final-1.mp4", "audio.mp3", "sub/clip.mp4"):
+        (d / n).write_bytes(b"\0")
+        t_ = (RNOW - timedelta(days=age_days)).timestamp()
+        os.utime(d / n, (t_, t_))
+    return d
+
+
+with Session(eng) as s:
+    def RV(ch, tp, status, handle):
+        v = Video(channel_id=ch, topic_id=tp, subject=handle, status=status, mpt_task_id=handle)
+        s.add(v); s.commit()
+    RV(CR, TR_, VideoStatus.REVIEW, "ret-old-ok")
+    RV(CR, TR_, VideoStatus.FAILED, "ret-old-failed")
+    RV(CR, TR_, VideoStatus.PUBLISHED, "ret-old-published")
+    RV(CR, TR_, VideoStatus.REVIEW, "ret-new")
+    RV(CR, TR_, VideoStatus.RENDERING, "ret-running")
+    RV(CR, TR_, VideoStatus.QUEUED, "ret-queued")
+    RV(CI, TI, VideoStatus.REVIEW, "ret-internal1")
+    RV(CA2, TA2, VideoStatus.REVIEW, "ret-ws2")
+    RV(CR, TR_, VideoStatus.REVIEW, "ret-shared")
+    RV(CE, TE, VideoStatus.REVIEW, "ret-shared")
+    RV(CR, TR_, VideoStatus.REVIEW, "linkret")
+    RV(CR, TR_, VideoStatus.REVIEW, "../" + outside.name)
+dirs = {h: task(h, a) for h, a in (("ret-old-ok", 8), ("ret-old-failed", 8), ("ret-old-published", 8),
+                                    ("ret-new", 6), ("ret-running", 9), ("ret-queued", 9),
+                                    ("ret-internal1", 30), ("ret-ws2", 30), ("ret-shared", 30),
+                                    ("ret-orphan", 30))}
+old_out = (RNOW - timedelta(days=30)).timestamp()
+os.utime(outside / "victim.mp4", (old_out, old_out))
+os.symlink(outside, Path(MP) / "linkret")
+cap3 = _Cap()
+logging.getLogger("manager.mpt_retention").addHandler(cap3)
+logging.getLogger("manager.mpt_retention").setLevel(logging.INFO)
+n_dry = mpt_retention.tick(RNOW, dry_run=True)
+ok(n_dry == 3 and all(d.exists() for d in dirs.values())
+   and any("would_delete" in m for _, m in cap3.rows) and any("mpt_task_retention plan" in m for _, m in cap3.rows),
+   f"dry-run: plan + would_delete logged for 3 folders, nothing deleted ({n_dry})")
+with patch.object(settings, "purge_media_dry_run", True):
+    mpt_retention.tick(RNOW)
+ok(all(d.exists() for d in dirs.values()), "MANAGER_PURGE_MEDIA_DRY_RUN=1 → nothing deleted")
+n = mpt_retention.tick(RNOW)
+ok(n == 3, f"3 folders deleted ({n})")
+ok(not dirs["ret-old-ok"].exists() and not dirs["ret-old-failed"].exists(),
+   "external job finished > 7 d ago (ok and failed): task folder deleted")
+ok(not dirs["ret-old-published"].exists() and Path(SD).exists(),
+   "published > 7 d: MPT scratch deleted (the Manager's own copy in storage/videos is not touched)")
+ok(dirs["ret-new"].exists(), "finished < 7 d ago: kept")
+ok(dirs["ret-running"].exists() and dirs["ret-queued"].exists(), "rendering / queued job: kept (even if old)")
+ok(dirs["ret-internal1"].exists() and dirs["ret-ws2"].exists(), "internal ws 1 and ws 2 (OS/RR): kept")
+ok(dirs["ret-shared"].exists() and dirs["ret-orphan"].exists(), "folder shared by two videos / without a video row: kept")
+ok((outside / "victim.mp4").exists() and (Path(MP) / "linkret").is_symlink(),
+   "symlinked task folder and '../' traversal handle: blocked, target untouched")
+with patch.object(settings, "llm_internal_workspace_ids", f"1,{WR}"):
+    task("ret-env-internal", 9)
+    with Session(eng) as s:
+        s.add(Video(channel_id=CR, topic_id=TR_, subject="e", status=VideoStatus.REVIEW,
+                    mpt_task_id="ret-env-internal")); s.commit()
+    mpt_retention.tick(RNOW)
+    ok((Path(MP) / "ret-env-internal").exists(), "a workspace in MANAGER_LLM_INTERNAL_WORKSPACE_IDS is internal: kept")
+ok(mpt_retention.TICK_HOURS == 6 and mpt_retention.RETENTION_DAYS == 7, "6 h cycle, 7-day retention")
+sch_src = (ROOT / "app/services/scheduler.py").read_text()
+ok('id="mpt_task_retention"' in sch_src and "hours=mpt_retention.TICK_HOURS" in sch_src,
+   "registered as scheduler job mpt_task_retention (6 h)")
 
 # ---- (5) no-channel-numbers instruction --------------------------------------------
 print("(5) no-channel-numbers instruction: external only, OS/RR byte-identical")

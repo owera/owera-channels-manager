@@ -82,7 +82,9 @@ banner step "AI data". Flag OFF: unchanged (#217 allowlist).
   / `status.json` script within 7 days (`youtube_purge.purge_channel`); a plain disconnect
   keeps the draft. The same purge deletes the render media (mp4, narration audio,
   thumbnails, other artifacts) of NOT-published drafts; published videos and YouTube are
-  never touched (`youtube_purge.purge_media`, `MANAGER_PURGE_MEDIA_DRY_RUN`). External workspaces' script / storyboard prompts get
+  never touched (`youtube_purge.purge_media`, `MANAGER_PURGE_MEDIA_DRY_RUN`; video dir, HyperFrames
+  job dir and MPT task folder). External workspaces' MPT task folders are also deleted 7 days
+  after the job finished (`mpt_retention`, scheduler job `mpt_task_retention`, 6 h). External workspaces' script / storyboard prompts get
   `llm_derived.NO_CHANNEL_NUMBERS_RULE` appended to the system prompt (OS/RR prompts
   byte-identical); `llm_derived.flag_stats_echo` logs a `llm_stats_echo` warning (never
   blocks) when a raw channel statistic appears literally in the script or storyboard text.
