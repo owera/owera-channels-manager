@@ -92,7 +92,10 @@ def _add_missing_columns() -> None:
                       ("login_ambiguous_owner_count", "INTEGER"),
                       ("login_ambiguous_owner_last_at", "DATETIME"),
                       ("paid_at", "DATETIME"),
-                      ("first_draft_at", "DATETIME")],
+                      ("first_draft_at", "DATETIME"),
+                      ("llm_disabled", "BOOLEAN DEFAULT 0"),
+                      ("terms_accepted_at", "DATETIME"),
+                      ("privacy_accepted_at", "DATETIME")],
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():

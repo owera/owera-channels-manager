@@ -166,6 +166,12 @@ class Settings(BaseSettings):
     # Separate from the LLM allowlist on purpose: approved buyers join that list,
     # and must still be watched here. Malformed/empty → every workspace is external.
     token_age_internal_workspace_ids: str = "1"  # env: MANAGER_TOKEN_AGE_INTERNAL_WORKSPACE_IDS
+    # S8 external release (llm_guard.release_block_reason, docs/LLM_GUARD.md). OFF
+    # (default) = the allowlist above is the whole rule, exactly as #217. ON = a
+    # non-internal workspace may reach the LLM only if paid or is_test AND terms +
+    # privacy accepted, not kill-switched, backend=api with the retention ack, for a
+    # released purpose with declared fields. Policy owner: CTO/LegalOps/CoS/PO.
+    llm_external_release: bool = False        # env: MANAGER_LLM_EXTERNAL_RELEASE
     # LLM backend (docs/LLM_BACKEND.md). "cli" (default) = Grok CLI `grok -p` on the
     # consumer `grok login` session — unchanged behavior. "api" = xAI API
     # POST {llm_api_base_url}/responses with XAI_API_KEY for llm.complete() only,

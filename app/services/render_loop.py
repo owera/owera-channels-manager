@@ -142,6 +142,10 @@ def _profile_params(session: Session, profile_id) -> dict:
 
 
 def _effective_skip_gate(video: Video, channel: Channel) -> bool:
+    # S8/L5: an external (non-allowlisted) workspace never auto-approves — the
+    # customer approves every draft (Gate B) before anything reaches YouTube.
+    if not llm_guard.is_allowed(channel.workspace_id):
+        return False
     return channel.default_skip_gate if video.skip_gate is None else video.skip_gate
 
 
@@ -170,9 +174,11 @@ def _llm_guard_block(session: Session, video: Video, channel: Channel) -> bool:
     grok prompt). Every render engine calls an LLM, so the row fails before any
     side effect (playlist, slot, TTS). Not transient: no retry loop. The guard
     logs ``llm_blocked_external_google_data`` once per row transition."""
-    if llm_guard.is_allowed(channel.workspace_id):
+    if llm_guard.would_allow(channel.workspace_id, "render"):
         return False
-    reason = str(llm_guard.LLMBlocked(channel.workspace_id, "render"))
+    _r = llm_guard.block_reason(llm_guard._coerce_ws(channel.workspace_id), "render")
+    reason = str(llm_guard.LLMBlocked(channel.workspace_id, "render",
+                                      _r if isinstance(_r, str) else None))
     if video.status != VideoStatus.FAILED or video.error != reason:
         try:
             llm_guard.require("render", workspace_id=channel.workspace_id)
