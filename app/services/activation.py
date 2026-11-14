@@ -102,9 +102,20 @@ def render_failed_signal(session: Session, ws: Workspace,
            "last_render_failed_at": None}
     if not ch_ids:
         return out
-    failed = session.exec(
-        select(Video.updated_at).where(Video.channel_id.in_(ch_ids),
-                                       Video.status == VideoStatus.FAILED)).all()
+    failed_rows = session.exec(
+        select(Video.id, Video.updated_at).where(Video.channel_id.in_(ch_ids),
+                                                 Video.status == VideoStatus.FAILED)).all()
+    # How long a row has been FAILED: the render/publish loops don't touch
+    # Video.updated_at on failure (it can be the idea's create time), so use the
+    # video's latest error JobRun; fall back to updated_at only without one.
+    last_err: dict[int, datetime] = {}
+    if failed_rows:
+        last_err = {vid: t for vid, t in session.exec(
+            select(JobRun.video_id, func.max(JobRun.created_at))
+            .where(JobRun.video_id.in_([r[0] for r in failed_rows]),
+                   JobRun.status == "error")
+            .group_by(JobRun.video_id)).all() if t is not None}
+    failed = [last_err.get(vid) or upd for vid, upd in failed_rows]
     out["failed_now"] = len(failed)
     out["failed_over_24h"] = sum(
         1 for t in failed if t is not None and now - _aware(t) > A5_FAILED_GRACE)

@@ -242,8 +242,10 @@ with Session(engine) as s:
     s.commit()
 fa = add_video(channel_id=2, topic_id=20, title="old fail", status=VideoStatus.FAILED,
                updated_at=now - timedelta(hours=30))
+# A days-old idea that failed 1 h ago: updated_at is stale (the render loop
+# doesn't touch it on failure), the error JobRun is what dates the failure.
 fb = add_video(channel_id=2, topic_id=20, title="new fail", status=VideoStatus.FAILED,
-               updated_at=now - timedelta(hours=1))
+               updated_at=now - timedelta(hours=72))
 with Session(engine) as s:
     s.add(JobRun(kind="render", status="error", channel_id=2, video_id=fa,
                  created_at=now - timedelta(hours=30)))
@@ -253,7 +255,7 @@ with Session(engine) as s:
     sig = activation.render_failed_signal(s, s.get(Workspace, BUYER), now)
     sig1 = activation.render_failed_signal(s, s.get(Workspace, 1), now)
 ok(sig["failed_now"] == 2 and sig["failed_over_24h"] == 1 and sig["render_errors_24h"] == 1,
-   f"buyer signal counts ({sig})")
+   f"buyer signal counts; fail age from the error JobRun, not stale updated_at ({sig})")
 ok(sig["last_render_failed_at"] is not None, "last_render_failed_at")
 ok(sig1["failed_now"] == 0 and sig1["failed_over_24h"] == 0,
    "ws1 signal is separate (buyer FAILED rows not counted)")
