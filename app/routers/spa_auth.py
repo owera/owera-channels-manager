@@ -36,7 +36,7 @@ def auth_me(request: Request):
     _require_enabled()
     ident = spa.spa_session_identity(request)
     if not ident:
-        raise HTTPException(401, "not signed in")
+        raise HTTPException(401, request.session.get(spa.LOGIN_ERROR_KEY) or "not signed in")
     ws_slug, actor = ident
     payload = request.session.get(spa.SESSION_KEY) or {}
     email = spa.normalized_email(str(payload.get("email") or ""))
@@ -86,10 +86,15 @@ def google_callback(
             "<html><body><h1>Sign-in failed</h1><p>Google did not return a verified email.</p></body></html>",
             status_code=400,
         )
-    ws = spa.workspace_for_email(email)
+    ws = spa.workspace_for_email(email, record_alert=True)
     if not ws:
+        if spa.resolution_error() == "login_ambiguous_owner":
+            request.session.pop(spa.SESSION_KEY, None)
+            request.session[spa.LOGIN_ERROR_KEY] = "login_ambiguous_owner"
+            return RedirectResponse("/?login_error=login_ambiguous_owner", status_code=302)
         logger.info("SPA login denied for non-allowlisted email %s", email)
         return _deny_html(email)
+    request.session.pop(spa.LOGIN_ERROR_KEY, None)
     spa.establish_session(request, email=email, workspace_slug=ws)
     return RedirectResponse("/", status_code=302)
 

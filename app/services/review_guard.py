@@ -94,6 +94,15 @@ def actor_of(request) -> str:
     return basic_user_of(request)
 
 
+def approver_of(actor: str | None) -> str | None:
+    """S1/A4 value for ``Video.approved_by``: the review actor, or None when
+    the request carried no identity ("unknown"/empty). Never raises."""
+    a = (actor or "").strip()
+    if not a or a == "unknown":
+        return None
+    return a[:64]
+
+
 def is_channels_actor(actor: str | None) -> bool:
     """Channels only — the CM teaser approve allowlist."""
     return (actor or "").lower() in CHANNELS_ACTORS

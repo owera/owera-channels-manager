@@ -404,6 +404,7 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         video.craft_review = craft.CRAFT_REVIEW_FAIL
         video.status = VideoStatus.REVIEW
         video.approved_at = None
+        video.approved_by = None
         video.error = dup
         session.add(video)
         quota.log(session, kind="publish", status="error", video_id=video.id,
@@ -419,6 +420,7 @@ def _publish_one(session: Session, channel: Channel, video: Video) -> None:
         video.craft_review = craft.CRAFT_REVIEW_PENDING
         video.status = VideoStatus.REVIEW
         video.approved_at = None
+        video.approved_by = None
         video.error = need_vm
         session.add(video)
         quota.log(session, kind="publish", status="error", video_id=video.id,

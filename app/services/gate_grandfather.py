@@ -75,6 +75,8 @@ def park_os_held(video, reason) -> None:
 
     video.status = VideoStatus.REVIEW
     video.approved_at = None
+    if hasattr(video, "approved_by"):
+        video.approved_by = None
     video.held = True
     if getattr(video, "held_at", None) is None:
         video.held_at = utcnow()
