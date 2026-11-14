@@ -194,8 +194,11 @@ def wizard_budgets(body: WizardBudgetsBody, session: Session = Depends(get_sessi
 
 
 class WizardConsentsBody(BaseModel):
+    # LegalOps FIX 14/11: ONE box "accept the Terms of Service and have read the
+    # Privacy Policy" (``terms``) + the sha / locale of the exact sentence shown.
     terms: bool = False
-    privacy: bool = False
+    terms_text_sha: str | None = None
+    terms_locale: str | None = None
     ai_data: bool = False
     # Google Limited Use consent: sha256 of the exact checkbox text displayed
     # (EN or PT) and the locale it was displayed in.
@@ -209,25 +212,33 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
                     ws: Workspace = Depends(current_workspace),
                     locale: str = Depends(ui_locale)):
     _need(session, ws, "consents")
-    if not (body.terms is True and body.privacy is True and body.ai_data is True):
-        raise HTTPException(400, "accept the Terms of Service and the Privacy Policy, "
-                                 "and tick the AI data box")
+    if not (body.terms is True and body.ai_data is True):
+        raise HTTPException(400, "accept the Terms of Service (and confirm you read the "
+                                 "Privacy Policy), and tick the AI data box")
+    from app.services import terms_consent
     try:
+        terms_loc = terms_consent.validate(body.terms_text_sha, body.terms_locale)
         google_limited_use.validate(body.ai_data_locale, body.ai_data_text_sha)
+    except terms_consent.TermsError as e:
+        raise HTTPException(409, {"code": e.code, "message": e.message})
     except google_limited_use.ConsentError as e:
         raise HTTPException(409, {"code": e.code, "message": e.message})
     now = utcnow()
     # First acceptance is kept (an audit timestamp is never moved forward).
     ws.terms_accepted_at = ws.terms_accepted_at or now
     ws.privacy_accepted_at = ws.privacy_accepted_at or now
+    if not ws.terms_accepted_version:
+        ws.terms_accepted_version = body.terms_text_sha
+        ws.terms_accepted_locale = terms_loc
     session.add(ws)
     session.commit()
     session.refresh(ws)
     if not google_limited_use.is_valid(ws):
         google_limited_use.record_ack(session, ws, user=google_limited_use.request_user(request),
                                       locale=body.ai_data_locale, sha=body.ai_data_text_sha)
-    logger.info("onboarding_consents workspace_id=%s terms=1 privacy=1 "
-                "google_limited_use_consent=1 text_sha=%s", ws.id, (ws.ai_data_ack_version or "")[:12])
+    logger.info("onboarding_consents workspace_id=%s terms=1 privacy_read=1 terms_sha=%s "
+                "google_limited_use_consent=1 text_sha=%s", ws.id, (ws.terms_accepted_version or "")[:12],
+                (ws.ai_data_ack_version or "")[:12])
     llm_guard.clear_block(ws.id)    # S8: drop a stale "finish setup step" banner now
     session.refresh(ws)
     return wiz.state(session, ws, locale)

@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     hyperframes_version: str = "0.6.97"           # pinned; CLI contract validated against it
     hyperframes_render_quality: str = "standard"  # draft | standard | high
     hyperframes_storage_dir: str = str(MANAGER_DIR / "storage" / "hyperframes")
+    # #214 media purge (PO CM 14/11): log the plan but delete nothing when true.
+    purge_media_dry_run: bool = False
     # Background-music pool shared with MPT; falls back to channel/music/ if absent.
     bgm_dir: str = str(MPT_DIR / "resource" / "songs")
 

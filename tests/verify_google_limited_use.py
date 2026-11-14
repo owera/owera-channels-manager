@@ -495,17 +495,20 @@ wiz_banner = (ROOT / "frontend/src/ui.tsx").read_text()
 ok("LlmBlockedBanner" in wiz_banner and "blocked.message" in wiz_banner, "SPA renders the server banner text")
 
 # ---- CMO copy ---------------------------------------------------------------------------
-print("CMO copy v2 (CM-WIZARD-COPY.md sha a8b4aa958efd)")
+print("CMO copy (CM-WIZARD-COPY.md sha 6a389cd4d636, v3.1 + LegalOps FIX4)")
 cmo = Path("/workspace/cm-onboarding-wizard-2026-11-14/CM-WIZARD-COPY.md")
 dict_src = (ROOT / "frontend/src/wizardI18n.ts").read_text()
 if cmo.exists():
     raw = cmo.read_bytes()
-    ok(hashlib.sha256(raw).hexdigest().startswith("a8b4aa958efd"), "CMO file v2 sha a8b4aa958efd")
-    rows = re.findall(r'^\| `((?:wizard|banner|ai_data|settings\.glu|status|nav)\.[a-z_.]+)` \| (.*?) \| (?:\d+|—) \| (.*?) \| (?:\d+|—) \|(?: [^|]*\|)?$',
+    ok(hashlib.sha256(raw).hexdigest().startswith("6a389cd4d636"), "CMO file sha 6a389cd4d636")
+    rows = re.findall(r'^\| `((?:wizard|banner|ai_data|settings|status|nav|footer|dash)\.[a-z_.]+)` \| (.*?) \| (?:\d+|—) \| (.*?) \| (?:\d+|—) \|(?: [^|]*\|)?$',
                       raw.decode(), re.M)
+    # wizard.consents.terms* / privacy* (v3) are superseded by the v3.1 / FIX4 LegalOps single
+    # checkbox (frontend/src/termsConsent.ts), so they are not dictionary keys.
+    rows = [r for r in rows if not re.match(r"wizard\.consents\.(terms|privacy)", r[0])]
     missing = [k for k, en, pt in rows if "[LegalOps" not in en and (
         f'"{k}": {{ en: {json.dumps(en, ensure_ascii=False)}, pt: {json.dumps(pt, ensure_ascii=False)} }}' not in dict_src)]
-    ok(len(rows) >= 100 and missing == [], f"every CMO key in wizardI18n.ts, EN + PT verbatim ({missing})")
+    ok(len(rows) >= 150 and missing == [], f"every CMO key in wizardI18n.ts, EN + PT verbatim ({missing})")
 else:
     print("  (CMO file not on this box: verbatim check skipped)")
 ok(len(topic_presets.NICHE_PRESETS_EN) == 5 and len(topic_presets.NICHE_PRESETS_PT) == 5

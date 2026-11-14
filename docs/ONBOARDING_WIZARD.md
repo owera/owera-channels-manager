@@ -19,7 +19,7 @@ while `first_login` is true (wizard active, or done but the first draft hasn't r
 | youtube | existing `POST /api/oauth/google/start` or `/api/channels/{id}/oauth/start` | (OAuth callback) `oauth_status=connected` |
 | topics | `POST /wizard/topics {channel_id, niche, preset_id?, topics[3]}` → `topics.create_topic` | `Channel.niche`, 3 topics (replaced while no idea exists) |
 | budgets | `POST /wizard/budgets {channel_id, daily_render_budget?, daily_publish_budget?}` | channel budgets (1–50), `wizard_budgets_at` |
-| consents | `POST /wizard/consents {terms, privacy, ai_data, ai_data_text_sha, ai_data_locale}` | `terms_accepted_at`, `privacy_accepted_at` (first acceptance kept); Google Limited Use consent (below); `llm_guard.clear_block(ws)` |
+| consents | `POST /wizard/consents {terms, terms_text_sha, terms_locale, ai_data, ai_data_text_sha, ai_data_locale}` | ONE Terms + Privacy box (LegalOps FIX 14/11, `app/services/terms_consent.py`): `terms_accepted_at`, `privacy_accepted_at` (first acceptance kept) + `terms_accepted_version` (sha of the exact sentence) + `terms_accepted_locale`; Google Limited Use consent (below, separate box); `llm_guard.clear_block(ws)` |
 | ideas + first draft | `POST /wizard/first-draft {channel_id}` → `topics.generate_videos` (1 idea per topic × 3 topics) + `videos.produce` | 3 drafts, the first topic's one QUEUED, `first_draft_video_id`, `wizard_completed_at` |
 
 Every `/api/onboarding/*` route takes `?locale=` (the SPA sends the L6 detection result;
@@ -80,7 +80,9 @@ banner step "AI data". Flag OFF: unchanged (#217 allowlist).
   OS/RR: warning log only). In #214 scope: a deletion request or workspace closure purges
   `Video.script`, `Video.creation_config` and the job's `index.html` / `narration_words.json`
   / `status.json` script within 7 days (`youtube_purge.purge_channel`); a plain disconnect
-  keeps the draft. External workspaces' script / storyboard prompts get
+  keeps the draft. The same purge deletes the render media (mp4, narration audio,
+  thumbnails, other artifacts) of NOT-published drafts; published videos and YouTube are
+  never touched (`youtube_purge.purge_media`, `MANAGER_PURGE_MEDIA_DRY_RUN`). External workspaces' script / storyboard prompts get
   `llm_derived.NO_CHANNEL_NUMBERS_RULE` appended to the system prompt (OS/RR prompts
   byte-identical); `llm_derived.flag_stats_echo` logs a `llm_stats_echo` warning (never
   blocks) when a raw channel statistic appears literally in the script or storyboard text.
@@ -124,3 +126,22 @@ first-draft chip and Trends now use the label map, not the raw enum) and the nav
 code and logs. The dashboard funnel cell uses CMO's fallback "Em render" (PT "Renderizando"
 clipped at 70px).
 No Owera topics, no OS/RR series. The user can type free text.
+
+## Terms + Privacy checkbox (LegalOps FIX4 via CMO, sha 6a389cd4d636)
+
+One box, unchecked by default: EN "I accept the Owera Terms of Service and have read the
+Privacy Notice." / PT "Aceito os Termos de Serviço da Owera e li o Aviso de Privacidade."
+Links on "Terms of Service" / "Termos de Serviço" and "Privacy Notice" / "Aviso de Privacidade".
+Links on the document names (EN `owera.com/terms/`, `owera.com/privacy/`; PT
+`owera.com/terms/pt/`, `owera.com/privacy/pt/`). Same strings in `terms_consent.py` and
+`frontend/src/termsConsent.ts`; the SPA sends the sha256 of the sentence shown + its locale;
+the server accepts only known shas (409 `terms_text_changed` / `terms_locale_mismatch`).
+
+**PT gate:** `TERMS_PT_LIVE = False` (both files) until `owera.com/terms/pt/` is live. While
+false, a PT browser sees the EN sentence with the EN links and the server accepts only the
+EN sha. Flag ON for PT users requires owera.com/terms/pt/ live; PO CM decides EN-only vs
+wait if not live by Mon 16.
+
+CMO v3 also localizes the footer links (Privacidade · Termos · Termos de Serviço do YouTube,
+`aria-label` "Jurídico") and the Dashboard / Settings bodies (`footer.*`, `dash.*`,
+`settings.*`). Out of scope: the #215 Connect consent note and server activity kind/detail.

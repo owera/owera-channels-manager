@@ -198,12 +198,12 @@ function ExtLink({ href, children }: { href: string; children: ReactNode }) {
 
 export function PolicyLinks({ className = "" }: { className?: string }) {
   return (
-    <nav aria-label="Legal" className={`text-[11px] text-fog-400 flex flex-wrap gap-x-2 gap-y-1 ${className}`}>
-      <ExtLink href={POLICY_LINKS.privacy}>Privacy</ExtLink>
+    <nav aria-label={t("footer.legal_aria")} className={`text-[11px] text-fog-400 flex flex-wrap gap-x-2 gap-y-1 ${className}`}>
+      <ExtLink href={POLICY_LINKS.privacy}>{t("footer.privacy")}</ExtLink>
       <span aria-hidden>·</span>
-      <ExtLink href={POLICY_LINKS.terms}>Terms</ExtLink>
+      <ExtLink href={POLICY_LINKS.terms}>{t("footer.terms")}</ExtLink>
       <span aria-hidden>·</span>
-      <ExtLink href={POLICY_LINKS.youtubeTerms}>YouTube Terms of Service</ExtLink>
+      <ExtLink href={POLICY_LINKS.youtubeTerms}>{t("footer.youtube_terms")}</ExtLink>
     </nav>
   );
 }

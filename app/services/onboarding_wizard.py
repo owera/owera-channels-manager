@@ -158,6 +158,8 @@ def state(session: Session, ws: Workspace, locale: str | None = None) -> dict:
         "consents": {
             "terms_accepted_at": activation.iso_utc(ws.terms_accepted_at),
             "privacy_accepted_at": activation.iso_utc(ws.privacy_accepted_at),
+            "terms_accepted_version": ws.terms_accepted_version,
+            "terms_accepted_locale": ws.terms_accepted_locale,
             "ai_data_ack_at": activation.iso_utc(ws.ai_data_ack_at),
             "ai_data_ack_version": ws.ai_data_ack_version,
             "ai_data_ack_locale": ws.ai_data_ack_locale,

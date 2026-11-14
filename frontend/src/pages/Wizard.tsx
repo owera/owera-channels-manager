@@ -16,9 +16,10 @@ import { useFeatures, useMut, useWizard, useWizardMut, WizardPreset, WizardState
 import { l6ConnectAiLineId, l6ConnectAiLineProps } from "../l6ConnectAiLine";
 import { googleLimitedUse } from "../googleLimitedUse";
 import { GoogleLimitedUseBox } from "../GoogleLimitedUseBox";
-import { ConnectConsentNote, Dot, LlmBlockedBanner, POLICY_LINKS } from "../ui";
+import { ConnectConsentNote, Dot, LlmBlockedBanner } from "../ui";
 import { wizardT as t } from "../wizardI18n";
 import { statusLabel } from "../status";
+import { termsConsent } from "../termsConsent";
 
 const STEPS: { id: string; covers: string[] }[] = [
   { id: "channel", covers: ["channel"] },
@@ -241,29 +242,28 @@ function BudgetsStep({ state }: { state: WizardState }) {
 function ConsentsStep() {
   const m = useWizardMut();
   const [terms, setTerms] = useState(false);
-  const [privacy, setPrivacy] = useState(false);
   const [ai, setAi] = useState(false);
   const l6 = l6ConnectAiLineProps(navLocale());
   const glu = googleLimitedUse(navLocale());
+  const tc = termsConsent(navLocale());   // single Terms + Privacy box (LegalOps FIX 14/11)
   const box = "mt-0.5 h-4 w-4 accent-[#c9f24e] shrink-0";
   return (
     <Panel title={t("wizard.consents.title")} step="consents">
       <p className="text-sm text-fog-300 max-w-xl leading-relaxed">{t("wizard.consents.help")}</p>
       <form className="max-w-xl space-y-4 mt-4" onSubmit={(e) => {
         e.preventDefault();
-        // Google Limited Use consent: the sha of the exact text displayed + its locale.
-        m.consents.mutate({ terms, privacy, ai_data: ai, ai_data_text_sha: glu.sha, ai_data_locale: glu.locale });
+        // The sha + locale of the exact sentences displayed (Terms box and Google Limited Use box).
+        m.consents.mutate({ terms, terms_text_sha: tc.sha, terms_locale: tc.locale,
+          ai_data: ai, ai_data_text_sha: glu.sha, ai_data_locale: glu.locale });
       }}>
-        <label className="flex gap-3 text-sm text-fog-200">
-          <input type="checkbox" className={box} checked={terms} onChange={(e) => setTerms(e.target.checked)} />
-          <span>I accept the Owera{" "}
-            <a href={POLICY_LINKS.terms} target="_blank" rel="noopener noreferrer" className="underline">Terms of Service</a>.
-          </span>
-        </label>
-        <label className="flex gap-3 text-sm text-fog-200">
-          <input type="checkbox" className={box} checked={privacy} onChange={(e) => setPrivacy(e.target.checked)} />
-          <span>I accept the Owera{" "}
-            <a href={POLICY_LINKS.privacy} target="_blank" rel="noopener noreferrer" className="underline">Privacy Policy</a>.
+        <label className="flex gap-3 text-sm text-fog-200" data-terms-consent="">
+          <input type="checkbox" className={box} checked={terms} data-terms-sha={tc.sha}
+            onChange={(e) => setTerms(e.target.checked)} />
+          <span lang={tc.lang} data-terms-text={tc.text}>
+            {tc.parts.map((p, i) => p.href
+              ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="underline"
+                  data-terms-link={p.href}>{p.text}</a>
+              : <span key={i}>{p.text}</span>)}
           </span>
         </label>
         <div className="rounded-md border border-signal/25 bg-signal/[0.04] px-5 py-4">
@@ -272,7 +272,7 @@ function ConsentsStep() {
             className="text-sm text-fog-100 leading-relaxed">{l6.text}</p>
           <GoogleLimitedUseBox copy={glu} checked={ai} onChange={setAi} describedBy="l6-ai-data-ack-line" />
         </div>
-        <button className="btn btn-signal" disabled={!(terms && privacy && ai) || m.consents.isPending}>
+        <button className="btn btn-signal" disabled={!(terms && ai) || m.consents.isPending}>
           {m.consents.isPending ? t("wizard.consents.cta_pending") : t("wizard.consents.cta")}
         </button>
         <ErrorRow error={m.consents.error} />

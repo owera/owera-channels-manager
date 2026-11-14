@@ -362,6 +362,7 @@ export interface WizardState {
   locale: "en" | "pt";
   consents: {
     terms_accepted_at: string | null; privacy_accepted_at: string | null;
+    terms_accepted_version: string | null; terms_accepted_locale: string | null;
     ai_data_ack_at: string | null; ai_data_ack_version: string | null; ai_data_ack_locale: string | null;
   };
   ai_data_line_version: string;

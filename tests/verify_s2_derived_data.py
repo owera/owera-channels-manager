@@ -16,6 +16,10 @@ Stripe call, no real LLM (``llm._complete_api`` mocked, CLI raises). Covers:
       internal OS/RR: logged only, never blocked); own script allowed.
   (4) #214 scope: deletion request / workspace closure purge scripts +
       storyboards through youtube_purge.purge_channel; a plain disconnect keeps them.
+  (4b) same path, PO CM round 3: render media (mp4, narration, thumbnails, other
+      artifacts) of NOT-published drafts deleted; published kept; path-traversal /
+      symlink / shared-handle guards; other workspaces + internal OS/RR untouched;
+      dry-run logs the plan and deletes nothing.
   (5) no-channel-numbers instruction: external workspaces only; OS/RR system
       prompts byte-identical.
   (6) stats echo: post-generation warning (never blocks) when a raw channel
@@ -63,11 +67,13 @@ def ok(cond, msg):
 SHA_EN = hashlib.sha256(glu.TEXT_EN.encode()).hexdigest()
 NOW = datetime.now(timezone.utc)
 HF = tempfile.mkdtemp(prefix="s2-hf-")
+SD = tempfile.mkdtemp(prefix="s2-storage-")
 
 eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 SQLModel.metadata.create_all(eng)
 patches = [patch.object(appdb, "engine", eng),
            patch.object(settings, "hyperframes_storage_dir", HF),
+           patch.object(settings, "storage_dir", SD),
            patch.object(notify, "email_access_lost", lambda *a, **k: None),
            patch.object(youtube, "disconnect_channel", lambda s, ch: None),
            patch.object(llm, "_complete_api", lambda *a, **k: "ok"),
@@ -166,6 +172,14 @@ def ctx_titles(ws, ch_id):
 def existing(ch_id, topic_id):
     with Session(eng) as s:
         return llm_derived.idea_existing_subjects(s, topic_id, s.get(Channel, ch_id))
+
+
+class _Cap(logging.Handler):
+    def __init__(self):
+        super().__init__(); self.rows = []
+
+    def emit(self, rec):
+        self.rows.append((rec.levelno, rec.getMessage()))
 
 
 # ---- (1) per-channel disconnect -------------------------------------------------------
@@ -351,8 +365,9 @@ with Session(eng) as s:
     ok(v3.script is None and v3.creation_config is None and r3.get("derived_videos", 0) >= 1,
        f"deletion_requested: Video.script + creation_config cleared ({r3})")
     ok(not (d3 / "index.html").exists() and not (d3 / "narration_words.json").exists()
-       and "script" not in json.loads((d3 / "status.json").read_text()),
-       "deletion_requested: storyboard (index.html), words and status script removed")
+       and not (d3 / "status.json").exists() and not (d3 / "final.mp4").exists(),
+       "deletion_requested (unpublished draft): storyboard, words, status script and the render removed")
+    ok(youtube_purge._purge_job_text is not None, "text purge kept for published drafts' job dirs")
     ok(v1.script == f"script of {C1}" and v1.creation_config is not None and "derived_videos" not in r1
        and (d1 / "index.html").exists(), "plain disconnect: the draft is kept (only YouTube API data purged)")
 # workspace closure → same purge
@@ -374,6 +389,123 @@ with Session(eng) as s:
 ok("purge_derived" in (ROOT / "app/services/youtube_purge.py").read_text()
    and "def purge_derived" not in (ROOT / "app/services/google_limited_use.py").read_text(),
    "one purge path (youtube_purge), no duplicate")
+
+
+# ---- (4b) media of NOT-published drafts ------------------------------------------------
+print("(4b) deletion request: unpublished render media deleted, published kept, guards")
+import os  # noqa: E402
+
+VROOT = Path(SD) / "videos"
+
+
+def media(vid, handle, extra=True):
+    vd = VROOT / str(vid)
+    (vd / "sub").mkdir(parents=True, exist_ok=True)
+    for n in ("video.mp4", "thumb.jpg", "thumb_provided.png"):
+        (vd / n).write_bytes(b"\0")
+    if extra:
+        (vd / "sub" / "artifact.bin").write_bytes(b"\0")
+    files = [vd / "video.mp4", vd / "thumb.jpg", vd / "thumb_provided.png"]
+    if handle and "/" not in handle:
+        jd = Path(HF) / handle
+        jd.mkdir(parents=True, exist_ok=True)
+        for n in ("final.mp4", "narration.mp3", "index.html"):
+            (jd / n).write_bytes(b"\0")
+        files += [jd / "final.mp4", jd / "narration.mp3"]
+    return files
+
+
+WD, SLUG_D = provision("buyer-d@example.com", "cs_d")
+WE, SLUG_E = provision("buyer-e@example.com", "cs_e")
+SLUG[WD], SLUG[WE] = SLUG_D, SLUG_E
+CD, TD = mk_channel(WD, "d-one")
+CE, TE = mk_channel(WE, "e-one")
+CI, TI = mk_channel(1, "os-int")
+outside = Path(tempfile.mkdtemp(prefix="s2-outside-"))
+(outside / "victim.mp4").write_bytes(b"\0")
+os.symlink(outside, Path(HF) / "linkjob")                      # symlinked job dir
+with Session(eng) as s:
+    def V(ch, tp, **kw):
+        v = Video(channel_id=ch, topic_id=tp, subject=kw.pop("subject", "v"), **kw)
+        s.add(v); s.commit(); s.refresh(v)
+        return v.id
+    U = V(CD, TD, status=VideoStatus.REVIEW, mpt_task_id="job-u", video_path="x", thumb_path="y")
+    P = V(CD, TD, status=VideoStatus.PUBLISHED, yt_video_id="yt-p", mpt_task_id="job-p")
+    P2 = V(CD, TD, status=VideoStatus.APPROVED, published_at=NOW, mpt_task_id="job-p2")   # published earlier
+    TR = V(CD, TD, status=VideoStatus.FAILED, mpt_task_id="../" + outside.name)          # traversal handle
+    SL = V(CD, TD, status=VideoStatus.FAILED, mpt_task_id="linkjob")                     # symlink job dir
+    SH = V(CD, TD, status=VideoStatus.REVIEW, mpt_task_id="job-shared")
+    O = V(CE, TE, status=VideoStatus.REVIEW, mpt_task_id="job-o")                        # other workspace
+    O2 = V(CE, TE, status=VideoStatus.REVIEW, mpt_task_id="job-shared")                  # shares SH's handle
+    I = V(CI, TI, status=VideoStatus.REVIEW, mpt_task_id="job-i")                        # internal OS/RR
+f_u = media(U, "job-u")
+f_p, f_p2 = media(P, "job-p"), media(P2, "job-p2")
+media(TR, None); media(SL, None)
+f_sh = media(SH, "job-shared")
+f_o, f_i = media(O, "job-o"), media(I, "job-i")
+# a symlink inside U's output dir that points outside must not be followed
+os.symlink(outside / "victim.mp4", VROOT / str(U) / "evil.mp4")
+
+cap2 = _Cap()
+logging.getLogger("manager.youtube_purge").addHandler(cap2)
+logging.getLogger("manager.youtube_purge").setLevel(logging.INFO)
+with Session(eng) as s:
+    notify.mark_deletion_requested(s, s.get(Channel, CD))
+with Session(eng) as s:
+    ch = s.get(Channel, CD)
+    dry = youtube_purge.purge_media(s, ch, dry_run=True)
+ok(dry["media_dry_run"] is True and dry["media_files"] > 0 and all(f.exists() for f in f_u)
+   and any("would_delete" in m and str(VROOT / str(U)) in m for _, m in cap2.rows)
+   and any("youtube_purge_media plan" in m and f"video_id={U}" in m for _, m in cap2.rows),
+   f"dry-run: plan + would_delete logged, nothing deleted ({dry})")
+with Session(eng) as s, patch.object(settings, "purge_media_dry_run", True):
+    youtube_purge.purge_media(s, s.get(Channel, CD))
+ok(all(f.exists() for f in f_u), "MANAGER_PURGE_MEDIA_DRY_RUN=1 → nothing deleted")
+cap2.rows.clear()
+with Session(eng) as s:
+    ch = s.get(Channel, CD)
+    la = ch.access_lost_at if ch.access_lost_at.tzinfo else ch.access_lost_at.replace(tzinfo=timezone.utc)
+    ok(not youtube_purge.is_due(ch, la + timedelta(days=6)) and youtube_purge.is_due(ch, la + timedelta(days=7, seconds=1)),
+       "same 7-day clock (not due at 6 d, due after 7 d)")
+    res = youtube_purge.purge_channel(s, ch, la + timedelta(days=7, seconds=1))
+ok(not any(f.exists() for f in f_u) and not (VROOT / str(U)).exists() and not (Path(HF) / "job-u").exists(),
+   f"unpublished draft: video.mp4, thumb.jpg, provided thumb, sub/artifact, final.mp4, narration.mp3 deleted ({res})")
+with Session(eng) as s:
+    vu = s.get(Video, U)
+    ok(vu.video_path is None and vu.thumb_path is None and vu.script is None, "row paths cleared")
+    ok(s.get(Video, P).yt_video_id == "yt-p", "nothing on YouTube touched (no API call, yt id kept)")
+ok(all(f.exists() for f in f_p + f_p2) and res.get("media_published_kept") == 3,
+   "published videos (status PUBLISHED / yt_video_id / published_at) keep every file")
+ok((outside / "victim.mp4").exists() and outside.exists(),
+   "path traversal: '../x' handle never resolves outside; evil.mp4 symlink removed, its target kept")
+ok((outside / "victim.mp4").exists() and (Path(HF) / "linkjob").is_symlink(),
+   "symlinked job dir is not followed or deleted")
+ok(all(f.exists() for f in f_sh[-2:]) and not (VROOT / str(SH)).exists(),
+   "job dir shared with another workspace's video kept; the draft's own output dir deleted")
+ok(all(f.exists() for f in f_o), "another workspace's media untouched")
+ok(all(f.exists() for f in f_i), "internal ws 1 OS/RR media untouched")
+ok(youtube_purge._safe_dir(str(VROOT), "..") is None and youtube_purge._safe_dir(str(VROOT), "../videos") is None
+   and youtube_purge._safe_dir(str(Path(HF)), "linkjob") is None and youtube_purge._safe_dir("", "1") is None,
+   "_safe_dir rejects '..', multi-segment names, symlinks and an unset root")
+# plain disconnect (and the 30-day dead-token reason) never deletes media
+with Session(eng) as s:
+    s.get(Channel, CE)
+    ce = s.get(Channel, CE)
+    notify.mark_operator_disconnect(s, ce)
+with Session(eng) as s:
+    ce = s.get(Channel, CE)
+    la = ce.access_lost_at if ce.access_lost_at.tzinfo else ce.access_lost_at.replace(tzinfo=timezone.utc)
+    r_e = youtube_purge.purge_channel(s, ce, la + timedelta(days=8))
+ok(all(f.exists() for f in f_o) and "media_videos" not in r_e, "plain disconnect: media kept")
+# the internal workspace's own deletion request is the only way its media goes
+with Session(eng) as s:
+    notify.mark_deletion_requested(s, s.get(Channel, CI))
+with Session(eng) as s:
+    ci = s.get(Channel, CI)
+    la = ci.access_lost_at if ci.access_lost_at.tzinfo else ci.access_lost_at.replace(tzinfo=timezone.utc)
+    youtube_purge.purge_channel(s, ci, la + timedelta(days=8))
+ok(not any(f.exists() for f in f_i) and all(f.exists() for f in f_o),
+   "internal ws 1 media deleted only by ws 1's own deletion request (others untouched)")
 
 # ---- (5) no-channel-numbers instruction --------------------------------------------
 print("(5) no-channel-numbers instruction: external only, OS/RR byte-identical")
@@ -415,14 +547,6 @@ ok(llm_derived.stats_echo("987654 views later", st) == ["view_count"], "987654 (
 ok(llm_derived.stats_echo("987.654 visualizações", st) == ["view_count"], "987.654 (PT grouping) flagged")
 ok(llm_derived.stats_echo("42 tips, 1234567 grains, 123450 steps", st) == [],
    "small numbers (<100) and longer numbers containing the digits are not flagged")
-
-
-class _Cap(logging.Handler):
-    def __init__(self):
-        super().__init__(); self.rows = []
-
-    def emit(self, rec):
-        self.rows.append((rec.levelno, rec.getMessage()))
 
 
 cap = _Cap()

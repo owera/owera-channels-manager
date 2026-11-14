@@ -115,6 +115,10 @@ class Workspace(SQLModel, table=True):
     ai_data_ack_locale: Optional[str] = None
     ai_data_ack_user: Optional[str] = None
     ai_data_ack_withdrawn_at: Optional[datetime] = None
+    # Single Terms + Privacy checkbox (LegalOps FIX 14/11, app/services/terms_consent.py):
+    # sha256 of the exact sentence shown and its locale, stored with terms/privacy_accepted_at.
+    terms_accepted_version: Optional[str] = None
+    terms_accepted_locale: Optional[str] = None
     wizard_started_at: Optional[datetime] = None
     wizard_budgets_at: Optional[datetime] = None
     wizard_completed_at: Optional[datetime] = None

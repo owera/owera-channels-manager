@@ -185,3 +185,16 @@ and L1 (no training at the provider) is proven. Headless agents are unchanged (i
 - **#214 scope**: `youtube_purge.purge_channel` also runs `purge_derived` (scripts,
   `creation_config`, job text files) when the reason is `deletion_requested` or
   `workspace_closed`. A plain disconnect keeps the draft.
+- **Render media (PO CM round 3)**: for the same two reasons, `youtube_purge.purge_media`
+  deletes the render artifacts of NOT-published drafts (status not PUBLISHED, no
+  `yt_video_id`, no `published_at`): everything in `<storage_dir>/videos/<video_id>/`
+  (video.mp4, thumb.jpg, provided thumbnail, other files) and in the render job dir
+  `<hyperframes_storage_dir>/<handle>/` (final.mp4, narration.mp3, …). Safe paths only:
+  the name must be one plain segment, the resolved dir a direct child of the configured
+  root, symlinked dirs are skipped and symlinks are unlinked without following them, a job
+  dir shared with another video is kept. The plan and every file are logged first
+  (`youtube_purge_media plan … / delete …`); `MANAGER_PURGE_MEDIA_DRY_RUN=true` logs
+  `would_delete` and deletes nothing. Published videos and YouTube are never touched; other
+  workspaces' and internal OS/RR media only go on that workspace's own deletion request.
+- **Follow-up (after 27/11)**: bind script/storyboard to video_id+workspace in DB instead of
+  text prefix. Until then the text-prefix check stays fail-closed for external workspaces.

@@ -167,7 +167,8 @@ for p in llm_patches:
 
 PRESET = topic_presets.NICHE_PRESETS[0]
 SHA_EN = google_limited_use.text_sha(google_limited_use.TEXT_EN)
-CONSENTS = {"terms": True, "privacy": True, "ai_data": True,
+from app.services import terms_consent  # noqa: E402
+CONSENTS = {"terms": True, "terms_text_sha": terms_consent.SHA_EN, "terms_locale": "en", "ai_data": True,
             "ai_data_text_sha": SHA_EN, "ai_data_locale": "en"}
 
 
@@ -290,10 +291,20 @@ ok(r.status_code == 409 and r.json()["detail"]["code"] == "ai_data_text_changed"
    and row(WA).terms_accepted_at is None, "unknown text sha → 409, nothing written")
 r = post(WA, "consents", dict(CONSENTS, ai_data_text_sha=onboarding_wizard.AI_DATA_LINE_SHA))
 ok(r.status_code == 409 and row(WA).ai_data_ack_at is None, "the L6 sha is not accepted as the consent sha")
+r = post(WA, "consents", dict(CONSENTS, terms=False))
+ok(r.status_code == 400 and row(WA).terms_accepted_at is None, "Terms box unchecked → 400, nothing written")
+r = post(WA, "consents", dict(CONSENTS, terms_text_sha="0" * 64))
+ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed" and row(WA).terms_accepted_at is None,
+   "unknown Terms text sha → 409 terms_text_changed, nothing written")
+r = post(WA, "consents", dict(CONSENTS, terms_text_sha=terms_consent.SHA_PT, terms_locale="pt"))
+ok(r.status_code == 409 and r.json()["detail"]["code"] == "terms_text_changed" and row(WA).terms_accepted_at is None,
+   "PT gate closed (TERMS_PT_LIVE=False): PT Terms sha refused")
 r = post(WA, "consents", CONSENTS)
 w = row(WA)
 ok(r.status_code == 200 and w.terms_accepted_at and w.privacy_accepted_at and w.ai_data_ack_at,
    "terms_accepted_at / privacy_accepted_at / ai_data_ack_at persisted")
+ok(w.terms_accepted_version == terms_consent.SHA_EN and w.terms_accepted_locale == "en",
+   "terms_accepted_version = sha of the exact single-box sentence shown; locale en")
 ok(w.ai_data_ack_version == SHA_EN and w.ai_data_ack_locale == "en",
    "ai_data_ack_version = sha of the exact EN text shown; locale en")
 c = r.json()["consents"]

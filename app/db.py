@@ -103,6 +103,8 @@ def _add_missing_columns() -> None:
                       ("ai_data_ack_locale", "VARCHAR"),
                       ("ai_data_ack_user", "VARCHAR"),
                       ("ai_data_ack_withdrawn_at", "DATETIME"),
+                      ("terms_accepted_version", "VARCHAR"),
+                      ("terms_accepted_locale", "VARCHAR"),
                       ("wizard_started_at", "DATETIME"),
                       ("wizard_budgets_at", "DATETIME"),
                       ("wizard_completed_at", "DATETIME"),
