@@ -259,11 +259,14 @@ def require(call_type: str | None = None, *, workspace_id=_UNSET, fields=_UNSET)
         bad = rejected_fields(fields)
         if bad:
             _log_block(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
+            _persist_block(ws, "field_not_allowed")
             raise LLMFieldRejected(ws, ct, "field_not_allowed:" + ",".join(sorted(bad)))
     r = block_reason(ws, ct, fields)
     if r is False:
+        _clear_block_if_set(ws)
         return ws  # type: ignore[return-value]
     _log_block(ws, ct, r)
+    _persist_block(ws, r)
     if r == "cross_workspace_data":
         raise LLMCrossWorkspace(ws, ct, r)
     raise LLMBlocked(ws, ct, r)
@@ -451,6 +454,12 @@ _WS_READ: _cv.ContextVar[str] = _cv.ContextVar("llm_guard_ws_read", default="na"
 # external is blocked.
 WS_READ_BUSY_TIMEOUT_MS = 200
 
+# Last row read by ``_workspace_row`` in this context: lets ``require`` clear a
+# persisted refusal on the next allowed call without an extra read or a write
+# lock on every call.
+_LAST_ROW: _cv.ContextVar[tuple[int, object] | None] = _cv.ContextVar(
+    "llm_guard_last_row", default=None)
+
 def external_release_enabled() -> bool:
     """``MANAGER_LLM_EXTERNAL_RELEASE`` (default OFF). OFF = #217 allowlist only."""
     return bool(getattr(settings, "llm_external_release", False))
@@ -465,6 +474,7 @@ RELEASE_CALL_TYPES: frozenset[str] = frozenset({
 
 def _workspace_row(ws: int):
     """``(row, error)``; row None + error None = no such workspace."""
+    _LAST_ROW.set(None)
     try:
         from sqlmodel import Session
 
@@ -488,6 +498,7 @@ def _workspace_row(ws: int):
                     except Exception:  # noqa: BLE001
                         pass
             _WS_READ.set("ok")
+            _LAST_ROW.set((int(ws), row))
             return row, None
     except Exception as e:  # noqa: BLE001
         _WS_READ.set("fail")
@@ -563,6 +574,113 @@ def workspace_of_channel(channel_id, session=None) -> int | None:
             return _q(s)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ------------------------------------------------------- user-visible refusal (S8)
+#
+# PO CM 14/11: a refusal is never silent. With the release flag ON, every refusal
+# of a NON-internal workspace is persisted on the workspace row
+# (``llm_blocked_reason`` / ``llm_blocked_at``), shown in the SPA as a
+# "Drafts paused: …" banner via GET /api/onboarding/status, and cleared by the
+# next allowed call. Flag OFF: nothing is persisted or shown (#217 unchanged).
+# ``llm_blocked_at`` = when the CURRENT reason was first seen (a repeat of the
+# same reason doesn't rewrite the row).
+
+# reason → (setup step id, user-facing EN text). Unknown/internal → support.
+BLOCK_USER_TEXT: dict[str, tuple[str, str]] = {
+    "terms_privacy_not_accepted": (
+        "terms_privacy",
+        "Drafts paused: finish setup step \"Accept the Terms of Service and Privacy Policy\"."),
+    "not_paid_or_test": (
+        "payment", "Drafts paused: finish setup step \"Payment\"."),
+    # Reserved for S2 (wizard): a per-workspace AI-data acknowledgement. No guard
+    # reason emits it yet; mapped so S2 only has to return it.
+    "ai_data_not_acknowledged": (
+        "ai_data", "Drafts paused: finish setup step \"AI data\"."),
+}
+_SUPPORT = ("support", "Drafts paused: please contact Owera support so we can finish your setup.")
+
+
+def _norm_reason(reason: str) -> str:
+    return str(reason).split(":", 1)[0][:64]
+
+
+def block_message(reason: str | None) -> dict | None:
+    """``{"reason", "step", "message"}`` for a persisted reason (no ``at``)."""
+    if not reason:
+        return None
+    r = _norm_reason(reason)
+    step, msg = BLOCK_USER_TEXT.get(r, _SUPPORT)
+    return {"reason": r, "step": step, "message": msg}
+
+
+def blocked_status(ws_row) -> dict | None:
+    """Public read for the SPA banner and (after S1 merges) ``activation_report``:
+    ``{"reason", "step", "message", "at"}`` or ``None``. ``None`` whenever the
+    release flag is OFF (no banner for the #217 allowlist block)."""
+    if ws_row is None or not external_release_enabled():
+        return None
+    out = block_message(getattr(ws_row, "llm_blocked_reason", None))
+    if out is None:
+        return None
+    at = getattr(ws_row, "llm_blocked_at", None)
+    if at is not None and getattr(at, "tzinfo", None) is None:
+        from datetime import timezone as _tz
+        at = at.replace(tzinfo=_tz.utc)
+    out["at"] = at.isoformat() if at is not None else None
+    return out
+
+
+def _write_ws(sql: str, params: dict) -> None:
+    """Best-effort single UPDATE with the short busy_timeout. Never raises: a
+    failed write must not turn a refusal into a different error."""
+    try:
+        from sqlalchemy import text as _text
+
+        from app.db import engine
+
+        with engine.begin() as conn:
+            prev = None
+            if engine.dialect.name == "sqlite":
+                prev = conn.exec_driver_sql("PRAGMA busy_timeout").scalar()
+                conn.exec_driver_sql(f"PRAGMA busy_timeout={int(WS_READ_BUSY_TIMEOUT_MS)}")
+            try:
+                conn.execute(_text(sql), params)
+            finally:
+                if prev is not None:
+                    conn.exec_driver_sql(f"PRAGMA busy_timeout={int(prev)}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("llm_guard_block_state_write_failed error=%s", type(e).__name__)
+
+
+def _persist_block(ws: int | None, reason) -> None:
+    if ws is None or not isinstance(reason, str) or reason == "workspace_unknown":
+        return
+    if not external_release_enabled() or ws in internal_workspace_ids():
+        return
+    from app.models import utcnow
+    r = _norm_reason(reason)
+    _write_ws("UPDATE workspace SET llm_blocked_reason = :r, llm_blocked_at = :now "
+              "WHERE id = :id AND (llm_blocked_reason IS NULL OR llm_blocked_reason != :r)",
+              {"r": r, "now": utcnow(), "id": int(ws)})
+
+
+def _clear_block_if_set(ws: int | None) -> None:
+    last = _LAST_ROW.get()
+    if ws is None or last is None or last[0] != ws:
+        return
+    if not getattr(last[1], "llm_blocked_reason", None):
+        return
+    _write_ws("UPDATE workspace SET llm_blocked_reason = NULL, llm_blocked_at = NULL "
+              "WHERE id = :id AND llm_blocked_reason IS NOT NULL", {"id": int(ws)})
+    _LAST_ROW.set(None)
+
+
+def clear_block(ws: int) -> None:
+    """Explicit clear (e.g. S2 wizard after terms acceptance). The next allowed
+    LLM call clears it anyway."""
+    _write_ws("UPDATE workspace SET llm_blocked_reason = NULL, llm_blocked_at = NULL "
+              "WHERE id = :id AND llm_blocked_reason IS NOT NULL", {"id": int(ws)})
 
 
 # --------------------------------------------------------------------- agents

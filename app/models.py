@@ -95,6 +95,11 @@ class Workspace(SQLModel, table=True):
     # accepted. Read only when MANAGER_LLM_EXTERNAL_RELEASE is on.
     terms_accepted_at: Optional[datetime] = None
     privacy_accepted_at: Optional[datetime] = None
+    # S8 (PO CM 14/11): last LLM guard refusal for this workspace (flag ON, non-internal
+    # only), shown to the user as a "Drafts paused: …" banner. Cleared by the next
+    # allowed call. Written only by llm_guard (never by request handlers).
+    llm_blocked_reason: Optional[str] = None
+    llm_blocked_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
