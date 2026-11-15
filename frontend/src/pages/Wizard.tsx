@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatures, useMut, useWizard, useWizardMut, WizardPreset, WizardState } from "../api";
+import { intFromBlur } from "../intFromBlur";
 import { l6ConnectAiLineId, l6ConnectAiLineProps } from "../l6ConnectAiLine";
 import { googleLimitedUse } from "../googleLimitedUse";
 import { GoogleLimitedUseBox } from "../GoogleLimitedUseBox";
@@ -208,15 +209,22 @@ function TopicsStep({ state }: { state: WizardState }) {
 function BudgetsStep({ state }: { state: WizardState }) {
   const ch = state.channel!;
   const m = useWizardMut();
-  const [render, setRender] = useState(String(ch.daily_render_budget || state.default_budgets.daily_render_budget));
-  const [publish, setPublish] = useState(String(ch.daily_publish_budget || state.default_budgets.daily_publish_budget));
+  const fallbackRender = ch.daily_render_budget || state.default_budgets.daily_render_budget;
+  const fallbackPublish = ch.daily_publish_budget || state.default_budgets.daily_publish_budget;
+  const [render, setRender] = useState(String(fallbackRender));
+  const [publish, setPublish] = useState(String(fallbackPublish));
   return (
     <Panel title={t("wizard.budgets.title")} step="budgets">
       <p className="text-sm text-fog-300 mb-5 max-w-xl leading-relaxed">{t("wizard.budgets.help")}</p>
       <form className="max-w-md grid grid-cols-2 gap-4" onSubmit={(e) => {
         e.preventDefault();
-        m.budgets.mutate({ channel_id: ch.id, daily_render_budget: Number(render),
-                           daily_publish_budget: Number(publish) });
+        const r = intFromBlur(render, 1);
+        const p = intFromBlur(publish, 1);
+        if (r === null || r > 50) setRender(String(fallbackRender));
+        if (p === null || p > 50) setPublish(String(fallbackPublish));
+        if (r === null || r > 50 || p === null || p > 50) return;
+        m.budgets.mutate({ channel_id: ch.id, daily_render_budget: r,
+                           daily_publish_budget: p });
       }}>
         <label className="block">
           <div className="label mb-1.5">{t("wizard.budgets.field_render")}</div>

@@ -652,6 +652,41 @@ gate = (fe / "AuthGate.tsx").read_text() + (fe / "App.tsx").read_text()
 ok("useWizard" in gate and "/welcome" in gate, "AuthGate routes a 0-channel workspace to /welcome")
 ok("hideOnFirstLogin" in gate and "first_login" in gate, "App hides Trends/Settings on the first login")
 
+# Wizard empty-budget submit (BACKLOG #72): after the API floor, budget 0 is
+# 400 ("would stall the first draft"). Empty Number("")===0 then Continue
+# still POSTs 0. Same choke point as Settings/Channels/generate-count
+# (#34/#35/#42), min=1 (0 is not legal; wizard range is 1–50).
+print("Wizard.tsx budget submit skips mutate instead of Number('')===0")
+ok("Number(render)" not in wiz_tsx,
+   "render budget does not Number() (Number('')===0 is a 400)")
+ok("Number(publish)" not in wiz_tsx,
+   "publish budget does not Number() (Number('')===0 is a 400)")
+ok('from "../intFromBlur"' in wiz_tsx,
+   "Wizard.tsx imports intFromBlur (not an inlined copy)")
+ok("const r = intFromBlur(render, 1);" in wiz_tsx,
+   "full statement const r = intFromBlur(render, 1); (?? 0 / min=0 still POST 0)")
+ok("const p = intFromBlur(publish, 1);" in wiz_tsx,
+   "full statement const p = intFromBlur(publish, 1); (publish-only ?? 0 / min=0)")
+ok("if (r === null || r > 50) setRender(String(fallbackRender));" in wiz_tsx,
+   "invalid render restores fallbackRender (not a hardcoded 2 / empty / 0)")
+ok("if (p === null || p > 50) setPublish(String(fallbackPublish));" in wiz_tsx,
+   "invalid publish restores fallbackPublish")
+_submit = """if (r === null || r > 50 || p === null || p > 50) return;
+        m.budgets.mutate({ channel_id: ch.id, daily_render_budget: r,
+                           daily_publish_budget: p });"""
+ok(_submit in wiz_tsx,
+   "invalid return is immediately followed by mutate(r, p) (restore-then-POST / mutate-then-return die)")
+ok("daily_render_budget: r," in wiz_tsx,
+   "mutate body is daily_render_budget: r, (not render|0 / r ?? 0 / Number(render))")
+ok("daily_publish_budget: p });" in wiz_tsx,
+   "mutate body is daily_publish_budget: p }); (not publish|0 / p ?? 0)")
+ok("daily_render_budget: Number" not in wiz_tsx and "daily_publish_budget: Number" not in wiz_tsx,
+   "mutate body does not Number() either budget")
+ok("valueAsNumber" not in wiz_tsx,
+   "Wizard.tsx does not use valueAsNumber (empty is 0, same class as Number(''))")
+ok("+render" not in wiz_tsx and "+publish" not in wiz_tsx,
+   "Wizard.tsx does not coerce budgets with unary-plus")
+
 for p in llm_patches:
     p.stop()
 appdb_patch.stop()
