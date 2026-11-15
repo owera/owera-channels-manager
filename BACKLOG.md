@@ -1945,6 +1945,26 @@ flag the operator step in the commit body.
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
 
+### 72. ✅ DONE (PR autoimprove/2026-11-15-wizard-budget-blur) Wizard empty-budget restores instead of POSTing 0 — normal
+- **resolution (2026-11-15):** Wizard `BudgetsStep` submit uses `intFromBlur(..., 1)`
+  as the choke point: empty / 0 / NaN / non-int / >50 restore the current
+  (or week-1 default) value and skip the mutate. Typed `2` still POSTs.
+  Same helper as #34/#35/#42; min=1 because 0 is a 400 after the wizard
+  API floor ("would stall the first draft"). Suite:
+  `tests/verify_onboarding_wizard.py` 143 → 156. Isolated commit;
+  `onboarding.py` / `WizardBudgetsBody` untouched.
+- **why (found 2026-11-15 ranking remaining `Number()` after #35/#42):** the
+  wizard API 400s budget=0, but Continue still `Number(render)` /
+  `Number(publish)`. Clearing a field and submitting is a 400 instead of
+  the seeded 2/2 coming back. `Number("x")` is JSON null which the handler
+  treats as omitted and silently applies the default.
+- **caution:** normal (SPA only; not a money-path file). Isolated commit
+  + regression tests. `npm run build` required.
+- **acceptance:** empty/0/invalid/51 budget submit does not POST; fields
+  restore; a typed `2` still saves.
+  Remaining (not bundled): `WizardBudgetsBody.channel_id` still coerces
+  JSON bool (`true` binds channel 1).
+
 ### 71. ✅ DONE (PR autoimprove/2026-10-07-endcard-cue) shorts endcard cue follows the spoken closer — normal
 - **resolution (2026-10-07):** `_sanitize_cta` sets only the last shorts
   CTA `cue` to the script's trailing endcard, the line align and
