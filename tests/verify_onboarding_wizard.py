@@ -43,6 +43,8 @@ for _k in ("terms_doc_sha_en", "terms_doc_sha_pt", "privacy_doc_sha_en", "privac
     setattr(settings, _k, PINNED_DOC_SHA)
 from app.db import get_session
 from app.models import (Channel, OAuthStatus, Settings, Topic, Video, VideoStatus, Workspace)
+from app.routers.onboarding import (WizardBudgetsBody, WizardFirstDraftBody,
+                                    WizardTopicsBody)
 from app.services import (activation, google_limited_use, llm, llm_guard, onboarding_wizard,
                           render_loop, stripe_provision, topic_presets)
 
@@ -286,6 +288,75 @@ st = r.json()
 ok(r.status_code == 200 and st["channel"]["daily_render_budget"] == 3
    and st["channel"]["daily_publish_budget"] == 2 and st["current_step"] == "consents",
    "budgets saved (missing one = default), next = consents")
+
+print("wizard channel_id JSON bool is 4xx (true must not bind channel 1)")
+ok(CHA != 1 and IA == 1, "precondition: wizard channel is not id 1 (true coerces to 1)")
+
+
+def _compact(resp):
+    return resp.text.replace(" ", "")
+
+
+def _budget_row():
+    with Session(eng) as s:
+        ch = s.get(Channel, CHA)
+        return (ch.daily_render_budget, ch.daily_publish_budget)
+
+
+def _topic_names():
+    with Session(eng) as s:
+        return [t.name for t in s.exec(select(Topic).where(Topic.channel_id == CHA)
+                                       .order_by(Topic.id)).all()]
+
+
+before_budgets = _budget_row()
+before_topics = _topic_names()
+ok(before_budgets == (3, 2), "precondition: budgets are the saved 3/2")
+ok(len(before_topics) == 3, "precondition: three topics on the wizard channel")
+
+for path, extra in (
+    ("topics", {"niche": "hijack", "topics": PRESET["topics"]}),
+    ("budgets", {"daily_render_budget": 4, "daily_publish_budget": 4}),
+    ("first-draft", {}),
+):
+    for flag, label in ((True, "true"), (False, "false")):
+        r = post(WA, path, dict(extra, channel_id=flag))
+        ok(r.status_code in (400, 422),
+           f"{path} channel_id={label} is 4xx (must not coerce to {1 if flag else 0})")
+        ok("boolean" in r.text and f'"input":{label}' in _compact(r),
+           f"{path} {label} names boolean and keeps input {label} "
+           "(mode=after would show 1/0)")
+
+ok(_budget_row() == before_budgets, "bool channel_id left the 3/2 budgets")
+ok(_topic_names() == before_topics, "bool channel_id left the three topics")
+ok(row(WA).first_draft_video_id is None, "bool channel_id created no first draft")
+ok(row(WA).wizard_budgets_at is not None, "bool probes did not clear wizard_budgets_at")
+
+r = post(WA, "budgets", {"channel_id": 0, "daily_render_budget": 4})
+ok(r.status_code == 404, "budgets channel_id=0 is still 404 (no channel 0)")
+ok("boolean" not in r.text, "integer 0 stays the channel 404 (reject-zero would say boolean)")
+ok(_budget_row() == before_budgets, "integer 0 wrote no budget")
+
+r = post(WA, "budgets", {"channel_id": None})
+ok(r.status_code == 422, "budgets channel_id=null is 422 (required int)")
+ok("boolean" not in r.text, "null is the required-int error, not the bool rejection")
+ok(_budget_row() == before_budgets, "null channel_id wrote no budget")
+
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 3})
+ok(r.status_code == 200 and r.json()["channel"]["daily_render_budget"] == 3
+   and r.json()["channel"]["daily_publish_budget"] == 2,
+   "integer channel_id still saves (always-raise dies here)")
+
+for cls, name in (
+    (WizardTopicsBody, "WizardTopicsBody"),
+    (WizardBudgetsBody, "WizardBudgetsBody"),
+    (WizardFirstDraftBody, "WizardFirstDraftBody"),
+):
+    src = inspect.getsource(cls)
+    ok('@field_validator("channel_id", mode="before")' in src,
+       f"{name} rejects channel_id with mode=before "
+       "(mode=after would already have coerced true→1)")
+    ok("def _reject_bool_channel" in src, f"{name} has _reject_bool_channel")
 
 print("step consents: terms + privacy + Google Limited Use consent")
 r = post(WA, "first-draft", {"channel_id": CHA})
