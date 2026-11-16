@@ -1945,6 +1945,28 @@ flag the operator step in the commit body.
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
 
+### 73. ✅ DONE (PR autoimprove/2026-11-16-wizard-channel-bool) POST wizard topics/budgets/first-draft reject JSON bool channel_id — normal
+- **resolution (2026-11-16):** `_reject_bool_channel_id` is the choke
+  point; `WizardTopicsBody` / `WizardBudgetsBody` /
+  `WizardFirstDraftBody` `_reject_bool_channel` `mode="before"` reject
+  JSON bool on `channel_id` before lax `int` coerces `false→0` /
+  `true→1`. `true` bound the step to channel id=1 (Owera Software on
+  the default workspace; the first channel on a fresh single-tenant);
+  `false` 404'd as channel 0. Integer ids, integer 0, and null are
+  unchanged (0/missing still 404, null still the required-int 422).
+  Suite: `tests/verify_onboarding_wizard.py` 143 → 175. Isolated
+  commit; no money-path files. SPA already sends `ch.id`.
+- **why (left open by #72 / PR #237):** wizard empty-budget restore
+  floored `Number()`; `channel_id` still coerced. A growth-agent /
+  curl `{"channel_id": true}` binds the step to channel 1.
+- **caution:** normal (`onboarding.py` wizard bodies only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** POST topics/budgets/first-draft `channel_id`
+  `true`/`false` is 4xx and writes nothing; integer ids still save;
+  integer 0 still 404; null still 422 without the bool message.
+  Remaining (not bundled): `daily_render_budget` /
+  `daily_publish_budget` still coerce JSON bool (`true` is a legal 1).
+
 ### 71. ✅ DONE (PR autoimprove/2026-10-07-endcard-cue) shorts endcard cue follows the spoken closer — normal
 - **resolution (2026-10-07):** `_sanitize_cta` sets only the last shorts
   CTA `cue` to the script's trailing endcard, the line align and

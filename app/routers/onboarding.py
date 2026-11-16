@@ -22,7 +22,7 @@ Accept-Language header; presets and banners come back in EN or PT.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -72,6 +72,16 @@ def _own_wizard_channel(session: Session, ws: Workspace, channel_id: int):
     return ch
 
 
+def _reject_bool_channel_id(v):
+    # Lax int coerces JSON false→0 / true→1 before the handler.
+    # true silently binds the wizard step to channel id=1 (Owera
+    # Software on the default workspace; the first channel on a
+    # fresh single-tenant). false 404s as channel 0.
+    if isinstance(v, bool):
+        raise ValueError("must be an integer, not a boolean")
+    return v
+
+
 @router.get("/wizard")
 def wizard_state(session: Session = Depends(get_session),
                  ws: Workspace = Depends(current_workspace),
@@ -118,6 +128,11 @@ class WizardTopicsBody(BaseModel):
     niche: str
     preset_id: str | None = None
     topics: list[WizardTopic]
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        return _reject_bool_channel_id(v)
 
 
 @router.post("/wizard/topics")
@@ -167,6 +182,11 @@ class WizardBudgetsBody(BaseModel):
     channel_id: int
     daily_render_budget: int | None = None
     daily_publish_budget: int | None = None
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        return _reject_bool_channel_id(v)
 
 
 @router.post("/wizard/budgets")
@@ -243,6 +263,11 @@ def wizard_consents(body: WizardConsentsBody, request: Request,
 
 class WizardFirstDraftBody(BaseModel):
     channel_id: int
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        return _reject_bool_channel_id(v)
 
 
 @router.post("/wizard/first-draft")
