@@ -1962,3 +1962,30 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 94. ✅ DONE (PR autoimprove/2026-11-03-health-workspace) health fixture seeds the legacy workspace — normal
+- **resolution (2026-11-03):** `tests/verify_health.py` built an in-memory
+  DB with channels and no `workspace` row. `current_workspace` looks up
+  slug `owera` when multi-workspace is off and 404s when that row is
+  missing, so authenticated `GET /api/channels` never reached the auth
+  pin. The fixture now inserts `Workspace(id=1, slug="owera", ...)`,
+  the same id `Channel.workspace_id` defaults to, and the suite forces
+  `multi_workspace` off so a local `.env` cannot treat the dummy
+  username `x` as a tenant slug. The list check requires slugs a, b,
+  and c. Health snapshot counts are unchanged (they count channels,
+  not workspaces). Suite: `tests/verify_health.py` ALL 63 CHECKS PASSED
+  (one new pin). Omitting the workspace row 404s the authenticated
+  request. A workspace id of 2 returns 200 and fails the slug pin.
+  `verify_storyboard.py` ALL 604. Tests only. Open PRs append items
+  72–93 at this same BACKLOG tail — keep every section.
+  `run/code-experiments.jsonl` is union-merge.
+- **why (found 2026-11-03, gate red on origin/main after WS4):** the
+  auth-exemption check died on a missing tenant row, so a real auth
+  regression would not be distinguished from the 404.
+- **caution:** normal (tests only). Not a publish/oauth behavior change.
+- **acceptance:** authenticated `GET /api/channels` is 200 and lists
+  slugs a, b, and c. A missing workspace row fails the 200 check. A
+  workspace id other than 1 fails the slug check. n does not decrease.
+  Still red on origin/main, not this diff: `verify_p0_status_hold_compose`
+  (`ALTER TABLE oauthpending`, PR #176) and the YouTube stub-signature
+  suites (PR #175).
