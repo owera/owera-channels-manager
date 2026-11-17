@@ -1962,3 +1962,33 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 82. ✅ DONE (PR autoimprove/2026-10-24-channel-privacy-floor) POST/PATCH /api/channels reject a blank or illegal default_privacy — normal
+- **resolution (2026-10-24):** `ChannelCreate` and `ChannelUpdate`
+  `_reject_blank_privacy` (`mode="before"`) share `_privacy_or_reject`.
+  Blank, whitespace, null, bool, and anything other than `public` /
+  `unlisted` / `private` is 422 and writes nothing. A padded legal value
+  is stored stripped. Omitted PATCH leaves the column; omitted POST
+  stays the `public` default. JSON null used to setattr onto the NOT
+  NULL column and the auth middleware turned the IntegrityError into
+  401. `publish_windows=""` still clears. Suite:
+  `tests/verify_channel_privacy.py` (82 checks). Before the floor,
+  PATCH `default_privacy=""` was 200 and stored `""`.
+- **why:** `publish_loop` uploads `video.privacy or channel.default_privacy`.
+  `ensure_topic_playlist` and `backfill_playlist` pass
+  `channel.default_privacy` into `playlists.insert` with no fallback.
+  `""` is forwarded on the playlist insert (50 quota units). `"   "` is
+  truthy, so both the upload and the insert send it. YouTube
+  `privacyStatus` is only those three values. The channel select already
+  only offers them; growth-agent / curl still reach the body.
+- **caution:** normal (`schemas.py` ChannelCreate + ChannelUpdate only).
+  Isolated commit + regression tests. `publish_loop.py` and
+  `youtube.py` untouched.
+- **acceptance:** `""`, whitespace, null, bool, `secret`, and `Public`
+  are 422 and write nothing; `"  unlisted  "` stores `unlisted`;
+  omitted PATCH does not clobber; omitted POST stays `public`;
+  `publish_windows=""` still clears; budget 0 still stalls.
+- **not bundled:** `PlaylistCreate.privacy` `""` still forwards to
+  `create_playlist` (left open by #81). `VideoUpdate.privacy` whitespace
+  is truthy and wins the publish `or`. Rows already stored are not
+  rewritten.
