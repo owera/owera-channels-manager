@@ -287,6 +287,65 @@ ok(r.status_code == 200 and st["channel"]["daily_render_budget"] == 3
    and st["channel"]["daily_publish_budget"] == 2 and st["current_step"] == "consents",
    "budgets saved (missing one = default), next = consents")
 
+print("wizard budget JSON bool is 4xx (true must not persist as 1)")
+from app.routers.onboarding import WizardBudgetsBody
+
+
+def _compact(resp):
+    return resp.text.replace(" ", "")
+
+
+def _budget_row():
+    with Session(eng) as s:
+        ch = s.get(Channel, CHA)
+        return (ch.daily_render_budget, ch.daily_publish_budget)
+
+
+before_budgets = _budget_row()
+ok(before_budgets == (3, 2), "precondition: budgets are the saved 3/2")
+
+for key in ("daily_render_budget", "daily_publish_budget"):
+    for flag, label in ((True, "true"), (False, "false")):
+        r = post(WA, "budgets", {"channel_id": CHA, key: flag})
+        ok(r.status_code in (400, 422),
+           f"{key}={label} is 4xx (must not coerce to {1 if flag else 0})")
+        ok("boolean" in r.text and f'"input":{label}' in _compact(r),
+           f"{key} {label} names boolean and keeps input {label} "
+           "(mode=after would show 1/0)")
+        ok(_budget_row() == before_budgets, f"{key}={label} writes nothing")
+
+r = post(WA, "budgets",
+         {"channel_id": CHA, "daily_render_budget": True, "daily_publish_budget": 4})
+ok(r.status_code in (400, 422), "mixed render=true / publish=4 is 4xx")
+ok(_budget_row() == before_budgets, "mixed 4xx writes none of the fields")
+
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 0})
+ok(r.status_code == 400, "integer 0 is still the 1–50 floor")
+ok("boolean" not in r.text, "integer 0 stays the floor error (reject-zero would say boolean)")
+ok(_budget_row() == before_budgets, "integer 0 wrote no budget")
+
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": None})
+ok(r.status_code == 200, "null render budget is omitted → default, not 4xx")
+ok("boolean" not in r.text, "null is not the bool rejection")
+ok(_budget_row() == (2, 2), "null render applies the week-1 default 2; omitted publish stays default")
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 3})
+ok(r.status_code == 200 and _budget_row() == (3, 2),
+   "restore integer 3 after the null pin")
+
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 1})
+ok(r.status_code == 200 and r.json()["channel"]["daily_render_budget"] == 1,
+   "integer 1 still saves (true-coercion target is a legal int)")
+ok(_budget_row() == (1, 2), "integer 1 persisted; publish left at 2")
+r = post(WA, "budgets", {"channel_id": CHA, "daily_render_budget": 3})
+ok(r.status_code == 200 and _budget_row() == (3, 2),
+   "restore integer 3 after the 1 pin")
+
+src = inspect.getsource(WizardBudgetsBody)
+ok('@field_validator("daily_render_budget", "daily_publish_budget", mode="before")' in src,
+   "WizardBudgetsBody rejects both budget fields with mode=before "
+   "(mode=after would already have coerced true→1)")
+ok("def _reject_bool_budget" in src, "WizardBudgetsBody has _reject_bool_budget")
+
 print("step consents: terms + privacy + Google Limited Use consent")
 r = post(WA, "first-draft", {"channel_id": CHA})
 ok(r.status_code == 409 and r.json()["detail"]["missing"] == "consents", "first-draft before consents → 409")

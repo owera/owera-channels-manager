@@ -1945,6 +1945,28 @@ flag the operator step in the commit body.
   does not page; a craft-ready sibling still does, and the ready count
   is 1.
 
+### 74. ✅ DONE (PR autoimprove/2026-11-17-wizard-budget-bool) POST wizard budgets reject JSON bool daily_*_budget — normal
+- **resolution (2026-11-17):** `WizardBudgetsBody._reject_bool_budget`
+  `mode="before"` rejects JSON bool on `daily_render_budget` /
+  `daily_publish_budget` before lax `Optional[int]` coerces `false→0`
+  / `true→1`. `true` silently persisted as a legal 1 (week-1 default
+  is 2; 1 still publishes). `false` 400'd as "must be an integer from
+  1 to 50" without naming the boolean — the handler's
+  `isinstance(v, bool)` is dead after pydantic coercion. Integer 1
+  still saves; integer 0 still 400s the 1–50 floor without "boolean";
+  null still applies the week-1 default. Suite:
+  `tests/verify_onboarding_wizard.py` 143 → 170. Isolated commit; no
+  money-path files. SPA already sends ints via `intFromBlur` (#72).
+- **why (left open by #73 / PR #238):** wizard `channel_id` bool floor
+  left the budget fields coercing. A growth-agent / curl
+  `{"daily_render_budget": true}` parks the first draft at 1/day.
+- **caution:** normal (`onboarding.py` WizardBudgetsBody only; not a
+  money-path file). Isolated commit + regression tests.
+- **acceptance:** POST `/wizard/budgets` `daily_render_budget` /
+  `daily_publish_budget` `true`/`false` is 4xx and writes nothing;
+  mixed bool+int writes none of the fields; integer 1 still saves;
+  integer 0 still 400 without the bool message; null still defaults.
+
 ### 71. ✅ DONE (PR autoimprove/2026-10-07-endcard-cue) shorts endcard cue follows the spoken closer — normal
 - **resolution (2026-10-07):** `_sanitize_cta` sets only the last shorts
   CTA `cue` to the script's trailing endcard, the line align and
