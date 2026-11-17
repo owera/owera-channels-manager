@@ -1962,3 +1962,24 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 97. ✅ DONE (PR autoimprove/2026-11-06-spa-callback-escape) SPA Google callback escapes HTML — normal
+- **resolution (2026-11-06):** `spa_auth` pages for a cancelled consent, a
+  failed token exchange, and a denied email now run the dynamic string
+  through `html.escape` before it lands in the HTML (same treatment as
+  `channels._callback_html`). A `?error=<img …>` callback stays 400 and
+  shows the escaped text; an exchange exception stays 502 and is escaped;
+  a denied email stays 403 with the allowlist copy and an escaped
+  address. Ampersands are escaped too. Suite: `tests/verify_spa_google_login.py`
+  18 → 28. Dropping the escape in `_p` or in the deny page fails its own
+  check. YouTube connect and agent Basic are unchanged.
+- **why (found 2026-11-06, after #190):** the new human-login callback
+  interpolated the `error` query param, `str(exception)[:200]`, and the
+  Google email into HTML. The `error` param is attacker-controlled
+  without a Google account. The YouTube consent page already escaped
+  this class of string.
+- **caution:** normal (`app/routers/spa_auth.py` only). Not the YouTube
+  publish/oauth path and not `app/main.py` auth middleware.
+- **acceptance:** markup in `error`, in the exchange exception, and in
+  the denied email is not raw HTML; `access_denied` still renders;
+  allowlisted login, logout, and agent Basic still work.
