@@ -1962,3 +1962,27 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 86. ✅ DONE (PR autoimprove/2026-10-27-topic-channel-bool) POST /api/topics rejects JSON bool channel_id — normal
+- **resolution (2026-10-27):** `TopicCreate._reject_bool_channel` is
+  `mode="before"`. JSON `true`/`false` on `channel_id` are 422 before
+  lax int coercion. `true` was creating the topic on channel 1;
+  `false` became 0 and 404'd only because no channel 0 exists. Integer
+  ids, including 0, are unchanged: 0 is still the channel 404; integer
+  2 still creates on channel 2, not channel 1. Null/omit stay the
+  required-int 422 (not the bool message). `create_playlist` stays a
+  real bool. Suite: `tests/verify_topics.py` 268 → 305. Isolated
+  commit; no money-path files.
+- **why (found ranking remaining bare ints after #59/#60):**
+  `TopicCreate.channel_id` was a bare `int`. A growth-agent / curl
+  `{"channel_id": true}` lands a topic on channel 1.
+- **caution:** normal (`schemas.py` TopicCreate only). Isolated commit
+  + extend `tests/verify_topics.py`.
+- **acceptance:** POST `channel_id` `true`/`false` is 422 and writes no
+  topic; integer channel 2 still creates on channel 2, not channel 1;
+  integer 0 still 404s; null/omit do not take the bool message;
+  `create_playlist` true still creates.
+  Remaining (not bundled): `GET /api/topics?channel_id=` is a query
+  int (string `"true"` already 422s); `list_topics` has no JSON body.
+  Open PRs #139 / #140 / #143 / #146 append items 82–85 at the same
+  tail. Keep every section when merging.
