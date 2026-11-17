@@ -22,7 +22,7 @@ Accept-Language header; presets and banners come back in EN or PT.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -167,6 +167,18 @@ class WizardBudgetsBody(BaseModel):
     channel_id: int
     daily_render_budget: int | None = None
     daily_publish_budget: int | None = None
+
+    @field_validator("daily_render_budget", "daily_publish_budget", mode="before")
+    @classmethod
+    def _reject_bool_budget(cls, v):
+        # Lax Optional[int] coerces JSON false→0 / true→1 before the handler.
+        # true is a legal 1 (the week-1 default is 2; 1 still publishes).
+        # false becomes 0 and 400s as "must be an integer from 1 to 50"
+        # without naming the boolean. The handler's isinstance(v, bool) is
+        # dead after pydantic coercion.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer from 1 to 50, not a boolean")
+        return v
 
 
 @router.post("/wizard/budgets")
