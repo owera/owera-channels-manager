@@ -106,7 +106,7 @@ function useFontFaces(fonts: string[] = []) {
   }, [fonts.join("|")]);
 }
 
-const RES: Record<string, [number, number]> = { "9:16": [1080, 1920], "16:9": [1920, 1080], "1:1": [1080, 1080] };
+const RES: Record<string, [number, number]> = { "9:16": [1080, 1920], "16:9": [1920, 1080], "1:1": [1080, 1080], "4:5": [1080, 1350] };
 
 function Preview({ params }: { params: Record<string, any> }) {
   const g = (k: string) => (params[k] ?? (DISPLAY_DEFAULTS as any)[k]);
