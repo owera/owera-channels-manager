@@ -265,7 +265,7 @@ ok(publish_loop._next_approved(s, ch.id) is None,
    "_next_approved skips Video.held")
 uploaded = []
 from app.services import youtube
-youtube.get_service = lambda slug: object()
+youtube.get_service = lambda slug, channel=None, session=None: object()
 youtube.upload_video = lambda *a, **k: uploaded.append(a) or "ytX"
 publish_loop._publish_one(s, ch, held_v)
 s.commit()

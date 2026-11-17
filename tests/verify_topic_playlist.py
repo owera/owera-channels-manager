@@ -80,7 +80,7 @@ _GOOD_PL = "PL" + "Q" * 32  # a structurally-valid 34-char YouTube playlist id
 _calls = {"get_service": [], "create_playlist": []}
 
 
-def _fake_get_service(slug):
+def _fake_get_service(slug, channel=None, session=None):
     _calls["get_service"].append(slug)
     return object()  # an opaque service handle; create_playlist stub ignores it
 
