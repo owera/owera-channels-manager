@@ -1962,3 +1962,26 @@ flag the operator step in the commit body.
   cue is the spoken closer and matches the Subscribe word. The mid CTA,
   an unpinned doubled script, a script with no closer, and long-form
   keep their cues.
+
+### 75. ✅ DONE (PR autoimprove/2026-11-18-platform-oauth-channel-bool) POST /api/oauth/google/start rejects JSON bool channel_id — normal
+- **resolution (2026-11-18):** `PlatformOAuthStartBody._reject_bool_channel`
+  `mode="before"` rejects JSON bool on `channel_id` before lax `int`
+  coerces `false→0` / `true→1`. `true` started consent on channel id=1
+  (Owera Software in the legacy workspace). `false` became 0 and 404'd
+  only because no channel 0 exists. Integer 5/1 still 200 when the
+  flag is on; integer 0 still 404; null still 422 (required int). A
+  4xx writes no pending flow. Suite: `tests/verify_platform_oauth.py`
+  9 → 27. Isolated commit; `youtube.py` / desktop reconnect untouched.
+  SPA Connect YouTube sends the channel's numeric id. This is the
+  growth-agent / curl floor. Flag-gated (`MANAGER_GOOGLE_WEB_OAUTH`).
+- **why (found ranking remaining JSON-body ints after #74):** wizard
+  `channel_id` and topic create were floored (PRs #238 / #148); the
+  platform OAuth start body still coerced. A growth-agent / curl
+  `{"channel_id": true}` mints a consent URL for channel 1.
+- **caution:** normal (`platform_oauth.py` start body only; not a
+  money-path file). Isolated commit + regression tests. Does not
+  reconnect or grant OAuth.
+- **acceptance:** POST `channel_id` `true`/`false` is 4xx and writes
+  no pending flow (channel 1 stays unconnected); integer 1 still
+  200; integer 0 still 404; null is 422 without the bool message.
+
