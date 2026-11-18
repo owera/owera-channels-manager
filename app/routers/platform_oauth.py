@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import Session
 
 from app.config import settings
@@ -28,6 +28,17 @@ def _require_enabled() -> None:
 
 class PlatformOAuthStartBody(BaseModel):
     channel_id: int
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def _reject_bool_channel(cls, v):
+        # Lax int coerces JSON false→0 / true→1 before the handler.
+        # true silently starts consent on channel id=1 (Owera Software in
+        # the legacy workspace). false becomes 0 and 404s only because no
+        # channel 0 exists.
+        if isinstance(v, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return v
 
 
 @router.post("/start")
