@@ -48,6 +48,11 @@ def youtube_context(session: Session, channel_id: int, *, max_videos: int = 20,
             t = json.loads(v.tags_json or "[]")
         except (TypeError, ValueError):
             t = []
+        # JSON null / number / object / bool parse without raising; iterating
+        # them TypeErrored outside the try (a corrupt tags_json must not
+        # fail the prompt).
+        if not isinstance(t, list):
+            t = []
         tags.extend(x for x in t if isinstance(x, str) and x not in tags)
     raw: dict = {"video_title": titles, "video_description": descs, "video_tags": tags}
     if include_stats:

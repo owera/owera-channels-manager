@@ -686,6 +686,29 @@ flag the operator step in the commit body.
   `make_thumbnail_png` so an un-stubbed `_publish_one`
   cannot hang on the live LLM. Discovered follow-up
   shipped as #23.
+  `llm_context.py` (previously only incidental pins via
+  verify_llm_guard_s8 / verify_s2_derived_data) —
+  `tests/verify_llm_context.py` (47 checks, 2026-11-20):
+  the S8 sanctioned YouTube-data-into-prompt seam.
+  Missing channel ValueError names the id; L2
+  `assert_data_workspace` runs BEFORE the allowed/empty
+  short-circuit (a disconnected foreign channel raises
+  LLMCrossWorkspace, not {}); no scope raises; disconnected
+  and access_lost_at (#214 clock while CONNECTED) return
+  {} and log `llm_channel_excluded` where=youtube_context;
+  titles newest-id-first with title-or-subject fallback;
+  max_videos 0 / negative / MAX_VIDEOS clamp (query-site
+  source pin, because minimize's `[:MAX_VIDEOS]` hid a
+  dropped `min()`); descriptions skip empty; tags unique
+  strings; tags_json JSON-null / number / bool / object /
+  corrupt never raises (the iterate sat outside the
+  json.loads try — production now treats a non-list parse
+  as []); include_stats False omits channel_stats; no
+  metric omits the key; two snapshots pick captured_at
+  desc; sibling channel stays out; only L6 keys leave;
+  render_block / fields_of shape. Mutation-verified:
+  14/14 hand-built semantic mutants killed from the
+  worktree (bytecode off).
 
 ### 8. ✅ DONE (code shipped to main 2026-07-29) Remove the basic-auth-on-callback smell + document reconnect — normal
 - **resolution (2026-07-29):** `app/main.py`'s `basic_auth` middleware exempts exactly
